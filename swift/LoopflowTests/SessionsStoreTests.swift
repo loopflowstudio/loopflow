@@ -45,6 +45,22 @@ struct SessionsStoreTests {
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
     }
 
+    @Test("A prepared Task target enters its terminal without another preparation")
+    func taskPreparationIsConsumedDirectly() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            throw RegistryQueryError("The prepared command is already available")
+        })
+        let prepared = try #require(records([session(id: "primary", state: "closed")]).first)
+        store.reconcile([prepared])
+        store.adoptPreparation(prepared)
+
+        await store.select(prepared.id)
+
+        #expect(item(store, prepared.id)?.state == .prepared)
+        #expect(item(store, prepared.id)?.surface?.openArgv == prepared.openArgv)
+        #expect(item(store, prepared.id)?.error == nil)
+    }
+
     @Test("A Session opened elsewhere during selection is not prepared locally")
     func selectionHonorsFreshClientOwnership() async throws {
         let store = SessionsStore(
@@ -64,7 +80,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
-                #expect(args == ["session", "connect", "native", "--json", "--replace"])
+                #expect(args == ["session", "connect", "native", "--prepare", "--json", "--takeover"])
                 return session(id: "native", state: "closed")
             }
         )
@@ -122,7 +138,7 @@ struct SessionsStoreTests {
             await store.select("native")
         }
         let prepared = try #require(item(store, "native")?.surface)
-        #expect(prepared.openArgv.contains("--replace") == replacing)
+        #expect(prepared.openArgv.contains("--takeover") == replacing)
         store.reconcile(try records([
             session(id: "native", state: "active"),
         ]))
@@ -255,7 +271,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
       "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
-      "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--replace\"" : "")]
+      "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--takeover\"" : "")]
     }
     """
 }

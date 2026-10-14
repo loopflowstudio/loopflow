@@ -365,6 +365,29 @@ fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSes
     .transpose()
 }
 
+fn primary_session_in(
+    conn: &rusqlite::Connection,
+    scope: &PrimaryScope,
+) -> StoreResult<Option<LfSession>> {
+    let marked = |kind: &str, column: &str, id: String| {
+        conn.query_row(
+            &format!(
+                "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
+                     AND s.completed_at IS NULL"
+            ),
+            params![kind, id],
+            read_session,
+        )
+        .optional()?
+        .transpose()
+    };
+    match scope {
+        PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string()),
+        PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string()),
+        PrimaryScope::Task(task) => task_primary_in(conn, task),
+    }
+}
+
 impl SqliteStore {
     pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -869,6 +892,11 @@ impl SqliteStore {
         Ok(session)
     }
 
+    pub(crate) fn primary_session(&self, scope: &PrimaryScope) -> StoreResult<Option<LfSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        primary_session_in(&conn, scope)
+    }
+
     /// Find the scope's uncompleted primary, or admit `session` as it. When the
     /// current primary is `replacing`, complete it and admit its successor in
     /// the same transaction; a repeat naming a replaced predecessor finds the
@@ -882,23 +910,7 @@ impl SqliteStore {
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let marked = |kind: &str, column: &str, id: String| {
-            tx.query_row(
-                &format!(
-                    "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
-                     AND s.completed_at IS NULL"
-                ),
-                params![kind, id],
-                read_session,
-            )
-            .optional()?
-            .transpose()
-        };
-        let current = match scope {
-            PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string())?,
-            PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string())?,
-            PrimaryScope::Task(task) => task_primary_in(&tx, task)?,
-        };
+        let current = primary_session_in(&tx, scope)?;
         match current {
             Some(current) if Some(current.id.as_str()) == replacing => {
                 tx.execute(

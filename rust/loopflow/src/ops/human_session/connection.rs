@@ -59,13 +59,13 @@ impl SessionConnectExplanation {
             };
             let mode = match action.mode {
                 OpenMode::Refuse => "refuse an active native client",
-                OpenMode::Replace => "replace Loopflow-owned clients; unsent text there is lost",
+                OpenMode::Takeover => "replace Loopflow-owned clients; unsent text there is lost",
                 OpenMode::Try => "ask the provider even if another client is active",
             };
             lines.push(format!(
                 "Action: {intent}; {mode}{}",
                 if action.prepare_only {
-                    " (JSON preparation only; no client takeover)"
+                    " (preparation only; no client takeover)"
                 } else {
                     ""
                 }
@@ -99,11 +99,11 @@ impl SessionConnectExplanation {
 pub(crate) async fn explain_connect(
     store: &SharedStore,
     cwd: &Path,
-    id: Option<&str>,
+    target: super::SessionTarget<'_>,
     mode: OpenMode,
     prepare_only: bool,
 ) -> SessionConnectExplanation {
-    let selector = match super::select_connection(store, cwd, id).await {
+    let selector = match super::select_connection(store, cwd, target, false).await {
         Ok(selector) => selector,
         Err(error) => return SessionConnectExplanation::unavailable(error),
     };
@@ -126,8 +126,8 @@ pub(crate) async fn explain_connect(
         unavailable: Vec::new(),
     };
     if let ContextFact::Bound { source, .. } = &mut report.resolution.session {
-        if id.is_none() {
-            *source = "latest_interactive_in_checkout".into();
+        if !matches!(target, super::SessionTarget::Session(_)) {
+            *source = "contextual_session".into();
         }
     }
     if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await {

@@ -72,6 +72,13 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
+pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
+pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
+
+pub fn yolo_override() -> bool {
+    std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
+}
+
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
 pub fn agent_override() -> Option<String> {
@@ -80,11 +87,15 @@ pub fn agent_override() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn resume_model(provider: &str, model: Option<&str>) -> anyhow::Result<Option<String>> {
-    let Some(agent) = agent_override() else {
+pub(crate) fn resume_model(
+    provider: &str,
+    model: Option<&str>,
+    selected: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    let Some(agent) = selected else {
         return Ok(model.map(str::to_owned));
     };
-    let (selected, model) = parse_agent(&agent);
+    let (selected, model) = parse_agent(agent);
     anyhow::ensure!(
         selected == provider,
         "This Session's native history belongs to {provider}; it cannot resume with {selected}. Start a new Session with lf -a {agent} : <message>."
@@ -557,22 +568,21 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 mod tests {
     #[test]
     fn native_resume_keeps_history_with_its_provider() {
-        let _lock = crate::journal::test_env_lock();
-        let _environment = crate::test_ambient::EnvGuard::clear(&[super::AGENT_OVERRIDE_ENV]);
         assert_eq!(
-            super::resume_model("claude", Some("haiku"))
+            super::resume_model("claude", Some("haiku"), None)
                 .unwrap()
                 .as_deref(),
             Some("haiku")
         );
-        std::env::set_var(super::AGENT_OVERRIDE_ENV, "claude:opus");
         assert_eq!(
-            super::resume_model("claude", Some("haiku"))
+            super::resume_model("claude", Some("haiku"), Some("claude:opus"))
                 .unwrap()
                 .as_deref(),
             Some("opus")
         );
-        let error = super::resume_model("codex", None).unwrap_err().to_string();
+        let error = super::resume_model("codex", None, Some("claude:opus"))
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("native history belongs to codex"));
         assert!(error.contains("Start a new Session"));
     }

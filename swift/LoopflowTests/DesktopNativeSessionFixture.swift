@@ -33,7 +33,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     func read(_ args: [String]) async throws -> String {
         if args.prefix(2) == ["session", "connect"] {
-            guard args.count == 4, args[2] == sessionId, args[3] == "--json" else {
+            guard args.count == 5, args[2] == sessionId, args[3] == "--prepare", args[4] == "--json" else {
                 throw RegistryQueryError("Only the owned Session may connect")
             }
             let output = try await Task.detached { try capture([cli] + args) }.value
@@ -196,7 +196,7 @@ struct DesktopNativeSessionTests {
             args: ["history", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
         let activity = try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(activityJSON.utf8))
         #expect(activity.items.contains { $0.work == copiedRecord.work })
-        await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }
+        await #expect(throws: (any Error).self) { try await query.prepareSession(id: copiedRecord.id) }
         let model = WorkModel(query: query, repoPath: fixture.repo)
         await model.refresh()
         let originalIDs = Set(model.projection.waves.flatMap { $0.tasks.map { $0.task.id } })

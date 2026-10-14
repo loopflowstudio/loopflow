@@ -37,7 +37,7 @@ const LAUNCHES: [&[&str]; 3] = [
 ];
 
 #[test]
-fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
+fn explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("agent-proof");
@@ -61,6 +61,8 @@ import sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -167,19 +169,25 @@ for line in sys.stdin:
     for args in [
         vec![
             "-b",
+            "--yolo",
+            "--chrome",
+            "on",
             "--isolate",
             "--task",
             "INF-123",
             "skill",
             "first",
             "-a",
-            "claude",
+            "claude:sonnet",
         ],
         vec![
             "-b",
+            "--yolo",
+            "--chrome",
+            "on",
             "--isolate",
             "-a",
-            "claude",
+            "claude:sonnet",
             "task",
             "run",
             "INF-123",
@@ -210,6 +218,34 @@ for line in sys.stdin:
             .map(|skill| (skill.to_owned(), "claude".to_owned()))
     );
     assert_eq!(support::recorded_flows(home.path()).len(), 1);
+    let launches = fs::read_to_string(home.path().join("launches.jsonl")).unwrap();
+    assert_eq!(launches.lines().count(), 6);
+    for launch in launches.lines() {
+        let received: serde_json::Value = serde_json::from_str(launch).unwrap();
+        let args = received["args"].as_array().unwrap();
+        assert!(args.contains(&serde_json::json!("--chrome")), "{launch}");
+        assert!(
+            !args.contains(&serde_json::json!("--no-chrome")),
+            "{launch}"
+        );
+        assert!(
+            args.contains(&serde_json::json!("--dangerously-skip-permissions")),
+            "{launch}"
+        );
+        assert!(
+            args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
+            "{launch}"
+        );
+        assert_eq!(
+            Path::new(received["claude_home"].as_str().unwrap())
+                .canonicalize()
+                .unwrap(),
+            home.path()
+                .join("accounts/claude/fixture")
+                .canonicalize()
+                .unwrap()
+        );
+    }
     let session: String = db
         .query_row(
             "SELECT id FROM agent_sessions WHERE skill='first' LIMIT 1",
@@ -220,7 +256,7 @@ for line in sys.stdin:
     let refused = command(
         repo.path(),
         home.path(),
-        &["session", "resume", &session, "-a", "codex"],
+        &["session", "connect", &session, "-a", "codex"],
     )
     .output()
     .unwrap();

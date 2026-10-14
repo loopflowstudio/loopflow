@@ -185,7 +185,7 @@ fn prepare_prompt(
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
     let mut launch = AgentConfig {
-        chrome: false,
+        chrome: config.chrome,
         session_attachment: None,
         system_prompt,
         conversation_context,

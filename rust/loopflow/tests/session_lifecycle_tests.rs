@@ -280,7 +280,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         )
         .unwrap();
     let resumed = fixture
-        .command(&["session", "resume", &session])
+        .command(&["session", "connect", &session])
         .current_dir(worktree)
         .output()
         .unwrap();
@@ -326,7 +326,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .unwrap();
     fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
     let refused = fixture
-        .command(&["session", "resume", &session])
+        .command(&["session", "connect", &session])
         .current_dir(worktree)
         .output()
         .unwrap();
@@ -349,7 +349,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         "Task was deleted; retained history is read-only"
     );
     let refused = fixture
-        .command(&["session", "resume", &session])
+        .command(&["session", "connect", &session])
         .current_dir(fixture.repo.path())
         .output()
         .unwrap();
@@ -381,7 +381,7 @@ fn task_conversation_reopens_after_terminal_startup_failure() {
     std::fs::write(&provider, original).unwrap();
     for args in [
         vec!["session", "resume"],
-        vec!["session", "connect", id, "--replace"],
+        vec!["session", "connect", id, "--takeover"],
     ] {
         let result = fixture.run(&args);
         assert!(result.status.success(), "{result:?}");
@@ -909,7 +909,7 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
         if replacement {
             let previous = session["id"].as_str().unwrap();
             let before = fixture.launches();
-            session = fixture.json(&["-a", "opencode", "session", "replace", previous, "--json"]);
+            session = fixture.json(&["-a", "opencode", "session", "new", previous, "--json"]);
             assert_eq!(fixture.launches(), before);
             assert!(session["agent_process_id"].is_null());
         }
@@ -938,7 +938,11 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
                 [&agent],
             ).unwrap();
             let before = fixture.launches().len();
-            let reopened = fixture.run(&["session", command, id]);
+            let reopened = if command == "resume" {
+                fixture.run(&["session", command])
+            } else {
+                fixture.run(&["session", command, id])
+            };
             assert!(reopened.status.success(), "{reopened:?}");
             assert_eq!(fixture.launches().len(), before + 1);
             assert_eq!(
@@ -995,7 +999,7 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
             )
             .unwrap();
         let successor =
-            retired.then(|| fixture.json(&["-a", "opencode", "session", "replace", id, "--json"]));
+            retired.then(|| fixture.json(&["-a", "opencode", "session", "new", id, "--json"]));
         std::fs::write(provider, script).unwrap();
 
         let opened = fixture.run(&["session", "connect", id]);
@@ -1135,12 +1139,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
 
     // Replacing it finishes that conversation and names a fresh one.
-    let successor = fixture.json(&[
-        "session",
-        "replace",
-        created["id"].as_str().unwrap(),
-        "--json",
-    ]);
+    let successor = fixture.json(&["session", "new", created["id"].as_str().unwrap(), "--json"]);
     assert_ne!(successor["id"], created["id"]);
     assert_eq!(primary(&["INF-125"])["id"], successor["id"]);
     assert_eq!(
@@ -1721,7 +1720,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
                 schema["properties"]["decision"]["enum"],
                 serde_json::json!(["advance", "iterate", "blocked"])
             );
-            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
+            assert_eq!(args[3..6], ["session", "connect", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }

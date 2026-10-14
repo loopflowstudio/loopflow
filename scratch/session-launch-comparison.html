@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session entry paths — current and proposed</title>
+<style>
+:root{color-scheme:light;--paper:#f6f4ed;--ink:#222e2c;--muted:#59665f;--line:#c9cfc5;--panel:#fffef9;--green:#245e48;--green-bg:#e9f1e8;--red:#943d2e;--red-bg:#faece4;--blue:#365b7d;--blue-bg:#edf1f6}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1540px;margin:auto;padding:48px 48px 64px}h1,h2,h3,p{margin:0}h1{font:normal clamp(36px,4vw,62px)/1.07 Georgia,serif;letter-spacing:-1.6px;max-width:950px;margin:14px 0 20px}h2{font:normal 30px/1.15 Georgia,serif}h3{font-size:16px;font-weight:650}.eyebrow,.section-label{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:1.1px;text-transform:uppercase}.eyebrow{color:var(--green)}.lead{max-width:780px;font-size:18px;color:var(--muted)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}code{font-size:.83em;overflow-wrap:anywhere}pre{font-size:12px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0 0}a{color:var(--green);text-underline-offset:3px}.meta{display:flex;flex-wrap:wrap;gap:8px 26px;font-size:13px;color:var(--muted);margin-top:22px}.rule{border:0;border-top:1px solid var(--line);margin:32px 0}.entry-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px;margin-top:16px}.entry{border-top:2px solid var(--ink);padding:12px 0}.entry p{font-size:13px;color:var(--muted);margin-top:5px}.entry code{display:block;margin-top:8px;font-size:12px}.entry details{margin-top:10px}.compare{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:32px}.column{min-width:0}.column-head{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--line);padding-bottom:15px;margin-bottom:22px}.index{font:13px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}.column-intro{font-size:14px;min-height:66px;color:var(--muted)}.lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.lane{min-width:0}.lane-label{font-size:12px;font-weight:600;text-align:center;min-height:42px}.node{padding:13px 12px;border:1px solid var(--line);background:var(--panel);border-radius:3px;min-width:0}.node strong{display:block;font-size:13px;line-height:1.4}.node code{display:block;font-size:11px;margin-top:7px;line-height:1.6}.node small{display:block;color:var(--muted);font-size:12px;line-height:1.45;margin-top:7px}.node.bad{border-color:#d5a692;background:var(--red-bg)}.node.good{border-color:#8eaf98;background:var(--green-bg)}.flag{display:block;margin-top:9px;font:11px/1.5 ui-monospace,SFMono-Regular,monospace;color:var(--red)}.good .flag{color:var(--green)}.arrow{text-align:center;color:var(--muted);height:36px;line-height:36px;font-size:22px}.arrow span{font:11px ui-monospace,SFMono-Regular,monospace;vertical-align:middle;margin-left:6px}.current .lane .node:nth-of-type(1){min-height:135px}.current .lane .node:nth-of-type(2){min-height:185px}.current .lane .node:nth-of-type(3){min-height:126px}.merge{height:30px;position:relative;margin:0 16.66%;border-left:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}.merge:before{content:"";height:30px;border-left:1px solid var(--line);position:absolute;left:50%;top:0}.shared{margin:0 26px}.shared .node{text-align:center;padding:18px}.shared .node strong{font-size:15px}.shared .node code{font-size:12px}.providers{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;border-top:1px solid var(--line);padding:12px 0;font-size:13px}.providers span{padding:2px 9px}.note{font-size:13px;color:var(--muted);margin-top:15px;border-left:3px solid var(--line);padding-left:13px}.current .note{border-color:var(--red)}.proposed .note{border-color:var(--green)}.diagram details{margin-top:10px}.diagram summary{font-size:12px}summary{cursor:pointer;color:var(--blue);font-size:13px;width:fit-content;max-width:100%}summary:hover{text-decoration:underline}details[open] summary{margin-bottom:8px}details p{font-size:13px;margin-top:6px}.diagram pre{font-size:11px}.section{margin-top:42px}.section-head{display:flex;gap:16px;align-items:baseline;flex-wrap:wrap;margin-bottom:18px}.section-head p{font-size:14px;color:var(--muted)}.api-row{display:grid;grid-template-columns:170px 1fr 1fr;gap:22px;padding:20px 0;border-top:1px solid var(--line);align-items:start}.api-row>strong{font-size:14px}.api-row .caption{font:11px ui-monospace,SFMono-Regular,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:8px}.api-row p{font-size:13px;color:var(--muted);margin-top:10px}.api-row pre{margin-top:0}.pill{font-size:11px;display:inline-block;padding:2px 6px;border:1px solid var(--line);border-radius:3px;margin-right:6px}.exceptions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}.exception{border-top:2px solid var(--blue);padding-top:13px}.exception p{font-size:14px;color:var(--muted);margin-top:7px}.coverage{display:grid;grid-template-columns:1fr 1fr;gap:20px 32px}.coverage div{border-top:1px solid var(--line);padding-top:12px}.coverage p{font-size:14px;color:var(--muted);margin-top:5px}.footer{font-size:12px;color:var(--muted);margin-top:36px;display:flex;gap:15px;flex-wrap:wrap}button{font:inherit;cursor:pointer;padding:7px 12px;border:1px solid var(--line);border-radius:3px;background:var(--panel);color:var(--ink)}button:hover{border-color:var(--green)}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:15px;margin:28px 0 16px}.toolbar p{color:var(--muted);font-size:13px}:focus-visible{outline:3px solid var(--blue);outline-offset:4px}
+@media(max-width:1100px){main{padding:30px 24px}.compare{gap:22px}.lanes{gap:7px}.node{padding:10px 8px}.shared{margin:0 12px}.api-row{grid-template-columns:135px 1fr 1fr;gap:15px}}
+@media(max-width:850px){.compare{grid-template-columns:1fr;gap:38px}.column-intro{min-height:0;margin-bottom:20px}.entry-grid{grid-template-columns:1fr 1fr}.api-row{grid-template-columns:1fr 1fr}.api-row>strong{grid-column:1/-1}.exceptions{grid-template-columns:1fr}.shared{margin:0 35px}}
+@media(max-width:480px){main{padding:24px 16px}h1{letter-spacing:-.8px}.entry-grid,.coverage,.api-row{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.lane-label{text-align:left;min-height:0;margin-bottom:8px}.current .lane .node{min-height:0!important}.current .lane{border-left:2px solid var(--line);padding:0 0 20px 13px}.merge{display:none}.proposed .lanes .node{margin-bottom:8px}.shared{margin:0}.toolbar{align-items:flex-start}.toolbar button{font-size:13px}.api-row>strong{grid-column:auto}.column-head{gap:10px}}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--paper:#18211f;--ink:#e7ece3;--muted:#b3bfb4;--line:#45524b;--panel:#222e29;--green:#a0d3af;--green-bg:#243d30;--red:#f3b5a3;--red-bg:#402c26;--blue:#b3cbe1;--blue-bg:#263540}.node.bad{border-color:#976a5b}.node.good{border-color:#688c72}}
+@media print{body{background:white;color:#18211f}main{max-width:none;padding:15px}.compare{grid-template-columns:1fr 1fr}.toolbar button{display:none}.node{break-inside:avoid}details{break-inside:avoid}.section{break-before:auto}a{color:inherit}.api-row{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main id="session-comparison">
+<header>
+<div class="eyebrow">Loopflow / architecture review / 14 October 2026</div>
+<h1>Many ways in.<br>One launch contract.</h1>
+<p class="lead">Current Session entry paths lose settings at different handoffs. The proposal keeps the entry points and gives provider options one shared owner.</p>
+<div class="meta"><span>Current: inspected source snapshot</span><span>Proposed: draft APIs, implementation in progress</span><span>Accepted: resume uses current settings</span></div>
+</header>
+<hr class="rule">
+<div class="section-label">The ways into a Session</div>
+<section class="entry-grid" aria-label="Session entry points">
+<article class="entry"><h3>Direct CLI</h3><code>lf -a claude : MESSAGE<br>lf skill NAME<br>lf -b skill NAME</code><p>Prompt or skill, interactive or headless.</p><details><summary>Input parameters</summary><p><code>Cli</code>: agent, yolo, chrome, interactive/batch, docs, clipboard, diff, account selectors, isolate/shared, repo/wt/task/wave; skill arguments and optional output schema.</p></details></article>
+<article class="entry"><h3>Resume / connect</h3><code>lf session resume ID<br>lf session connect ID<br>lf -b session resume ID MESSAGE</code><p>Native history, a live connection, or one more headless turn.</p><details><summary>Input parameters</summary><p>Session ID or latest selection, optional headless message, open mode, saved provider identity, account, checkout and captured context.</p></details></article>
+<article class="entry"><h3>Task / Desktop / primary</h3><code>lf session ensure --task ISSUE --json<br>lf session connect ID --json<br>→ returned open_argv</code><p>Select or prepare a conversation, then open it. JSON inspection does not launch the provider.</p><details><summary>API parameters</summary><p><code>ensureTaskSession(issue, cwd)</code><br><code>openSession(id, replacing, cwd)</code><br>Repository/Wave primaries and replacement converge on the same prepared/open paths.</p></details></article>
+<article class="entry"><h3>Task execution / Flow</h3><code>lf task run ISSUE<br>lf flow NAME<br>→ child lf … skill NAME</code><p>Workflow selects a Flow; skill steps re-enter ordinary headless execution.</p><details><summary>Forwarded parameters</summary><p>Selected checkout, Task/Work association, agent override, launch options, captured skill input, message and decision schema. Flow identity is execution context, not another permissions policy.</p></details></article>
+</section>
+<div class="toolbar"><p>Expand a node to inspect its API and parameters.</p><button type="button" id="expand" aria-expanded="false">Expand API details</button></div>
+<section class="compare" aria-label="Current versus proposed launch architecture">
+<article class="column current diagram">
+<div class="column-head"><span class="index">01 / CURRENT</span><h2>Options split at entry.</h2></div>
+<p class="column-intro">The main builder knows about YOLO. Native Session launch and resume assemble their own commands without carrying that setting.</p>
+<div class="lanes">
+<div class="lane"><div class="lane-label">Fresh terminal</div>
+<div class="node"><strong>Resolve prompt + config</strong><code>build_prompt_at(…)<br>→ AgentConfig</code><small>Includes resolved YOLO, context, scope and provider.</small></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node bad"><strong>Unpack selected fields</strong><code>run_prompt<br>→ launch_session(…)</code><span class="flag">LOST: skip_permissions</span><details><summary>Parameters passed</summary><pre>harness, model, worktree,
+prompt, environment,
+agent_session, flags,
+context_file, context,
+attachment</pre><p>Full AgentConfig and Chrome capability are not passed.</p></details></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node bad"><strong>Separate native builder</strong><code>build_session_command(…)</code><small>Claude: no bypass flag.<br>Codex: skip_permissions=false.</small></div></div>
+<div class="lane"><div class="lane-label">Stopped native resume</div>
+<div class="node"><strong>Select saved Session</strong><code>human_session::open(…)</code><small>Reads identity, account, checkout and native history.</small></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node bad"><strong>Restore selected inputs</strong><code>resume_session_with_env(…)</code><span class="flag">MISSING: resolved settings</span><details><summary>Parameters passed</summary><pre>harness, model, worktree,
+artifact_key,
+provider_session,
+extra_environment,
+launch_lock, remote,
+attachment</pre><p>Saved context is restored selectively; current launch policy is not rebuilt in full.</p></details></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node bad"><strong>Another native builder</strong><code>build_resume_session_command(…)</code><small>Same permission omission; adds continuation identity.</small></div></div>
+<div class="lane"><div class="lane-label">Headless / agent runner</div>
+<div class="node"><strong>Resolve AgentConfig</strong><code>run_headless_prompt(…)<br>→ run_agent(…)</code><small>Headless resume builds from current settings.</small></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node good"><strong>Retain resolved policy</strong><code>run_admitted_agent(…)<br>→ provider harness</code><span class="flag">KEPT: skip_permissions</span><details><summary>Shared inputs</summary><pre>AgentConfig,
+ProcessConfig,
+AgentCapabilities</pre><p>Internal non-auto calls take a separate terminal builder in agent/mod.rs.</p></details></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node"><strong>Provider translation</strong><code>ClaudeArgs / Codex / OpenCode</code><small>Claude stream builder still hardcodes Chrome off.</small></div></div>
+</div>
+<div class="arrow" aria-hidden="true">↓</div><div class="providers"><span>Claude</span><span>Codex</span><span>OpenCode</span></div>
+<p class="note"><strong>Observed failure:</strong> configured YOLO does not reach terminal launch or resume. Claude falls back to its own mode; auto-mode denials can return to the agent without showing a prompt.</p>
+</article>
+<article class="column proposed diagram">
+<div class="column-head"><span class="index">02 / PROPOSED</span><h2>Resolve once. Carry intact.</h2></div>
+<p class="column-intro">Entry points select work and conversation identity. One resolved input supplies provider policy; adapters retain their distinct transports.</p>
+<div class="lanes"><div class="node"><strong>Fresh launch</strong><small>CLI, prepared Session, Task/Desktop</small></div><div class="node"><strong>Stopped resume</strong><small>Native history or headless continuation</small></div><div class="node"><strong>Headless launch</strong><small>Direct, Task/Flow or internal call</small></div></div>
+<div class="merge" aria-hidden="true"></div><div class="arrow" aria-hidden="true">↓</div>
+<div class="shared"><div class="node good"><strong>Resolve current launch settings</strong><code>Fresh preparation / resolve_session_config(session, cli)</code><small>Current config + explicit overrides + saved identity/account + required execution boundary</small><details><summary>Resume contract</summary><p>Resolve at the saved checkout. Preserve native conversation and account. Do not replay the initial skill. Missing optional prompt capture must not prevent native resume.</p></details></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node good"><strong>AgentConfig — complete provider input</strong><code>provider · permissions · scope · Chrome · context · cwd · account</code><small>One Chrome owner. AgentProcessRequest remains historical capture.</small><details><summary>Options that survive</summary><pre>agent, skip_permissions, chrome,
+write_scope, execution_boundary,
+system_prompt, conversation_context,
+task_prompt, skill_invocation,
+output_schema, max_turns,
+resume_token, provider_account_id,
+cwd, env, session_attachment</pre></details></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="node good"><strong>One option translator per provider</strong><code>build_session_command(config, invocation)</code><small>Resolve common option semantics here; transport adapters add framing.</small><details><summary>Proposed API boundary</summary><pre>ProviderInvocation:
+  FreshTerminal { identity, input, context }
+  ResumeTerminal { identity, context }
+  Stream { identity, context }</pre><p>Conceptual variants, not final Rust declarations. Codex terminal and headless startup consume the same resolved settings through app-server. Claude terminal prompts use stdin; Codex uses protocol input. Live attachment stays separate.</p></details></div></div>
+<div class="arrow" aria-hidden="true">↓</div>
+<div class="lanes"><div class="node"><strong>Terminal start</strong><small>Fresh ID + prompt</small></div><div class="node"><strong>Terminal resume</strong><small>Resume ID; no seed replay</small></div><div class="node"><strong>Stream / app-server</strong><small>Protocol input + recovery</small></div></div>
+<div class="arrow" aria-hidden="true">↓</div><div class="providers"><span>Claude</span><span>Codex</span><span>OpenCode</span></div>
+<p class="note"><strong>Invariant:</strong> the entry point cannot silently change provider options. Transport-specific unsupported options receive an explicit, tested disposition.</p>
+</article>
+</section>
+<section class="section" aria-labelledby="apis"><div class="section-head"><h2 id="apis">The API cut</h2><p>Draft signatures; lifecycle ownership stays in existing owners.</p></div>
+<div class="api-row"><strong>Choose a conversation</strong><div><span class="caption">Current · overlapping selectors</span><pre>lf session resume [ID]
+lf session connect ID</pre><p>Two explicit-ID entry points reach the same connection operation. Resume additionally selects the latest interactive Session when ID is omitted.</p></div><div><span class="caption">Accepted · contextual or explicit</span><pre>lf session resume
+lf --task ISSUE session resume
+lf --wave NAME session resume
+
+lf session connect ID
+lf connect --wave infra
+lf connect --task ISSUE</pre><p>Use the existing shorthand <code>lf resume</code>. Resume accepts no Session ID. Work-target connect finds or prepares the primary conversation and opens it in its checkout, eliminating the caller's ensure/JSON/connect sequence. Both forms use one Session connection operation.</p><pre>explicit Task / Wave → its Session
+active Task in worktree → Task Session
+main checkout → latest across repo worktrees
+other worktree → latest in this worktree
+resume: no eligible Session → not found</pre><p>Recency uses interactive input, not background agent activity. Main does not default to the repository primary Session. Direct Work-target connect can prepare a missing primary; contextual resume does not create one.</p></div></div>
+<div class="api-row"><strong>Intent and output</strong><div><span class="caption">Current · behavior hidden in flags</span><pre>connect ID --json → prepare only
+connect ID        → connect
+session replace ID
+connect ID --replace</pre><p>JSON currently changes effects. Replace refers both to a new primary conversation and taking over an existing connection.</p></div><div><span class="caption">Accepted separation · proposed spellings</span><pre>connect ID [--json]
+connect ID --prepare [--json]
+connect ID --takeover
+session new …</pre><p>Output format does not change effects. Preparation is explicit. New conversation changes identity; takeover preserves it. Task/Desktop use the same target resolver as the CLI.</p></div></div>
+<div class="api-row"><strong>Fresh launch</strong><div><span class="caption">Current · partial parameters</span><pre>launch_session(
+  harness, model, worktree, prompt,
+  environment, agent_session, flags,
+  context_file, context, attachment
+)</pre><p>Prepared config is unpacked. A newly added field can vanish here.</p></div><div><span class="caption">Proposed · complete input</span><pre>build_session_command(
+  config: &amp;AgentConfig,
+  invocation: &amp;ProviderInvocation
+) -&gt; Result&lt;SessionCommand&gt;</pre><p>Provider command construction moves into agent. Native launch consumes the result.</p></div></div>
+<div class="api-row"><strong>Stopped resume</strong><div><span class="caption">Current · independent assembly</span><pre>build_resume_session_command(
+  harness, model, worktree,
+  agent_session
+)</pre><p>Context and hooks are added later. Permissions never enter this signature.</p></div><div><span class="caption">Proposed · shared resolution</span><pre>resolve_session_config(
+  session: &amp;LfSession,
+  cli: &amp;Cli
+) -&gt; Result&lt;AgentConfig&gt;
+→ same build_session_command(…)</pre><p>Uses current settings at the saved checkout; preserves conversation identity and account.</p></div></div>
+<div class="api-row"><strong>Task / Desktop</strong><div><span class="caption">Current · selection then open</span><pre>ensure_task(store, repo, task, choose)
+open(store, session_id, mode, resume)
+→ open_argv / native resume / prepared start</pre><p>These entry points already converge at selection and lifecycle boundaries.</p></div><div><span class="caption">Proposed · retain this responsibility</span><pre>select / prepare Session
+→ current launch-settings resolution
+→ shared provider translation</pre><p>No Task-specific provider builder. No Desktop permissions policy. Explicit preparation starts no provider; JSON changes formatting only.</p></div></div>
+<div class="api-row"><strong>Chrome ownership</strong><div><span class="caption">Current · duplicate values</span><pre>AgentCapabilities.chrome
+AgentConfig.chrome
+Claude stream builder: chrome = false</pre></div><div><span class="caption">Proposed · one owner</span><pre>AgentConfig.chrome
+→ provider translation
+→ captured AgentProcessRequest.chrome</pre><p>Delete AgentCapabilities and migrate its callers in the same change.</p></div></div>
+</section>
+<section class="section" aria-labelledby="distinct"><div class="section-head"><h2 id="distinct">Keep these paths distinct</h2><p>Sharing settings does not make every operation a new launch.</p></div><div class="exceptions">
+<article class="exception"><h3>Attach to a live provider</h3><p>Codex live connect adds a relay/client. Preserve the running process, settings and attachment fencing. Do not restart it to apply current defaults.</p></article>
+<article class="exception"><h3>Replay a historical request</h3><p>Explicit replay reproduces captured AgentProcessRequest inputs. It deliberately differs from stopped-session resume, which uses current settings.</p></article>
+<article class="exception"><h3>Recover within a run</h3><p>Automatic harness respawn reuses the already resolved config and native continuation token. A later explicit resume resolves settings again.</p></article>
+</div></section>
+<section class="section" aria-labelledby="tests"><div class="section-head"><h2 id="tests">Test the contract at both seams</h2><p>Every option at the provider boundary; every entry at the public boundary.</p></div><div class="coverage">
+<div><h3>Option coverage</h3><p>Provider/model, YOLO precedence, Chrome, scope and writable roots, context/hooks/skills, schema and budgets, cwd, account/home, environment and identity. Test presence, absence and meaningful interactions.</p></div>
+<div><h3>Entry coverage</h3><p>Fresh and resumed native Sessions, headless continuation, Task/Desktop prepared start, Flow children, live attach, replay and recovery. Use the candidate CLI and stand-in providers.</p></div>
+<div><h3>Regression that must fail first</h3><p>Claude defaults to auto; Loopflow enables YOLO. Both actual terminal launch and resume must deliver the bypass flag to the provider process.</p></div>
+<div><h3>Independent assertions</h3><p>Inspect provider argv, intended non-secret environment and input. Never calculate expected options with the production builder. No real account, network or display required.</p></div>
+</div></section>
+<footer class="footer"><span>Source snapshot: 2026-10-14; proposed architecture may evolve during pursue.</span><a href="claude-permissions.md">Design</a><a href="session-entry-map.md">Full entry and test matrix</a><span>Sources: run.rs · util.rs · agent/mod.rs · human_session.rs · RegistryQuery.swift</span></footer>
+</main>
+<script>
+(() => {
+  const root = document.getElementById('session-comparison');
+  const button = document.getElementById('expand');
+  const details = [...root.querySelectorAll('details')];
+  function sync() {
+    const allOpen = details.every(detail => detail.open);
+    button.setAttribute('aria-expanded', String(allOpen));
+    button.textContent = allOpen ? 'Collapse API details' : 'Expand API details';
+  }
+  button.addEventListener('click', () => {
+    const open = !details.every(detail => detail.open);
+    details.forEach(detail => { detail.open = open; });
+    sync();
+  });
+  details.forEach(detail => detail.addEventListener('toggle', sync));
+})();
+</script>
+</body>
+</html>

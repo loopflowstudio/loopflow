@@ -108,10 +108,7 @@ impl AgentProcessRequest {
         }
     }
 
-    pub(crate) fn from_prepared(
-        config: &crate::agent::AgentConfig,
-        capabilities: &crate::agent::AgentCapabilities,
-    ) -> Self {
+    pub(crate) fn from_prepared(config: &crate::agent::AgentConfig) -> Self {
         Self {
             system_prompt: crate::agent::system_prompt_with_structured_replies(config),
             conversation_context: config.conversation_context.clone(),
@@ -124,7 +121,7 @@ impl AgentProcessRequest {
             write_scope: config.write_scope,
             execution_boundary: config.execution_boundary.clone(),
             skip_permissions: config.skip_permissions,
-            chrome: capabilities.chrome,
+            chrome: config.chrome,
         }
     }
 
@@ -3029,7 +3026,6 @@ mod tests {
         read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
-    use crate::agent::AgentCapabilities;
     use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, TurnUsage};
 
@@ -3316,13 +3312,10 @@ mod tests {
     fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let home = tempfile::tempdir().unwrap();
-        let process = AgentProcessRequest::from_prepared(
-            &AgentConfig {
-                task_prompt: "repair the failed operation".into(),
-                ..Default::default()
-            },
-            &AgentCapabilities::default(),
-        );
+        let process = AgentProcessRequest::from_prepared(&AgentConfig {
+            task_prompt: "repair the failed operation".into(),
+            ..Default::default()
+        });
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
@@ -3591,6 +3584,7 @@ mod tests {
     fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
+            chrome: true,
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
             task_prompt: "authored task\n\nwith trailing space ".to_string(),
             agent: Some("codex:gpt-5.6".to_string()),
@@ -3604,8 +3598,7 @@ mod tests {
             env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
             ..AgentConfig::default()
         };
-        let expected =
-            AgentProcessRequest::from_prepared(&config, &AgentCapabilities { chrome: true });
+        let expected = AgentProcessRequest::from_prepared(&config);
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
@@ -3831,13 +3824,10 @@ mod tests {
         .unwrap();
         let attachment = store.session_attachment(&session.id).unwrap().unwrap();
         let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
-        let request = AgentProcessRequest::from_prepared(
-            &AgentConfig {
-                task_prompt: "the next instruction".into(),
-                ..AgentConfig::default()
-            },
-            &AgentCapabilities::default(),
-        );
+        let request = AgentProcessRequest::from_prepared(&AgentConfig {
+            task_prompt: "the next instruction".into(),
+            ..AgentConfig::default()
+        });
         let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
         crate::journal::with_runtime(ledger.home(), &command, || {
             let next = CaptureHandle::continue_with_context(
@@ -3916,10 +3906,7 @@ mod tests {
                 &session.id,
                 spec(ledger.home()),
                 &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-                AgentProcessRequest::from_prepared(
-                    &AgentConfig::default(),
-                    &AgentCapabilities::default()
-                ),
+                AgentProcessRequest::from_prepared(&AgentConfig::default()),
             )
             .is_err());
             let next = store.session(&session.id)?.unwrap();

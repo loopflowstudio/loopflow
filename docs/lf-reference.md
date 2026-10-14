@@ -420,12 +420,15 @@ Observe validated Program Status snapshots from an active local terminal
 
 ## lf session resume
 
-Resume a conversation by ID, or the last interactive Session in this worktree
+Resume the relevant existing conversation of this checkout or explicit Work
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Loopflow Session ID or Claude/Codex conversation ID |
-| `<message>` | With `-b`: send this as the conversation's next headless turn |
+| `--task` | task |
+| `--wave` | wave |
+| `--message` | With `-b`: send the conversation its next turn |
+| `--prepare` | Return connection data without starting the provider Default: false. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session history
@@ -462,13 +465,17 @@ List Sessions
 
 ## lf session connect
 
-Stop headless Claude/OpenCode and resume history; connect to Codex live
+Connect to a Session, or find/prepare a Task or Wave's primary conversation
 
 | Argument | What it does |
 |---|---|
 | `<id>` | Session ID or provider conversation ID |
+| `--task` | task |
+| `--wave` | wave |
+| `--message` | With `-b`: send the conversation its next turn |
+| `--prepare` | Return connection data without starting the provider Default: false. |
 | `--json` | json Default: false. |
-| `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
+| `--takeover` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
 | `--help / -h` | Print help |
 
@@ -484,7 +491,7 @@ Find or prepare the one ongoing conversation of this repository, a Wave or a Tas
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf session replace
+## lf session new
 
 Give a primary Session's scope a fresh conversation
 

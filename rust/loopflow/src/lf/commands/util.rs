@@ -7,7 +7,10 @@ use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::agent::missing_agent_message;
-use crate::agent::workspace_add_dirs;
+use crate::agent::{
+    build_session_command, session_environment, AgentConfig, NativeConnection, ProviderInvocation,
+    SessionCommand,
+};
 use crate::id::AgentSessionId;
 use crate::provider_auth::Provider;
 use crate::store::sqlite::SqliteStore;
@@ -44,157 +47,33 @@ pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDate
         .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct SessionCommand {
-    pub(crate) codex: Option<crate::agent::AgentConfig>,
-    pub(crate) input: Option<String>,
-    pub(crate) program: String,
-    pub(crate) args: Vec<String>,
-    pub(crate) cwd: PathBuf,
-    pub(crate) context: Option<crate::context_block::ContextDelivery>,
-    pub(crate) remote: Option<NativeConnection>,
-    pub(crate) attachment: Option<(String, crate::process::SessionAttachment)>,
-}
-
-/// The local relay is the client transport; only upstream identifies the AgentProcess.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NativeConnection {
-    pub(crate) relay: PathBuf,
-    pub(crate) upstream: PathBuf,
-}
-
-#[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
 pub(crate) fn launch_session(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-    environment: &BTreeMap<String, String>,
+    config: &AgentConfig,
     agent_session: Option<&AgentSessionId>,
-    flags: &[String],
     context_file: Option<&Path>,
-    context: Option<&crate::context_block::ContextDelivery>,
-    attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-    let worktree = absolute_path(worktree);
-    let mut command = build_session_command(
-        harness,
-        model,
-        &worktree,
-        prompt,
-        agent_session,
+    let command = build_session_command(
+        config,
+        ProviderInvocation::Terminal {
+            session_id: agent_session,
+        },
         context_file,
     )?;
-    command.args.splice(0..0, flags.iter().cloned());
-    command.attachment = attachment;
-    command.context = context.cloned();
-    let mut environment = environment.clone();
-    if let Some(context) = context.filter(|_| harness == "opencode") {
-        let instructions = context_file
-            .map(std::fs::read_to_string)
-            .transpose()?
-            .unwrap_or_default();
-        let config = crate::harness::context::opencode_config(
-            context,
-            &instructions,
-            environment
-                .get("OPENCODE_CONFIG_CONTENT")
-                .map(String::as_str),
-        )?;
-        environment.insert("OPENCODE_CONFIG_CONTENT".into(), config);
-    }
-    spawn_session_command_with_env(&command, &environment, agent_session, None, None)
-}
-
-pub(crate) fn build_session_command(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-    agent_session: Option<&AgentSessionId>,
-    context_file: Option<&Path>,
-) -> Result<SessionCommand> {
-    if harness == "opencode" {
-        crate::agent::validate_terminal_turn(prompt)?;
-    }
-    let worktree_arg = worktree.to_string_lossy().to_string();
-
-    let args = match harness {
-        "codex" => Vec::new(),
-        "claude" => {
-            let mut args = Vec::new();
-            if let Some(model) = model {
-                args.push("--model".to_string());
-                args.push(model.to_string());
-            }
-            for dir in workspace_add_dirs(worktree) {
-                args.push("--add-dir".to_string());
-                args.push(dir.to_string_lossy().to_string());
-            }
-            if let Some(agent_session) = agent_session {
-                args.push("--session-id".to_string());
-                args.push(agent_session.to_string());
-            }
-            if let Some(path) = context_file {
-                args.push("--append-system-prompt-file".to_string());
-                args.push(path.to_string_lossy().to_string());
-            }
-            args.push("--".to_string());
-            args
-        }
-        "opencode" => {
-            let mut args = vec![worktree_arg, "--prompt".to_string(), prompt.to_string()];
-            if let Some(model) = model {
-                args.push("--model".to_string());
-                args.push(model.to_string());
-            }
-            args
-        }
-        _ => bail!(
-            "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
-            harness
-        ),
-    };
-    Ok(SessionCommand {
-        input: (harness == "claude" && !prompt.is_empty()).then(|| prompt.to_owned()),
-        codex: (harness == "codex")
-            .then(|| -> Result<_> {
-                Ok(crate::agent::AgentConfig {
-                    agent: Some(
-                        model
-                            .map(|model| format!("codex:{model}"))
-                            .unwrap_or_else(|| "codex".into()),
-                    ),
-                    cwd: Some(worktree.to_path_buf()),
-                    task_prompt: prompt.to_owned(),
-                    system_prompt: context_file
-                        .map(std::fs::read_to_string)
-                        .transpose()?
-                        .unwrap_or_default(),
-                    ..Default::default()
-                })
-            })
-            .transpose()?,
-        context: None,
-        attachment: None,
-        remote: None,
-        program: harness.to_string(),
-        args,
-        cwd: worktree.to_path_buf(),
-    })
+    let environment = session_environment(config, context_file)?;
+    spawn_session_command_with_env(
+        &command,
+        &environment,
+        agent_session,
+        config.provider_account_id.as_ref(),
+        None,
+    )
 }
 
 pub(crate) fn resume_session(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
 ) -> Result<()> {
-    open_saved_session_with_env(
-        harness,
-        model,
-        worktree,
+    resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
@@ -204,11 +83,7 @@ pub(crate) fn resume_session(
     )
 }
 
-#[allow(clippy::too_many_arguments)] // Native launch inputs plus its startup exclusion lock.
-pub(crate) fn open_saved_session_with_env(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
+pub(crate) fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
@@ -216,107 +91,62 @@ pub(crate) fn open_saved_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-    let selected_model = crate::config::resume_model(harness, model)?;
-    let user_name = crate::config::participant_name()?;
-    let mut command = match provider_session {
-        Some(provider) => build_resume_session_command(
-            harness,
-            selected_model.as_deref(),
-            worktree,
-            &provider.agent_session,
-        )?,
-        None => {
-            build_session_command(harness, selected_model.as_deref(), worktree, "", None, None)?
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session_for_artifact(artifact_key)?
+        .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
+    let mut config = if remote.is_some() {
+        AgentConfig {
+            agent: session.provider.clone(),
+            cwd: Some(session.cwd.clone()),
+            ..Default::default()
         }
+    } else {
+        crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?
     };
-    let mut account_id = provider_session.and_then(|provider| provider.account_id.clone());
-    command.attachment = attachment;
-    command.remote = remote;
-    if let Some(remote) = &command.remote {
-        if harness != "codex" {
+    if let Some(provider) = provider_session {
+        config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
+    }
+    config.session_attachment = attachment;
+    config.env.extend(extra_environment.clone());
+    config.env.insert(
+        crate::session_record::CAPTURE_KEY_ENV.into(),
+        artifact_key.clone(),
+    );
+    config.env.insert(
+        crate::config::USER_NAME_ENV.into(),
+        crate::config::participant_name()?.unwrap_or_default(),
+    );
+    let context_file = crate::agent::write_system_prompt_file(&config, "resume-instructions")?;
+    let command = if let Some(remote) = remote {
+        if session.provider.as_deref() != Some("codex") {
             bail!("This provider has no native remote connection");
         }
-        command.args.splice(
-            1..1,
-            [
-                "--remote".into(),
-                format!("unix://{}", remote.relay.display()),
-            ],
-        );
-    }
-    let mut environment = BTreeMap::from([(
-        crate::session_record::CAPTURE_KEY_ENV.to_string(),
-        artifact_key.to_string(),
-    )]);
-    environment.extend(extra_environment.clone());
-    // Native history remains resumable when the optional capture payload is gone.
-    // Retain saved context when available; malformed payloads still report errors.
-    let request =
-        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact_key) {
-            Ok((_, saved)) => saved.process,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
-    if let Some(request) = request {
-        account_id = account_id.or(request.account_id.clone());
-        command.context = request.conversation_context.clone();
-        if harness == "codex" {
-            let config = crate::agent::AgentConfig {
-                agent: Some(
-                    selected_model
-                        .as_ref()
-                        .map(|model| format!("codex:{model}"))
-                        .unwrap_or_else(|| "codex".into()),
-                ),
-                cwd: Some(worktree.to_path_buf()),
-                system_prompt: request.system_prompt,
-                task_prompt: request.task_prompt,
-                skill_invocation: request.skill_invocation,
-                conversation_context: request.conversation_context,
-                write_scope: request.write_scope,
-                execution_boundary: request.execution_boundary,
-                skip_permissions: request.skip_permissions,
-                ..Default::default()
-            };
-            command.codex = Some(config);
-        } else if harness == "claude" && !request.system_prompt.is_empty() {
-            let path = crate::prompt::write_prompt_log(
-                worktree,
-                &request.system_prompt,
-                "resume-instructions",
-                None,
-            )?;
-            command.args.splice(
-                0..0,
-                [
-                    "--append-system-prompt-file".into(),
-                    path.display().to_string(),
-                ],
-            );
-        } else if harness == "opencode" {
-            if let Some(context) = request.conversation_context.as_ref() {
-                let config = crate::harness::context::opencode_config(
-                    context,
-                    &request.system_prompt,
-                    extra_environment
-                        .get("OPENCODE_CONFIG_CONTENT")
-                        .map(String::as_str),
-                )?;
-                environment.insert("OPENCODE_CONFIG_CONTENT".into(), config);
-            }
-        }
-    }
-    environment.insert(
-        crate::config::USER_NAME_ENV.to_string(),
-        user_name.unwrap_or_default(),
-    );
-    // Fresh launches and native resumes share admission and settlement below.
-    // Remote clients retain the attachment supplied by their connection owner.
+        // Attaching a client does not change a running provider's launch policy.
+        crate::agent::native_connection_command(
+            session.cwd.clone(),
+            provider_session.map(|provider| &provider.agent_session),
+            remote,
+            config.session_attachment.clone(),
+        )
+    } else {
+        build_session_command(
+            &config,
+            match provider_session {
+                Some(provider) => ProviderInvocation::Resume {
+                    session_id: &provider.agent_session,
+                },
+                None => ProviderInvocation::Terminal { session_id: None },
+            },
+            context_file.as_deref(),
+        )?
+    };
+    let environment = session_environment(&config, context_file.as_deref())?;
     spawn_session_command_with_env(
         &command,
         &environment,
         provider_session.map(|provider| &provider.agent_session),
-        account_id.as_ref(),
+        config.provider_account_id.as_ref(),
         launch_lock,
     )
 }
@@ -349,61 +179,6 @@ pub(crate) fn require_session_task(
     Ok(())
 }
 
-fn build_resume_session_command(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    agent_session: &AgentSessionId,
-) -> Result<SessionCommand> {
-    let cwd = absolute_path(worktree);
-    if harness == "codex" {
-        let mut command = build_session_command(harness, model, &cwd, "", None, None)?;
-        command.args = vec!["resume".into(), "--".into(), agent_session.to_string()];
-        return Ok(command);
-    }
-    let worktree_arg = cwd.to_string_lossy().to_string();
-    let args = match harness {
-        "claude" => {
-            let mut args = Vec::new();
-            if let Some(model) = model {
-                args.extend(["--model".to_string(), model.to_string()]);
-            }
-            for dir in workspace_add_dirs(&cwd) {
-                args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
-            }
-            args.extend(["--resume".to_string(), agent_session.to_string()]);
-            args
-        }
-        "opencode" => {
-            let mut args = vec![
-                worktree_arg,
-                "--session".to_string(),
-                agent_session.to_string(),
-            ];
-            if let Some(model) = model {
-                args.extend(["--model".to_string(), model.to_string()]);
-            }
-            args
-        }
-        _ => {
-            return Err(anyhow!(
-                "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
-                harness
-            ));
-        }
-    };
-    Ok(SessionCommand {
-        codex: None,
-        input: None,
-        context: None,
-        attachment: None,
-        remote: None,
-        program: harness.to_string(),
-        args,
-        cwd,
-    })
-}
-
 fn spawn_session_command_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -424,7 +199,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if agent_session.is_some() {
         Err(anyhow!(
-            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.",
+            "{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --takeover` for a Loopflow-owned client.",
             command.program,
             outcome.status,
         ))
@@ -798,21 +573,14 @@ fn run_native_session(
 pub(crate) fn run_native_codex_agent(
     launch: &crate::agent::AgentConfig,
 ) -> Result<crate::agent::AgentProcessResult> {
-    let cwd = launch
-        .cwd
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)?;
-    let command = SessionCommand {
-        codex: Some(launch.clone()),
-        input: None,
-        program: "codex".into(),
-        args: Vec::new(),
-        cwd,
-        context: launch.conversation_context.clone(),
-        remote: None,
-        attachment: launch.session_attachment.clone(),
-    };
+    let command = build_session_command(
+        launch,
+        match launch.resume_token.as_ref() {
+            Some(session_id) => ProviderInvocation::Resume { session_id },
+            None => ProviderInvocation::Terminal { session_id: None },
+        },
+        None,
+    )?;
     let outcome = session_command_status_with_env(
         &command,
         &launch.env,
@@ -883,21 +651,12 @@ fn run_codex_native(
         let prepared = ready_rx.recv();
         let result = match prepared {
             Ok((thread, remote, account)) => {
-                let mut client = match &thread {
-                    Some(thread) => {
-                        build_resume_session_command("codex", None, &command.cwd, thread)?
-                    }
-                    None => build_session_command("codex", None, &command.cwd, "", None, None)?,
-                };
-                client.args.splice(
-                    0..0,
-                    [
-                        "--remote".into(),
-                        format!("unix://{}", remote.relay.display()),
-                    ],
+                let client = crate::agent::native_connection_command(
+                    command.cwd.clone(),
+                    thread.as_ref(),
+                    remote,
+                    command.attachment.clone(),
                 );
-                client.remote = Some(remote);
-                client.attachment = command.attachment.clone();
                 run_native_session(
                     &client,
                     environment,
@@ -1061,18 +820,6 @@ fn parse_opencode_session_id(line: &str) -> Option<&str> {
         .filter(|id| id.starts_with("ses_") && id.len() > 4)
 }
 
-fn absolute_path(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
 pub(crate) fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
@@ -1108,56 +855,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    fn path() -> PathBuf {
-        PathBuf::from("/tmp/loop flow")
-    }
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| value.to_string()).collect()
-    }
-
-    fn git_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf) {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let main = tmp.path().join("repo");
-        let worktree = tmp.path().join("repo.feature");
-        std::fs::create_dir(&main).expect("create repo dir");
-        std::fs::write(main.join("README.md"), "hello\n").expect("write file");
-
-        git(&main, &["init", "-b", "main"]);
-        git(&main, &["config", "user.email", "test@example.com"]);
-        git(&main, &["config", "user.name", "Test User"]);
-        git(&main, &["add", "."]);
-        git(&main, &["commit", "-m", "init"]);
-        git(
-            &main,
-            &[
-                "worktree",
-                "add",
-                "-b",
-                "feature",
-                worktree.to_str().expect("utf8 worktree"),
-            ],
-        );
-
-        (tmp, main, worktree)
-    }
-
-    fn git(repo: &Path, args: &[&str]) {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git -C {} {} failed:\n{}",
-            repo.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
     }
 
     #[cfg(unix)]
@@ -1217,80 +914,33 @@ mod tests {
         assert!(error.to_string().contains("signal: 15"));
     }
 
-    #[test]
-    fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
-        let launch = build_session_command("codex", Some("o3"), &path(), "fix it", None, None)
-            .expect("build launch");
-
-        assert_eq!(launch.program, "codex");
-        assert_eq!(launch.cwd, path());
-        assert!(launch.args.is_empty());
-        let config = launch.codex.as_ref().unwrap();
-        assert_eq!(config.task_prompt, "fix it");
-        assert_eq!(config.agent.as_deref(), Some("codex:o3"));
-        assert_eq!(config.cwd.as_ref(), Some(&path()));
-    }
-
-    #[test]
-    fn bare_tui_harnesses_do_not_select_a_model() {
-        for agent in ["claude", "codex", "opencode"] {
-            let (harness, model) = crate::config::parse_agent(agent);
-            let launch =
-                build_session_command(&harness, model.as_deref(), &path(), "test", None, None)
-                    .expect("build bare harness launch");
-            assert!(
-                !launch
-                    .args
-                    .iter()
-                    .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
-                "bare {agent} selected a model: {:?}",
-                launch.args
-            );
-        }
-    }
-
-    #[test]
-    fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
-        let launch = build_session_command("claude", Some("sonnet"), &path(), "fix it", None, None)
-            .expect("build launch");
-
-        assert_eq!(launch.program, "claude");
-        assert_eq!(launch.cwd, path());
-        assert_eq!(launch.args, args(&["--model", "sonnet", "--"]));
-        assert!(launch.codex.is_none());
-    }
-
-    #[test]
-    fn session_launch_tui_claude_assigns_a_resumable_provider_session() {
-        let launch = build_session_command(
-            "claude",
-            None,
-            &path(),
-            "test",
-            Some(&"01234567-89ab-cdef-0123-456789abcdef".into()),
-            None,
-        )
-        .expect("build launch");
-
-        assert_eq!(
-            launch.args,
-            args(&["--session-id", "01234567-89ab-cdef-0123-456789abcdef", "--",])
-        );
-    }
-
     #[cfg(unix)]
     #[test]
-    fn preferred_name_resume_opens_every_provider_without_a_prompt() {
+    fn resume_retains_native_identity_without_sending_a_prompt() {
         let temp = tempfile::tempdir().unwrap();
         let provider = fake_provider(&temp, "for arg do printf '%s\\0' \"$arg\"; done > received");
         for harness in ["claude", "codex", "opencode"] {
-            let command = build_resume_session_command(
-                harness,
+            let command = build_session_command(
+                &AgentConfig {
+                    agent: Some(harness.to_string()),
+                    cwd: Some(temp.path().to_path_buf()),
+                    ..Default::default()
+                },
+                ProviderInvocation::Resume {
+                    session_id: &"recorded-session".into(),
+                },
                 None,
-                temp.path(),
-                &"recorded-session".into(),
             )
             .unwrap();
+            assert!(command.input.is_none());
+            if let Some(launch) = command.codex {
+                assert_eq!(
+                    launch.resume_token.as_ref().map(AgentSessionId::as_str),
+                    Some("recorded-session")
+                );
+                assert!(launch.task_prompt.is_empty());
+                continue;
+            }
             let status = Command::new(&provider)
                 .args(&command.args)
                 .current_dir(temp.path())
@@ -1365,10 +1015,7 @@ mod tests {
                 None => std::env::remove_var("LF_USER_NAME"),
             }
             let resume = || {
-                open_saved_session_with_env(
-                    "opencode",
-                    None,
-                    temp.path(),
+                resume_session_with_env(
                     &capture.artifact_key(),
                     Some(&session),
                     &BTreeMap::new(),
@@ -1771,27 +1418,6 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
-    fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-
-        let launch =
-            build_session_command("claude", Some("sonnet"), &worktree, "fix it", None, None)
-                .expect("build launch");
-
-        let idx = launch
-            .args
-            .iter()
-            .position(|arg| arg == "--add-dir")
-            .expect("add-dir flag");
-        assert_eq!(
-            PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
-            main.canonicalize().unwrap()
-        );
-        assert!(launch.args.ends_with(&args(&["--"])));
-        assert_eq!(launch.input.as_deref(), Some("fix it"));
-    }
-
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn session_launch_tui_claude_signs_its_native_home_in_as_a_healthy_managed_login() {
@@ -1849,14 +1475,13 @@ mod tests {
         store.upsert_provider_account(&account).await.unwrap();
 
         launch_session(
-            "claude",
-            None,
-            temp.path(),
-            "review it",
-            &BTreeMap::new(),
-            None,
-            &[],
-            None,
+            &AgentConfig {
+                agent: Some("claude".to_string()),
+                cwd: Some(temp.path().to_path_buf()),
+                task_prompt: "review it".into(),
+                env: BTreeMap::new(),
+                ..Default::default()
+            },
             None,
             None,
         )
@@ -1936,14 +1561,13 @@ mod tests {
             .unwrap();
 
         launch_session(
-            "opencode",
-            None,
-            temp.path(),
-            "review it",
-            &BTreeMap::new(),
-            None,
-            &[],
-            None,
+            &AgentConfig {
+                agent: Some("opencode".to_string()),
+                cwd: Some(temp.path().to_path_buf()),
+                task_prompt: "review it".into(),
+                env: BTreeMap::new(),
+                ..Default::default()
+            },
             None,
             None,
         )
@@ -1977,32 +1601,5 @@ mod tests {
         let mut command = Command::new(&codex);
         crate::provider_auth::apply_provider_env_to_command("codex", &mut command);
         assert!(command.status().unwrap().success());
-    }
-
-    #[test]
-    fn session_launch_tui_opencode_sets_worktree_prompt_and_model() {
-        let launch = build_session_command(
-            "opencode",
-            Some("moonshotai/kimi-k2"),
-            &path(),
-            "fix it",
-            None,
-            None,
-        )
-        .expect("build launch");
-
-        assert_eq!(launch.program, "opencode");
-        assert_eq!(launch.cwd, path());
-        assert_eq!(
-            launch.args,
-            args(&[
-                "/tmp/loop flow",
-                "--prompt",
-                "fix it",
-                "--model",
-                "moonshotai/kimi-k2"
-            ])
-        );
-        assert!(launch.codex.is_none());
     }
 }

@@ -2,7 +2,6 @@ use crate::agent::check_cli_available;
 use crate::agent::missing_agent_message;
 use crate::agent::run_agent;
 use crate::agent::stream::StreamFormat;
-use crate::agent::AgentCapabilities;
 use crate::agent::AgentConfig;
 use crate::agent::ProcessConfig;
 use crate::config::parse_agent;
@@ -98,7 +97,7 @@ pub(crate) fn preview_prompt(
     })
 }
 
-/// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
+/// `lf -b connect ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     crate::data_clone::require_writable_session(id)?;
@@ -106,16 +105,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
-    if let Some(provider) = session.provider.as_deref() {
-        crate::config::resume_model(provider, session.model.as_deref())?;
-    }
+    let resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
-    if turn.agent.is_none() {
-        turn.agent = match (&session.provider, &session.model) {
-            (Some(provider), Some(model)) => Some(format!("{provider}:{model}")),
-            (provider, _) => provider.clone(),
-        };
-    }
+    turn.agent = resolved.agent.clone();
     turn.resume = Some(session.id.clone());
     turn.skill_input = None;
     turn.resolved_invocation = None;
@@ -134,17 +126,21 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         Some(message),
         message,
         &turn,
-        session.cwd,
+        session.cwd.clone(),
         None,
         false,
     )?;
-    let (_, saved) = crate::session_record::resolve_manifest(
-        &crate::store::lf_home_dir(),
-        &session.artifact_key,
-    )?;
-    if let Some(request) = saved.process {
-        built.agent_config.conversation_context = request.conversation_context;
-    }
+    let prepared = built.agent_config;
+    built.agent_config = AgentConfig {
+        system_prompt: prepared.system_prompt,
+        conversation_context: resolved
+            .conversation_context
+            .or(prepared.conversation_context),
+        task_prompt: prepared.task_prompt,
+        structured_replies: prepared.structured_replies,
+        env: prepared.env,
+        ..resolved
+    };
     print_context_header(&built, &turn);
     run_prompt(&built, &turn).map(|_| ())
 }
@@ -262,7 +258,6 @@ struct PromptBuild {
     repo_root: PathBuf,
     agent_config: AgentConfig,
     process: ProcessConfig,
-    capabilities: AgentCapabilities,
     components: PromptComponents,
     context: crate::trace::PreparedTurnContext,
     harness: String,
@@ -498,7 +493,7 @@ fn build_prompt_at(
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
                 .or_else(|| cli.agent.clone()),
-            yolo_mode: cli.yolo || config.yolo,
+            yolo_mode: cli.yolo || crate::config::yolo_override() || config.yolo,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
                 diff: cli.diff_setting(),
@@ -539,11 +534,8 @@ fn build_prompt_at(
         stream: !is_interactive,
         ..Default::default()
     };
-    let capabilities = AgentCapabilities {
-        chrome: cli.chrome_setting().unwrap_or(config.chrome),
-    };
-
     let mut agent_config = prepared.config;
+    agent_config.chrome = cli.chrome_setting().unwrap_or(config.chrome);
     agent_config.output_schema = cli.output_schema.clone();
     if confine && !cli.context {
         agent_config.write_scope = crate::agent::AgentWriteScope::Worktree;
@@ -576,7 +568,6 @@ fn build_prompt_at(
         repo_root,
         agent_config,
         process,
-        capabilities,
         components,
         context,
         harness,
@@ -656,23 +647,8 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
             let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
-            let (flags, prompt) = if let Some(skill) = &config.skill_invocation {
-                skill.terminal_input(&built.harness, &config)?
-            } else {
-                (Vec::new(), config.task_prompt.clone())
-            };
-            launch_session(
-                &built.harness,
-                built.model.as_deref(),
-                &built.repo_root,
-                &prompt,
-                &environment,
-                agent_session.as_ref(),
-                &flags,
-                context_file.as_deref(),
-                config.conversation_context.as_ref(),
-                capture.session_attachment(),
-            )
+            config.session_attachment = capture.session_attachment();
+            launch_session(&config, agent_session.as_ref(), context_file.as_deref())
         })();
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
@@ -753,7 +729,7 @@ fn run_headless_prompt(
 
     info!(harness = built.harness, "launching agent");
     let process_start = Instant::now();
-    let result = run_agent(&agent_config, &process, &built.capabilities);
+    let result = run_agent(&agent_config, &process);
 
     // Relay safe directives from the agent back to the invoking shell.
     if let (Some(relay), Some(ref target)) = (relay_path, directive_file) {
@@ -817,7 +793,7 @@ fn begin_capture(
             session,
             spec,
             &built.context,
-            AgentProcessRequest::from_prepared(prepared_config, &built.capabilities),
+            AgentProcessRequest::from_prepared(prepared_config),
         )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(
@@ -825,16 +801,10 @@ fn begin_capture(
             &id,
             spec,
             &built.context,
-            Some(AgentProcessRequest::from_prepared(
-                prepared_config,
-                &built.capabilities,
-            )),
+            Some(AgentProcessRequest::from_prepared(prepared_config)),
         )
     } else {
-        let launch = Some(AgentProcessRequest::from_prepared(
-            prepared_config,
-            &built.capabilities,
-        ));
+        let launch = Some(AgentProcessRequest::from_prepared(prepared_config));
         CaptureHandle::begin_with_context(spec, &built.context, launch)
     }
     .map_err(|error| {
@@ -1218,7 +1188,7 @@ mod tests {
         PromptBuild,
     };
 
-    use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+    use crate::agent::{run_agent, AgentConfig, ProcessConfig};
     use crate::lf::Cli;
     use crate::prompt::{Document, DocumentSource, PromptComponents};
     use crate::skills::catalog::SkillCatalog;
@@ -1283,7 +1253,7 @@ mod tests {
                         patch
                     );
                     assert_eq!(
-                        built.capabilities.chrome,
+                        built.agent_config.chrome,
                         browser.map_or(configured, |value| value == "on")
                     );
                 }
@@ -1458,7 +1428,6 @@ for line in sys.stdin:
                 auto: true,
                 ..ProcessConfig::default()
             },
-            capabilities: AgentCapabilities::default(),
             components: PromptComponents::default(),
             context,
             harness: "claude".to_string(),
@@ -1512,7 +1481,7 @@ for line in sys.stdin:
             home.path().join("implicit-attempt").display().to_string(),
         );
         let result = crate::journal::with_test_ledger(registry.clone(), || {
-            run_agent(&implicit_launch, &built.process, &built.capabilities)
+            run_agent(&implicit_launch, &built.process)
         })
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -1581,7 +1550,6 @@ for line in sys.stdin:
                     auto: true,
                     ..ProcessConfig::default()
                 },
-                capabilities: AgentCapabilities::default(),
                 components: PromptComponents::default(),
                 context: crate::trace::PreparedTurnContext::from_prompts("", task),
                 harness: "claude".to_string(),

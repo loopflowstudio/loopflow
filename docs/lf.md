@@ -317,7 +317,11 @@ Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use
 `refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
 when `planning` is omitted. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git.
+Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
+repository are queued for publication, including Tasks created offline. Retry a
+specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+identity before synchronizing state and comments. An uncertain creation remains
+pending instead of silently creating a duplicate.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
 a personal Git preference.
 

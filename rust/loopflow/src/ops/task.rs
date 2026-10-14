@@ -3126,6 +3126,37 @@ pub fn task_sync(issue: &str) -> OpsResult<String> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let wave = store
+            .get_wave(&task.wave_id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Task Wave is missing"))?;
+        let repo = Path::new(wave.repo());
+        if !super::linear_observe::connected(wave.repo()) {
+            return Err(task_error("Task repository does not use Linear"));
+        }
+        if task.linear_id.is_none() {
+            super::planning_export::sync_export(
+                &store,
+                repo,
+                &crate::durable::WorkRef::Project(task.project_id.clone()),
+            )
+            .await?;
+            super::planning_export::sync_export(
+                &store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            )
+            .await?;
+        }
+        let task = store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Task is missing"))?;
+        if task.linear_id.is_none() {
+            return Err(task_error("Task publication to Linear remains pending"));
+        }
         // Independent effects do not make each other a prerequisite.
         let (state, comments) = tokio::join!(
             super::linear_observe::sync_task_state(&store, &task),

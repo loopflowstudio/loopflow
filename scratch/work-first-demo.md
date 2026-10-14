@@ -27,22 +27,10 @@ cutover: `07626b7909dfbef40c97c008b459594416de7d6a:scratch/work-first-demo.md`, 
 Those were bounded repairs, not further retirement authority. Preserve all other
 history, active clients and drafts; never restore a whole database over live work.
 
-## Live-reader diagnosis — October 12
+## Earlier live-reader diagnosis
 
-v0.13.12 shares WorkFrame/wire models; Portfolio is new. LocalLineObservation
-now reports decoding paths; the wrong-type regression identifies `sequence`. Check: WorkObservationTransportTests PASS (8); diff check PASS.
-Installed read `/tmp/loo462-live-wire/` finished in 690 s: both live frames decode
-with current Swift, as do 100 Session records. Earlier live app predates main sync; compatibility is not usable opening.
-Jack Heart requested this app on the real database. After unlock, launched
-`/private/tmp/loo462-native.FgtDmE/staged/Loopflow Work Demo.app` (PID 26326),
-ordinary Home/installed dispatch, actual Loopflow repo. Native view is loading;
-Portfolio reports root-json failure. Reader 26587 is live. No migration/takeover.
-
-Live output selects 17 Loopflow Tasks under the current Swift predicate; the branch
-snapshot selects 11. Six extra completed Tasks have only old blocked Flow evidence:
-LOO-440/412, lf-b978097/df7e403/cb9012a/6f396c0. `c229a29648` fixes that shared
-Rust projection; Desktop decoding compatibility does not deliver this unreleased
-behavior. Do not delete failed history or duplicate the fix in Swift.
+October 12's failed loading, installed-CLI mismatch, membership fixes and evidence
+limits remain at `61f7090d660:scratch/work-first-demo.md`, **Live-reader diagnosis**.
 
 ## Bundled runtime — October 12
 
@@ -227,3 +215,21 @@ Native AX inspection confirms links and absent unknown/client-only labels;
 selected LOO-462 for review. Existing clients were not explicitly replaced.
 Capture returned a malformed tall bitmap, so full visual/color acceptance remains
 with Jack Heart; no provider-input or both-appearance proof is claimed.
+
+## Linear linkage — October 14
+
+Jack Heart requires all Tasks in this Linear-configured repo to have Linear issues,
+not merely local IDs displayed in Desktop. Main's `linear.team` was still commented
+out by the October 11 rate-limit workaround. PR #1540 is included in installed
+0.13.14; restored the Team setting, preserving `/tmp/loo462-main-config-before-linear-restore.yaml`.
+The patched CLI published 15 retained Tasks as LOO-466–480 on the real Home;
+two SQLite-lock failures recovered by observing the same creation IDs, not by
+creating replacements. Five older Tasks remain unmapped. Their original rate-limit
+errors survive in `/private/tmp/loo462-native.FgtDmE/live-before-abandoned-repair.db`;
+that snapshot alone does not distinguish rejected creation from a later failed read.
+
+Targeted Task sync now publishes retained Project/Task identities before state/comments;
+repository delivery uses each operation's deadline rather than canceling the whole
+queue after five seconds and starving later Tasks. Review retained uncertainty
+refusal and added a slow-first-export regression; no new retries or identities.
+Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Remaining: five uncertain creations, then native link verification; no completion claim.

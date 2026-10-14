@@ -229,24 +229,16 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
             false
         }
     };
-    if tokio::time::timeout(Duration::from_secs(5), async {
-        if let Err(error) = sync_repository_deliveries(store, repository).await {
-            tracing::debug!(%error, "planning delivery pending");
-        }
-        if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await
-        {
-            tracing::debug!(%error, "planning export pending");
-        }
-        if let Err(error) =
-            super::planning_delivery::sync_repository_fields(store, repository).await
-        {
-            tracing::debug!(%error, "planning field delivery pending");
-        }
-    })
-    .await
-    .is_err()
-    {
-        tracing::debug!("Linear delivery deadline elapsed; pending receipts retained");
+    // Each delivery has its own deadline. A shared deadline repeatedly canceled
+    // the first slow export and starved every later saved Task.
+    if let Err(error) = sync_repository_deliveries(store, repository).await {
+        tracing::debug!(%error, "planning delivery pending");
+    }
+    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
+        tracing::debug!(%error, "planning export pending");
+    }
+    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
+        tracing::debug!(%error, "planning field delivery pending");
     }
     changed
 }

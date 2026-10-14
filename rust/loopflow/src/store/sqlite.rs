@@ -137,6 +137,22 @@ fn deleted_task_issues_in(
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
+    Ok(read_task_worktree_ownership(path)?
+        .into_iter()
+        .filter(|owner| owner.unfinished)
+        .map(|owner| owner.path)
+        .collect())
+}
+
+#[derive(Debug)]
+pub(crate) struct TaskWorktreeOwnership {
+    pub task: String,
+    pub path: PathBuf,
+    pub completed: bool,
+    pub unfinished: bool,
+}
+
+pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskWorktreeOwnership>> {
     let conn = Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -157,12 +173,37 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
          WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
             .to_owned()
     };
+    let done = if planning_completion {
+        "t.abandoned_at IS NULL AND t.planning_completed IS 1"
+    } else {
+        "t.abandoned_at IS NULL AND EXISTS(SELECT 1 FROM task_workflows wf \
+         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
+    };
+    // Old registries still protect unfinished work, but cannot grant deletion
+    // until they can establish this machine's positive checkout ownership.
+    let placed: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    let local = if placed {
+        "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
+    } else {
+        "0"
+    };
     let mut statement = conn.prepare(&format!(
-        "SELECT t.worktree FROM tasks t WHERE t.worktree IS NOT NULL AND t.worktree != '' AND ({open})"
+        "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
+         WHERE t.worktree IS NOT NULL AND t.worktree != ''"
     ))?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-    rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
-        .collect()
+    let rows = statement.query_map([], |row| {
+        Ok(TaskWorktreeOwnership {
+            task: row.get(0)?,
+            path: PathBuf::from(row.get::<_, String>(1)?),
+            completed: row.get(2)?,
+            unfinished: row.get(3)?,
+        })
+    })?;
+    rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {

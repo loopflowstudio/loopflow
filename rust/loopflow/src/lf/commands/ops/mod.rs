@@ -1903,7 +1903,26 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::List { json, sync } => wt_list(*json, *sync),
         WtCommand::Timing { json } => wt_timing(*json),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
-        WtCommand::Prune { dry_run } => wt_prune(*dry_run),
+        WtCommand::Prune {
+            dry_run,
+            builds,
+            json,
+            retention_hours,
+            maximum_roots,
+            maximum_bytes,
+        } => {
+            if *builds {
+                wt_prune_builds(
+                    *dry_run,
+                    *json,
+                    *retention_hours,
+                    *maximum_roots,
+                    *maximum_bytes,
+                )
+            } else {
+                wt_prune(*dry_run)
+            }
+        }
     }
 }
 
@@ -2275,6 +2294,65 @@ fn parse_shortstat(raw: &str) -> String {
     format!("+{ins} -{del} ({files} files)")
 }
 
+fn wt_prune_builds(
+    dry_run: bool,
+    json: bool,
+    retention_hours: u64,
+    maximum_roots: usize,
+    maximum_bytes: u64,
+) -> Result<()> {
+    let repo = find_repo_root()?;
+    let main = main_repo_root(&repo)?;
+    // This path never opens a registry for writes or advances its frontier.
+    let selected = crate::store::default_db_path();
+    let production = crate::store::production_database_path();
+    // A missing or unreadable selected registry is unknown, not permission
+    // to rely exclusively on another Home's completed ownership.
+    let mut registries = vec![selected.clone()];
+    if production != selected
+        && !matches!(std::fs::metadata(&production), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        registries.push(production);
+    }
+    let retention = std::time::Duration::from_secs(
+        retention_hours
+            .checked_mul(3600)
+            .ok_or_else(|| anyhow!("retention hours overflow"))?,
+    );
+    let report = crate::git::build_cleanup::prune_builds(
+        &main,
+        &repo,
+        &registries,
+        crate::git::build_cleanup::BuildCleanupPolicy {
+            retention,
+            maximum_roots,
+            maximum_bytes,
+        },
+        dry_run,
+    )?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        for entry in &report.entries {
+            println!(
+                "{} {} ({} bytes): {}",
+                entry.status,
+                entry.path.display(),
+                entry
+                    .allocated_bytes
+                    .map(|bytes| bytes.to_string())
+                    .unwrap_or_else(|| "unknown".into()),
+                entry.reason
+            );
+        }
+        println!(
+            "Reclaimed {} allocated bytes; checkouts retained.",
+            report.removed_bytes
+        );
+    }
+    Ok(())
+}
+
 fn wt_prune(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
@@ -2327,7 +2405,7 @@ fn wt_prune(dry_run: bool) -> Result<()> {
 }
 
 fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
-    let mut protected = crate::lf::commands::top::running_workspace_paths();
+    let mut protected = crate::git::build_cleanup::running_paths()?;
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {

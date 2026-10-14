@@ -154,6 +154,7 @@ impl SqliteStore {
         owner: PlanningChanges<'_>,
         input: &Value,
         link: bool,
+        retry_creation: bool,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
@@ -168,7 +169,7 @@ impl SqliteStore {
             ""
         };
         Ok(conn.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
-            WHERE {key}=?1 AND {column}=0 AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1)
+            WHERE {key}=?1 AND ({column}=0 OR ?4) AND export_json IS NOT NULL {deleted}"), params![owner.owner().1,input.to_string(),link,retry_creation && !link])? == 1)
     }
 
     pub(crate) fn reject_planning_export(

@@ -1103,7 +1103,12 @@ pub enum TaskCommand {
     /// Clear a Task pause without starting execution
     Resume { issue: String },
     /// Synchronize a Task; observed planning conflicts adopt Linear
-    Sync { issue: String },
+    Sync {
+        issue: String,
+        /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
+        #[arg(long)]
+        retry_creation: bool,
+    },
     /// Inspect or reset this Task's captured Workflow
     Workflow {
         #[command(subcommand)]

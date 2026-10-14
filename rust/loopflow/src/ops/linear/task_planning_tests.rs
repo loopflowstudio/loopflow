@@ -3446,6 +3446,15 @@ fn with_export_plan(
 
 #[test]
 fn repository_sync_exports_later_tasks_after_an_earlier_export_times_out() {
+    exports_later_tasks_after_timeout(false);
+}
+
+#[test]
+fn save_sync_exports_later_tasks_after_an_earlier_export_times_out() {
+    exports_later_tasks_after_timeout(true);
+}
+
+fn exports_later_tasks_after_timeout(after_save: bool) {
     with_export_plan(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             crate::ops::planning_export::sync_export(
@@ -3484,8 +3493,13 @@ fn repository_sync_exports_later_tasks_after_an_earlier_export_times_out() {
                 )
                 .unwrap();
             state.lock().await.slow_export_id = Some(export.id);
-            crate::ops::linear_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
-                .await;
+            if after_save {
+                crate::ops::planning_sync::sync_after_save(&fixture.store, repo.to_str().unwrap())
+                    .await;
+            } else {
+                crate::ops::linear_observe::sync_repository(&fixture.store, repo.to_str().unwrap())
+                    .await;
+            }
             let other = if first == &task.id {
                 &later.id
             } else {
@@ -3512,10 +3526,30 @@ fn repository_sync_exports_later_tasks_after_an_earlier_export_times_out() {
 }
 
 #[test]
+fn task_create_in_linear_repository_returns_published_task_without_execution() {
+    with_export_plan(|runtime, fixture, repo, task, _state| {
+        let wave = runtime
+            .block_on(fixture.store.get_wave(&task.wave_id))
+            .unwrap()
+            .unwrap();
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some(wave.slug()),
+            Some("New Linear Task".into()),
+            Some("Retain this work".into()),
+        )
+        .unwrap();
+        assert!(saved.linear_id.is_some());
+        assert!(saved.identifier.starts_with("FIX-"));
+        assert!(saved.worktree.is_none());
+    });
+}
+
+#[test]
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, _repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(task.id.as_str()).unwrap();
+        let result = crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -3523,7 +3557,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(task.id.as_str()).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }
@@ -3549,9 +3583,72 @@ fn task_sync_does_not_claim_success_for_uncertain_publication() {
             .is_err());
             state.lock().await.hide_exports = true;
         });
-        let error = crate::ops::task::task_sync(task.id.as_str()).unwrap_err();
+        let error = crate::ops::task::task_sync(task.id.as_str(), false).unwrap_err();
         assert!(error.to_string().contains("uncertain"), "{error}");
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
+    });
+}
+
+#[test]
+fn task_sync_explicit_retry_preserves_saved_creation_identity() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Project(task.project_id.clone()),
+            )
+            .await
+            .unwrap();
+            state.lock().await.lose_creation_reply = true;
+            assert!(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone())
+            )
+            .await
+            .is_err());
+            // Simulate the absent issue that an explicit retry is allowed to recreate.
+            state
+                .lock()
+                .await
+                .issues
+                .retain(|issue| issue["title"] != task.title);
+        });
+        assert!(crate::ops::task::task_sync(task.id.as_str(), false).is_err());
+        runtime.block_on(state.lock()).rate_limit_query = Some("mutation DeliverTaskCreation");
+        assert!(crate::ops::task::task_sync(task.id.as_str(), true).is_err());
+        assert!(
+            fixture
+                .store
+                .sqlite
+                .planning_export_attempts(
+                    crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                )
+                .unwrap()
+                .0
+        );
+        runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+        });
+        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .prepare_planning_export(
+                crate::store::sqlite::planning_changes::PlanningChanges::Task(&task.id),
+                "team-1",
+                "initiative-1",
+            )
+            .unwrap();
+        assert_eq!(saved.linear_id.unwrap().as_str(), receipt.id);
+        assert_eq!(saved.id, task.id);
+        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
+        assert_eq!(runtime.block_on(state.lock()).creation_writes, 3);
     });
 }
 

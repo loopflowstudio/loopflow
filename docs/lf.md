@@ -321,7 +321,10 @@ Linear unavailability leaves saves buffered locally; it never switches to Git. A
 repository are queued for publication, including Tasks created offline. Retry a
 specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state and comments. An uncertain creation remains
-pending instead of silently creating a duplicate.
+pending instead of silently creating a duplicate. To deliberately retry an
+uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
+the saved issue ID and first checks for an existing issue; it can recreate a
+previously deleted issue. Ordinary sync never makes that choice.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
 a personal Git preference.
 

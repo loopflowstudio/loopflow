@@ -989,8 +989,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Ok(())
             }
         },
-        TaskCommand::Sync { issue } => {
-            println!("{}", loopflow::ops::task::task_sync(issue)?);
+        TaskCommand::Sync {
+            issue,
+            retry_creation,
+        } => {
+            println!(
+                "{}",
+                loopflow::ops::task::task_sync(issue, *retry_creation)?
+            );
             Ok(())
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
@@ -1039,13 +1045,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.id, issue.title);
+                println!("{} · {}", issue.identifier, issue.title);
             }
             if matches!(
                 loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
                 loopflow::config::PlanningConfig::Linear {}
-            ) {
-                eprintln!("Saved locally; pending Linear sync.");
+            ) && issue.linear_id.is_none()
+            {
+                eprintln!(
+                    "Saved locally; pending Linear sync. Retry with `lf task sync {}`.",
+                    issue.identifier
+                );
             }
             Ok(())
         }

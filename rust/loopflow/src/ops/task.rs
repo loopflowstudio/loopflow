@@ -3118,7 +3118,7 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     })
 }
 
-pub fn task_sync(issue: &str) -> OpsResult<String> {
+pub fn task_sync(issue: &str, retry_creation: bool) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -3142,12 +3142,16 @@ pub fn task_sync(issue: &str) -> OpsResult<String> {
                 &crate::durable::WorkRef::Project(task.project_id.clone()),
             )
             .await?;
-            super::planning_export::sync_export(
-                &store,
-                repo,
-                &crate::durable::WorkRef::Task(task.id.clone()),
-            )
-            .await?;
+            if retry_creation {
+                super::planning_export::retry_task_export(&store, repo, &task.id).await?;
+            } else {
+                super::planning_export::sync_export(
+                    &store,
+                    repo,
+                    &crate::durable::WorkRef::Task(task.id.clone()),
+                )
+                .await?;
+            }
         }
         let task = store
             .get_task(&task.id)

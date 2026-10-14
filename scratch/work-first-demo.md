@@ -37,22 +37,10 @@ external helper override and provenance-only store refusal, not schema validatio
 or the exclusive migration boundary. Reattachment keeps an already-running
 provider's environment; it does not silently restart it for a new executable.
 
-Main’s unreleased `linear_team_checks` table is absent from real data. Linear
-acquisition and Flow schema revalidation remain unproved; no live table was added.
-No global install, migration, provider takeover or additional cleanup performed.
-
-Check: bundled selection/shared-store Rust 7 PASS (initial over-specific filter ran zero, corrected); Desktop launcher/zsh 9 PASS; Python launcher 8 PASS; fmt, all-target Clippy, Ruff/diff PASS. Native preparation fixture remains display-only.
-Live bundled app PID 8749 finished refreshing with 12 rows (new CI Task since the
-11-row snapshot); Portfolio error gone. Clicking LOO-462 launched exact
-`session connect 955ff6f0a65047a18b191505e307fce1`; provider shows hook-trust review,
-left for Jack. His LOO-312 click reproduces missing-checkout opening failure;
-restoration sequencing now calls ordinary Task checkout before primary acquisition;
-sidebar failure stays inline instead of duplicating the error sheet. No schema migration.
-Check: network-isolated primary Session lifecycle PASS (restores missing checkout at same HEAD, same Task/Session ownership); focused Swift failure-retention PASS; fmt/all-target Clippy PASS.
-LOO-312 still needs recovery: no local/remote-tracking branch or worktree registration,
-no direct Sessions, historical PR without GitHub/head evidence. Retained October 5
-progress describes actual implementation, so absence cannot classify it as debris.
-No real restoration, Session creation, abandonment or history deletion attempted.
+Earlier missing-schema, helper selection, hook-trust, failed LOO-312 restoration
+and focused checks: `6e6795389d:scratch/work-first-demo.md`, **Bundled runtime**.
+Later release and recovery evidence below supersedes those dated launch conditions;
+no old fixture proves native acceptance or authorizes discarding LOO-312 work.
 
 ## Every-sidebar-Task audit — October 12, in progress
 
@@ -219,7 +207,7 @@ out by the October 11 rate-limit workaround. PR #1540 is included in installed
 0.13.14; restored the Team setting, preserving `/tmp/loo462-main-config-before-linear-restore.yaml`.
 The patched CLI published 15 retained Tasks as LOO-466–480 on the real Home;
 two SQLite-lock failures recovered by observing the same creation IDs, not by
-creating replacements. Five older Tasks remain unmapped. Their original rate-limit
+creating replacements. Five older Tasks initially remained unmapped. Their original rate-limit
 errors survive in `/private/tmp/loo462-native.FgtDmE/live-before-abandoned-repair.db`;
 that snapshot alone does not distinguish rejected creation from a later failed read.
 
@@ -227,4 +215,20 @@ Targeted Task sync now publishes retained Project/Task identities before state/c
 repository delivery uses each operation's deadline rather than canceling the whole
 queue after five seconds and starving later Tasks. Review retained uncertainty
 refusal and added a slow-first-export regression; no new retries or identities.
-Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Remaining: five uncertain creations, then native link verification; no completion claim.
+Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Native link verification and whole-repo reconciliation remain; no completion claim.
+
+October 14 continuation: Jack Heart approved explicitly retrying the five saved
+issue IDs, including possible recreation of a deleted provider issue. Ordinary
+uncertain sync remains non-replaying. Jack also requested whole-repo LF/Linear
+agreement and stated he uses Linear only through Loopflow. Explicit
+`task sync --retry-creation` preserves identity, capture and execution. All five
+retries succeeded as LOO-481–485; zero non-deleted repo Tasks lack Linear IDs.
+Found the same shared five-second deadline in `sync_after_save`, now removed;
+creation output must show the saved identifier and warn only while unmapped.
+Checks: slow-export regressions PASS (2), normal creation PASS (1; initial nonexistent `started_at` assertion removed), explicit/ordinary retry PASS (3, including rate-limited retry preserving earlier uncertainty), all-target Clippy PASS. Logs: `/tmp/loo462-linear-{retry-rate-tests,retry-final-clippy,approved-retries}.log`.
+Whole-repo audit: 373 non-deleted Tasks mapped; 166 lack cached provider observations,
+five known state mismatches (LOO-376/440/450/451 completed, LOO-367 canceled locally;
+Linear unstarted), and LOO-462 description delivery remains uncertain. Full
+`repo refresh --all` refused before mutation because spend/engbot/list GOAL files
+are missing on main. Do not restore retired Waves or erase uncertainty to bypass it.
+Use scoped acquisition/delivery; inspect remaining project/comment receipts too.

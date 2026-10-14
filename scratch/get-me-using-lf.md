@@ -440,3 +440,39 @@ a live client alone cannot claim Working. This supersedes the sidebar's current
 “Status unknown”/“Active · inferred” presentation, not its underlying observations.
 The semantic-token cutover and rendered redesign remain unimplemented. The review
 in `pr-review.html` exposes this mismatch rather than treating the request as done.
+
+
+### Implementation cut — October 14
+
+Jack Heart requested continuing the redesign after the walkthrough. One coherent
+Desktop cut in LOO-462, returning to demo; no landing or installation authority.
+
+- Keep `LoopflowPalette` as the color owner. Add explicit roles for selection
+  fill/edge, keyboard focus, link ink/hover, and emphasized versus ordinary actions.
+  Reuse cream/charcoal, burgundy/rose, blue, amber, green and failure red. Do not
+  invent a new theme or force appearance; both existing appearances need deliberate
+  role assignments. Text uses primary/secondary/muted ink, never selection hue.
+- Cut over `WorkNavigator`, `TaskRowMetadata`, `WorkBreadcrumbBar`, shared button
+  styles, Workflow and Files/control chrome to these roles. Repo identity may retain
+  burgundy; Wave/Task titles stay neutral. Links are secondary ink with underline
+  on hover/focus. Selection uses tint plus edge; keyboard focus uses a distinct
+  outline and survives selection. Ordinary buttons are neutral; emphasized action
+  alone uses burgundy. Red remains failures/destructive affordances, not navigation.
+- Keep status evidence intact. Presentation omits unknown and client-liveness-only
+  labels/dots, without falsely classifying either as idle. Valid working reports
+  use blue; supported Waiting/blocked uses amber with wording that preserves their
+  distinction; actual errors use red. Successful program reports are not Task
+  completion. Read failures remain inspectable without painting every row as failed.
+- Delete replaced direct `accentInk` choices and duplicate Desktop status-color
+  mappings rather than layer another theme over them. Preserve terminal ANSI colors,
+  selected-failed combinations, retained panes/drafts, APIs and all data records.
+  Update `VISUAL_DESIGN.md` to separate Desktop semantics from marketing examples.
+- Focused checks: palette/row/headless view tests for unknown/active omission,
+  reported working/error, shared Waiting, selection plus failure, muted links and
+  focus visibility. Build using `scripts/test_desktop.sh` with affected filters;
+  contrast checks must resolve actual light/dark colors and composited backgrounds
+  (4.5:1 ordinary text, 3:1 meaningful indicators). No empty filter counts as proof.
+- Demo: same real Loopflow repository in the matching bundled app, sidebar → Task
+  → Files/Workflow. Inspect both appearances, hover/focus/selection and status
+  combinations without creating fake live reports or interrupting user clients.
+  Refresh `pr-review.html` after implementation so it stops describing old code.

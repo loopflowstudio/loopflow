@@ -19,61 +19,13 @@ The shared Flow membership query now restricts candidate Processes before joinin
 history. Its five passing Rust tests prove membership retention, not native speed.
 No previous launch or screenshot established real-provider continuation.
 
-## October 11 native navigation and cleanup rehearsal
+## Earlier cleanup and opening evidence
 
-The failed sandboxed launches, LOO-149 mismatch and LOO-376 rehearsal/rollback
-receipts remain at `2016119a88:scratch/work-first-demo.md`, under this heading.
-They established neither provider continuation nor live cleanup; the subsequent
-installed application below owns live changes. Preserve old-Project backlog,
-active execution and conditional rollback, never overwrite a live database copy.
-
-### Installed cleanup and Workflow rendering
-
-The earlier read-only app sandbox and initial LOO-376 completion refusal/rehearsal
-are retained at `bf19dc0b5f:scratch/work-first-demo.md`, this heading. Supported
-live completion succeeded after the rehearsal; no whole-store restore or other
-Task/Session retirement. The final retained-checkout evidence is below.
-
-### Verified live result and legacy cleanup
-
-Live LOO-376 completion returned exit 0; fresh supported status says done. Its
-checkout remains because ef54b06d-9896-467f-a920-f8d4648f9d8b and
-e2d3d8d6-a9d5-43ef-83d8-022aadd47295 have unresolved execution evidence. No attempt
-was made to erase those records. This supersedes the pending-process note above.
-
-The one-time missing-disposition repair selected 126 exact already-abandoned rows;
-all had no subsequent Task edit/comment, no provider revision, pending completion,
-state delivery or planning edit. `repair_abandoned.py` in the demo directory refuses
-the newer journal schema and captures full preimages before commit. The installed-
-schema copy passed repair and conditional rollback. Live application then changed
-only planning state/revision; the native Work revision trigger handles refresh.
-Live before/after counts: 547 Tasks, 564 PRs, 3292 Sessions, 68406 Task events—
-unchanged. No new provider requests were created. Backup `live-before-abandoned-repair.db`,
-preimages `abandoned-live-before.json`; rollback refuses any subsequently edited row.
-Do not restore a whole snapshot over concurrent live activity.
-
-Private-copy writer rehearsal and native 24-versus-65 Product rows:
-`f0d993e2c9:scratch/work-first-demo.md`, **Verified live result and legacy cleanup**.
-Provider opening there was sandbox-blocked; no further cancellation authority.
-
-## Earlier Task opening — October 12
-
-Task-click fallback and disposable provider proof, including failed optional
-WorkReference builds and hidden trust prompts: `f0d993e2c9:scratch/work-first-demo.md`,
-**Task click fallback** and **Provider-backed conversation**. Inline opening/error
-retention replaced New shell; later Started membership supersedes Session-presence
-admission. No copied-execution takeover or populated-provider acceptance followed.
-
-## Correct repository and Started membership — October 12
-
-Copied-data mismatch, failed sandbox launches, release alignment, repaired
-Portfolio flag ownership and placeholder contrast are retained at
-`33e313a56a:scratch/work-first-demo.md`, under this heading. Recorded Started
-plus shared unresolved execution replaced Session-presence sidebar admission;
-37 navigation tests passed. In-memory proof and fixture rendering do not establish
-live-provider continuation. Copied execution grants no takeover. `linear_team_checks`
-was added only to the disposable copy, not the real database; branch draft-schema
-compatibility remains an unresolved live boundary.
+Exact LOO-376 completion, retained unresolved execution, 126-row abandoned-state
+repair/conditional rollback, failed clone-provider opening and Started-membership
+cutover: `07626b7909dfbef40c97c008b459594416de7d6a:scratch/work-first-demo.md`, **October 11 native navigation and cleanup rehearsal** through **Correct repository and Started membership**.
+Those were bounded repairs, not further retirement authority. Preserve all other
+history, active clients and drafts; never restore a whole database over live work.
 
 ## Live-reader diagnosis — October 12
 

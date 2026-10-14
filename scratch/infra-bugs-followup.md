@@ -43,15 +43,47 @@ the installed Fantasia workflow has not been replayed against a new release.
 ## Reusing a delivered checkout
 
 Jack Heart also requested checking reuse after an earlier PR, with or without a
-Task. This checkout has no Task (`lf task status --json`), and its committed diff
-against origin/main is empty after sync. `create_or_update_pr` uses only open PRs,
-so a subsequent publication creates a new PR rather than modifying merged #1552.
-No new publication was performed for this check.
+Task. This checkout has no Task (`lf task status --json`). Its earlier PR #1552
+merged; these follow-up changes continue here. `create_or_update_pr` finds only
+open PRs, so another publication creates a new PR rather than modifying #1552.
 
-Current code limits automatic merged-history restart to branches configured as
-persistent (`ops/commit.rs`), although ordinary checkouts can be reused after
-explicit sync. Task publication refuses a settled PR (`_task_pr_context_from_store`)
-because a Task owns at most one PR. Reusing that checkout for a new Task needs an
-explicit ownership transition that retains prior Task, PR and Session history.
-Whether to create that follow-up Task automatically or keep creation explicit
-is awaiting Jack's preference. No branch-reuse policy has been changed yet.
+Jack Heart chose resilience over enforcing a preferred workflow: recommend a
+follow-up Task, but accept sequential PRs in one Task and show the current PR in
+the main UI. No new configuration, flags or command sequence. Earlier PRs remain
+history. Publishing continued work must adapt both ordinary and Task checkouts.
+
+Implementation: allow atomically archiving a settled current PR when inserting
+its successor; retain one current PR. Refresh remote settlement before publication
+when the known PR is no longer open. Freeze settled placement/history, discard
+old merge/completion intent for the new delivery, and keep retries on the same
+new publication. Reuse merged-history preparation for ordinary publication while
+preserving staged, unstaged and committed follow-up work. Follow-up Task creation
+remains advice, never an implicit operation or admission requirement.
+
+Acceptance: publish twice from the same checkout after squash merge, both with
+and without a Task; repeat the second publication; retain the first PR unchanged;
+recognize a merge without requiring reconcile; preserve local edits and unrelated
+remote commits; do not let an earlier landing complete the latest delivery.
+
+Review found three additional boundaries: submit still required a create-PR flag;
+landing mistook leftover scratch notes for another delivery; and follow-up commits
+may already have been pushed. Removed the create-PR requirement (the existing
+public option remains accepted), ignore scratch-only edits when reporting an
+already-merged Task PR, and preserve pushed follow-up ancestry while adopting the
+replayed tree. Only an exact remote head already delivered to main can be replaced,
+under an explicit Git lease; a concurrent push remains intact. Historical PR rows
+and placement remain frozen, and a failed successor insert rolls back archival
+and reopening. Earlier landing observations cannot complete the new delivery.
+
+Proof uses real Git repositories and the actual publish/submit/land CLI with a
+simulated GitHub boundary. It is not an installed Fantasia release replay or a
+live GitHub merge lifecycle. Hosted full-matrix checks remain deferred while this
+review checkpoint retains scratch, per TESTING.md.
+
+Checks: isolated `cargo nextest` delivery/migration/docs suites (111 passed),
+startup/release-lock/scheduled-release suites (28 passed), `release_tests`
+(70 passed); `cargo build -p loopflow --bin lf`, all-target Clippy with warnings
+denied, and `cargo fmt --all -- --check` passed. Logs:
+`/tmp/lf-continuation-{reviewed-checks,shared-git-checks,release-checks}.log`.
+The final merged-only landing fast path is checked separately in
+`/tmp/lf-continuation-land-fastpath.log`.

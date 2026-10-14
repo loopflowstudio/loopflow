@@ -16,11 +16,10 @@ use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard};
 use time::OffsetDateTime;
 
-fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
+fn land_options(pr_title: &str) -> LandOptions {
     LandOptions {
         strict: true,
         local: false,
-        create_pr,
         wait_and_fix: false,
         worktree: None,
         commit_message: None,
@@ -151,8 +150,7 @@ fn task_pr_heals_stale_base_and_aligns_the_three_views() {
 
     let task = register_task_with_pr(home.path(), repo.path(), branch, &stale_base);
 
-    land(repo.path(), &land_options(false, "Task PR"), &NullProgress)
-        .expect("stale base heals and lands");
+    land(repo.path(), &land_options("Task PR"), &NullProgress).expect("stale base heals and lands");
 
     // The recorded base healed forward to the current origin tip.
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
@@ -625,12 +623,8 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
                 .expect("set github number");
         });
 
-        let err = submit(
-            repo.path(),
-            &land_options(true, "empty range"),
-            &NullProgress,
-        )
-        .expect_err("empty range must refuse");
+        let err = submit(repo.path(), &land_options("empty range"), &NullProgress)
+            .expect_err("empty range must refuse");
         assert!(
             err.to_string().contains("empty"),
             "expected empty-range refusal, got: {err}"
@@ -680,7 +674,7 @@ fn completed_merge_updates_recorded_base_for_publish_submit_and_land() {
             &["merge", "--no-ff", "-m", "Completed merge", "origin/main"],
         );
         let merged = repo.head_sha();
-        let options = land_options(false, "completed merge");
+        let options = land_options("completed merge");
         match operation {
             "publish" => create_or_update_pr(
                 repo.path(),
@@ -1024,4 +1018,299 @@ fn publishing_after_parent_squash_preserves_the_fork_for_sync() {
         fs::read_to_string(child_path.join("child.txt")).unwrap(),
         "child work\n"
     );
+}
+
+fn continued_publication(scenario: &str) {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let state = home.path().join("github");
+    fs::create_dir(&state).unwrap();
+    let unarmed = support::github_merge_response(2, "@HEAD@", "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(2, "@HEAD@", "OPEN", "CLEAN", Some("auto"));
+    let script = r#"#!/bin/sh
+state='@STATE@'
+case "$1 $2" in
+  'pr list')
+    case "$*" in
+      *'--state merged'*)
+        if [ -f "$state/merge" ]; then
+          printf '[{"state":"MERGED","headRefOid":"%s"}]\n' "$(cat "$state/head")"
+        else echo '[]'; fi
+        exit 0;;
+    esac
+    if [ ! -f "$state/open" ]; then echo '[]'; exit 0; fi
+    number=$(cat "$state/open")
+    printf '[{"url":"https://example.com/pr/%s","number":%s,"state":"OPEN","isDraft":false,"headRefOid":"%s"}]\n' "$number" "$number" "$(git rev-parse HEAD)"
+    ;;
+  'pr create')
+    number=1
+    if [ -f "$state/count" ]; then number=$(($(cat "$state/count") + 1)); fi
+    echo "$number" > "$state/count"
+    echo "$number" > "$state/open"
+    echo "https://example.com/pr/$number"
+    ;;
+  'api graphql')
+    if [ -f "$state/armed" ]; then response='@ARMED@'; else response='@UNARMED@'; fi
+    printf '%s\n' "$response" | sed "s/@HEAD@/$(git rev-parse HEAD)/g"
+    ;;
+  'pr merge') touch "$state/armed";;
+  'pr view') echo "https://example.com/pr/$(cat "$state/open")";;
+  'api -H'|'api --cache')
+    printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"%s","merged_at":"2026-10-14T17:00:00Z","number":1,"html_url":"https://example.com/pr/1","head":{"sha":"%s"}}\n' "$(cat "$state/merge")" "$(cat "$state/head")"
+    ;;
+esac
+exit 0
+"#.replace("@STATE@", state.to_str().unwrap()).replace("@ARMED@", &armed).replace("@UNARMED@", &unarmed);
+    let _env = EnvGuard::with_lf_home(&[("gh", &script)], home.path());
+    git_out(
+        &repo,
+        &[
+            "config",
+            &format!("url.{}.insteadOf", repo.bare_path().display()),
+            "https://github.com/loopflowstudio/loopflow.git",
+        ],
+    );
+    git_out(
+        &repo,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/loopflowstudio/loopflow.git",
+        ],
+    );
+    let base = repo.head_sha();
+    let branch = "jack/continued-work";
+    repo.create_branch(branch);
+    let task = (scenario != "ordinary")
+        .then(|| register_task_with_pr(home.path(), repo.path(), branch, &base));
+    repo.create_file("first.txt", "first delivery\n");
+    repo.stage_all();
+    repo.commit("First delivery");
+    let options = PrOptions {
+        draft: false,
+        title: Some("First delivery".into()),
+        body: Some("First delivery".into()),
+        agent: None,
+    };
+    let first = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
+    assert!(first.created);
+    let first_head = repo.head_sha();
+    fs::write(state.join("head"), &first_head).unwrap();
+    repo.checkout("main");
+    git_out(&repo, &["merge", "--squash", branch]);
+    repo.commit("Squash first delivery");
+    let merge = repo.head_sha();
+    repo.push();
+    repo.checkout(branch);
+    fs::remove_file(state.join("open")).unwrap();
+    fs::write(state.join("merge"), &merge).unwrap();
+    if scenario == "pruned" {
+        git_out(&repo, &["push", "origin", "--delete", branch]);
+        git_out(&repo, &["fetch", "--prune", "origin"]);
+    }
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    if let Some(task) = &task {
+        if scenario != "unobserved" {
+            let mut pr = runtime
+                .block_on(task.store.active_task_pr(&task.task.id))
+                .unwrap()
+                .unwrap();
+            pr.merge_commit = Some(merge.clone());
+            runtime.block_on(task.store.settle_task_pr(&pr)).unwrap();
+        }
+        if scenario == "completed" {
+            loopflow::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
+        }
+    }
+    repo.create_file("later.txt", "committed follow-up\n");
+    repo.stage_all();
+    repo.commit("Follow-up already committed");
+    let committed_follow_up = repo.head_sha();
+    if scenario == "pushed" {
+        repo.push();
+    }
+    let concurrent_head = if scenario == "concurrent" {
+        git_out(&repo, &["checkout", "-b", "other-contributor", &first_head]);
+        repo.create_file("remote.txt", "another contributor's work\n");
+        repo.stage_all();
+        repo.commit("Concurrent remote work");
+        let head = repo.head_sha();
+        git_out(
+            &repo,
+            &["push", "origin", &format!("HEAD:refs/heads/{branch}")],
+        );
+        repo.checkout(branch);
+        // Model a push that arrived after this checkout's last fetch.
+        git_out(
+            &repo,
+            &[
+                "update-ref",
+                &format!("refs/remotes/origin/{branch}"),
+                &first_head,
+            ],
+        );
+        Some(head)
+    } else {
+        None
+    };
+    repo.create_file("local.txt", "local follow-up\n");
+    let options = PrOptions {
+        title: Some("Follow-up".into()),
+        ..options
+    };
+    if let Some(concurrent_head) = concurrent_head {
+        assert!(create_or_update_pr(repo.path(), &options, &NullProgress).is_err());
+        assert_eq!(
+            git_out(&repo, &["ls-remote", "--heads", "origin", branch])
+                .split_whitespace()
+                .next(),
+            Some(concurrent_head.as_str())
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("later.txt")).unwrap(),
+            "committed follow-up\n"
+        );
+        assert_eq!(
+            fs::read_to_string(repo.path().join("local.txt")).unwrap(),
+            "local follow-up\n"
+        );
+        assert_eq!(fs::read_to_string(state.join("count")).unwrap().trim(), "1");
+        return;
+    }
+    let second_url = if matches!(scenario, "pruned" | "land" | "submit") {
+        let operation = match scenario {
+            "land" => "land",
+            "submit" => "submit",
+            _ => "publish",
+        };
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .current_dir(repo.path())
+            .args([
+                "pr",
+                operation,
+                "--title",
+                "Follow-up",
+                "--body",
+                "Follow-up",
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fs::read_to_string(state.join("open")).unwrap().trim(), "2");
+        "https://example.com/pr/2".to_string()
+    } else {
+        let second = create_or_update_pr(repo.path(), &options, &NullProgress)
+            .unwrap_or_else(|error| panic!("{scenario}: {error}"));
+        assert!(second.created);
+        second.url
+    };
+    assert_ne!(first.url, second_url);
+    if scenario == "pushed" {
+        git_out(
+            &repo,
+            &["merge-base", "--is-ancestor", &committed_follow_up, "HEAD"],
+        );
+    }
+    assert_eq!(
+        git_out(&repo, &["diff", "--name-only", "origin/main...HEAD"]),
+        "later.txt\nlocal.txt"
+    );
+    assert_eq!(
+        git_out(&repo, &["rev-parse", &format!("origin/{branch}")]),
+        repo.head_sha()
+    );
+    let history = task.as_ref().map(|task| {
+        let prs = runtime
+            .block_on(task.store.task_prs(&task.task.id))
+            .unwrap();
+        assert_eq!(prs.len(), 2);
+        assert_eq!(prs[0].github().unwrap().number, 1);
+        assert_eq!(prs[0].merge_commit.as_deref(), Some(merge.as_str()));
+        assert_eq!(prs[0].base_commit, base);
+        assert_eq!(prs[1].github().unwrap().number, 2);
+        assert_eq!(
+            prs[1].merge_request().is_some(),
+            matches!(scenario, "land" | "submit")
+        );
+        assert_eq!(
+            runtime
+                .block_on(task.store.active_task_pr(&task.task.id))
+                .unwrap()
+                .unwrap()
+                .id,
+            prs[1].id
+        );
+        if scenario == "completed" {
+            assert_ne!(
+                runtime
+                    .block_on(task.store.task_state(&task.task.id))
+                    .unwrap(),
+                loopflow::durable::TaskState::Done
+            );
+        }
+        prs
+    });
+    let retry = create_or_update_pr(repo.path(), &options, &NullProgress).unwrap();
+    assert!(!retry.created);
+    assert_eq!(retry.url, second_url);
+    assert_eq!(fs::read_to_string(state.join("count")).unwrap().trim(), "2");
+    if let (Some(task), Some(history)) = (&task, history) {
+        let after = runtime
+            .block_on(task.store.task_prs(&task.task.id))
+            .unwrap();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0], history[0]);
+    }
+}
+
+#[test]
+fn continued_publication_without_task() {
+    continued_publication("ordinary");
+}
+
+#[test]
+fn continued_publication_in_the_same_task() {
+    continued_publication("task");
+}
+
+#[test]
+fn continued_publication_observes_the_previous_merge() {
+    continued_publication("unobserved");
+}
+
+#[test]
+fn continued_publication_reopens_completed_task() {
+    continued_publication("completed");
+}
+
+#[test]
+fn continued_publication_after_remote_branch_pruning() {
+    continued_publication("pruned");
+}
+
+#[test]
+fn continued_publication_through_land() {
+    continued_publication("land");
+}
+
+#[test]
+fn continued_publication_through_submit() {
+    continued_publication("submit");
+}
+
+#[test]
+fn continued_publication_preserves_already_pushed_followup_commits() {
+    continued_publication("pushed");
+}
+
+#[test]
+fn continued_publication_preserves_concurrent_remote_work() {
+    continued_publication("concurrent");
 }

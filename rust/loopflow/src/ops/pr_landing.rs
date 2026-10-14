@@ -1266,7 +1266,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         return Ok(());
     }
     if crate::git::worktrees::is_persistent_worktree(&landing.worktree)? {
-        match crate::ops::sync::restart_landed_persistent(&landing.worktree) {
+        match crate::ops::sync::restart_landed_branch(&landing.worktree) {
             Ok(true) => eprintln!("PR merged; restarted persistent branch from the default branch."),
             Ok(false) => eprintln!(
                 "PR merged; retained persistent checkout with unmerged commits. Run lf sync before the next publication."

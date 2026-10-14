@@ -148,7 +148,6 @@ Prepare a PR to land: sync, clear committed scratch additions and mark ready. Le
 | Argument | What it does |
 |---|---|
 | `--strict` | strict Default: false. |
-| `--create-pr / -p` | create pr Default: false. |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |

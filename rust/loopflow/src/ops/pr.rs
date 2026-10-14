@@ -93,7 +93,8 @@ pub fn create_or_update_pr(
     progress: &impl Progress,
 ) -> OpsResult<PrResult> {
     reject_control_plane_pr(repo)?;
-    crate::ops::commit::restart_landed_persistent(repo)?;
+    crate::ops::task::refresh_task_pr_for_publication(repo)?;
+    crate::ops::sync::restart_landed_branch(repo)?;
     if !gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -1453,6 +1454,45 @@ fn find_open_pr(repo: &Path) -> OpsResult<Option<GhPr>> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     find_open_branch_pr(repo, &branch)
+}
+
+pub(crate) fn latest_merged_branch_head(repo: &Path, branch: &str) -> OpsResult<Option<String>> {
+    if !gh_available() || crate::git::worktrees::github_repo_nwo(repo).is_none() {
+        return Ok(None);
+    }
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "merged",
+            "--limit",
+            "1",
+            "--json",
+            "state,headRefOid",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("read merged PR for {branch}"),
+            stderr: stderr_from_output(&output),
+        });
+    }
+    #[derive(Deserialize)]
+    struct MergedHead {
+        state: String,
+        #[serde(rename = "headRefOid")]
+        head: Option<String>,
+    }
+    let prs: Vec<MergedHead> = serde_json::from_slice(&output.stdout)
+        .map_err(|error| OpsError::Parse(format!("read merged PR head: {error}")))?;
+    Ok(prs
+        .into_iter()
+        .find(|pr| pr.state.eq_ignore_ascii_case("merged"))
+        .and_then(|pr| pr.head))
 }
 
 fn find_open_branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhPr>> {

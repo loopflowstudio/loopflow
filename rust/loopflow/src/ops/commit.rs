@@ -82,7 +82,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
 /// its merged PRs already delivered. Nothing has to observe the merge itself.
 pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
     if crate::git::worktrees::is_persistent_worktree(repo)?
-        && crate::ops::sync::restart_landed_persistent(repo)?
+        && crate::ops::sync::restart_landed_branch(repo)?
     {
         eprintln!("Earlier commits have merged; restarted this branch from the default branch.");
     }
@@ -303,6 +303,30 @@ fn push_with_upstream_if_needed_locked(
     repo: &Path,
     inherit_git: &impl Fn(&mut Command),
 ) -> OpsResult<()> {
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".into()))?;
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    if let Ok(previous) = crate::git::rev_parse(repo, &remote_ref) {
+        if !crate::git::is_ancestor(repo, &previous, "HEAD")? {
+            let base = crate::git::integration_base(repo)?;
+            if crate::ops::sync::landed_at(repo, &base, &previous)? {
+                let reference = format!("refs/heads/{branch}");
+                let remote = git_stdout(repo, &["ls-remote", "--heads", "origin", &reference])?;
+                if remote.split_whitespace().next() == Some(previous.as_str()) {
+                    // Replace only the exact branch head already delivered to the
+                    // base. A concurrent push must survive this continuation.
+                    let lease = format!("--force-with-lease={reference}:{previous}");
+                    return git_stdout_inheriting(
+                        repo,
+                        &["push", &lease, "-u", "origin", &reference],
+                        inherit_git,
+                    )
+                    .map(|_| ())
+                    .map_err(OpsError::from);
+                }
+            }
+        }
+    }
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")

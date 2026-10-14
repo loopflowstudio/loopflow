@@ -24,4 +24,5 @@ For a persistent document workspace, inspect the entire committed range and use
 `lf commit -m "<accepted change>" <selected-path>...` before publication. Persistent
 publication pushes committed documents, preserves other staged and unstaged work,
 and keeps `scratch/` local. Do not delete scratch or create an export worktree.
-After merge, refresh the same persistent branch with `lf sync` before another PR.
+Continued publication carries new work past merged history automatically. Use
+`lf sync` when integrating other upstream changes.

@@ -1561,7 +1561,8 @@ pub enum PrCommand {
     Submit {
         #[arg(long)]
         strict: bool,
-        #[arg(short = 'p', long = "create-pr")]
+        // Accepted for existing scripts; submit always creates a PR when needed.
+        #[arg(short = 'p', long = "create-pr", hide = true)]
         create_pr: bool,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,

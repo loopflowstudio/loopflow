@@ -1787,6 +1787,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         let context = _task_pr_context_from_store(&store, &task).await?;
         _validate_task_pr_copy(&context, body)?;
         let existing = store.active_task_pr(&task.id).await.map_err(task_error)?;
+        let existing = existing.filter(|pr| !pr.is_settled());
         let creating = existing.is_none();
         let mut pr = existing.unwrap_or_else(|| task_pr_for_publication(&task));
         if creating {
@@ -1897,6 +1898,50 @@ fn _markdown_link_text(value: &str) -> String {
         .replace(']', "\\]")
 }
 
+/// Publication observes a previous PR's settlement itself; callers never need
+/// to run reconciliation before continuing work in a checkout.
+pub(crate) fn refresh_task_pr_for_publication(repo: &Path) -> OpsResult<()> {
+    block_on_task(async {
+        let ManagedTask::Managed { store, mut task } = resolve_managed_task(repo).await? else {
+            return Ok(());
+        };
+        let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
+            return Ok(());
+        };
+        if let Some(known) = pr.github().filter(|_| pr.phase() != PrPhase::Merged) {
+            let open = crate::ops::pr::current_pr(repo)?;
+            if pr.phase() == PrPhase::Abandoned
+                || open.is_none_or(|open| open.number != u64::from(known.number))
+            {
+                pr = reconcile_task_pr_observation(
+                    &store,
+                    &mut task,
+                    crate::ops::pr::PrReadFreshness::Fresh,
+                )
+                .await?
+                .ok_or_else(|| task_error("publication PR disappeared"))?;
+                if let Observation::Degraded { reason, .. } = task.observation {
+                    return Err(task_error(reason));
+                }
+            }
+        }
+        if pr.phase() == PrPhase::Merged && task.parent_pr_id.is_some() {
+            // Its own merge delivered the dependency too. The old PR retains
+            // that stack; the next delivery compares with the default branch.
+            store
+                .sync_task_placement(
+                    &task.id,
+                    &task.base_commit,
+                    true,
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await
+                .map_err(task_error)?;
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
@@ -1921,17 +1966,11 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         None
     };
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
-    if let Some(pr) = pr.as_ref().filter(|pr| pr.is_settled()) {
-        return Err(task_error(format!(
-            "Task {} already delivered its pull request ({}). Reopen a closed pull request to reuse it; new delivery belongs to another Task",
-            task.identifier, pr.phase().as_str(),
-        )));
-    }
     Ok(TaskPrContext {
         title: task.title.clone(),
         identifier: task.identifier.clone(),
         url,
-        merge_request: pr.as_ref().and_then(|pr| {
+        merge_request: pr.as_ref().filter(|pr| !pr.is_settled()).and_then(|pr| {
             pr.merge_request()
                 .filter(|request| {
                     pr.github().and_then(|github| github.head_sha.as_deref())
@@ -1994,7 +2033,7 @@ pub(crate) fn matching_task_pr_merge_request(
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
             .ok_or_else(|| task_error(format!("Task {} has no active PR", task.identifier)))?;
-        if branch.as_deref() != Some(pr.branch.as_str()) {
+        if pr.is_settled() || branch.as_deref() != Some(pr.branch.as_str()) {
             return Ok(None);
         }
         let Some(github) = pr.github() else {
@@ -2067,6 +2106,9 @@ async fn clear_task_pr_merge(
     else {
         return Ok(false);
     };
+    if pr.is_settled() {
+        return Ok(false);
+    }
     let Some(request) = pr
         .publication
         .as_ref()
@@ -5692,6 +5734,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+
+        let current = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
+        let mut next = super::task_pr_for_publication(&task);
+        next.sequence = current.sequence + 1;
+        next.branch = "wrong-placement".into();
+        assert!(store.insert_task_pr(&next).await.is_err());
+        assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(current));
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+
+        next.branch = task.branch.clone();
+        store.insert_task_pr(&next).await.unwrap();
+        store
+            .sqlite
+            .request_task_completion(&task.id, Some("New delivery"))
+            .unwrap();
+        super::settle_task_landing(&store, &landing).await.unwrap();
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        assert_eq!(
+            store.active_task_pr(&task.id).await.unwrap().unwrap().id,
+            next.id
+        );
+        assert!(store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_some());
     }
 
     #[test]

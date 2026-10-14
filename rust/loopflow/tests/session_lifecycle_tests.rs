@@ -1230,7 +1230,6 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     std::fs::remove_dir_all(&empty_path).unwrap();
     let launches_before = fixture.launches().len();
     let created = primary(&["INF-125"]);
-<<<<<<< HEAD
     assert_eq!(fixture.launches().len(), launches_before);
     assert!(created["open_argv"]
         .as_array()
@@ -1247,12 +1246,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             .stdout,
         head
     );
-    assert_eq!(created["title"], "Sibling INF-125");
-||||||| e3c3a038aa
-    assert_eq!(created["title"], "Sibling INF-125");
-=======
     assert_eq!(created["title"], "INF-125 Sibling");
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
     assert_eq!(fixture.count("agent_sessions"), before + 1);
     let (skill, cwd): (String, String) = fixture
         .db()

@@ -218,9 +218,9 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
-<<<<<<< HEAD
-Claude and Codex terminal Sessions load assembled context from a system instructions
-file, keeping the initial command-line message short even with large Wave memory.
+Codex terminal Sessions receive context and the first message through the provider
+protocol. Claude loads context from a system instructions file and the first
+message from stdin. Large requests stay out of terminal command-line arguments.
 Startup, resume and compaction hooks refresh reference context from the Session's
 saved launch sources. Hook declarations stay identical across Tasks and Sessions
 for the same lf executable and Machine. Each native launch gets its own context
@@ -237,14 +237,6 @@ folder; `claude -p` treats the workspace as trusted. Loopflow follows the provid
 and [Claude workspace trust](https://code.claude.com/docs/en/hooks#workspace-trust)
 policies. Unchanged declarations cannot remove Claude’s folder trust requirement.
 
-||||||| e3c3a038aa
-Claude and Codex terminal Sessions load assembled context from a system instructions
-file, keeping the initial command-line message short even with large Wave memory.
-=======
-Codex terminal Sessions receive context and the first message through the provider
-protocol. Claude loads context from a system instructions file and the first
-message from stdin. Large requests stay out of terminal command-line arguments.
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
 purpose was supplied. Human-assigned names survive reconnects and suggestions.

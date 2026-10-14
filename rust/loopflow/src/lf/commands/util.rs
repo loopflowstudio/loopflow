@@ -703,18 +703,10 @@ fn run_native_session(
         );
         route.pin_session_blocking(agent_session.cloned())?;
     }
-<<<<<<< HEAD
-    let capture_codex =
-        command.program == "codex" && agent_session.is_none() && capture_dir.is_some();
     process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
     if let Some(context) = &command.context {
         context.configure_hooks(&mut process)?;
     }
-||||||| e3c3a038aa
-    let capture_codex =
-        command.program == "codex" && agent_session.is_none() && capture_dir.is_some();
-=======
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),

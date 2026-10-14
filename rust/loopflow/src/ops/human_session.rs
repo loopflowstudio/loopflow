@@ -1219,22 +1219,6 @@ pub(crate) async fn spawn_session_process(
             }
             bail!("{launch}: exited with {status} before becoming resumable");
         }
-<<<<<<< HEAD
-||||||| e3c3a038aa
-        if tokio::time::Instant::now() >= deadline {
-            bail!("{launch}: did not become resumable within 30s");
-        }
-=======
-        if tokio::time::Instant::now() >= deadline {
-            // Reap the launcher before returning. Protocol providers are tied to
-            // its lifeline, including wrappers that never finish starting.
-            child
-                .kill()
-                .await
-                .context("stop timed-out Session launcher")?;
-            bail!("{launch}: did not become resumable within 30s");
-        }
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
@@ -1291,14 +1275,8 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
-<<<<<<< HEAD
     crate::agent_input_timing::record("native_resume_selected", &session.id);
-    crate::lf::commands::util::resume_session_with_env(
-||||||| e3c3a038aa
-    crate::lf::commands::util::resume_session_with_env(
-=======
     crate::lf::commands::util::open_saved_session_with_env(
->>>>>>> f9a16d6f84fde87b6650bab34af375bfb4981508
         native.provider,
         session.model.as_deref(),
         &session.cwd,

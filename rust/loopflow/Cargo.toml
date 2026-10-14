@@ -81,6 +81,10 @@ path = "tests/task_remote_tests.rs"
 name = "test_environment_tests"
 path = "tests/test_environment_tests.rs"
 
+[[test]]
+name = "session_launch_contract"
+path = "tests/session_launch_contract.rs"
+
 # --- Core dependencies ---
 [dependencies]
 clap = { version = "4.6", features = ["derive", "env"] }

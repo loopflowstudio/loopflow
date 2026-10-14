@@ -423,19 +423,19 @@ public struct RegistryQuery: Sendable {
     /// The Task's one ongoing conversation: the one already chosen, else its
     /// only or most recently used one, else a new one in its checkout. The
     /// choice is remembered as the Task's primary.
-    public func ensureTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "ensure", "--task", issue, "--json"], cwd)
+    public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Open one Session and return its terminal command.
-    public func openSession(
+    /// Prepare one Session’s terminal command without starting its provider.
+    public func prepareSession(
         id: String,
-        replacing: Bool = false,
+        takeover: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "connect", id, "--json"]
-        if replacing { args.append("--replace") }
+        var args = ["session", "connect", id, "--prepare", "--json"]
+        if takeover { args.append("--takeover") }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }

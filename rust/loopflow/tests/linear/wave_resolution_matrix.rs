@@ -58,6 +58,10 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
 /// `human_session::primary::tests` proves ambient Wave context cannot redirect them.
 const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
 
+/// Session entry uses an explicit Work target or checkout discovery, never an
+/// ambient Wave. `session_launch_contract` covers both forms and their effects.
+const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"], &["session", "resume"]];
+
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
@@ -544,6 +548,7 @@ fn registry_is_complete() {
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
         .chain(REPOSITORY_DEFAULT)
+        .chain(SESSION_TARGETS)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -591,6 +596,7 @@ fn registry_is_complete() {
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
         .chain(REPOSITORY_DEFAULT)
+        .chain(SESSION_TARGETS)
     {
         assert!(
             find_clap_command(&root, path).is_some(),

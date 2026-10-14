@@ -841,7 +841,7 @@ fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
         reports[1].action.as_ref().unwrap().intent,
         SessionConnectIntent::Resume
     );
-    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Replace);
+    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Takeover);
     assert!(reports[1].action.as_ref().unwrap().prepare_only);
     assert_eq!(
         reports[2].action.as_ref().unwrap().intent,

@@ -594,7 +594,7 @@ field is null. A router's message asks for a JSON object containing `path`, one
 of the branch's path names. The contract travels in the message, not as a
 provider schema, and the Flow process accepts the value inside prose or a code fence.
 Session history retains the native output and completion separately. An invalid
-answer is corrected by `lf -b session resume ID MESSAGE` in the same
+answer is corrected by `lf -b connect ID --message TEXT` in the same
 conversation, at most twice, then the Flow fails; provider failure remains
 distinct.
 
@@ -640,7 +640,7 @@ authority.
 
 ```bash
 lf session list --json
-lf session connect SESSION --json
+lf connect SESSION --prepare --json
 ```
 
 Discuss design and review feedback in the ongoing Task conversation. Historical

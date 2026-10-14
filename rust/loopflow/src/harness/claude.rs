@@ -10,7 +10,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::agent::{build_claude_stream_session_args, AgentConfig};
+use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -126,8 +126,14 @@ impl ClaudeHarness {
             .expect("claude provider session id lock poisoned")
             .clone();
         let context_file = crate::agent::write_system_prompt_file(config, "session")?;
-        let mut args =
-            build_claude_stream_session_args(config, resume_id.as_ref(), context_file.as_deref());
+        let mut args = build_session_command(
+            config,
+            ProviderInvocation::ClaudeStream {
+                session_id: resume_id.as_ref(),
+            },
+            context_file.as_deref(),
+        )?
+        .args;
         if let Some(invocation) = &config.skill_invocation {
             let (flags, input) = invocation.claude_input(config)?;
             args.extend(flags);
@@ -753,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn interrupted_capture_resumes_with_a_new_process_and_fences_old_snapshots() {
+    fn interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots() {
         use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
 
         async fn observed_input(home: &std::path::Path, text: &str) -> String {
@@ -774,6 +780,21 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
         let home = ledger.home();
+        std::fs::create_dir_all(home.join(".lf")).unwrap();
+        std::fs::write(
+            home.join(".lf/config.yaml"),
+            "agent: claude:sonnet\nyolo: true\nchrome: true\n",
+        )
+        .unwrap();
+        let settings = crate::config::load_config(Some(home)).unwrap().unwrap();
+        // Without explicit YOLO, an already-bypassing vendor setting omits the
+        // CLI override. This makes an accidental policy reload observable.
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#,
+        )
+        .unwrap();
         let script = home.join("claude");
         std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> launches\nwhile read -r line; do printf '%s\\n' \"$line\" >> inputs; done\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -806,6 +827,9 @@ mod tests {
                 let (tx, _rx) = mpsc::unbounded_channel();
                 let mut harness = ClaudeHarness::new(tx);
                 harness.config = Some(AgentConfig {
+                    agent: settings.agent,
+                    chrome: settings.chrome,
+                    skip_permissions: settings.yolo,
                     cwd: Some(home.into()),
                     session_attachment: Some((session.clone(), first.clone())),
                     ..AgentConfig::default()
@@ -823,6 +847,14 @@ mod tests {
                 assert_eq!(ended.pid, Some(first_pid));
                 assert!(ended.completed_at.is_some());
 
+                std::fs::write(
+                    home.join(".lf/config.yaml"),
+                    "agent: claude:haiku\nyolo: false\nchrome: false\n",
+                )
+                .unwrap();
+                let current = crate::config::load_config(Some(home)).unwrap().unwrap();
+                assert!(!current.yolo && !current.chrome);
+                assert_eq!(current.agent.as_deref(), Some("claude:haiku"));
                 harness.send_input("resumed request").await.unwrap();
                 let (_, second) = capture.session_attachment().unwrap();
                 assert_ne!(first.agent_process_id, second.agent_process_id);
@@ -857,6 +889,16 @@ mod tests {
                     .contains("stale request"));
                 let launches = std::fs::read_to_string(home.join("launches")).unwrap();
                 assert_eq!(launches.lines().count(), 2);
+                for launch in launches.lines() {
+                    assert!(
+                        launch.contains("--dangerously-skip-permissions"),
+                        "{launch}"
+                    );
+                    assert!(launch.contains("--chrome"), "{launch}");
+                    assert!(launch.contains("--model sonnet"), "{launch}");
+                    assert!(!launch.contains("--no-chrome"), "{launch}");
+                    assert!(!launch.contains("haiku"), "{launch}");
+                }
                 assert!(launches
                     .lines()
                     .nth(1)
@@ -1042,7 +1084,7 @@ done
             task_prompt: String::new(),
             skill_invocation: None,
             output_schema: None,
-            agent: None,
+            agent: Some("claude".into()),
             cwd: Some(std::env::temp_dir()),
             max_turns: None,
             resume_token: None,

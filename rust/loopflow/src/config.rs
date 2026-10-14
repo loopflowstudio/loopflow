@@ -73,6 +73,13 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
+pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
+pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
+
+pub fn yolo_override() -> bool {
+    std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
+}
+
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
 pub fn agent_override() -> Option<String> {

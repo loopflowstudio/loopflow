@@ -160,7 +160,7 @@ pub struct Cli {
     #[arg(long = "__cwd", value_name = "PATH", hide = true)]
     pub bound_cwd: Option<PathBuf>,
 
-    /// The conversation `lf -b session resume ID MESSAGE` continues.
+    /// The conversation `lf -b connect ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
 }
@@ -179,10 +179,13 @@ impl Cli {
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
-                SessionCommand::Resume { .. }
-                    | SessionCommand::Open { json: false, .. }
+                SessionCommand::Resume(SessionConnectionArgs { prepare: false, .. })
+                    | SessionCommand::Connect {
+                        connection: SessionConnectionArgs { prepare: false, .. },
+                        ..
+                    }
                     | SessionCommand::Ensure { .. }
-                    | SessionCommand::Replace { .. }
+                    | SessionCommand::New { .. }
             ),
             Some(Commands::Commit { message, .. }) => message.is_none(),
             Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
@@ -217,7 +220,36 @@ impl Cli {
 
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
-    pub fn checked(self) -> Result<Self, clap::Error> {
+    pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Session { cmd }) = &self.command {
+            let selection = match cmd {
+                SessionCommand::Connect { id, connection, .. } => Some((id.as_deref(), connection)),
+                SessionCommand::Resume(connection) => Some((None, connection)),
+                _ => None,
+            };
+            if let Some((id, connection)) = selection {
+                let target = connection.target(&self, id).map_err(|error| {
+                    clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
+                })?;
+                if matches!(cmd, SessionCommand::Connect { .. })
+                    && matches!(target, crate::ops::human_session::SessionTarget::Context)
+                {
+                    return Err(clap::Error::raw(clap::error::ErrorKind::MissingRequiredArgument, "connect requires a Session ID, --task or --wave; use resume for contextual discovery"));
+                }
+            }
+        }
+        // Work routing consumes the same explicit selector in either flag position.
+        if let Some(Commands::Session {
+            cmd: SessionCommand::Connect { connection, .. } | SessionCommand::Resume(connection),
+        }) = &mut self.command
+        {
+            if connection.task.is_some() {
+                self.task = connection.task.take();
+            }
+            if connection.wave.is_some() {
+                self.wave = connection.wave.take();
+            }
+        }
         if self.json && !self.context && !self.explain {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
@@ -332,7 +364,11 @@ impl Cli {
     }
 
     pub fn chrome_setting(&self) -> Option<bool> {
-        self.chrome.map(|mode| mode == BrowserMode::On)
+        self.chrome.map(|mode| mode == BrowserMode::On).or_else(|| {
+            std::env::var(crate::config::CHROME_OVERRIDE_ENV)
+                .ok()
+                .map(|value| value == "on")
+        })
     }
 
     pub fn diff_files_setting(&self) -> Option<bool> {
@@ -806,6 +842,45 @@ impl SessionMode {
     }
 }
 
+/// Shared selection, preparation and next-turn options for resume and connect.
+#[derive(Args, Debug)]
+pub struct SessionConnectionArgs {
+    #[arg(long, conflicts_with = "wave")]
+    pub task: Option<String>,
+    #[arg(long)]
+    pub wave: Option<String>,
+    /// With `-b`: send the conversation its next turn
+    #[arg(long)]
+    pub message: Option<String>,
+    /// Return connection data without starting the provider
+    #[arg(long, conflicts_with = "message")]
+    pub prepare: bool,
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl SessionConnectionArgs {
+    pub fn target<'a>(
+        &'a self,
+        cli: &'a Cli,
+        id: Option<&'a str>,
+    ) -> anyhow::Result<crate::ops::human_session::SessionTarget<'a>> {
+        anyhow::ensure!(
+            self.task.is_none() || cli.task.is_none(),
+            "select a Task only once"
+        );
+        anyhow::ensure!(
+            self.wave.is_none() || cli.wave.is_none(),
+            "select a Wave only once"
+        );
+        crate::ops::human_session::SessionTarget::from_selectors(
+            id,
+            self.task.as_deref().or(cli.task.as_deref()),
+            self.wave.as_deref().or(cli.wave.as_deref()),
+        )
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
     /// Save a steer for this Session without starting a turn
@@ -835,13 +910,8 @@ pub enum SessionCommand {
         #[arg(long)]
         agent_process: Option<String>,
     },
-    /// Resume a conversation by ID, or the last interactive Session in this worktree
-    Resume {
-        /// Loopflow Session ID or Claude/Codex conversation ID
-        id: Option<String>,
-        /// With `-b`: send this as the conversation's next headless turn
-        message: Option<String>,
-    },
+    /// Resume the relevant existing conversation of this checkout or explicit Work
+    Resume(SessionConnectionArgs),
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID or provider conversation ID
@@ -889,18 +959,18 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Stop headless Claude/OpenCode and resume history; connect to Codex live
-    #[command(name = "connect")]
-    Open {
+    /// Connect to a Session, or find/prepare a Task or Wave's primary conversation
+    Connect {
         /// Session ID or provider conversation ID
-        id: String,
-        #[arg(long)]
-        json: bool,
+        #[arg(conflicts_with_all = ["task", "wave"])]
+        id: Option<String>,
+        #[command(flatten)]
+        connection: SessionConnectionArgs,
         /// Stop Loopflow-owned clients before resuming here
         #[arg(long, conflicts_with = "try_open")]
-        replace: bool,
+        takeover: bool,
         /// Ask the provider to resume even when another client is active
-        #[arg(long = "try", conflicts_with = "replace")]
+        #[arg(long = "try", conflicts_with = "takeover")]
         try_open: bool,
     },
     /// Find or prepare the one ongoing conversation of this repository, a Wave or a Task
@@ -918,7 +988,7 @@ pub enum SessionCommand {
         json: bool,
     },
     /// Give a primary Session's scope a fresh conversation
-    Replace {
+    New {
         id: String,
         #[arg(long)]
         json: bool,
@@ -2932,6 +3002,38 @@ mod tests {
     }
 
     #[test]
+    fn session_work_flags_normalize_before_machine_routing() {
+        for command in ["resume", "connect"] {
+            for (flag, value) in [("--task", "LOO-1"), ("--wave", "infra")] {
+                for argv in [
+                    vec!["lf", flag, value, "session", command, "--prepare"],
+                    vec!["lf", "session", command, flag, value, "--prepare"],
+                ] {
+                    let cli = Cli::try_parse_from(argv).unwrap().checked().unwrap();
+                    assert_eq!(
+                        if flag == "--task" {
+                            cli.task.as_deref()
+                        } else {
+                            cli.wave.as_deref()
+                        },
+                        Some(value)
+                    );
+                    assert!(!cli.may_launch_agent());
+                }
+            }
+        }
+        for argv in [
+            vec!["lf", "session", "resume", "session-id"],
+            vec!["lf", "--task", "LOO-1", "session", "connect", "session-id"],
+            vec![
+                "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(argv).and_then(Cli::checked).is_err());
+        }
+    }
+
+    #[test]
     fn cli_rejects_review_handshake_and_preserves_native_open() {
         assert!(Cli::try_parse_from(["lf", "session", "ask", "Help"]).is_err());
         for args in [
@@ -2943,22 +3045,28 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
 
-        let open = Cli::try_parse_from(["lf", "session", "connect", "run_123", "--replace"])
+        let open = Cli::try_parse_from(["lf", "session", "connect", "run_123", "--takeover"])
             .expect("parse replacement open");
         assert!(matches!(
             open.command,
             Some(Commands::Session {
-                cmd: SessionCommand::Open {
+                cmd: SessionCommand::Connect {
                     id,
-                    replace: true,
+                    takeover: true,
                     try_open: false,
-                    json: false,
+                    connection: SessionConnectionArgs { json: false, .. },
+                    ..
                 }
-            }) if id == "run_123"
+            }) if id.as_deref() == Some("run_123")
         ));
-        assert!(Cli::try_parse_from(
-            ["lf", "session", "connect", "run_123", "--replace", "--try",]
-        )
+        assert!(Cli::try_parse_from([
+            "lf",
+            "session",
+            "connect",
+            "run_123",
+            "--takeover",
+            "--try",
+        ])
         .is_err());
 
         let rename = Cli::try_parse_from([

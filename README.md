@@ -208,11 +208,10 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 
 ```bash
 lf session list
-lf resume                         # last interactive Session in this worktree
-lf resume SESSION                 # Loopflow, Claude, or Codex ID
-lf -b resume SESSION "Continue"    # headless turn in the saved Session workspace
+lf resume                         # relevant conversation for this checkout
+lf connect SESSION                # Loopflow, Claude, or Codex ID
+lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
-lf session connect SESSION
 lf session history SESSION --json
 lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
@@ -259,10 +258,16 @@ across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
-`lf resume` is short for `lf session resume`. It selects the latest human message
-in this worktree, falling back per Session to its last opening when native input
-history is unavailable. Assistant output and background work do not change that
-order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
+`lf resume` is short for `lf session resume`. It selects the active Task’s conversation,
+or the most recent interactive Session in this worktree. From the main checkout,
+it searches all worktrees of the repository. `--task ISSUE` or `--wave NAME`
+overrides discovery. Recency uses native human input, falling back to last opening.
+Assistant output and background work do not change that order. A Flow is never
+resumed; `lf task run ISSUE` runs a fresh one.
+
+`lf connect --wave NAME` and `lf connect --task ISSUE` find or prepare the Work’s
+primary conversation and open it in its checkout. `--prepare` returns the terminal
+command without launching; `--json` changes output format only.
 Headless continuation reads the saved workspace's context and native history,
 even from another directory, without re-running the original skill.
 

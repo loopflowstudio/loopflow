@@ -573,9 +573,9 @@ final class SessionsStore {
                 }
             }
             Perf.agentInput("connect_prepare_begin", session: id)
-            let surface = try await executionQuery.openSession(
+            let surface = try await executionQuery.prepareSession(
                 id: id,
-                replacing: replacing,
+                takeover: replacing,
                 cwd: repoPath
             )
             Perf.agentInput("connect_prepare_returned", session: id)
@@ -591,6 +591,21 @@ final class SessionsStore {
         } catch {
             guard let latest = _index(id) else { return }
             sessions[latest].state = .failed(error.localizedDescription)
+        }
+    }
+
+    func adoptPreparation(_ record: SessionRecord) {
+        guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
+        switch sessions[index].state {
+        case .pending, .failed:
+            sessions[index].record = record
+            if let reason = record.action(.open)?.unavailableReason {
+                sessions[index].state = .failed(reason)
+            } else {
+                sessions[index].state = .prepared
+            }
+        case .elsewhere, .opening, .prepared, .live:
+            break
         }
     }
 

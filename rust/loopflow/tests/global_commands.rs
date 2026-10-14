@@ -1503,8 +1503,22 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
         ))
         .unwrap()
     };
-    let explicit = read(&["session", "connect", &session.id, "--explain", "--json"]);
-    let native = read(&["session", "connect", "native-proof", "--explain", "--json"]);
+    let explicit = read(&[
+        "session",
+        "connect",
+        &session.id,
+        "--explain",
+        "--prepare",
+        "--json",
+    ]);
+    let native = read(&[
+        "session",
+        "connect",
+        "native-proof",
+        "--explain",
+        "--prepare",
+        "--json",
+    ]);
     let inferred = read(&["--json", "session", "resume", "--explain"]);
     assert_eq!(explicit["resolution"]["session"]["value"], session.id);
     assert_eq!(
@@ -1514,7 +1528,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     assert_eq!(inferred["resolution"]["session"]["value"], session.id);
     assert_eq!(
         inferred["resolution"]["session"]["source"],
-        "latest_interactive_in_checkout"
+        "contextual_session"
     );
     assert_eq!(explicit["action"]["intent"], "resume");
     assert_eq!(explicit["action"]["prepare_only"], true);
@@ -1526,7 +1540,14 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
         command(
             home.path(),
             repo.path(),
-            &["session", "connect", &session.id, "--explain", "--json"],
+            &[
+                "session",
+                "connect",
+                &session.id,
+                "--explain",
+                "--prepare",
+                "--json",
+            ],
         )
         .env("LF_BIN", home.path().join("missing-lf"))
         .output()
@@ -1540,8 +1561,9 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
         "session",
         "connect",
         &session.id,
-        "--replace",
+        "--takeover",
         "--explain",
+        "--prepare",
         "--json",
     ]);
     let try_open = read(&[
@@ -1550,15 +1572,16 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
         &session.id,
         "--try",
         "--explain",
+        "--prepare",
         "--json",
     ]);
-    assert_eq!(replace["action"]["mode"], "replace");
+    assert_eq!(replace["action"]["mode"], "takeover");
     assert_eq!(try_open["action"]["mode"], "try");
     let text = success(
         command(
             home.path(),
             repo.path(),
-            &["session", "connect", &session.id, "--replace", "--explain"],
+            &["session", "connect", &session.id, "--takeover", "--explain"],
         )
         .output()
         .unwrap(),
@@ -1570,7 +1593,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     assert_eq!(before, fs::read(db_path).unwrap());
     assert!(!home.path().join(".lf/runs").exists());
     assert!(!home.path().join(".lf/human-sessions").exists());
-    let prepared = read(&["session", "connect", "native-proof", "--json"]);
+    let prepared = read(&["session", "connect", "native-proof", "--prepare", "--json"]);
     assert_eq!(prepared["id"], explicit["resolution"]["session"]["value"]);
     assert_eq!(prepared["state"], explicit["state"]);
     assert_eq!(prepared["actions"], explicit["actions"]);
@@ -1585,7 +1608,7 @@ fn session_connect_explain_preserves_missing_and_stale_evidence() {
             command(
                 home.path(),
                 repo.path(),
-                &["session", "connect", id, "--explain", "--json"],
+                &["session", "connect", id, "--explain", "--prepare", "--json"],
             )
             .output()
             .unwrap(),
@@ -1666,10 +1689,17 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         let before = fs::read(&db_path).unwrap();
         for (flag, blocked) in [
             (None, true),
-            (Some("--replace"), false),
+            (Some("--takeover"), false),
             (Some("--try"), false),
         ] {
-            let mut args = vec!["session", "connect", &session.id, "--explain", "--json"];
+            let mut args = vec![
+                "session",
+                "connect",
+                &session.id,
+                "--explain",
+                "--prepare",
+                "--json",
+            ];
             args.extend(flag);
             let report: serde_json::Value = serde_json::from_str(&success(
                 command(home.path(), repo.path(), &args).output().unwrap(),
@@ -1733,7 +1763,7 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
         command(
             home.path(),
             repo.path(),
-            &["--json", "session", "resume", &session.id, "--explain"],
+            &["--json", "session", "connect", &session.id, "--explain"],
         )
         .output()
         .unwrap(),

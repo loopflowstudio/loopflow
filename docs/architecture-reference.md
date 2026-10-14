@@ -42,8 +42,8 @@ captured input and provider outcomes beneath their Session owners. Jack Heart's
 schemas and old format readers. The cutover retains current Work and links,
 accounts/routes and resumable conversations. Configured acceptance is separate.
 
-Current CLI examples use supported spellings. `lf session connect` has `open` as
-an alias; `--replace` stops owned clients and connects through the same live
+Current CLI examples use supported spellings. `lf connect` selects a Session ID,
+Task or Wave; `--takeover` stops owned clients and connects through the same live
 Codex AgentProcess, preserving its active turn and other conversations. There is no
 separate AgentProcess-restart operation. A Flow whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
@@ -279,7 +279,7 @@ interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
 Task or planning provider. `lf session ensure` finds or admits it and prepares
 its first input; `lf session connect` owns the foreground launch.
-`lf session replace` stops the predecessor's provider, then
+`lf session new` stops the predecessor's provider, then
 completes it and admits the successor in one transaction, so a scope never has
 two or none midway. Primary grants no Flow, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
@@ -420,7 +420,7 @@ Each step is the command a person would type, started as a child of the Flow pro
 ```text
 lf --batch [options] skill <name> [message]       # agent step
 lf <command> <args>                               # operation step
-lf --batch session resume <session> <message>     # correction of an answer
+lf -b connect <session> --message <message>     # correction of an answer
 ```
 
 Headless Session correction reserves the next captured input and claims its attachment

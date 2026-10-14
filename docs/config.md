@@ -72,7 +72,7 @@ config files.
 | Include clipboard | `-c, --clipboard` | — |
 | Context files | — | `context: [FILE]` |
 | Chrome automation | `--chrome` | `chrome: true` |
-| Yolo mode (skip permissions) | — | `yolo: true` |
+| Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
@@ -417,6 +417,10 @@ Enable browser automation for Claude Code.
 | **Config** | `chrome: true` |
 | **Default** | `false` |
 
+Applies to fresh and resumed Claude Sessions, both terminal and headless.
+`--chrome off` explicitly disables the vendor integration. Other providers do
+not use this Claude-specific setting.
+
 Requires the [Chrome extension](https://chromewebstore.google.com/detail/claude-browser-tool/gfbkicmkbhdjacjmfjffcldkdopkfjgk) and a paid Claude plan.
 
 ### Yolo
@@ -425,6 +429,7 @@ Skip vendor permission prompts and sandboxes.
 
 | | |
 |---|---|
+| **CLI** | `--yolo` |
 | **Config** | `yolo: true` |
 | **Default** | `false` |
 
@@ -434,17 +439,32 @@ non-interactive Claude runs skip permission prompts. User and repo-level vendor
 configs that are already more permissive are not downgraded. For example, Codex
 `sandbox_mode = "danger-full-access"` or Claude
 `permissions.defaultMode = "bypassPermissions"` are left to the vendor config.
-If vendor config is less permissive, Loopflow warns and supplies its default.
+If vendor config is less permissive, Loopflow supplies its default.
 
-`yolo: true` is the explicit Loopflow bypass: Claude uses
-`--dangerously-skip-permissions`, Codex uses
-`--dangerously-bypass-approvals-and-sandbox`, and OpenCode uses
-`permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
+`--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
+`--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`
+and `approvalPolicy: "never"` through its app-server protocol, and OpenCode uses
+`permission: {"*": "allow"}` via `OPENCODE_CONFIG_CONTENT`.
 
-Durable Task provider turns are the exception. Their assigned worktree is a
-hard write boundary, so `yolo` and a more permissive vendor config cannot widen
-it. Codex runs with `workspace-write`, Claude uses its strict fail-closed Bash
-sandbox, and OpenCode denies external-directory tools.
+Managed Task turns require an execution boundary independently of vendor
+permission settings. Claude and Codex bypass their own permission prompts within
+managed execution; `yolo` does not remove the required boundary. OpenCode cannot
+currently satisfy that managed execution requirement. For provider-only worktree
+scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
+sandbox, and OpenCode denies external-directory tools, including with `yolo`.
+
+Stopped-session resume reloads Loopflow settings at the saved checkout. The
+provider's conversation identity and account stay attached; a current model
+setting for that provider applies. A configured different provider does not
+change the saved history's provider. CLI overrides take precedence. Connecting
+to an already running provider keeps its existing launch settings. Historical
+replay uses captured inputs. Resuming native history from an isolated account
+keeps that account's provider home, including when `--shared` is requested.
+
+Claude turn limits and native JSON schemas require headless mode; terminal
+launches reject them. Other headless providers report unsupported turn limits
+or native schemas and continue with ordinary output; this also preserves
+historical replay. Flow output validation still applies to every provider.
 
 ### Worktree Sandboxes
 

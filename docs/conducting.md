@@ -128,7 +128,7 @@ lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # save a steer for the Task's Sessions
 lf interrupt INF-123                     # end the active turn
 lf session list --waiting --json              # conversations waiting on you
-lf session connect <session-id> --json           # recover one exact conversation
+lf connect <session-id> --prepare --json           # recover one exact conversation
 ```
 
 Task comments save steers locally and sync when Linear is configured. Acquired

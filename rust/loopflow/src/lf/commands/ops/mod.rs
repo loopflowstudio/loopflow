@@ -1,4 +1,4 @@
-use crate::agent::{run_agent, AgentCapabilities, ProcessConfig};
+use crate::agent::{run_agent, ProcessConfig};
 use crate::config::{load_config_or_default, Config};
 use crate::flow::load_skill;
 use crate::git::worktree_name::WorktreeName;
@@ -2691,9 +2691,6 @@ fn process_skill_agent(
         &context,
         Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
-            &AgentCapabilities {
-                chrome: config.chrome,
-            },
         )),
     )?;
     capture.record_input("initial", &prepared.config.task_prompt);
@@ -2706,11 +2703,8 @@ fn process_skill_agent(
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
 
-    let result = run_agent(&launch, &process, &capabilities);
+    let result = run_agent(&launch, &process);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

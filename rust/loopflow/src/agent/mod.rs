@@ -3,7 +3,12 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+mod session;
 pub mod stream;
+pub(crate) use session::{
+    build_session_command, native_connection_command, resolve_session_config, session_environment,
+    NativeConnection, ProviderInvocation, SessionCommand,
+};
 
 use crate::id::AgentSessionId;
 use std::collections::BTreeMap;
@@ -173,7 +178,7 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 8] = [
 
 #[derive(Clone, Default)]
 pub struct AgentConfig {
-    /// Chrome integration for a native stream session.
+    /// Chrome integration for Claude terminal and stream sessions.
     pub chrome: bool,
     /// System/context prompt content.
     pub system_prompt: String,
@@ -391,13 +396,6 @@ impl AgentCapture {
     }
 }
 
-/// Agent capability flags.
-#[derive(Debug, Clone, Default)]
-pub struct AgentCapabilities {
-    /// Enable Chrome integration (Claude only).
-    pub chrome: bool,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CodexSandboxMode {
     ReadOnly,
@@ -406,6 +404,14 @@ enum CodexSandboxMode {
 }
 
 impl CodexSandboxMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::DangerFullAccess => "danger-full-access",
+        }
+    }
+
     fn parse(value: &str) -> Option<Self> {
         match value {
             "read-only" => Some(Self::ReadOnly),
@@ -536,6 +542,31 @@ fn merge_codex_permission_config(
     }
 }
 
+/// App-server overrides for native and headless startup. None preserves vendor policy.
+fn codex_permission_policy(
+    config: CodexPermissionConfig,
+    launch: &AgentConfig,
+) -> CodexPermissionConfig {
+    if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
+        return CodexPermissionConfig {
+            sandbox: Some(CodexSandboxMode::WorkspaceWrite),
+            approval: Some(CodexApprovalPolicy::Never),
+        };
+    }
+    if launch.skip_permissions || launch.execution_boundary.is_some() {
+        return CodexPermissionConfig {
+            sandbox: Some(CodexSandboxMode::DangerFullAccess),
+            approval: Some(CodexApprovalPolicy::Never),
+        };
+    }
+    CodexPermissionConfig {
+        sandbox: (config.sandbox < Some(CodexSandboxMode::WorkspaceWrite))
+            .then_some(CodexSandboxMode::WorkspaceWrite),
+        approval: (config.approval < Some(CodexApprovalPolicy::Never))
+            .then_some(CodexApprovalPolicy::Never),
+    }
+}
+
 fn read_claude_permission_mode(cwd: Option<&Path>) -> Option<ClaudePermissionMode> {
     let mut mode = None;
     for path in claude_settings_paths(cwd) {
@@ -596,148 +627,68 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
     true
 }
 
-/// Common Claude CLI arguments shared by terminal and stream-input launches.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ClaudeArgs {
-    /// Model variant (already resolved, no "claude:" prefix).
-    pub model: Option<String>,
-    /// System prompt text for `--append-system-prompt`.
-    pub system_prompt: Option<String>,
-    /// System prompt file for `--append-system-prompt-file` (takes precedence over text).
-    pub system_prompt_file: Option<std::path::PathBuf>,
-    /// Additional directories the harness may access.
-    pub add_dirs: Vec<PathBuf>,
-    /// Skip permission prompts.
-    pub skip_permissions: bool,
-    /// Enforce the managed Task worktree boundary.
-    pub worktree_isolation: bool,
-    /// Max turn budget.
-    pub max_turns: Option<u32>,
-    /// Enable Chrome integration.
-    pub chrome: bool,
-    /// Resume an existing Claude Code session.
-    pub resume_id: Option<AgentSessionId>,
-}
-
-impl ClaudeArgs {
-    /// Resolve a model string to a Claude `--model` variant.
-    ///
-    /// Strips the `claude:` prefix and leaves bare `claude` to the CLI default.
-    pub fn resolve_model(model: &str) -> Option<String> {
-        let (harness, model_variant) = parse_agent(model);
-        if harness == "claude" {
-            model_variant
-        } else {
-            Some(model.to_string())
-        }
-    }
-
-    /// Build `Vec<String>` of Claude CLI args (without program name or prompt content).
-    pub fn to_args(&self) -> Vec<String> {
-        let mut args = Vec::new();
-
-        if self.chrome {
-            args.push("--chrome".to_string());
-        }
-
-        if let Some(ref model) = self.model {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
-
-        if let Some(ref file) = self.system_prompt_file {
-            args.push("--append-system-prompt-file".to_string());
-            args.push(file.to_string_lossy().to_string());
-        } else if let Some(ref text) = self.system_prompt {
-            if !text.trim().is_empty() {
-                args.push("--append-system-prompt".to_string());
-                args.push(text.clone());
-            }
-        }
-
-        if !self.add_dirs.is_empty() {
-            args.push("--add-dir".to_string());
-            args.extend(
-                self.add_dirs
-                    .iter()
-                    .map(|dir| dir.to_string_lossy().to_string()),
-            );
-        }
-
-        if self.skip_permissions {
-            args.push("--dangerously-skip-permissions".to_string());
-        }
-
-        if self.worktree_isolation {
-            args.push("--permission-mode".to_string());
-            args.push("acceptEdits".to_string());
-            args.push("--setting-sources".to_string());
-            args.push(String::new());
-            args.push("--settings".to_string());
-            args.push(
-                serde_json::json!({
-                    "sandbox": {
-                        "enabled": true,
-                        "failIfUnavailable": true,
-                        "allowUnsandboxedCommands": false
-                    }
-                })
-                .to_string(),
-            );
-        }
-
-        if let Some(max_turns) = self.max_turns {
-            args.push("--max-turns".to_string());
-            args.push(max_turns.to_string());
-        }
-
-        if let Some(ref id) = self.resume_id {
-            args.push("--resume".to_string());
-            args.push(id.to_string());
-        }
-
-        args
-    }
-}
-
-/// Args for the persistent stream-json session; turn content arrives on stdin.
-pub fn build_claude_stream_session_args(
+/// Common Claude options shared by terminal and stream-input launches.
+fn claude_options(
     config: &AgentConfig,
-    resume_id: Option<&AgentSessionId>,
+    model: Option<&str>,
     context_file: Option<&Path>,
+    stream: bool,
 ) -> Vec<String> {
-    let mut args = vec![
-        "-p".to_string(),
-        "--replay-user-messages".to_string(),
-        "--input-format".to_string(),
-        "stream-json".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-    ];
-    args.extend(
-        ClaudeArgs {
-            model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
-            system_prompt: None,
-            system_prompt_file: context_file.map(Path::to_path_buf),
-            add_dirs: provider_writable_roots(config),
-            skip_permissions: config.execution_boundary.is_some()
-                || (config.write_scope == AgentWriteScope::Configured
-                    && claude_skip_permissions(
-                        config.cwd.as_deref(),
-                        true,
-                        config.skip_permissions,
-                    )),
-            worktree_isolation: config.write_scope == AgentWriteScope::Worktree
-                && config.execution_boundary.is_none(),
-            max_turns: config.max_turns,
-            chrome: false,
-            resume_id: resume_id.cloned(),
+    let mut args = vec![if config.chrome {
+        "--chrome"
+    } else {
+        "--no-chrome"
+    }
+    .into()];
+    if let Some(model) = model {
+        args.extend(["--model".into(), model.into()]);
+    }
+    if let Some(file) = context_file {
+        args.extend([
+            "--append-system-prompt-file".into(),
+            file.display().to_string(),
+        ]);
+    } else {
+        let instructions = system_prompt_with_structured_replies(config);
+        if !instructions.trim().is_empty() {
+            args.extend(["--append-system-prompt".into(), instructions]);
         }
-        .to_args(),
-    );
-    if let Some(schema) = &config.output_schema {
-        args.extend(["--json-schema".to_string(), schema.to_string()]);
+    }
+    let add_dirs = provider_writable_roots(config);
+    if !add_dirs.is_empty() {
+        args.push("--add-dir".into());
+        args.extend(add_dirs.iter().map(|dir| dir.display().to_string()));
+    }
+    if config.execution_boundary.is_some()
+        || (config.write_scope == AgentWriteScope::Configured
+            && claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions))
+    {
+        args.push("--dangerously-skip-permissions".into());
+    }
+    if config.write_scope == AgentWriteScope::Worktree && config.execution_boundary.is_none() {
+        args.extend([
+            "--permission-mode".into(),
+            "acceptEdits".into(),
+            "--setting-sources".into(),
+            String::new(),
+            "--settings".into(),
+            serde_json::json!({
+                "sandbox": {
+                    "enabled": true,
+                    "failIfUnavailable": true,
+                    "allowUnsandboxedCommands": false
+                }
+            })
+            .to_string(),
+        ]);
+    }
+    if stream {
+        if let Some(max_turns) = config.max_turns {
+            args.extend(["--max-turns".into(), max_turns.to_string()]);
+        }
+        if let Some(schema) = &config.output_schema {
+            args.extend(["--json-schema".into(), schema.to_string()]);
+        }
     }
     args
 }
@@ -822,45 +773,13 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    if launch.write_scope == AgentWriteScope::Worktree {
-        params.insert(
-            "approvalPolicy".to_string(),
-            serde_json::Value::String("never".to_string()),
-        );
-        params.insert(
-            "sandbox".to_string(),
-            serde_json::Value::String(
-                if launch.execution_boundary.is_some() {
-                    "danger-full-access"
-                } else {
-                    "workspace-write"
-                }
-                .to_string(),
-            ),
-        );
-    } else if launch.skip_permissions {
-        params.insert(
-            "approvalPolicy".to_string(),
-            serde_json::Value::String("never".to_string()),
-        );
-        params.insert(
-            "sandbox".to_string(),
-            serde_json::Value::String("danger-full-access".to_string()),
-        );
-    } else {
-        let config = read_codex_permission_config(launch.cwd.as_deref());
-        if config.sandbox < Some(CodexSandboxMode::WorkspaceWrite) {
-            params.insert(
-                "sandbox".to_string(),
-                serde_json::Value::String("workspace-write".to_string()),
-            );
-        }
-        if config.approval < Some(CodexApprovalPolicy::Never) {
-            params.insert(
-                "approvalPolicy".to_string(),
-                serde_json::Value::String("never".to_string()),
-            );
-        }
+    let policy =
+        codex_permission_policy(read_codex_permission_config(launch.cwd.as_deref()), launch);
+    if let Some(sandbox) = policy.sandbox {
+        params.insert("sandbox".into(), sandbox.as_str().into());
+    }
+    if policy.approval == Some(CodexApprovalPolicy::Never) {
+        params.insert("approvalPolicy".into(), "never".into());
     }
 
     params
@@ -896,113 +815,6 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
     }
 }
 
-/// Build Claude CLI command.
-pub fn build_claude_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
-    model_variant: Option<&str>,
-) -> Vec<String> {
-    let mut cmd = vec!["claude".to_string()];
-
-    let claude_args = ClaudeArgs {
-        model: model_variant.map(str::to_string),
-        system_prompt: Some(system_prompt_with_structured_replies(launch)),
-        system_prompt_file: process.context_file.clone(),
-        add_dirs: provider_writable_roots(launch),
-        skip_permissions: launch.execution_boundary.is_some()
-            || (launch.write_scope == AgentWriteScope::Configured
-                && claude_skip_permissions(launch.cwd.as_deref(), false, launch.skip_permissions)),
-        worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
-            && launch.execution_boundary.is_none(),
-        max_turns: launch.max_turns,
-        chrome: capabilities.chrome,
-        resume_id: launch.resume_token.clone(),
-    };
-    cmd.extend(claude_args.to_args());
-
-    cmd
-}
-
-/// Build OpenCode CLI command.
-pub fn build_opencode_command(model_variant: Option<&str>) -> Vec<String> {
-    let mut cmd = vec!["opencode".to_string()];
-
-    if let Some(variant) = model_variant {
-        cmd.push("--model".to_string());
-        cmd.push(variant.to_string());
-    }
-
-    cmd
-}
-
-/// Build the `OPENCODE_CONFIG_CONTENT` env var JSON string.
-///
-/// Returns `None` when no config overrides are needed (interactive mode, no context).
-fn build_opencode_env_for_scope(
-    process: &ProcessConfig,
-    write_scope: AgentWriteScope,
-) -> Option<String> {
-    let mut oc_config = serde_json::Map::new();
-    if write_scope == AgentWriteScope::Worktree {
-        oc_config.insert(
-            "permission".into(),
-            serde_json::json!({"*": "allow", "external_directory": "deny"}),
-        );
-    }
-    if let Some(ref context_file) = process.context_file {
-        oc_config.insert(
-            "instructions".into(),
-            serde_json::json!([context_file.to_string_lossy()]),
-        );
-    }
-    if oc_config.is_empty() {
-        None
-    } else {
-        Some(serde_json::Value::Object(oc_config).to_string())
-    }
-}
-
-/// Highest-priority OpenCode configuration for a managed Task provider.
-pub fn opencode_worktree_config() -> String {
-    build_opencode_env_for_scope(&ProcessConfig::default(), AgentWriteScope::Worktree)
-        .expect("worktree scope always produces OpenCode configuration")
-}
-
-/// Apply harness-specific environment variables to a command.
-fn apply_harness_env(
-    harness: &str,
-    cmd: &mut Command,
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-) {
-    if harness == "opencode" {
-        if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
-            cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
-        }
-    }
-}
-
-/// Build a native terminal command for a supported provider.
-pub fn build_model_command(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
-) -> Result<Vec<String>, CoreError> {
-    let agent = launch.agent();
-    let (harness, model_variant) = parse_agent(agent);
-    let model_variant = model_variant.as_deref();
-    Ok(match harness.as_str() {
-        "opencode" => build_opencode_command(model_variant),
-        "claude" => build_claude_command(launch, process, capabilities, model_variant),
-        _ => {
-            return Err(CoreError::ExecutionFailed(format!(
-                "unsupported agent provider: {harness}"
-            )))
-        }
-    })
-}
-
 /// Claude consumes initial stdin and reopens the controlling terminal for keys.
 /// A file avoids blocking on pipe capacity before the native process starts.
 pub(crate) fn configure_native_input(command: &mut Command, prompt: &str) -> std::io::Result<()> {
@@ -1029,7 +841,6 @@ pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
 pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
     let cwd = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -1037,7 +848,7 @@ pub fn run_agent(
     };
     let command = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&cwd, &command, || {
-        run_admitted_agent(launch, process, capabilities).map_err(Into::into)
+        run_admitted_agent(launch, process).map_err(Into::into)
     })
     .map_err(|error| {
         error
@@ -1049,11 +860,17 @@ pub fn run_agent(
 fn run_admitted_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
     launch.apply_agent_override();
-    launch.chrome = capabilities.chrome;
+    if process.auto && parse_agent(launch.agent()).0 != "claude" {
+        if launch.max_turns.is_some() {
+            eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
+        }
+        if launch.output_schema.is_some() {
+            eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Flow output validation still applies)");
+        }
+    }
     if launch.resume_token.is_none() {
         if let Some(capture) = &process.capture {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
@@ -1064,13 +881,7 @@ fn run_admitted_agent(
     pin_provider_account_id_blocking(&mut launch)?;
     let (harness, model) = parse_agent(launch.agent());
     let implicit_capture = if process.capture.is_none() {
-        Some(_begin_implicit_capture(
-            &launch,
-            process,
-            capabilities,
-            &harness,
-            model,
-        )?)
+        Some(_begin_implicit_capture(&launch, process, &harness, model)?)
     } else {
         None
     };
@@ -1106,7 +917,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_agent_once(attempt, &process, capabilities, retry),
+        |attempt, retry| _run_agent_once(attempt, &process, retry),
         thread::sleep,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -1323,7 +1134,6 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
 fn _begin_implicit_capture(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
     harness: &str,
     model: Option<String>,
 ) -> Result<AgentCapture, CoreError> {
@@ -1349,7 +1159,7 @@ fn _begin_implicit_capture(
     let capture = if process.auto {
         CaptureHandle::begin_with_request(
             spec,
-            crate::session_record::AgentProcessRequest::from_prepared(launch, capabilities),
+            crate::session_record::AgentProcessRequest::from_prepared(launch),
         )
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1361,7 +1171,6 @@ fn _begin_implicit_capture(
             &context,
             Some(crate::session_record::AgentProcessRequest::from_prepared(
                 launch,
-                capabilities,
             )),
         )
     };
@@ -1603,7 +1412,6 @@ fn _run_harness_once(
 fn _run_agent_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    capabilities: &AgentCapabilities,
     retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
@@ -1620,20 +1428,16 @@ fn _run_agent_once(
         });
     }
     let mut progress = crate::startup::Startup::new(format!("Preparing {harness}"));
-    if harness == "opencode" {
-        validate_terminal_turn(&launch.task_prompt)?;
-    }
-    let mut cmd_args = build_model_command(launch, process, capabilities)?;
-    if cmd_args.is_empty() {
-        return Err(CoreError::ExecutionFailed("Empty command".to_string()));
-    }
+    let invocation = match launch.resume_token.as_ref() {
+        Some(session_id) => ProviderInvocation::Resume { session_id },
+        None => ProviderInvocation::Terminal { session_id: None },
+    };
+    let command = build_session_command(launch, invocation, process.context_file.as_deref())
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let hooks =
         crate::harness::context::native_args(&harness, launch.conversation_context.as_ref())
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    cmd_args.splice(1..1, hooks);
-
-    let program = &cmd_args[0];
-    let args = &cmd_args[1..];
+    let program = &command.program;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "run_agent prepared command"
@@ -1644,7 +1448,10 @@ fn _run_agent_once(
     for name in EXECUTION_IDENTITY_ENV {
         cmd.env_remove(name);
     }
-    cmd.envs(&launch.env);
+    cmd.envs(
+        session_environment(launch, process.context_file.as_deref())
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
+    );
     if let Some(context) = launch
         .conversation_context
         .as_ref()
@@ -1654,39 +1461,16 @@ fn _run_agent_once(
             .configure_hooks(&mut cmd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    if let Some(context) = launch
-        .conversation_context
-        .as_ref()
-        .filter(|_| harness == "opencode")
-    {
-        crate::harness::context::configure_opencode(
-            &mut cmd,
-            context,
-            &system_prompt_with_structured_replies(launch),
-        )
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    }
     progress.finish();
     let title = crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd);
-    cmd.args(args);
-    if !launch.task_prompt.is_empty() {
-        if harness == "claude" {
-            configure_native_input(&mut cmd, &launch.task_prompt)
-                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-        } else {
-            cmd.arg(&launch.task_prompt);
-        }
-    }
-
-    if let Some(ref cwd) = launch.cwd {
-        cmd.current_dir(cwd);
-    }
-
-    let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
-    if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_process(cwd, &launch.env)
+    if let Some(input) = &command.input {
+        configure_native_input(&mut cmd, input)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
+
+    cmd.current_dir(&command.cwd);
+    crate::ops::git_operation::prepare_agent_process(&command.cwd, &launch.env)
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     cmd.env_remove(crate::os_process::DISCORD_TOKEN_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
@@ -1708,11 +1492,7 @@ fn _run_agent_once(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 
     // Harness-specific environment setup.
-    let managed_provider = match harness.as_str() {
-        "claude" => Some(Provider::Claude),
-        "codex" => Some(Provider::Codex),
-        _ => None,
-    };
+    let managed_provider = (harness == "claude").then_some(Provider::Claude);
     let account_route = match managed_provider
         .map(|provider| resolve_account_route_blocking(provider, launch))
         .transpose()
@@ -1743,6 +1523,7 @@ fn _run_agent_once(
             }
         };
     }
+    cmd.args(hooks).args(&command.args);
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {
         if let Some(capture) = capture {
@@ -1758,7 +1539,6 @@ fn _run_agent_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
-    apply_harness_env(&harness, &mut cmd, launch, process);
 
     if let Some(capture) = capture {
         capture.observe_provider(
@@ -1933,6 +1713,16 @@ mod tests {
         );
     }
 
+    fn terminal_args(config: &AgentConfig) -> Vec<String> {
+        build_session_command(
+            config,
+            ProviderInvocation::Terminal { session_id: None },
+            None,
+        )
+        .unwrap()
+        .args
+    }
+
     fn auto_process() -> ProcessConfig {
         ProcessConfig {
             auto: true,
@@ -1966,36 +1756,37 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn codex_thread_permissions_preserve_config_and_supply_the_loopflow_floor() {
-        let _lock = loopflow_test_support::env_lock().lock().unwrap();
-        let _env = crate::test_ambient::EnvGuard::clear(&["CODEX_HOME"]);
-        let home = tempfile::tempdir().unwrap();
-        env::set_var("CODEX_HOME", home.path());
-        let config = home.path().join("config.toml");
-        for (settings, expected) in [
-            ("", Some("workspace-write")),
-            (
-                "sandbox_mode=\"read-only\"\napproval_policy=\"on-request\"",
-                Some("workspace-write"),
-            ),
-            (
-                "sandbox_mode=\"danger-full-access\"\napproval_policy=\"never\"",
-                None,
-            ),
+    fn codex_policy_preserves_vendor_grants_and_raises_restrictive_defaults() {
+        for sandbox in [
+            None,
+            Some(CodexSandboxMode::ReadOnly),
+            Some(CodexSandboxMode::DangerFullAccess),
         ] {
-            fs::write(&config, settings).unwrap();
-            let params = build_codex_thread_start_params(&default_launch());
-            assert_eq!(
-                params.get("sandbox").and_then(serde_json::Value::as_str),
-                expected
+            let policy = codex_permission_policy(
+                CodexPermissionConfig {
+                    sandbox,
+                    approval: None,
+                },
+                &AgentConfig::default(),
             );
             assert_eq!(
-                params
-                    .get("approvalPolicy")
-                    .and_then(serde_json::Value::as_str),
-                expected.map(|_| "never")
+                policy.sandbox,
+                if sandbox == Some(CodexSandboxMode::DangerFullAccess) {
+                    None
+                } else {
+                    Some(CodexSandboxMode::WorkspaceWrite)
+                }
             );
+            assert_eq!(policy.approval, Some(CodexApprovalPolicy::Never));
         }
+        let policy = codex_permission_policy(
+            CodexPermissionConfig {
+                sandbox: Some(CodexSandboxMode::DangerFullAccess),
+                approval: Some(CodexApprovalPolicy::Never),
+            },
+            &AgentConfig::default(),
+        );
+        assert_eq!(policy, CodexPermissionConfig::default());
     }
 
     #[test]
@@ -2004,77 +1795,6 @@ trust_level = "trusted"
             parse_claude_permission_mode(r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#),
             Some(ClaudePermissionMode::BypassPermissions)
         );
-    }
-
-    #[test]
-    fn build_claude_command_yolo() {
-        let launch = AgentConfig {
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let process = ProcessConfig {
-            auto: true,
-            stream: false,
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"--dangerously-skip-permissions".to_string()));
-    }
-
-    #[test]
-    fn build_claude_command_with_model_variant() {
-        let launch = default_launch();
-        let process = auto_process();
-        let cmd = build_claude_command(
-            &launch,
-            &process,
-            &AgentCapabilities::default(),
-            Some("opus"),
-        );
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"opus".to_string()));
-    }
-
-    #[test]
-    fn build_claude_command_with_chrome_flag() {
-        let launch = default_launch();
-        let process = auto_process();
-        let cmd =
-            build_claude_command(&launch, &process, &AgentCapabilities { chrome: true }, None);
-        assert!(cmd.contains(&"--chrome".to_string()));
-    }
-
-    #[test]
-    fn build_claude_command_adds_main_repo_for_worktree_metadata() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-        let launch = AgentConfig {
-            cwd: Some(worktree),
-            ..default_launch()
-        };
-        let process = auto_process();
-
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        let idx = cmd
-            .iter()
-            .position(|arg| arg == "--add-dir")
-            .expect("add-dir flag");
-        assert_eq!(
-            PathBuf::from(&cmd[idx + 1]).canonicalize().unwrap(),
-            main.canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    fn build_claude_command_omits_add_dir_for_main_repo() {
-        let (_tmp, main, _worktree) = git_worktree_fixture();
-        let launch = AgentConfig {
-            cwd: Some(main),
-            ..default_launch()
-        };
-        let process = auto_process();
-
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(!cmd.contains(&"--add-dir".to_string()));
     }
 
     #[test]
@@ -2102,162 +1822,41 @@ trust_level = "trusted"
             skip_permissions: true,
             ..default_launch()
         };
-        let process = auto_process();
-
         let thread = build_codex_thread_start_params(&launch);
         assert_eq!(thread["sandbox"], "danger-full-access");
         assert_eq!(thread["approvalPolicy"], "never");
         assert!(thread.get("config").is_none());
 
-        let claude = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
+        let claude = terminal_args(&AgentConfig {
+            agent: Some("claude".into()),
+            ..launch
+        });
         assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!claude.contains(&"--add-dir".to_string()));
     }
 
     #[test]
-    fn build_claude_command_with_context_file() {
-        let launch = default_launch();
-        let process = ProcessConfig {
-            context_file: Some(std::path::PathBuf::from("/tmp/context.md")),
-            ..Default::default()
-        };
-        let cmd = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert!(cmd.contains(&"--append-system-prompt-file".to_string()));
-        assert!(cmd.contains(&"/tmp/context.md".to_string()));
-    }
-
-    #[test]
-    fn build_opencode_command_interactive() {
-        let cmd = build_opencode_command(None);
-        assert_eq!(cmd, vec!["opencode"]);
-    }
-
-    #[test]
-    fn build_opencode_command_with_model() {
-        let cmd = build_opencode_command(Some("anthropic/claude-sonnet-4-5"));
-        assert!(cmd.contains(&"--model".to_string()));
-        assert!(cmd.contains(&"anthropic/claude-sonnet-4-5".to_string()));
-    }
-
-    #[test]
-    fn build_opencode_env_context_only() {
-        let process = ProcessConfig {
-            context_file: Some(std::path::PathBuf::from("/tmp/lf-context.md")),
-            ..Default::default()
-        };
-        let env = build_opencode_env_for_scope(&process, AgentWriteScope::Configured).unwrap();
-        let v: serde_json::Value = serde_json::from_str(&env).unwrap();
-        assert!(v.get("permission").is_none());
-        assert_eq!(v["instructions"][0], "/tmp/lf-context.md");
-    }
-
-    #[test]
-    fn build_opencode_env_neither() {
-        assert!(build_opencode_env_for_scope(
-            &ProcessConfig::default(),
-            AgentWriteScope::Configured
-        )
-        .is_none());
-    }
-
-    // ── ClaudeArgs ────────────────────────────────────────────────
-
-    #[test]
-    fn claude_args_empty() {
-        let args = ClaudeArgs::default().to_args();
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn claude_args_model() {
-        let args = ClaudeArgs {
-            model: Some("opus".to_string()),
-            ..Default::default()
+    fn terminal_commands_keep_native_context_and_main_repo_scope() {
+        let (_tmp, main, _) = git_worktree_fixture();
+        for provider in ["claude", "codex", "opencode"] {
+            let launch = AgentConfig {
+                agent: Some(provider.into()),
+                cwd: Some(main.clone()),
+                system_prompt: "Fixed additions.".into(),
+                ..default_launch()
+            };
+            let args = terminal_args(&launch);
+            assert!(!args.contains(&"--add-dir".into()));
+            match provider {
+                "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
+                "codex" => {
+                    let params = build_codex_thread_start_params(&launch);
+                    assert_eq!(params["serviceTier"], "default");
+                    assert_eq!(params["developerInstructions"], "Fixed additions.");
+                }
+                _ => {}
+            }
         }
-        .to_args();
-        assert_eq!(args, vec!["--model", "opus"]);
-    }
-
-    #[test]
-    fn claude_args_system_prompt_file_takes_precedence() {
-        let args = ClaudeArgs {
-            system_prompt: Some("inline text".to_string()),
-            system_prompt_file: Some("/tmp/context.md".into()),
-            ..Default::default()
-        }
-        .to_args();
-        assert!(args.contains(&"--append-system-prompt-file".to_string()));
-        assert!(args.contains(&"/tmp/context.md".to_string()));
-        assert!(!args.contains(&"--append-system-prompt".to_string()));
-    }
-
-    #[test]
-    fn claude_args_system_prompt_text() {
-        let args = ClaudeArgs {
-            system_prompt: Some("Be concise".to_string()),
-            ..Default::default()
-        }
-        .to_args();
-        assert_eq!(args, vec!["--append-system-prompt", "Be concise"]);
-    }
-
-    #[test]
-    fn claude_args_empty_system_prompt_skipped() {
-        let args = ClaudeArgs {
-            system_prompt: Some("  ".to_string()),
-            ..Default::default()
-        }
-        .to_args();
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn claude_args_all_flags() {
-        let args = ClaudeArgs {
-            model: Some("sonnet".to_string()),
-            system_prompt: Some("Be brief".to_string()),
-            system_prompt_file: None,
-            add_dirs: vec!["/tmp/repo".into()],
-            skip_permissions: true,
-            worktree_isolation: false,
-            max_turns: Some(10),
-            chrome: true,
-            resume_id: Some("sess_abc".into()),
-        }
-        .to_args();
-        assert!(args.contains(&"--chrome".to_string()));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"sonnet".to_string()));
-        assert!(args.contains(&"--append-system-prompt".to_string()));
-        assert!(args.contains(&"--add-dir".to_string()));
-        assert!(args.contains(&"/tmp/repo".to_string()));
-        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--max-turns".to_string()));
-        assert!(args.contains(&"10".to_string()));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_abc".to_string()));
-    }
-
-    #[test]
-    fn claude_args_resolve_model_bare() {
-        assert_eq!(ClaudeArgs::resolve_model("claude"), None);
-    }
-
-    #[test]
-    fn claude_args_resolve_model_with_variant() {
-        assert_eq!(
-            ClaudeArgs::resolve_model("claude:sonnet"),
-            Some("sonnet".to_string())
-        );
-    }
-
-    #[test]
-    fn claude_args_resolve_model_full_string() {
-        // Non-claude backend passes through unchanged
-        assert_eq!(
-            ClaudeArgs::resolve_model("claude-sonnet-4-5-20250514"),
-            Some("claude-sonnet-4-5-20250514".to_string())
-        );
     }
 
     #[test]
@@ -2340,7 +1939,15 @@ trust_level = "trusted"
         let path = write_system_prompt_file(&config, "session")
             .unwrap()
             .unwrap();
-        let args = build_claude_stream_session_args(&config, Some(&"sess_abc".into()), Some(&path));
+        let args = build_session_command(
+            &config,
+            ProviderInvocation::ClaudeStream {
+                session_id: Some(&"sess_abc".into()),
+            },
+            Some(&path),
+        )
+        .unwrap()
+        .args;
         assert!(args.iter().all(|arg| arg.len() < 122_880));
         for (flag, value) in [
             ("--append-system-prompt-file", path.to_str().unwrap()),
@@ -2365,8 +1972,7 @@ trust_level = "trusted"
                 agent: Some(harness.to_string()),
                 ..default_launch()
             };
-            let cmd = build_model_command(&launch, &auto_process(), &AgentCapabilities::default())
-                .unwrap();
+            let cmd = terminal_args(&launch);
             assert!(
                 !cmd.iter()
                     .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
@@ -2388,8 +1994,7 @@ trust_level = "trusted"
                 auto,
                 ..Default::default()
             };
-            let error = _run_agent_once(&launch, &process, &AgentCapabilities::default(), false)
-                .unwrap_err();
+            let error = _run_agent_once(&launch, &process, false).unwrap_err();
             assert!(error.to_string().contains("not-a-provider"), "{error}");
         }
     }
@@ -2749,12 +2354,15 @@ trust_level = "trusted"
             resume_token: Some("session-123".into()),
             ..default_launch()
         };
-        let claude = build_claude_command(
+        let claude = build_session_command(
             &launch,
-            &ProcessConfig::default(),
-            &AgentCapabilities::default(),
-            Some("opus"),
-        );
+            ProviderInvocation::Resume {
+                session_id: launch.resume_token.as_ref().unwrap(),
+            },
+            None,
+        )
+        .unwrap()
+        .args;
         assert_arg_pair(&claude, "--resume", "session-123");
     }
 }

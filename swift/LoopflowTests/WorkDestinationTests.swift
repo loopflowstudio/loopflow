@@ -70,7 +70,7 @@ struct WorkDestinationTests {
     }
 
     @Test(arguments: [false, true])
-    func openingInstallsItsPaneBeforePreparationEnds(unprepared: Bool) async throws {
+    func openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -85,9 +85,8 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "ensure"]) { await barrier.wait("ensure"); return encoded }
-            if args.starts(with: ["wave", "show"]) { return data }
-            if args.starts(with: ["session", "connect"]) { await barrier.wait("connect"); return encoded }
+            if args.starts(with: ["session", "connect", "--task"]) { await barrier.wait("prepare"); return encoded }
+            if args.starts(with: ["wave", "show"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -108,21 +107,19 @@ struct WorkDestinationTests {
         }
         model.applyFixture(roadmap: .available(initial), waves: .available([]), workActivity: .loading, repos: [])
         let opening = Task { await model.openTaskConversation(task.id) }
-        while !(await barrier.contains("ensure")) { await Task.yield() }
+        while !(await barrier.contains("prepare")) { await Task.yield() }
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         #expect(model.selection == .task(id: task.id))
         #expect(workspace.openingConversation)
         let paneID = workspace.multiplexer.focusedPaneId
-        await barrier.release("ensure")
+        await barrier.release("prepare")
         let deadline = ContinuousClock.now + .seconds(3)
-        while !(await barrier.contains("connect")), ContinuousClock.now < deadline { await Task.yield() }
-        try #require(await barrier.contains("connect"))
+        while !(await barrier.contains("planning")), ContinuousClock.now < deadline { await Task.yield() }
+        try #require(await barrier.contains("planning"))
         #expect(workspace.openingConversation)
         #expect(workspace.multiplexer.focusedPaneId == paneID)
-        #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
         let store = registry.sessionStore(repository: "repo", repoPath: wave.wave.repo, query: query)
-        #expect(store.sessions.first?.state == .opening)
-        await barrier.release("connect")
+        await barrier.release("planning")
         await opening.value
         #expect(!workspace.openingConversation)
         #expect(store.sessions.first?.state == .prepared)
@@ -742,7 +739,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.starts(with: ["session", "ensure"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            guard args.starts(with: ["session", "connect", "--task"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
             await barrier.wait("ensure")
             return encoded
         }, repoPath: wave.wave.repo)

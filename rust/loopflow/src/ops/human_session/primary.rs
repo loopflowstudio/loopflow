@@ -57,14 +57,10 @@ pub(crate) async fn ensure_task(
     let scope = PrimaryScope::Task(id.clone());
     let _lock = lock_scope(&scope).await?;
     let chosen = match choose {
-        Some(session) => Some(store.choose_task_primary(id, session).await?),
-        None => match store.task_primary(id).await? {
-            Some(primary) => Some(primary),
-            None => match super::most_recent(store, store.task_conversations(id).await?).await? {
-                Some(session) => Some(store.choose_task_primary(id, &session.id).await?),
-                None => None,
-            },
-        },
+        Some(session) => Some(session.to_string()),
+        None => task_conversation(store, id)
+            .await?
+            .map(|session| session.id),
     };
     if !binding.cwd.try_exists()? {
         // Reuse Task preparation's recorded placement and restoration checks.
@@ -76,7 +72,8 @@ pub(crate) async fn ensure_task(
         })
         .await??;
     }
-    if let Some(primary) = chosen {
+    if let Some(session) = chosen {
+        let primary = store.choose_task_primary(id, &session).await?;
         return surface(store, &primary).await;
     }
     anyhow::ensure!(
@@ -87,6 +84,16 @@ pub(crate) async fn ensure_task(
         .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
     prepare(store, &session.id).await
+}
+
+pub(super) async fn task_conversation(
+    store: &SharedStore,
+    task: &crate::durable::TaskId,
+) -> Result<Option<LfSession>> {
+    if let Some(primary) = store.task_primary(task).await? {
+        return Ok(Some(primary));
+    }
+    super::most_recent(store, store.task_conversations(task).await?).await
 }
 
 /// Give the scope a fresh conversation. The predecessor's provider stops

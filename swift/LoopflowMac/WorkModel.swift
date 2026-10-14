@@ -96,6 +96,7 @@ struct LinkedSession {
     let task: RoadmapTask
     let showsChanges: Bool
     let location: TaskLocationObservation?
+    var prepared = false
 }
 
 struct LinkedTaskPage: Equatable {
@@ -317,18 +318,18 @@ final class WorkModel {
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
         let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
-        var ensuredRecord: SessionRecord?
+        var preparation: SessionRecord?
         if let selected = link.session {
             sessionID = selected
         } else {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
             Perf.agentInput("primary_begin", task: task.id)
-            let record = try await executionQuery.ensureTaskSession(issue: executionTask, cwd: wave.wave.repo)
+            let record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: wave.wave.repo)
             Perf.agentInput("primary_returned", task: task.id, session: record.id, detail: "provider=\(record.provider ?? "unknown")")
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
-            ensuredRecord = record
+            preparation = record
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
             if location == nil {
@@ -343,10 +344,10 @@ final class WorkModel {
             }
         }
         var records: [SessionRecord] = []
-        if let ensuredRecord {
-            // Ensure already returned this Session's authoritative reading.
+        if let preparation {
+            // Preparation already returned this Session's authoritative reading.
             // Opening one Task must not wait for every repository Session.
-            records = [ensuredRecord]
+            records = [preparation]
         } else if link.session != nil, retainedRecords.contains(where: { $0.id == sessionID }) {
             records = retainedRecords
         } else {
@@ -378,18 +379,18 @@ final class WorkModel {
         if location != nil, let executionIdentity { navigation.preparedTaskWorktrees[task.id] = executionIdentity }
         openTaskDestination(wave: wave, task: task, preservingOpening: true)
         supersedeSessions()
-        if location != nil || ensuredRecord != nil {
+        if location != nil || preparation != nil {
             // One explicitly opened Session updates its own reading. Merge the
             // latest inventory: it may have refreshed during preparation.
             records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
         }
-        if ensuredRecord != nil, let reason = sessions.errorMessage {
+        if preparation != nil, let reason = sessions.errorMessage {
             // One successful acquisition does not repair an unrelated inventory failure.
             sessions = .unavailable(lastGood: records, reason: reason)
         } else {
             sessions = .available(records)
         }
-        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)
+        let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, prepared: preparation != nil)
         try await installConversation(destination, repository: wave.wave.repo)
     }
 
@@ -494,6 +495,7 @@ final class WorkModel {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
+        if destination.prepared { store.adoptPreparation(destination.record) }
         await store.select(destination.record.id)
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         if let files { await files.refreshChanges() }

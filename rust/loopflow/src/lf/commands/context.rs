@@ -156,8 +156,8 @@ fn read_registry() -> Result<crate::store::SharedStore> {
 
 /// Explain connection without admitting a provider conversation or acquiring its client.
 pub fn explain_session_connect(
-    id: Option<&str>,
-    replace: bool,
+    target: crate::ops::human_session::SessionTarget<'_>,
+    takeover: bool,
     try_open: bool,
     prepare_only: bool,
 ) -> Result<SessionConnectExplanation> {
@@ -169,8 +169,8 @@ pub fn explain_session_connect(
                 crate::ops::human_session::explain_connect(
                     &store,
                     &cwd,
-                    id,
-                    OpenMode::from_flags(replace, try_open),
+                    target,
+                    OpenMode::from_flags(takeover, try_open),
                     prepare_only,
                 )
                 .await

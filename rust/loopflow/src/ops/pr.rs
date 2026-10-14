@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::{load_config_or_default, load_repo_config, MergeMethod};
 use crate::flow::load_skill;
 use crate::git::worktrees::{list_worktrees, main_repo_root};
@@ -527,6 +527,7 @@ pub fn generate_pr_copy(
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {
+        chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
@@ -538,11 +539,8 @@ pub fn generate_pr_copy(
         stream: false,
         ..Default::default()
     };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
 
-    let result = run_agent(&launch, &process, &capabilities)
+    let result = run_agent(&launch, &process)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(

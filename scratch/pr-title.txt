@@ -1,1 +1,0 @@
-Continue publishing from the same Task checkout after merge

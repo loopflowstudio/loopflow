@@ -41,4 +41,4 @@ remote source endpoint; Codex startup must capture its native Session ID. Fixtur
 providers explicitly exercise the hook without an account. Credential removal is
 checked in destination database bytes, not just rows.
 
-Checks: cargo fmt/clippy, architecture map, clone(3), Session CLI(21), documented commands(3), human Session(29), migration(98), process ownership(11; 3 existing ignored), Desktop launcher/navigation(40) pass; native process checks finishing; configured native proof belongs to lf-4e4cc84.
+Checks: cargo fmt/clippy, architecture map, clone(3), Session CLI(21), documented commands(3), human Session(29), migration(98), process ownership(11; 3 existing ignored), Desktop launcher/navigation(40) pass; native process identity(4) passes; configured native proof belongs to lf-4e4cc84.

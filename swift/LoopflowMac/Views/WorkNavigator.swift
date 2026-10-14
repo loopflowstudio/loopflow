@@ -11,7 +11,6 @@ struct WorkNavigator: View {
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
-    @State private var hoveringPresentation = false
 
     init(model: WorkModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
@@ -101,7 +100,6 @@ struct WorkNavigator: View {
 
     /// The repository heads its own outline: one scope, switched in place.
     private func header() -> some View {
-        @Bindable var navigation = model.navigation
         return HStack(spacing: Spacing.sm) {
             Button {
                 onOpenRepository?()
@@ -130,33 +128,7 @@ struct WorkNavigator: View {
             .accessibilityLabel("Choose repository")
             .accessibilityIdentifier("work-repository")
             Spacer(minLength: 0)
-            Menu {
-                Picker("Presentation", selection: Binding(
-                    get: { navigation.presentation },
-                    set: { Perf.begin(Perf.hierarchyInteraction, "presentation", id: "outline"); navigation.presentation = $0 })) {
-                    ForEach(WorkPresentation.allCases, id: \.self) { presentation in
-                        Text(presentation.rawValue).tag(presentation)
-                    }
-                }
-                if let onShowTerminals {
-                    Divider()
-                    Button("Show retained terminals", action: onShowTerminals)
-                        .accessibilityIdentifier("work-return-terminals")
-                }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(hoveringPresentation ? palette.text : palette.textSecondary)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 28, height: 28)
-            .background(hoveringPresentation ? palette.actionHover : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .onHover { hoveringPresentation = $0 }
-            .help("Outline presentation")
-            .accessibilityLabel("Outline presentation")
-            .accessibilityIdentifier("work-presentation")
+
         }
         .foregroundStyle(palette.text)
         .padding(.leading, 18)

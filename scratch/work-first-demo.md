@@ -23,18 +23,8 @@ preserve history, active clients and drafts, never restore a database over live 
 
 ## Bundled runtime — October 12
 
-Jack Heart authorized the changes needed in this diff for a viable real-data demo,
-including bundled lf selection and its propagation into embedded terminals/Session
-children. This supersedes the installed-release-only demo hold. Desktop selects
-its own helper via LF_BIN; ordinary terminal defaults remain installed. Remove the
-external helper override and provenance-only store refusal, not schema validation
-or the exclusive migration boundary. Reattachment keeps an already-running
-provider's environment; it does not silently restart it for a new executable.
-
-Earlier missing-schema, helper selection, hook-trust, failed LOO-312 restoration
-and focused checks: `6e6795389d:scratch/work-first-demo.md`, **Bundled runtime**.
-Later release and recovery evidence below supersedes those dated launch conditions;
-no old fixture proves native acceptance or authorizes discarding LOO-312 work.
+Bundled lf authority excludes installation/migration. Prior evidence:
+`79bf4a18ce:scratch/work-first-demo.md`, **Bundled runtime**. Running providers retain their environment.
 
 ## Every-sidebar-Task audit — October 12, in progress
 
@@ -232,4 +222,14 @@ independent PR/Task links. One background Button now spans the padded row, behin
 links and Wave disclosure; no nested controls or competing parent tap gesture.
 Metadata keeps hover help. Existing link checks preserve URLs, drafts and layout.
 Check: TaskRowMetadataTests + WorkNavigationTests PASS (48), `/tmp/loo462-row-hit-tests2.log`; native pixel-boundary review remains.
-The running demo has a real LOO-382 conversation open; do not restart it and lose input.
+Jack Heart requested relaunch. Updated demo shows real Work; CUA confirms populated sidebar. Pixel-boundary acceptance remains.
+
+## Navigation polish — October 14
+
+Jack Heart confirmed cached switching works; first-open loading belongs inside the
+terminal, not a separate banner. Removed that banner and moved preparation feedback
+into the empty pane. Primary conversations omit their redundant breadcrumb/rename;
+explicit non-primary Sessions retain identity. Removed the unhelpful presentation
+menu. Repository resolution no longer replaces selected paths with the demo's
+LOOPFLOW_DEV_WAVE_REPO override, which made different windows display Loopflow.
+Check: navigation/workspace/portfolio/metadata suites PASS (63), `/tmp/loo462-demo-polish-tests3.log`. Native review remains.

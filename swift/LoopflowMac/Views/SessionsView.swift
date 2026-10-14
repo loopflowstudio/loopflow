@@ -844,9 +844,6 @@ struct SessionsContentView: View {
                                 }
                             if taskPath != nil { missingCheckout }
                         }
-                        if workspace.openingConversation, !multiplexer.layout.allPanes.contains(where: { $0.sessionId != nil }) {
-                            ProgressView("Opening conversation…").padding(8)
-                        }
                         if let error = workspace.conversationError {
                             HStack {
                                 Text(error).textSelection(.enabled)
@@ -1695,17 +1692,19 @@ private struct SessionPaneView: View {
 
     @ViewBuilder
     private var emptyWorkspace: some View {
-        if workspace.key.kind == .task {
-            if !workspace.openingConversation {
-                ContentUnavailableView {
-                    Label("No Task conversation open", systemImage: "bubble.left")
-                        .foregroundStyle(TerminalPalette.foreground)
-                } description: {
-                    Text(workspace.conversationError == nil
-                        ? "Open this Task from the sidebar to return to its conversation."
-                        : "The conversation could not open. Retry the opening above.")
-                        .foregroundStyle(TerminalPalette.dim)
-                }
+        if workspace.openingConversation {
+            ProgressView("Opening conversation…")
+                .foregroundStyle(TerminalPalette.foreground)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if workspace.key.kind == .task {
+            ContentUnavailableView {
+                Label("No Task conversation open", systemImage: "bubble.left")
+                    .foregroundStyle(TerminalPalette.foreground)
+            } description: {
+                Text(workspace.conversationError == nil
+                    ? "Open this Task from the sidebar to return to its conversation."
+                    : "The conversation could not open. Retry the opening above.")
+                    .foregroundStyle(TerminalPalette.dim)
             }
         } else {
             ContentUnavailableView {

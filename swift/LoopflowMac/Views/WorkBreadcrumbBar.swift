@@ -1,12 +1,8 @@
 import Loopflow
 import SwiftUI
 
-/// The workspace's one toolbar: the Wave → Task → Session drill-down on the
-/// left, the surface's controls on the right. It sits in the sidebar tone and
-/// its bottom hairline continues the sidebar's right hairline, so frame and
-/// navigation read as one inverted L. Ancestors navigate upward; the final
-/// crumb names the exact Session and renames it through the shared authority.
-/// Task navigation stays on its conversation; explicit historical links survive.
+/// Work ancestry and surface controls. Primary conversations need no extra crumb;
+/// explicitly opened non-primary Sessions keep their exact title and rename action.
 struct WorkBreadcrumbBar<Trailing: View>: View {
     @Bindable var model: WorkModel
     let crumb: WorkBreadcrumb?
@@ -99,7 +95,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                     .help("Task name and planning details unavailable")
                     .accessibilityIdentifier("breadcrumb-task")
             }
-            if let session = crumb.session {
+            if let session = crumb.session, !session.taskPrimary, session.primaryScope == nil {
                 if crumb.waveWork != nil || crumb.taskWork != nil { separator }
                 sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible), isTask: crumb.taskWork != nil)
             }

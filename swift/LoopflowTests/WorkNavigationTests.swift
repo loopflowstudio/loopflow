@@ -1025,6 +1025,25 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership") }
     }
 
+    @Test("Primary Task conversations add no redundant breadcrumb or rename control")
+    func primaryConversationChrome() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let record = try session("primary", work: .task(id: "ts_review00000000000000000000000000"))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        json["task_primary"] = true
+        let primary = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [primary])
+        let crumb = try #require(projection.breadcrumb(selection: model.selection, sessionId: primary.id))
+        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session") }
+        #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "session-rename") }
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string().isEmpty == false)
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-presentation") }
+    }
+
     @Test("Unbound Sessions do not acquire ancestry from display text or checkout")
     func unboundSessionHasNoAncestry() throws {
         let record = try session("unbound", work: nil)

@@ -6,6 +6,24 @@ import Testing
 @MainActor
 @Suite("Portfolio Repo State")
 struct PortfolioRepoStateTests {
+    @Test("Explicit repository choices resolve to their own roots")
+    func explicitRepositoryRoots() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for name in ["first", "second"] {
+            let root = directory.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["init", "--quiet", root.path]
+            process.standardInput = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            #expect(PortfolioDiscovery.resolveLaunchRepo(root.path) == root.resolvingSymlinksInPath().normalizedFilePath)
+        }
+    }
+
     @Test("connected waves keep only this repo's rows")
     func connectedWavesScopedToRepo() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-scope")

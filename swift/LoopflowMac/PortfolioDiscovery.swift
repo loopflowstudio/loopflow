@@ -4,9 +4,7 @@ import Loopflow
 enum PortfolioDiscovery {
     nonisolated static func resolveLaunchRepo(_ initialPath: String) -> String? {
         let scanner = RepositoryPath()
-        let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
-        let devOverride = dev?.isEmpty == false ? dev : nil
-        let candidate = URL(fileURLWithPath: devOverride ?? initialPath)
+        let candidate = URL(fileURLWithPath: initialPath)
         guard let mainURL = scanner.mainRepository(candidate) else { return nil }
         return mainURL.normalizedFilePath
     }

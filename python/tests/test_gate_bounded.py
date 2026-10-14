@@ -22,6 +22,7 @@ assert _spec is not None and _spec.loader is not None
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["gate_test_runner"] = gate
 _spec.loader.exec_module(gate)
+_run_resource_check = gate._run_resource_check
 
 _resource_spec = importlib.util.spec_from_file_location(
     "gate_resource_envelope", ROOT / "scripts/resource_envelope.py"
@@ -843,3 +844,33 @@ def test_desktop_changes_select_headless_checks_without_host_automation():
     commands = selected["swift"].commands
     assert any(command.argv[0] == "scripts/test_desktop.sh" for command in commands)
     assert not any("scripts/prove_wave_surface_states.sh" in command.argv for command in commands)
+
+
+def test_recovery_has_time_beyond_read_only_inventory(tmp_path, monkeypatch):
+    script = tmp_path / "resources.py"
+    script.write_text("import time; time.sleep(0.2); print('{\"ok\":true}')")
+    monkeypatch.setattr(gate, "RESOURCE_SCRIPT", script)
+    monkeypatch.setattr(gate, "RESOURCE_READ_TIMEOUT", 0.05)
+    monkeypatch.setattr(gate, "RESOURCE_RECOVERY_TIMEOUT", 2)
+    report, failure = _run_resource_check(True)
+    assert report == {"ok": True}
+    assert failure is None
+    report, failure = _run_resource_check(False)
+    assert report is None
+    assert "timed out" in failure
+
+
+def test_resource_timeout_stops_its_cleanup_child(tmp_path, monkeypatch):
+    marker = tmp_path / "orphan"
+    script = tmp_path / "resources.py"
+    child = f"import time; from pathlib import Path; time.sleep(1); Path({str(marker)!r}).touch()"
+    script.write_text(
+        f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(20)"
+    )
+    monkeypatch.setattr(gate, "RESOURCE_SCRIPT", script)
+    monkeypatch.setattr(gate, "RESOURCE_RECOVERY_TIMEOUT", 0.3)
+    report, failure = _run_resource_check(True)
+    assert report is None
+    assert "timed out" in failure
+    time.sleep(1.2)
+    assert not marker.exists()

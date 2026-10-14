@@ -28,6 +28,14 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
+/// The shared native Codex stand-in: an app-server that records each turn
+/// and a terminal client that attaches to it.
+const CODEX_NATIVE: &str = concat!(
+    "#!/bin/sh\nexec /usr/bin/python3 '",
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/native_codex.py' \"$@\"\n"
+);
+
 /// The three ways to name a Task for a Flow: the Task entry, `--task`, and its
 /// worktree. All block in the foreground and reach the same checks.
 const LAUNCHES: [&[&str]; 3] = [
@@ -46,10 +54,7 @@ fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
-            (
-                "codex",
-                "#!/bin/sh\necho unexpected Codex launch >&2\nexit 99\n",
-            ),
+            ("codex", CODEX_NATIVE),
             (
                 "claude",
                 r#"#!/usr/bin/python3
@@ -217,21 +222,94 @@ for line in sys.stdin:
             |row| row.get(0),
         )
         .unwrap();
-    let refused = command(
+    // Connecting with another provider continues the same Session from a log;
+    // contextual resume reaches the same open.
+    let transcript = home
+        .path()
+        .join("accounts/claude/fixture/projects/fixture/agent-fixture.jsonl");
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(
+        &transcript,
+        [
+            serde_json::json!({"type":"user","userType":"external","message":{"content":"Rename the parser module"}}),
+            serde_json::json!({"type":"assistant","message":{"content":[
+                {"type":"text","text":"Renaming it now."},
+                {"type":"tool_use","id":"read","name":"Read","input":{"file_path":"src/parser.rs"}},
+                {"type":"tool_use","id":"move","name":"Bash","input":{"command":"git mv src/parser.rs src/syntax.rs"}}]}}),
+            serde_json::json!({"type":"user","userType":"external","toolUseResult":"done","message":{"content":[
+                {"type":"tool_result","tool_use_id":"read","content":"successful parser source"},
+                {"type":"tool_result","tool_use_id":"move","is_error":true,"content":"Permission to use Bash has been denied."}]}}),
+        ]
+        .map(|row| row.to_string())
+        .join("\n"),
+    )
+    .unwrap();
+    // The first Codex app-server crashes before the conversation opens.
+    fs::write(home.path().join("fail-server"), "").unwrap();
+    let crashed = command(
         repo.path(),
         home.path(),
-        &["session", "resume", &session, "-a", "codex"],
+        &["session", "connect", &session, "-a", "codex"],
     )
     .output()
     .unwrap();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("native history belongs to claude"));
+    assert!(!crashed.status.success());
+    // Retrying without -a relaunches Codex with the same continuation.
+    fs::remove_file(home.path().join("fail-server")).unwrap();
+    let imported = command(repo.path(), home.path(), &["session", "connect", &session])
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
     assert_eq!(
         db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
             .get::<_, i64>(0))
             .unwrap(),
         6
     );
+    assert_eq!(
+        db.query_row(
+            "SELECT provider FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "codex"
+    );
+    let turns: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("native-turns.json")).unwrap())
+            .unwrap();
+    let turn = turns[0]["items"][0]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|input| input["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(turn.contains("began in claude"), "{turn}");
+    assert!(turn.contains("Rename the parser module"), "{turn}");
+    // The skill ran in the Claude conversation; the continuation does not re-send it.
+    assert!(!turn.contains("<lf:skill:first"), "{turn}");
+    let log_path = turn
+        .split_whitespace()
+        .find_map(|word| {
+            word.strip_suffix(";")
+                .filter(|path| path.ends_with("conversation.md"))
+        })
+        .unwrap_or_else(|| panic!("no log path in {turn}"));
+    let log = fs::read_to_string(log_path).unwrap();
+    for expected in [
+        "Rename the parser module",
+        "Renaming it now.",
+        "- tool: Bash",
+        "Permission to use Bash has been denied.",
+    ] {
+        assert!(log.contains(expected), "{expected} missing from {log}");
+    }
+    assert!(!log.contains("successful parser source"), "{log}");
 
     // A separate invocation with no -a keeps skill and step declarations.
     let unbound = TestRepo::new();

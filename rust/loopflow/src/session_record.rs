@@ -1866,6 +1866,9 @@ impl CaptureHandle {
         let expected = store.session_attachment(session)?;
         next.artifact_key = new_artifact_key();
         next.input_published = false;
+        // The row records the agent this input actually launches.
+        next.provider = Some(spec.harness.clone());
+        next.model = spec.model.clone();
         let (next, attachment) =
             store.claim_session_input(next, expected.as_ref(), &lf_process_id, || {
                 crate::harness::agent_process::close_session_agent_process(&store, session)

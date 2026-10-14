@@ -1425,3 +1425,10 @@ environment; retain model/version, inputs, replies and failures. These cases cov
 launcher work, taskless Flows, custom Work clients, guided memory maintenance,
 explicit Task adoption, scratch ownership and instruction opt-out. They score
 proposed actions; lifecycle integration tests remain the proof of tool effects.
+
+Isolated data clones install their own inherited sandbox. Run their macOS fixtures
+directly: `cargo test -p loopflow --test integration data_clones:: < /dev/null`.
+The network wrapper's privileged `ps` exception cannot nest with this policy.
+CI proves clone operation on macOS 26 and early unsupported-host refusal on
+macOS 15; both hosts retain native process identity tests. An environment marker
+never substitutes for kernel confinement.

@@ -9,6 +9,19 @@ import Testing
 
 @Suite("Local wave launcher")
 struct LocalWaveAgentLauncherTests {
+    @Test("clone terminals retain the isolated helper and provider selection")
+    func cloneEnvironmentStaysIsolated() {
+        let selected = [
+            "LF_CLONE_ROOT": "/tmp/clone", "LF_HOME": "/tmp/clone",
+            "LF_BIN": "/tmp/clone/bin/lf", "HOME": "/tmp/clone/home",
+            "CODEX_HOME": "/tmp/clone/home/.codex",
+            "CLAUDE_CONFIG_DIR": "/tmp/clone/home/.claude",
+            "PATH": "/tmp/clone/bin:/usr/bin:/bin",
+        ]
+        let environment = GUIProcessEnvironment.enriched(selected)
+        for (key, value) in selected { #expect(environment[key] == value) }
+    }
+
     // MARK: - Command construction
 
     @Test("development launcher preserves the selected Machine registry")
@@ -99,6 +112,23 @@ struct LocalWaveAgentLauncherTests {
     }
 
     // MARK: - Bundled binary boundary
+
+    @Test("a clone selects its own helper before development or bundled helpers")
+    func cloneSelectsPinnedHelper() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let helper = bin.appendingPathComponent("lf")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let environment = ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path]
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), developmentConfig: nil, environment: environment) == helper.path)
+        try FileManager.default.removeItem(at: helper)
+        #expect(throws: LocalLfError.self) {
+            try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), developmentConfig: nil, environment: environment)
+        }
+    }
 
     @Test("a missing bundled helper never falls through to PATH")
     func missingBundledHelperFails() {

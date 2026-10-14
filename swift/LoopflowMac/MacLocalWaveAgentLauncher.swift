@@ -79,8 +79,17 @@ enum LocalWaveAgentLauncher {
         developmentConfig: URL? = Bundle.main.url(
             forResource: "LoopflowDevControl",
             withExtension: "json"
-        )
+        ),
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
+        if let root = environment["LF_CLONE_ROOT"] {
+            let helper = URL(fileURLWithPath: root).appendingPathComponent("bin/lf").path
+            guard environment["LF_HOME"] == root, environment["LF_BIN"] == helper,
+                  FileManager.default.isExecutableFile(atPath: helper) else {
+                throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
+            }
+            return helper
+        }
         if let developmentConfig {
             let config: DevelopmentControlConfig
             do {

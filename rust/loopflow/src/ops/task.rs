@@ -48,7 +48,7 @@ use crate::git::worktrees::{
 use crate::git::{
     current_branch, fetch, get_default_branch, is_clean, merge_base, ref_exists, rev_parse,
 };
-use crate::naming::{git_user, sanitize_for_branch};
+use crate::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
@@ -102,7 +102,7 @@ impl TaskProcessOptions {
 
     fn validate_workspace_name(&self, task: &Task) -> OpsResult<()> {
         if let Some(name) = &self.name {
-            let requested = parse_workspace_slug(name)?;
+            let requested = WorktreeSegment::parse(name).map_err(task_error)?;
             if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
                 return Err(task_error(format!(
                     "Task {} already uses workspace name {:?}",
@@ -1115,8 +1115,9 @@ fn plan_task_placement(
     let explicit_segment = options
         .name
         .as_deref()
-        .map(parse_workspace_slug)
-        .transpose()?;
+        .map(WorktreeSegment::parse)
+        .transpose()
+        .map_err(task_error)?;
     let title = match &explicit_segment {
         Some(segment) => segment.as_str().to_string(),
         None => task
@@ -1304,8 +1305,8 @@ async fn place_prepared_task(
         )));
     }
     if task.worktree.is_some() {
-        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
         restore_task_checkout(store, &task).await?;
+        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
         return Ok(task);
     }
     let now = time::OffsetDateTime::now_utc();
@@ -1344,7 +1345,6 @@ async fn place_prepared_task(
         )
         .await
         .map_err(task_error)?;
-    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
     if let Some(direction) = directive.as_deref() {
         append_task_comment(store, &task, direction, true)?;
     }
@@ -1365,6 +1365,7 @@ async fn place_prepared_task(
         }
         return Err(error);
     }
+    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
     Ok(task)
 }
 
@@ -1627,20 +1628,6 @@ fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<Concre
     }
 
     Ok((definition.name, steps))
-}
-
-fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
-    let value = value.trim();
-    let words = value.split('-').filter(|word| !word.is_empty()).count();
-    if sanitize_for_branch(value) != value
-        || value.contains(['.', '_', '/'])
-        || !(2..=5).contains(&words)
-    {
-        return Err(task_error(
-            "workspace name must be 2-5 lowercase kebab-case words",
-        ));
-    }
-    WorktreeSegment::parse(value).map_err(task_error)
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
@@ -3298,6 +3285,12 @@ pub(crate) async fn reconcile_delivered_task(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
+    // Local checkout cleanup is not evidence of delivery or Task completion.
+    if let Some(worktree) = &task.worktree {
+        if !worktree.try_exists()? {
+            return Ok(());
+        }
+    }
     match task_work_status(store, task).await? {
         WorkStatus::Abandoned => return Ok(()),
         WorkStatus::Done => return reconcile_task_completion(store, task).await,
@@ -5958,6 +5951,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_placement_accepts_shared_worktree_names() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
+        for (name, expected) in [
+            ("fix", "fix"),
+            ("Fix Workspace", "fix-workspace"),
+            ("one-two-three-four-five-six", "one-two-three-four-five-six"),
+        ] {
+            let (plan, slug) = super::plan_task_placement(
+                repo.path(),
+                &fixture.task,
+                None,
+                &super::TaskProcessOptions {
+                    name: Some(name.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(slug, expected);
+            assert!(plan.worktree_path.ends_with(format!(
+                "{}.{}",
+                repo.path().file_name().unwrap().to_str().unwrap(),
+                expected
+            )));
+            assert!(!plan.worktree_path.exists());
+        }
+    }
+
+    #[tokio::test]
     async fn task_preparation_rejects_invalid_inputs_before_allocating_placement() {
         let repo = loopflow_test_support::TestRepo::new();
         let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
@@ -5967,7 +5989,7 @@ mod tests {
                     name: Some("bad.name".into()),
                     ..Default::default()
                 },
-                "kebab-case",
+                "flat worktree name",
             ),
             (
                 super::TaskProcessOptions {

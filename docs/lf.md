@@ -136,6 +136,9 @@ not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow process for a Task is equally its work.
 
+`lf task run EXP-12 --name fix` selects its first checkout name. Names use the
+same normalization as `lf wt create`; single words and longer names are accepted.
+
 Flow output shows each step's position and name followed by the agent's messages.
 Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
 diagnostics. Codex Sessions start through the provider protocol and attach the
@@ -271,6 +274,10 @@ merge, optional new work uses ordinary Task creation;
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. Local planning does not
 require Linear at any of these boundaries.
+
+Delivery reconciliation skips deleted checkouts and retains their Task, PR and
+merge intent. It continues checking available work without recreating directories
+or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 

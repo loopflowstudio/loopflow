@@ -882,6 +882,11 @@ pub(crate) async fn reconcile_pr_landing(
     observe: ObservePr,
     repair: Option<RepairCi>,
 ) -> OpsResult<PrLanding> {
+    // External cleanup can remove the checkout. Retain the request until its
+    // local evidence is available again, without claiming an outcome.
+    if !landing.worktree.try_exists()? {
+        return Ok(landing);
+    }
     // Acquire the OS lock before changing the lease. A canceled async repair
     // retains this lock in its blocking worker until that worker really exits.
     let Some(ownership) = lock_landing(&landing)? else {
@@ -1228,6 +1233,9 @@ pub(crate) async fn landing_store() -> OpsResult<SharedStore> {
 }
 
 async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResult<()> {
+    if !landing.worktree.try_exists()? {
+        return Ok(());
+    }
     if let Some(task_id) = &landing.task_id {
         let task = store
             .get_task(task_id)
@@ -1731,9 +1739,11 @@ mod tests {
 
     async fn fixture() -> (tempfile::TempDir, SharedStore, PrLanding) {
         let directory = tempfile::tempdir().unwrap();
+        let worktree = directory.path().join("checkout");
+        std::fs::create_dir(&worktree).unwrap();
         assert!(std::process::Command::new("git")
             .args(["init", "--quiet"])
-            .current_dir(directory.path())
+            .current_dir(&worktree)
             .status()
             .unwrap()
             .success());
@@ -1748,7 +1758,7 @@ mod tests {
             NewPrLanding {
                 repo: "loopflowstudio/loopflow".into(),
                 pr_number: 248,
-                worktree: directory.path().into(),
+                worktree,
                 branch: "feature".into(),
                 task_id: None,
                 requested_head_sha: "head".into(),
@@ -1774,6 +1784,34 @@ mod tests {
             head_sha: "head".into(),
             merge_commit: "merge".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn deleted_checkout_preserves_landing_until_it_can_be_observed() {
+        let (_directory, store, landing) = fixture().await;
+        let landing = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
+        std::fs::remove_dir_all(&landing.worktree).unwrap();
+        let script = script(vec![merged()]);
+        let skipped = check(store.clone(), landing.clone(), &script)
+            .await
+            .unwrap();
+        assert_eq!(skipped, landing);
+        assert_eq!(
+            store.get_pr_landing(&landing.id).await.unwrap(),
+            Some(landing.clone())
+        );
+        assert!(!landing.worktree.exists());
+        super::cleanup_landed_pr(&store, &landing).await.unwrap();
+
+        std::fs::create_dir(&landing.worktree).unwrap();
+        assert!(std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&landing.worktree)
+            .status()
+            .unwrap()
+            .success());
+        let observed = check(store, landing, &script).await.unwrap();
+        assert_eq!(observed.state, PrLandingState::Merged);
     }
 
     #[tokio::test(start_paused = true)]

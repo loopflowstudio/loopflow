@@ -28,22 +28,13 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     command
 }
 
-/// An interactive Codex stand-in: records its first turn and reports a
-/// resumable conversation through the SessionStart hook Loopflow installed.
-const CODEX_TERMINAL: &str = r#"#!/bin/sh
-if [ "$1" = --version ]; then echo fixture; exit 0; fi
-printf '%s\n' "$@" > "$LF_HOME/codex-turn"
-# The first launch crashes before reporting a conversation.
-if [ ! -e "$LF_HOME/codex-crashed" ]; then touch "$LF_HOME/codex-crashed"; exit 1; fi
-exec python3 - "$@" <<'PYTHON'
-import subprocess, sys, tomllib
-config = tomllib.loads(next(arg for arg in sys.argv[1:] if arg.startswith("hooks=")))
-for group in config["hooks"]["SessionStart"]:
-    if "startup" in group["matcher"]:
-        for hook in group["hooks"]:
-            subprocess.run(hook["command"], shell=True, input='{"session_id":"codex-fixture"}', text=True, check=True)
-PYTHON
-"#;
+/// The shared native Codex stand-in: an app-server that records each turn
+/// and a terminal client that attaches to it.
+const CODEX_NATIVE: &str = concat!(
+    "#!/bin/sh\nexec /usr/bin/python3 '",
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/support/native_codex.py' \"$@\"\n"
+);
 
 /// The three ways to name a Task for a Flow: the Task entry, `--task`, and its
 /// worktree. All block in the foreground and reach the same checks.
@@ -63,7 +54,7 @@ fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
         &[
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
-            ("codex", CODEX_TERMINAL),
+            ("codex", CODEX_NATIVE),
             (
                 "claude",
                 r#"#!/usr/bin/python3
@@ -253,6 +244,8 @@ for line in sys.stdin:
         .join("\n"),
     )
     .unwrap();
+    // The first Codex app-server crashes before the conversation opens.
+    fs::write(home.path().join("fail-server"), "").unwrap();
     let crashed = command(
         repo.path(),
         home.path(),
@@ -262,7 +255,7 @@ for line in sys.stdin:
     .unwrap();
     assert!(!crashed.status.success());
     // Retrying without -a relaunches Codex with the same continuation.
-    fs::remove_file(home.path().join("codex-turn")).unwrap();
+    fs::remove_file(home.path().join("fail-server")).unwrap();
     let imported = command(repo.path(), home.path(), &["session", "connect", &session])
         .output()
         .unwrap();
@@ -286,7 +279,16 @@ for line in sys.stdin:
         .unwrap(),
         "codex"
     );
-    let turn = fs::read_to_string(home.path().join("codex-turn")).unwrap();
+    let turns: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.path().join("native-turns.json")).unwrap())
+            .unwrap();
+    let turn = turns[0]["items"][0]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|input| input["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(turn.contains("began in claude"), "{turn}");
     assert!(turn.contains("Rename the parser module"), "{turn}");
     // The skill ran in the Claude conversation; the continuation does not re-send it.

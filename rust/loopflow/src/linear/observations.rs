@@ -256,7 +256,7 @@ impl SqliteStore {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((project_claims, issue_claims))
             })();
-            let (project_claims, issue_claims) = match observations {
+            let (mut project_claims, mut issue_claims) = match observations {
                 Ok(observations) => observations,
                 Err(_) => continue,
             };
@@ -266,30 +266,21 @@ impl SqliteStore {
                 .as_ref()
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?
                 .as_deref();
-            for (id, initiatives, teams) in &project_claims {
-                if initiatives.as_slice() != [initiative.as_str()] {
-                    return Err(StoreError::InvalidData(format!(
-                        "Linear Project {id} in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative}", initiatives.join(", ")
-                    )));
-                }
-                if teams.len() != 1 || expected_team.is_some_and(|expected| teams[0] != expected) {
-                    return Err(StoreError::InvalidData(format!(
-                        "Linear Project {id} in wave/{wave} belongs to Teams [{}]; expected repository Team {}",
-                        teams.join(", "), expected_team.unwrap_or("(one Team)")
-                    )));
-                }
-            }
-            for (_, identifier, project_id, team) in &issue_claims {
-                let (_, _, teams) = project_claims.iter().find(|(id, _, _)| id == project_id)
-                    .ok_or_else(|| StoreError::InvalidData(format!(
-                        "Linear task {identifier} in wave/{wave} points to missing Project {project_id}"
-                    )))?;
-                if team.as_ref() != teams.first() {
-                    return Err(StoreError::InvalidData(format!(
-                        "Linear task {identifier} in wave/{wave} belongs to Team {}, but Project {project_id} belongs to Teams [{}]",
-                        team.as_deref().unwrap_or("unmapped"), teams.join(", ")
-                    )));
-                }
+            // Foreign historical observations do not claim this repository's
+            // Work. Their Task-specific planning evidence still refuses mutations;
+            // they must not prevent unrelated local Tasks from being read.
+            project_claims.retain(|(_, initiatives, teams)| {
+                initiatives.as_slice() == [initiative.as_str()]
+                    && teams.len() == 1
+                    && expected_team.is_none_or(|expected| teams[0] == expected)
+            });
+            issue_claims.retain(|(_, _, project_id, team)| {
+                project_claims
+                    .iter()
+                    .any(|(id, _, teams)| id == project_id && team.as_ref() == teams.first())
+            });
+            if project_claims.is_empty() {
+                continue;
             }
             if let Some(owner) = initiatives.insert(initiative.clone(), *wave) {
                 return Err(StoreError::InvalidData(format!(

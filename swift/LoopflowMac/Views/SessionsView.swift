@@ -1476,6 +1476,7 @@ private struct SessionPaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TerminalPalette.background)
+        .environment(\.colorScheme, .dark)
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
             if isFocused && showsStrip {
@@ -1696,16 +1697,23 @@ private struct SessionPaneView: View {
     private var emptyWorkspace: some View {
         if workspace.key.kind == .task {
             if !workspace.openingConversation {
-                ContentUnavailableView("No Task conversation open", systemImage: "bubble.left",
-                    description: Text(workspace.conversationError == nil
+                ContentUnavailableView {
+                    Label("No Task conversation open", systemImage: "bubble.left")
+                        .foregroundStyle(TerminalPalette.foreground)
+                } description: {
+                    Text(workspace.conversationError == nil
                         ? "Open this Task from the sidebar to return to its conversation."
-                        : "The conversation could not open. Retry the opening above."))
+                        : "The conversation could not open. Retry the opening above.")
+                        .foregroundStyle(TerminalPalette.dim)
+                }
             }
         } else {
             ContentUnavailableView {
                 Label("No session open", systemImage: "terminal")
+                    .foregroundStyle(TerminalPalette.foreground)
             } description: {
                 Text("Open a conversation or a shell in this Work.")
+                    .foregroundStyle(TerminalPalette.dim)
             } actions: {
                 Button {
                     do { try workspace.newShell() }

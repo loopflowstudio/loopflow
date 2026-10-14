@@ -179,11 +179,15 @@ PR #1531 remains published, not approved to land. Profiling and hook acceptance 
 October 14 relaunch requested by Jack Heart: retained unchanged Swift from
 `e7e3e0fc6d`, bundled validation-only helper from `1a1ab0ef7f`, ad-hoc signed
 `/tmp/loo462-semantic-demo/Loopflow Work Demo.app` against real repo/Home.
-PID 92573 native inspection shows cached sidebar, blocked live refresh: historical
-Product Performance Project `55a32ac0-d386-4d84-8231-cc4165c936ba` retains foreign
-Team `60558c53-2169-49f8-a76a-1f4586705aa9`. This is a failed demo, not ready
-acceptance. Task-row agreement did not prove whole-repository projection health.
-Prior semantic captures: `1a1ab0ef7f`, this section. No existing client takeover.
+Initial PID 92573 showed cached rows: historical Product Performance belonged to
+another Team, and repository-wide claim validation blocked unrelated Work. Fixed
+claim collection to exclude foreign evidence; affected Task mutation checks remain.
+Rebuilt/relaunched: real Work stream planning/activity have no unavailable error;
+native sidebar shows new LOO links (472/477/466), and no Team banner. Dark-mode
+inheritance alone failed to fix empty-pane contrast; explicit terminal foreground/dim
+styles visibly repaired it. No existing client takeover. Review remains with Jack.
+Checks: two Rust ownership regressions, nine Swift workspace tests, builds and
+Clippy PASS; `/tmp/loo462-{owned-inventory-*,refresh-pane-swift2.log}`.
 
 ## Linear linkage — October 14
 

@@ -1094,11 +1094,19 @@ mod tests {
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            // Rejected foreign evidence still matters even though Work keeps its owner.
+            // Foreign evidence blocks its Task, not the repository inventory.
             conn.execute("UPDATE pm_items SET team_id='foreign'", [])
                 .unwrap();
         }
-        assert!(validate().unwrap_err().to_string().contains("Team foreign"));
+        validate().unwrap();
+        assert!(store.validate_task_planning(&task).is_err());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE pm_projects SET team_ids='[\"foreign\"]'", [])
+                .unwrap();
+        }
+        validate().unwrap();
+        assert!(store.validate_task_planning(&task).is_err());
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE pm_items SET needs_refresh=1", [])

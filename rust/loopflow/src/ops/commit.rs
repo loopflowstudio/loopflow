@@ -307,12 +307,14 @@ fn push_with_upstream_if_needed_locked(
     if let Ok(previous) = crate::git::rev_parse(repo, &remote_ref) {
         if !crate::git::is_ancestor(repo, &previous, "HEAD")? {
             let base = crate::git::integration_base(repo)?;
-            if crate::ops::sync::landed_at(repo, &base, &previous)? {
+            if crate::git::is_ancestor(repo, &base, "HEAD")?
+                && crate::ops::sync::landed_at(repo, &base, &previous)?
+            {
                 let reference = format!("refs/heads/{branch}");
                 let remote = git_stdout(repo, &["ls-remote", "--heads", "origin", &reference])?;
                 if remote.split_whitespace().next() == Some(previous.as_str()) {
-                    // Replace only the exact branch head already delivered to the
-                    // base. A concurrent push must survive this continuation.
+                    // Replace only the exact head delivered to a base retained
+                    // in HEAD. Divergent rewrites and concurrent pushes survive.
                     let lease = format!("--force-with-lease={reference}:{previous}");
                     return git_stdout_inheriting(
                         repo,
@@ -338,8 +340,6 @@ fn push_with_upstream_if_needed_locked(
         return Ok(());
     }
 
-    let branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     push_with_upstream(repo, "origin", &branch, inherit_git)?;
     Ok(())
 }

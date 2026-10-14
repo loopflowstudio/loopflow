@@ -608,10 +608,11 @@ fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
 }
 
 /// Restart a landed branch from the default branch once its PR has merged.
-/// Commits made after the last push are carried over. Returns false and
+/// Commits made after the delivered head are carried over. Returns false and
 /// leaves the checkout alone when nothing has landed or Git is mid-operation.
 pub(crate) fn restart_landed_branch(repo: &Path) -> OpsResult<bool> {
-    if current_branch(repo)?.as_deref() == Some(get_default_branch(repo)?.as_str()) {
+    let branch = current_branch(repo)?;
+    if branch.as_deref() == Some(get_default_branch(repo)?.as_str()) {
         return Ok(false);
     }
     let base = crate::git::integration_base(repo)?;
@@ -627,57 +628,51 @@ pub(crate) fn restart_landed_branch(repo: &Path) -> OpsResult<bool> {
         return Ok(false);
     }
     let target = if landed(repo, &base)? {
-        Some(base.clone())
+        base.clone()
     } else {
-        // After a squash merge the pushed head is what landed; anything
-        // committed since then is still unpublished work.
-        let branch = current_branch(repo)?.unwrap_or_default();
+        // The tracking ref can identify the delivered head unless follow-up
+        // commits were pushed or the remote branch was pruned.
+        let branch = branch.unwrap_or_default();
         let pushed = rev_parse(repo, &format!("refs/remotes/origin/{branch}")).ok();
         let delivered = match pushed.as_ref() {
             Some(head) if landed_at(repo, &base, head)? => Some(head.clone()),
             _ => crate::ops::pr::latest_merged_branch_head(repo, &branch)?,
         };
-        match delivered {
-            Some(delivered)
-                if rev_parse(repo, &delivered).is_ok()
-                    && crate::git::is_ancestor(repo, &delivered, "HEAD")?
-                    && landed_at(repo, &base, &delivered)? =>
-            {
-                let replayed = replay(repo, &base, &format!("{delivered}..HEAD"))?;
-                match (replayed, pushed) {
-                    (Some(target), Some(pushed))
-                        if pushed != delivered
-                            && crate::git::is_ancestor(repo, &pushed, "HEAD")? =>
-                    {
-                        // Follow-up commits may already be published. Preserve
-                        // their ancestry while adopting the replayed tree, so
-                        // continuing never force-pushes someone else's work.
-                        Some(
-                            git(
-                                repo,
-                                &[
-                                    "commit-tree",
-                                    &format!("{target}^{{tree}}"),
-                                    "-p",
-                                    "HEAD",
-                                    "-p",
-                                    &base,
-                                    "-m",
-                                    "Continue work after merged PR",
-                                ],
-                            )?
-                            .trim()
-                            .to_string(),
-                        )
-                    }
-                    (target, _) => target,
-                }
-            }
-            _ => None,
+        let Some(delivered) = delivered else {
+            return Ok(false);
+        };
+        if rev_parse(repo, &delivered).is_err()
+            || !crate::git::is_ancestor(repo, &delivered, "HEAD")?
+            || !landed_at(repo, &base, &delivered)?
+        {
+            return Ok(false);
         }
-    };
-    let Some(target) = target else {
-        return Ok(false);
+        let Some(replayed) = replay(repo, &base, &format!("{delivered}..HEAD"))? else {
+            return Ok(false);
+        };
+        match pushed {
+            Some(pushed)
+                if pushed != delivered && crate::git::is_ancestor(repo, &pushed, "HEAD")? =>
+            {
+                // Follow-up commits may already be published. Preserve their
+                // ancestry while adopting the replayed tree, so continuing
+                // never force-pushes someone else's work.
+                git(
+                    repo,
+                    &[
+                        "commit-tree",
+                        &format!("{replayed}^{{tree}}"),
+                        "-p",
+                        "HEAD",
+                        "-p",
+                        &base,
+                        "-m",
+                        "Continue work after merged PR",
+                    ],
+                )?
+            }
+            _ => replayed,
+        }
     };
     // Reset clears staging even with --keep. Preserve the caller's index and
     // working edits through the same recovery boundary as explicit sync.

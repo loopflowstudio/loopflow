@@ -186,10 +186,16 @@ fn prepare_pr(
     // and pushes in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
     crate::ops::task::request_task_pr_publication(&repo_root, &copy.title, &copy.body)?;
-    let created_pr = ensure_pr(&repo_root, pr_exists, &main_branch, &copy, inherit_pr)?;
-    let pr = match created_pr {
-        Some(pr) => Some(pr),
-        None => crate::ops::pr::current_pr(&repo_root)?,
+    let pr = if pr_exists {
+        crate::ops::pr::current_pr(&repo_root)?
+    } else {
+        Some(crate::ops::pr::create_pr_from_pushed_branch(
+            &repo_root,
+            &copy.title,
+            &copy.body,
+            &main_branch,
+            inherit_pr,
+        )?)
     };
     crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref(), inherit_pr)?;
     crate::ops::task::record_task_pr_presentation(&repo_root, &copy.title, &copy.body)?;
@@ -407,31 +413,6 @@ fn finalize_local(
     let _ = git_land(repo_root, LandStrategy::LocalMerge, main_branch)?;
     delete_remote_branch(repo_root, feature_branch)?;
     Ok(())
-}
-
-fn ensure_pr(
-    repo_root: &Path,
-    pr_exists: bool,
-    base_branch: &str,
-    copy: &PrCopy,
-    inherit_pr: &impl Fn(&mut Command),
-) -> OpsResult<Option<PrInfo>> {
-    if !crate::ops::pr::gh_available() {
-        return Err(OpsError::Message("gh CLI not found".to_string()));
-    }
-
-    if !pr_exists {
-        return crate::ops::pr::create_pr_from_pushed_branch(
-            repo_root,
-            &copy.title,
-            &copy.body,
-            base_branch,
-            inherit_pr,
-        )
-        .map(Some);
-    }
-
-    Ok(None)
 }
 
 #[allow(clippy::too_many_arguments)] // Remote PR facts and explicit child capability inheritance.

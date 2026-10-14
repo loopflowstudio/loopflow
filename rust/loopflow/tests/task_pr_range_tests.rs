@@ -1120,7 +1120,17 @@ exit 0
             runtime.block_on(task.store.settle_task_pr(&pr)).unwrap();
         }
         if scenario == "completed" {
-            loopflow::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
+            let error = loopflow::ops::task::task_complete(repo.path(), "INF-123", None)
+                .expect_err("the primary fixture checkout is retained after completion");
+            assert!(error
+                .to_string()
+                .contains("cannot delete the primary checkout"));
+            assert_eq!(
+                runtime
+                    .block_on(task.store.task_state(&task.task.id))
+                    .unwrap(),
+                loopflow::durable::TaskState::Done
+            );
         }
     }
     repo.create_file("later.txt", "committed follow-up\n");

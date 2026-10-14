@@ -213,7 +213,20 @@ Cargo/npm/Swift operations newly racing cleanup in a completed candidate outside
 the Loopflow lease are unsupported. Detected Cargo retains output and reports that
 Task selection needs inspection. No native lock, mount or cache service claims
 universal exclusion. The matched measurements above complete local performance
-acceptance; affected gate, hosted CI and verified delivery remain separate work.
+acceptance; hosted CI and verified delivery remain separate work.
+
+Gate review corrected two obsolete Python age-only deletion expectations and a
+lost-receipt reporting error. An unavailable cleanup executable retains output;
+a timeout, nonzero exit or invalid receipt reports an unknown result and refreshes
+inventory, since deletion may already have occurred. The affected gate passed
+72 Python tests and 78 network-isolated Rust tests, including actual preview/apply,
+normal recovery, worktree preservation, released ownership, inherited-pipe
+deadlines and command examples. Rust formatting, Clippy with warnings denied,
+test registration and changed Python Ruff checks passed. Existing timing and
+allocation measurements above remain applicable; the full matrix belongs to CI.
+The final normal-recovery probe with the receipt repair again reclaimed all
+1,163,264 allocated bytes and preserved source, lockfile, registry and history
+(`.lf/tmp/local-build-gate/recovery-final.log`).
 
 ## October 6 inventory and reclamation
 

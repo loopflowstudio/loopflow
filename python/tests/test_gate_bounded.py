@@ -7,7 +7,6 @@ simulated runner-bootstrap failure names the missing capability.
 
 import importlib.util
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -368,8 +367,9 @@ def test_resource_preflight_blocks_before_product_commands(tmp_path, monkeypatch
     assert "NEXT ACTION" in output
 
 
-@pytest.mark.parametrize("stale", [False, True], ids=["recent-cache", "stale-cache"])
-def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch, capsys, stale):
+def test_verification_above_reserve_continues_when_build_owner_is_unavailable(
+    tmp_path, monkeypatch, capsys
+):
     monkeypatch.setattr(
         resources, "_lock_recovery", lambda: (tmp_path / "recovery.lock").open("a+")
     )
@@ -377,11 +377,8 @@ def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch
     for root in (repo, sibling):
         (root / "target").mkdir(parents=True)
         (root / "target/artifact").write_text("warm build")
-    if stale:
-        old = time.time() - 48 * 3600
-        for path in (sibling / "target/artifact", sibling / "target"):
-            os.utime(path, (old, old))
     marker = tmp_path / "product-ran"
+    monkeypatch.setenv("LF_BIN", str(tmp_path / "unavailable-lf"))
     monkeypatch.setenv("LF_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv"))
     monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
@@ -402,7 +399,7 @@ def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch
     )
 
     def _free():
-        return int((62.5 if (sibling / "target").exists() else 87.5) * 2**30)
+        return int(62.5 * 2**30)
 
     monkeypatch.setattr(
         resources.shutil, "disk_usage", lambda _: SimpleNamespace(total=1024 * 2**30, free=_free())
@@ -426,16 +423,11 @@ def test_verification_at_62_gib_reclaims_only_stale_builds(tmp_path, monkeypatch
     assert (repo / "target/artifact").read_text() == "warm build"
     output = capsys.readouterr().out
     record = json.loads(next((tmp_path / "evidence/changed").glob("*.json")).read_text())
-    if stale:
-        assert not (sibling / "target").exists()
-        assert "recover: build:idle" in output
-        assert "25.0 GiB" in output
-        assert "87.5 GiB free" in output
-        assert record["resources"]["recovery"][0]["status"] == "removed"
-    else:
-        assert (sibling / "target/artifact").read_text() == "warm build"
-        assert "64.0 GiB cleanup target" in output
-        assert not record["resources"]["recovery"]
+    assert (sibling / "target/artifact").read_text() == "warm build"
+    assert "64.0 GiB cleanup target" in output
+    assert "build output retained" in output
+    assert record["resources"]["recovery"][0]["status"] == "retained"
+    assert record["resources"]["recovery"][0]["removed_bytes"] == 0
 
 
 def test_identical_tree_and_plan_reuse_a_passing_run(tmp_path, monkeypatch, capsys):

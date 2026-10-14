@@ -371,25 +371,41 @@ def test_recovery_consumes_rust_receipt_above_pressure_threshold(
     assert artifact.exists()  # Python has no build-deletion path.
 
 
-@pytest.mark.parametrize("failure", ["missing", "old-cli", "timeout", "invalid-json"])
-def test_unavailable_build_owner_retains_output(tmp_path: Path, monkeypatch, failure: str) -> None:
+def test_unavailable_build_owner_retains_output(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "target"
     target.mkdir()
     (target / "source").write_text("preserve")
     monkeypatch.setenv("LF_BIN", "fixture-lf")
 
     def run(*_args, **_kwargs):
-        if failure == "missing":
-            raise FileNotFoundError("missing")
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired("lf", 120)
-        return SimpleNamespace(returncode=1 if failure == "old-cli" else 0, stdout="invalid")
+        raise FileNotFoundError("missing")
 
     monkeypatch.setattr(resources.subprocess, "run", run)
     actions = resources.recover_resources(_policy(), _snapshot(_policy(), []))
     assert actions[0].status == "retained"
     assert actions[0].removed_bytes == 0
     assert (target / "source").read_text() == "preserve"
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout", "invalid-json"])
+def test_lost_cleanup_receipt_does_not_claim_output_was_retained(
+    tmp_path: Path, monkeypatch, failure: str
+) -> None:
+    artifact = tmp_path / "artifact"
+    artifact.write_text("generated output")
+    monkeypatch.setenv("LF_BIN", "fixture-lf")
+
+    def run(*_args, **_kwargs):
+        artifact.unlink()
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired("lf", 120)
+        return SimpleNamespace(returncode=1 if failure == "exit" else 0, stdout="invalid")
+
+    monkeypatch.setattr(resources.subprocess, "run", run)
+    actions = resources.recover_resources(_policy(), _snapshot(_policy(), []))
+    assert not artifact.exists()
+    assert actions[0].status == "failed"
+    assert "result unknown" in actions[0].detail
 
 
 def test_inventory_timeout_is_unknown_and_never_authorizes_build_deletion(

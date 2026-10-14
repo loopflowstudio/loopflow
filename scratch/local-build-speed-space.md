@@ -7,8 +7,8 @@ Jack Heart accepted the outcome, practical
 concurrency policy and autonomous delivery. Prepared CLI measurements show a
 29.5% warm median gain; disposable normal recovery removed 100% of measured
 output allocation. Final matched edit/test median improved 34.2%; cold and app
-costs are recorded in the storage review. Gate, hosted CI and verified delivery
-remain; local measurements alone do not prove whole-outcome completion.
+costs are recorded in the storage review. Gate passed; hosted CI and verified
+delivery remain. Local measurements alone do not prove whole-outcome completion.
 
 ## Problem and demo
 
@@ -283,10 +283,10 @@ docs/reviews/storage-footprint.md. Done when normal local Rust verification demo
 matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
-Disposable reclamation and final matched measurements are complete; affected gate,
+Disposable reclamation, final matched measurements and affected gate are complete;
 full hosted CI and delivery remain. The test-reduction sibling is already
 integrated. Any later delivered sibling work needs integration without duplicating its scope. The pre-existing dirty
-Infrastructure memory contribution remains separate from this Task's checkpoints.
+Infrastructure memory contribution was kept separate from this Task's checkpoints.
 
 Review conclusions: target rewriting stops at the harness separator; authority
 filtering has one owner. Prepared-CLI measurements remain applicable and were not
@@ -311,4 +311,14 @@ inspections and generated-tree walk have their own five-second limits. Unknown
 ownership/activity/content retains output. Whole inventory still scales with the
 number of roots; no broad-inventory latency claim follows.
 
-Check: `git diff --check` and `lf context` — pass; prose-only reconciliation reuses 15 Python and 13 network-isolated cleanup passes plus fmt/Clippy/Ruff at `ff963fa769`, and measurements at `c2ccce13c7`; affected suites remain with gate, full matrix with hosted CI.
+Gate review replaced obsolete Python age-only deletion expectations with the
+current unavailable-owner behavior: output stays and above-reserve verification
+continues. It also corrected lost-receipt reporting: timeout, nonzero exit or
+invalid JSON cannot prove retention after cleanup began, so recovery reports an
+unknown result and refreshes inventory. No deletion policy or speed mechanism
+changed. Review found no further ownership, lease or source-preservation blocker.
+The final normal-recovery probe again removed 1,163,264 allocated bytes to zero,
+preserving source, lockfile, registry and history; concurrent free-space change
+was -1,921,024 bytes. Its fresh Python source includes the reporting repair.
+
+Check: `uv run pytest python/tests/{test_materialize_rust_tests,test_resource_envelope,test_gate_bounded}.py` via `test_network.py` — 72 pass; `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `check_rust_test_inventory.py`, changed Python Ruff check/format, `git diff --check`, `lf context` — pass; network-isolated materialized nextest selection above plus `ops::read_retry::` and `documented_commands` — 78 pass, final recovery probe — 1 pass; exact plan/logs in `.lf/tmp/local-build-gate/`; hosted CI/full matrix and verified merge remain with landing.

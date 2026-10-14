@@ -367,8 +367,10 @@ def inspect_resources(repo: Path, policy: ResourcePolicy, recover: bool) -> Reso
     try:
         before = collect_snapshot(repo, policy)
         recovery = recover_resources(policy, before) if lock is not None else ()
-        changed = any(action.status in {"removed", "pruned"} for action in recovery)
-        after = collect_snapshot(repo, policy) if changed else before
+        may_have_changed = any(
+            action.status in {"removed", "pruned", "failed"} for action in recovery
+        )
+        after = collect_snapshot(repo, policy) if may_have_changed else before
         return ResourceReport(str(POLICY_PATH), before, after, recovery)
     finally:
         if lock is not None:
@@ -447,7 +449,7 @@ def _prune_completed_builds(
         if sum(action.removed_bytes for action in actions) != receipt["removed_bytes"]:
             raise ValueError("inconsistent allocated-byte receipt")
         return tuple(actions)
-    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+    except OSError as exc:
         return (
             RecoveryAction(
                 "build-cleanup",
@@ -456,6 +458,18 @@ def _prune_completed_builds(
                 (),
                 "retained",
                 f"build output retained: {exc}; use a capable `lf wt prune --builds`",
+            ),
+        )
+    except (subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+        # The owner may already have removed output before losing its receipt.
+        return (
+            RecoveryAction(
+                "build-cleanup",
+                "lf wt prune",
+                0,
+                (),
+                "failed",
+                f"build cleanup result unknown: {exc}; inspect `lf wt prune --builds --dry-run`",
             ),
         )
 

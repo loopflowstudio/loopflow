@@ -123,7 +123,7 @@ def _cleanup(children: list[subprocess.Popen]) -> None:
 
 def _run_builds(prepare: list[str], xcode: list[str], cwd: Path, env: dict[str, str]) -> int:
     started = time.monotonic()
-    children: list[subprocess.Popen] = []
+    children: dict[str, subprocess.Popen] = {}
     preexisting = _xcode_compilers()
     succeeded = False
     cancelled = 0
@@ -134,19 +134,14 @@ def _run_builds(prepare: list[str], xcode: list[str], cwd: Path, env: dict[str, 
 
     handlers = {s: signal.signal(s, _cancel) for s in (signal.SIGINT, signal.SIGTERM)}
     try:
-        for label, command in (("control", prepare), ("xcode", xcode)):
+        for label, command, environment in (("control", prepare, env), ("xcode", xcode, None)):
             if cancelled:
                 return 128 + cancelled
-            children.append(
-                subprocess.Popen(
-                    command,
-                    cwd=cwd,
-                    env=env if label == "control" else None,
-                    start_new_session=True,
-                )
+            children[label] = subprocess.Popen(
+                command, cwd=cwd, env=environment, start_new_session=True
             )
-            _stamp(f"{label} started pid={children[-1].pid}", started)
-        pending = dict(zip(("control", "xcode"), children))
+            _stamp(f"{label} started pid={children[label].pid}", started)
+        pending = children.copy()
         while pending:
             if cancelled:
                 return 128 + cancelled
@@ -169,7 +164,7 @@ def _run_builds(prepare: list[str], xcode: list[str], cwd: Path, env: dict[str, 
         for signum in handlers:
             signal.signal(signum, signal.SIG_IGN)
         try:
-            _cleanup(children)
+            _cleanup(list(children.values()))
             if not succeeded:
                 _stop_xcode_compilers(preexisting)
             _stamp("builds and cleanup finished", started)

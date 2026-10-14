@@ -610,13 +610,8 @@ def _build_control_tools() -> Path:
         "--target-dir",
         str(target_dir),
     ]
-    bin_dir = target_dir / "debug"
-
-    result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled control binaries")
-
-    source = bin_dir / "lf"
+    run(cargo_cmd, cwd=REPO_ROOT)
+    source = target_dir / "debug" / "lf"
     if not source.exists():
         raise RuntimeError(f"Missing built binary: {source}")
     return source

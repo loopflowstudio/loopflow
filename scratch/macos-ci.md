@@ -50,6 +50,11 @@ into `_build_control_tools`; CI's inline Xcode argument list moved into the sing
 wrapper command. No parallel build implementation remains. Rejected always-overlap
 wiring, codegen-units override and boxed `sync_repository` remain absent. Preserve
 the single async sync function, await ordering, timeouts and acquisition tests.
+Compression removes duplicate process-label reconstruction, the fixture's unused
+no-descendant branch, and manual Cargo status checking. Named children retain
+cleanup ownership after completion; the existing checked command runner now
+reports Cargo's failed command and status. Scoped compiler cleanup remains
+necessary because process groups alone failed the real cancellation trial.
 
 Historical trials remain in the same durable review: always-overlap cold gains
 13.453–39.668s / warm 0.417s slower combined; package-only codegen cold 1.836s
@@ -58,7 +63,7 @@ distributed cost and justified no small frontend rewrite. Those rejections are
 not overturned. The selected variant changes cache-hit behavior, and its current
 cold result must not inherit the earlier saving as a forecast.
 
-Remaining: compress/reconcile without losing proof; gate once, full Swift tests,
+Remaining: reconcile without losing proof; gate once, full Swift tests,
 installation/network boundaries, full hosted CI/queue and verified delivery. No
 paid runners, test deletion, relaxed cache identity or arbitrary retries. Keep
 ordinary signed Xcode proof, current source/target, copy/sign, development
@@ -67,4 +72,4 @@ before completing this follow-up. [Aggregate proof](ci-remaining-proof.md) remai
 lf-12be237's independent ten-real-run and queue/push-to-merged obligation. The latest
 supplied real queue remains 6:24; no numeric acceptance is waived.
 
-Check: 12 matched signed Xcode builds, real cancellation, disposable/network-isolated authority proof, `test_network.py … pytest python/tests/test_build_xcode_ci.py` (10 passed), Ruff and `git diff --check` PASS; gate/full Swift/installation/hosted CI/queue/delivery pending.
+Check: `uv run --no-sync python scripts/test_network.py uv run --offline --no-sync pytest python/tests/test_build_xcode_ci.py -q` — 10 passed; `py_compile`, Ruff check/format and `git diff --check` PASS; prior signed-build/cancellation/authority evidence retained; gate owns full Swift/installation, CI owns hosted/queue proof before delivery.

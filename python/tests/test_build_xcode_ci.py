@@ -38,7 +38,7 @@ def _checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(build_xcode_ci, "REPO_ROOT", tmp_path)
 
 
-def _command(tmp_path: Path, name: str, status: int, descendant: bool = False) -> list[str]:
+def _command(tmp_path: Path, name: str, status: int) -> list[str]:
     script = tmp_path / f"{name}.py"
     peer = tmp_path / ("xcode.ready" if name == "control" else "control.ready")
     alive = tmp_path / f"{name}.alive"
@@ -50,22 +50,17 @@ def _command(tmp_path: Path, name: str, status: int, descendant: bool = False) -
     script.write_text(
         "import os,signal,subprocess,sys,time\n"
         "from pathlib import Path\n"
-        + (
-            f"p=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
-            f"while not Path({str(alive)!r}).exists(): time.sleep(.01)\n"
-            f"pidfile=Path({str(tmp_path / (name + '.pid'))!r})\n"
-            "pending=pidfile.with_suffix('.pending')\n"
-            "pending.write_text(str(p.pid)); pending.rename(pidfile)\n"
-            if descendant
-            else ""
-        )
-        + f"Path({str(tmp_path / (name + '.ready'))!r}).touch()\n"
-        + f"peer=Path({str(peer)!r})\n"
-        + "deadline=time.monotonic()+5\n"
-        + "while not peer.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
-        + "assert peer.exists(), 'other build never started'\n"
-        + "time.sleep(.1)\n"
-        + ("time.sleep(60)\n" if status == -1 else f"sys.exit({status})\n")
+        f"p=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        f"while not Path({str(alive)!r}).exists(): time.sleep(.01)\n"
+        f"pidfile=Path({str(tmp_path / (name + '.pid'))!r})\n"
+        "pending=pidfile.with_suffix('.pending')\n"
+        "pending.write_text(str(p.pid)); pending.rename(pidfile)\n"
+        f"Path({str(tmp_path / (name + '.ready'))!r}).touch()\n"
+        f"peer=Path({str(peer)!r})\n"
+        "deadline=time.monotonic()+5\n"
+        "while not peer.exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        "assert peer.exists(), 'other build never started'\n"
+        "time.sleep(.1)\n" + ("time.sleep(60)\n" if status == -1 else f"sys.exit({status})\n")
     )
     return [sys.executable, str(script)]
 
@@ -83,8 +78,8 @@ def _assert_descendants_stopped(tmp_path: Path) -> None:
 def test_builds_overlap_and_require_both_success(tmp_path: Path, statuses: tuple[int, int]) -> None:
     control, xcode = statuses
     result = _run_builds(
-        _command(tmp_path, "control", control, True),
-        _command(tmp_path, "xcode", xcode, True),
+        _command(tmp_path, "control", control),
+        _command(tmp_path, "xcode", xcode),
         tmp_path,
         dict(os.environ),
     )
@@ -107,7 +102,7 @@ def test_launch_failure_cleans_started_build(
 
     monkeypatch.setattr(subprocess, "Popen", launch)
     result = _run_builds(
-        _command(tmp_path, "control", -1, True),
+        _command(tmp_path, "control", -1),
         [str(tmp_path / "missing-command")],
         tmp_path,
         dict(os.environ),
@@ -118,8 +113,8 @@ def test_launch_failure_cleans_started_build(
 
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT])
 def test_cancellation_cleans_both_groups(tmp_path: Path, signum: int) -> None:
-    control = _command(tmp_path, "control", -1, True)
-    xcode = _command(tmp_path, "xcode", -1, True)
+    control = _command(tmp_path, "control", -1)
+    xcode = _command(tmp_path, "xcode", -1)
     driver = [
         sys.executable,
         "-c",

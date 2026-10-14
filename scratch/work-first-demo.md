@@ -12,12 +12,9 @@ Empty-clone launch evidence: `53c4c156e3:scratch/work-first-demo.md`,
 ## Review priority
 
 Jack Heart requested real populated Loopflow Work before Portfolio, no added
-chrome or Session counts. Earlier failed launches, redraw freeze, SQL loading
-repair, measurements and screenshots remain at
-`946dae6203:scratch/work-first-demo.md`, **Review priority — October 11**.
-The shared Flow membership query now restricts candidate Processes before joining
-history. Its five passing Rust tests prove membership retention, not native speed.
-No previous launch or screenshot established real-provider continuation.
+chrome or Session counts. Failed launches, redraw freeze, loading repair and
+membership evidence: `61f7090d660:scratch/work-first-demo.md`, **Review priority**.
+Headless membership checks do not establish native speed or provider continuation.
 
 ## Earlier cleanup and opening evidence
 

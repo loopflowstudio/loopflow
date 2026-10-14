@@ -249,7 +249,12 @@ evidence, never permission to alter an installed database.
 
 October 13 matched local-planning/startup runs, including preparation, improved
 from 113.05s to 79.72s median (29.5%, three pairs). The isolated verification root
-retained 4.49 GiB in addition to source/control output. See the
+retained 4.49 GiB in addition to source/control output. Two further fixed-input
+pairs, including a small Rust edit, improved edit/test median from 106.34s to
+70.02s (34.2%). Fresh prepared targets used 3.39 GiB versus fallback's 4.47 GiB;
+existing warm targets retain older variants until eligible cleanup. Cold totals
+favored preparation but varied widely. Unchanged Swift/control warm builds took
+0.36s/0.23s median; no app speedup is claimed. See the
 [measurements and limits](docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when

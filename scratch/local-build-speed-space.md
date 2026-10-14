@@ -1,11 +1,13 @@
 # Local test speed and build-output space
 
 Task lf-8f870b1 · Reconciled October 13, 2026 after implementation, compression
-and main integration (`471f9a4875`). Jack Heart accepted the outcome, practical
+and main integration (`471f9a4875`), with final measurements at `98face4a66`.
+Jack Heart accepted the outcome, practical
 concurrency policy and autonomous delivery. Prepared CLI measurements show a
 29.5% warm median gain; disposable normal recovery removed 100% of measured
-output allocation. Matched cold/edit/app acceptance, gate, hosted CI and verified
-delivery remain. Neither measurement proves whole-outcome completion.
+output allocation. Final matched edit/test median improved 34.2%; cold and app
+costs are recorded in the storage review. Gate, hosted CI and verified delivery
+remain; local measurements alone do not prove whole-outcome completion.
 
 ## Problem and demo
 
@@ -228,14 +230,25 @@ validation and delivery; research and kickoff need no replay.
    executable launched elsewhere, open files, held leases, cooperating writers starting after
    selection and detected direct-process retention. Use test-only race hooks plus real writer
    subprocesses; no production factory abstractions.
-4. **Remaining matched measurements and durable guidance.** The warm CLI pairs and
-   full retained-output counts are complete; TESTING.md and the storage review
-   own operating guidance and results. Matched cold preparation, small edit/test,
-   Swift/control cold/warm remain. Disposable reclamation removed 100% of measured
-   allocation; the durable storage review records separate free-space noise. Hold toolchain/lockfile and four
-   jobs fixed; include CLI preparation in measured totals.
-   Report median/range, raw command references and compiler/setup/execution/cleanup
-   separately. Draft technical targets, not Jack Heart's numeric acceptance:
+4. **Matched measurements and durable guidance complete.** TESTING.md and the
+   storage review own operating guidance, median/range and phase-separated results.
+   Two opposite-order pairs at `98face4a66`, fixed toolchain/lockfile and four jobs,
+   passed eight tests per run. A small comment in each disposable source copy
+   measured edit/test median 106.337s → 70.020s (34.2%). Cold preparation plus
+   execution was 227.608s → 99.932s median, with broad fallback variance disclosed;
+   the original three-pair 29.5% warm gain remains the primary speed evidence.
+   Fresh prepared allocation was 3.392 versus 4.467–4.470 GiB (24.1% lower).
+   Existing duplicate artifacts in warm targets are not retroactively removed.
+   Two unchanged app-build repetitions measured Swift/control cold medians
+   35.448s/67.056s and warm medians 0.363s/0.234s; no >10% warm regression signal.
+   App commands/profiles are unchanged, so these are repeated cost controls,
+   not evidence of an app speedup. Source/lockfile hashes survived; only disposable
+   benchmark output was removed. Raw phase receipts and commands:
+   `.lf/tmp/local-build-final/{measure.py,measurements.jsonl,rust-*.json,*.log}`.
+   Disposable normal recovery separately removed 100% of measured allocation;
+   the storage review distinguishes that supported operation from benchmark
+   housekeeping and records filesystem free-space noise. Draft technical targets,
+   not Jack Heart's numeric acceptance:
    CLI-heavy warm median at least 20% faster; investigate >10% warm edit/app
    regression; actual disposable-output cleanup removes at least 90%
    of allocated bytes. Measure filesystem-free
@@ -261,14 +274,15 @@ without disk pressure plus apply idempotence. Affected gate also includes
 and resource-envelope tests, worktree/prune preservation, and released ownership.
 No app launcher implementation or lease test changed in this branch. Full hosted
 CI remains required. Compression passes precede #1545 integration; they are focused
-evidence, not a gate pass for the integrated tree.
+evidence, not a gate pass for the integrated tree. Final measurements built and
+exercised the integrated tree but do not replace affected-suite verification.
 
 Final measurements/usage belong in TESTING.md and docs/reviews/storage-footprint.md
 before scratch cleanup. Done when normal local Rust verification demonstrates a
 matched fixture speedup, old completed inactive output is reclaimable through
 preview/apply and normal recovery with preservation proofs, affected/full hosted
 checks pass, and the PR is verified merged and Task completion recorded.
-Disposable reclamation is implemented; final matched acceptance, affected gate,
+Disposable reclamation and final matched measurements are complete; affected gate,
 full hosted CI and delivery remain. The test-reduction sibling is already
 integrated. Any later delivered sibling work needs integration without duplicating its scope. The pre-existing dirty
 Infrastructure memory contribution remains separate from this Task's checkpoints.
@@ -289,4 +303,4 @@ inspections and generated-tree walk have their own five-second limits. Unknown
 ownership/activity/content retains output. Whole inventory still scales with the
 number of roots; no broad-inventory latency claim follows.
 
-Check: `git diff --check` and `lf context` — pass; prior compression's 15 network-isolated cleanup/ownership tests and 15 Python resource tests retained as evidence; integrated affected gate and matched cold/edit/app measurements remain.
+Check: `.lf/tmp/local-build-final/measure.py` and `--app` — eight Rust runs × eight tests and sixteen Swift/control builds passed, source/lockfile preserved; `git diff --check` and context budgets pass; prior cleanup/ownership evidence retained, affected suites deferred to gate and full matrix to hosted CI.

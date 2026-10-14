@@ -60,7 +60,7 @@ fallback/prepared logical target sizes differed by only 1,680,150 bytes; allocat
 file counts varied by megabytes. `st_blocks * 512` sums file allocations, including
 possible hard-link/APFS sharing; it does not prove exclusive physical use or freed
 filesystem space. Swift and app-control bytes were retained unchanged, not rebuilt.
-Matched cold, small-edit and app measurements still belong to final acceptance.
+The matched cold/edit and app measurements below complete the local timing matrix.
 
 Raw commands, complete allocation snapshots and logs:
 `.lf/tmp/local-build-slice1/{measure.py,measure-final-pair.py,measurements.jsonl}`
@@ -70,6 +70,94 @@ with scripts/test.py's absolute-path network-runner configuration. The prepared
 variant adds `--prepare-cli` to the materializer; all CLI preparation is included.
 The initial isolated cold fallback total was 148.663s, recorded separately rather
 than compared to a warm candidate. Generic commands remain unprepared by default.
+
+### Cold preparation, small edit and app costs
+
+Final measurements used `98face4a667d2149deacf33ec85f7fd44b52b16e`, the same
+Cargo.lock hash above, Rust/Cargo 1.98.1 and Swift 6.2.3 on arm64 macOS. Two
+pairs ran fallback → prepared, then prepared → fallback, with four compiler/test
+jobs. Each mode started with an empty dedicated target, then reused it for one
+small edit: a fixed comment appended to `rust/loopflow/src/build_info.rs` only in
+the disposable source copy. Both modes used the exact-tree materializer and
+isolated verification target. Only CLI preparation differed. Source and lockfile
+hashes were unchanged afterward. Cold means empty build output; registry/download
+and OS caches were not flushed, and other host workloads remained active.
+
+The selection added six build-info tests to the two CLI-heavy fixtures above.
+All eight runs passed all eight tests through the normal network runner, with
+closed stdin, cleared inherited LF_* authority and disposable Homes. No final
+run emitted a leak warning. The earlier exploratory warning remains unresolved.
+
+| Workflow, two samples each | Total median (range), seconds | Allocated target GiB, range |
+| --- | ---: | ---: |
+| Cold fallback | 227.608 (184.918–270.297) | 4.467–4.470 |
+| Cold prepared | 99.932 (98.619–101.245) | 3.392–3.392 |
+| Small edit/test, fallback | 106.337 (100.534–112.139) | 4.496–4.499 |
+| Small edit/test, prepared | 70.020 (63.853–76.188) | 3.419–3.419 |
+
+The edit/test median improved **34.2%**. Cold median improved 56.1% in these two
+pairs, but the broad fallback range prevents treating that percentage as a stable
+forecast. The existing three-pair **29.5% warm gain** remains the primary speed
+result. Each materialized edit run copies source to a fresh path and rebuilds
+workspace crates; this does not measure an incremental in-place compiler edit.
+
+| Run | Compilation/preparation, seconds | Test phase, seconds |
+| --- | ---: | ---: |
+| Pair 1 cold fallback | ~127 | 46.514 |
+| Pair 1 cold prepared | 85.732 + 0.50 warm build check | 5.282 |
+| Pair 1 edit fallback | ~66 | 36.335 |
+| Pair 1 edit prepared | 48.702 + 0.49 warm build check | 5.296 |
+| Pair 2 cold prepared | 82.677 + 0.50 warm build check | 5.477 |
+| Pair 2 edit prepared | 49.162 + 0.46 warm build check | 15.250 |
+| Pair 2 cold fallback | ~213 | 42.227 |
+| Pair 2 edit fallback | 53.01 | 36.437 |
+
+Fallback compilation is Cargo's reported duration, rounded for minute-long builds;
+prepared compilation is wall time around the preparation subprocess. Fallback's
+test phase includes its nested ordinary-CLI build, not pure execution. Source
+copy/materialization took 0.337–1.416s; disposable-source cleanup and registration
+verification took 0.169–0.585s. Nextest metadata/discovery and residual overhead
+account for roughly 9–13s per invocation. Total includes every phase. No
+build-output reclamation runs inside these timings.
+
+Fresh prepared targets used **24.1% fewer allocated bytes**: 3,641,708,544 versus
+fallback's 4,796,891,136–4,799,524,864. Logical bytes were 3,597,200,314 versus
+4,733,894,750. This is consistent with avoiding fallback's separate ordinary-CLI
+dependency graph. It does not remove old variants already in a warm target; the
+earlier 10.890 GiB combined retained footprint remains evidence of that cost.
+After measurement, removing each benchmark-owned target took 0.365–1.003s and
+left zero allocation. That housekeeping is separate from the supported cleanup
+operation proved below. Allocation sums unique file `(device, inode)` pairs;
+APFS sharing still prevents an exclusive physical-savings claim.
+
+The app path received two unchanged-source repetitions, each with an empty
+Swift/control target and three warm rebuilds. `swift build --package-path swift
+--jobs 4` and `scripts/loopflow-dev.py bundle-control-tools --output <disposable
+bundle>` are unchanged by this Task; the latter inherits `CARGO_BUILD_JOBS=4`.
+These are repeated controls, not an app optimization comparison. Swift compilation
+and control build/copy are measured separately; no app installation, launch or
+execution was performed.
+
+| App component | Cold median (range), seconds, n=2 | Warm median (range), seconds, n=6 | Warm allocated output |
+| --- | ---: | ---: | ---: |
+| Swift | 35.448 (33.495–37.401) | 0.363 (0.353–0.456) | 856,485,888–856,526,848 bytes |
+| Control build/copy | 67.056 (67.011–67.101) | 0.234 (0.219–0.243) | 1,970,671,616 bytes |
+
+Warm medians by repetition were 0.364 → 0.356s for Swift and 0.228 → 0.241s
+for control: no >10% warm regression signal. The historical single-sample app
+baseline is not a causal comparison. Combined generated output was 2.63 GiB,
+excluding the copied bundle executable. Source setup took 0.308–0.322s; combined
+source/output cleanup took 0.890–0.901s, outside build timings. Swift linked
+successfully with Ghostty debug-symbol warnings. No profile, debugging or app
+authority tradeoff was introduced.
+
+Raw harness, exact commands, per-phase JSON and logs live in
+`.lf/tmp/local-build-final/{measure.py,measurements.jsonl,rust-*.json,*.log}`.
+Rust commands extend the selection above with `test(build_info::tests::)` and
+`--offline`; prepared mode adds only `--prepare-cli`. The harness times the
+existing materializer's subprocesses, changes the disposable copy for edit runs,
+and removes only its own outputs. The broad inventory supplies no deletion
+authority and was not needed for these measurements.
 
 ## Completed build output · 2026-10-13
 
@@ -124,8 +212,8 @@ counterexample is preserved at
 Cargo/npm/Swift operations newly racing cleanup in a completed candidate outside
 the Loopflow lease are unsupported. Detected Cargo retains output and reports that
 Task selection needs inspection. No native lock, mount or cache service claims
-universal exclusion. Full gate, remaining matched cold/edit/app measurements,
-hosted CI and delivery remain separate acceptance work.
+universal exclusion. The matched measurements above complete local performance
+acceptance; affected gate, hosted CI and verified delivery remain separate work.
 
 ## October 6 inventory and reclamation
 

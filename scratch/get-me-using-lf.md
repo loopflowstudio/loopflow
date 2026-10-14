@@ -487,3 +487,11 @@ affected-suite gate. No PR update, app restart or installation occurred; the sep
 datastore study remains outside this checkpoint.
 
 Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` PASS (524 tests, 61 suites; optional native diagnostics skipped); architecture, Swift boundary and diff checks PASS; `uv run python scripts/test.py --reuse-passing --base f9a16d6f84 < /dev/null` BLOCKED (resource preflight, no product suites); logs `/tmp/loo462-publish-{desktop-final,gate}.log`, inventory `/tmp/loo462-publish-resources.json`. Native proof remains with demo; affected suites with gate.
+
+### Next pursuit — database-driven UI
+
+Jack Heart authorized starting this after the rendering pass finishes. That pass
+finished at `e480b4bc7c`; publication remains blocked as above. Implement
+`scratch/datastore-reactivity-study.html`, including **Accepted next pursuit**.
+This supersedes the earlier research-only boundary, not the no-second-schema-reader
+rule. Preserve rendering and native-proof limits. Return to demo; no landing.

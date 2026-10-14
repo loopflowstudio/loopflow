@@ -390,13 +390,14 @@ explicit historical links or cached panes/drafts. A null successful reading diff
 from loading/unavailability; refresh failures preserve last-good Workflow content.
 The implemented chrome has focused tests, not native visual acceptance.
 
-Jack also requested taller compact Task rows with program status, stored Task/PR
-links and remote Machine names. Validated OSC 7501 reports and existing Waiting
-owners supply status; cheap nonreporter inference remains labeled and unknown
-stays unknown. Program completion is separate from Task/Workflow/Paused state.
-Started Tasks use recorded execution/checkout ownership, never changed delegation
-defaults; local names are omitted, assignment differs from execution. No new
-polling or status authority. This row slice remains unimplemented.
+Jack's October 13 Task metadata rows are implemented (`88d91e53ca`). Validated
+reports precede labeled nonreporter inference; cleared reporters stay unknown.
+Program status cannot complete Task/Workflow/Paused state. Stored Task/PR links
+are separate from conversation opening. Recorded checkout ownership supplies remote
+names, never delegation defaults; local names and assignments are omitted.
+Saved Session pages strip reports and Waiting with liveness: restoring them revived
+stale status. Focused tests pass; native link dispatch and density remain unproved.
+No new polling or authority.
 
 Jack renewed measured optimization for Codex and Claude separately: cached switch,
 resume and fresh launch end at visibly responsive unsent agent input. October 7's

@@ -8,8 +8,10 @@ cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
 `d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 13
-at `cf67067b0d`, including main `414d4dd27c`, completed chrome/profiling work and
-the failed configured demo. Sidebar metadata is implemented; native review remains.
+after `30b70b75b3`, including main `414d4dd27c`, sidebar implementation
+`88d91e53ca` and compression `0480344945`. The earlier feedback describing
+28-point single-line Task rows is superseded by those commits. Sidebar metadata
+is implemented; affected-suite gate and native review remain.
 
 ## Problem and accepted direction
 
@@ -396,4 +398,4 @@ live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
 Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check. These remain evidence for that revision, not an affected-suite gate.
-Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57); validation-only `cargo build --locked --bin lf --target-dir target/dev-app-control`, `codesign --verify --deep --strict` and `git diff --check` PASS. Gate owns affected suites; demo owns native timing/trust/link/density proof.
+Check: `git diff --check` PASS (prose reconciliation); reused `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57) and bundled build/signature results at `30b70b75b3` (code unchanged). Gate owns affected suites; demo owns native timing/trust/link/density proof.

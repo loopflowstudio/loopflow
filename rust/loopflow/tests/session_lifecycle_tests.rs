@@ -211,36 +211,7 @@ const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"
 #[test]
 fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let fixture = Fixture::new(false);
-    let codex = fixture.home.path().join("bin/codex");
-    let script = support::codex_app_server_script("Parser inspected.", "");
-    let terminal = r#"#!/bin/sh
-if [ "$1" = --version ]; then exit 0; fi
-mode=terminal
-for arg in "$@"; do
-    case "$arg" in app-server) mode=server;; resume) mode=resume;; esac
-done
-if [ "$mode" = resume ]; then
-    case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac
-fi
-if [ "$mode" = terminal ]; then
-    printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
-    python3 - "$@" <<'PYTHON'
-import subprocess, sys, tomllib
-config = tomllib.loads(next(arg for arg in sys.argv[1:] if arg.startswith("hooks=")))
-for group in config["hooks"]["SessionStart"]:
-    if "startup" in group["matcher"]:
-        for hook in group["hooks"]:
-            subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
-PYTHON
-    exit $?
-fi
-"#;
-    std::fs::write(
-        &codex,
-        terminal.to_owned() + script.strip_prefix("#!/bin/sh\n").unwrap(),
-    )
-    .unwrap();
-    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    support::install_native_codex(&fixture.home.path().join("bin"));
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
@@ -278,6 +249,26 @@ fi
         .output()
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
+    let config: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("native-config.json")).unwrap(),
+    )
+    .unwrap();
+    let roots = config["config"]["sandbox_workspace_write.writable_roots"]
+        .as_array()
+        .unwrap();
+    assert!(
+        roots.contains(&serde_json::json!(fixture
+            .home
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("configured-root"))),
+        "{roots:?}"
+    );
+    assert!(
+        roots.len() >= 2,
+        "worktree Git access must retain configured roots"
+    );
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
     let native: String = fixture

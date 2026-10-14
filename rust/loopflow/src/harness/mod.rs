@@ -234,13 +234,12 @@ pub enum SendCurrentOutcome {
 
 /// How a harness answers vendor approval/permission requests.
 ///
-/// `AutoApprove` is the only variant until Decisions land; the enum exists so
-/// approval behavior is an explicit construction-time policy instead of a
-/// constant buried in each transport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalPolicy {
     /// Approve every request the vendor asks about.
     AutoApprove,
+    /// Bootstrap a conversation without answering for the native client.
+    NativeClient,
 }
 
 #[async_trait]

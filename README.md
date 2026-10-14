@@ -218,8 +218,9 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
-Claude and Codex terminal Sessions load assembled context from a system instructions
-file, keeping the initial command-line message short even with large Wave memory.
+Codex terminal Sessions receive context and the first message through the provider
+protocol. Claude loads context from a system instructions file and the first
+message from stdin. Large requests stay out of terminal command-line arguments.
 New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
 purpose was supplied. Human-assigned names survive reconnects and suggestions.

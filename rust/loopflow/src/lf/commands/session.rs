@@ -98,6 +98,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 message.is_none(),
                 "a resume message is a headless turn: lf -b session resume ID MESSAGE"
             );
+            let progress = crate::startup::Startup::new("Finding conversation");
             let store = open_shared_store().await?;
             let id = crate::ops::human_session::select_connection(
                 &store,
@@ -105,6 +106,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 id.as_deref(),
             )
             .await?;
+            drop(progress);
             open(&store, &id, false, OpenMode::Refuse).await
         }
         SessionCommand::History {

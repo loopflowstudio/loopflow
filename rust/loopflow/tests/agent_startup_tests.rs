@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -30,12 +30,13 @@ fn command(home: &Path, repo: &Path, bin: &Path) -> Command {
 fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&str]) -> Duration {
     fs::create_dir(measurements).unwrap();
     fs::write(home.join("provider-launches"), "").unwrap();
+    let _ = fs::remove_file(home.join("release"));
     let start = Instant::now();
     let mut child = command(home, repo, bin)
         .args(args)
         .env("LF_PERF_OUTPUT", measurements)
         .env("GIT_TRACE2_EVENT", measurements.join("git.jsonl"))
-        .stdin(Stdio::piped())
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(
             fs::File::create(measurements.join("stderr")).unwrap(),
@@ -55,7 +56,7 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
     // The budget detects hangs and whole-second regressions, not runner jitter.
     let ready = receive.recv_timeout(Duration::from_secs(30));
     if ready.is_ok() {
-        child.stdin.take().unwrap().write_all(b"exit\n").unwrap();
+        fs::write(home.join("release"), "exit").unwrap();
     } else {
         // SAFETY: this is the new process group created for this fixture;
         // no copied or ambient process identity can be signaled here.
@@ -159,8 +160,12 @@ fn bare_and_connect_reach_provider_with_bounded_work_without_credentials() {
 printf 'launch\n' >> "$LF_HOME/provider-launches"
 if [ "$1" = --version ]; then exit 0; fi
 printf '%s\n' "$@" > "$LF_HOME/provider-args"
+case " $* " in
+    *" --resume "*) ;;
+    *) cat > "$LF_HOME/provider-input" ;;
+esac
 printf 'LF_STARTUP_READY\n'
-read -r finish
+while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
 "#,
     )
     .unwrap();
@@ -208,7 +213,10 @@ read -r finish
         .unwrap();
     let context = fs::read_to_string(context_file).unwrap();
     assert!(!context.contains("<lf:skill:default>"));
-    assert!(args.contains("<lf:skill:default>"));
+    assert!(!args.contains("<lf:skill:default>"));
+    assert!(fs::read_to_string(home.join("provider-input"))
+        .unwrap()
+        .contains("<lf:skill:default>"));
     let native = args
         .lines()
         .skip_while(|arg| *arg != "--session-id")

@@ -28,7 +28,7 @@ if '--input-format' in sys.argv:
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'result', 'session_id': 'fixture', 'subtype': 'success', 'result': 'hello'}), flush=True)
 else:
-    context += '\n' + sys.argv[-1]
+    context += '\n' + sys.stdin.read()
     open(os.environ['TEST_CONTEXT'], 'w').write(context)
     print('hello')
 "#,

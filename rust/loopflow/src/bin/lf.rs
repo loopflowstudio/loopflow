@@ -2321,9 +2321,6 @@ fn execute_command(
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),
-        Some(Commands::ProviderSession) => {
-            loopflow::lf::commands::session_history::observe_provider_session()
-        }
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery, *moment)
         }

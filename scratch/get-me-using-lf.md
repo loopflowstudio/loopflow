@@ -434,53 +434,59 @@ Desktop cut in LOO-462, returning to demo; no landing or installation authority.
   combinations without creating fake live reports or interrupting user clients.
   Refresh `pr-review.html` after implementation so it stops describing old code.
 
-### Implementation state — October 14
+### Current pursuit — rendering ownership, October 14
 
-Delete — do not maintain: `accentInk`/`selectionTint`; `TerminalPalette.stateDot`
-and its live-client state switch; per-row active/unknown labels and dots;
-`WorkSurfaceView.sessionTone`; red stopped-Workflow presentation; burgundy row
-selection; Desktop consumers of marketing `Color.status*`; duplicated `nowColor`.
-These predecessors are removed. Keep underlying Session evidence, program report
-severity/identity, terminal ANSI, native clients, stored records, retained layouts
-and drafts. No data model, persistence or execution change.
+Jack Heart approved implementing the previous rendering plan combined with the
+cmux research, then explicitly requested an updated design and background pursue.
+Return through publication for demo review; no landing, installation, live database
+cleanup, native takeover, or restart of the running demo is authorized by this cut.
+Prior semantic-color implementation and passing checks are preserved at
+`5ade59f428:scratch/get-me-using-lf.md`, **Implementation state — October 14**.
 
-`LoopflowPalette` owns selection/focus/link/action/status ink. Shared controls and
-Files use those roles. Reported working/error and shared Waiting survive; unknown
-and client-only activity are omitted. Failed reads remain a quiet inspectable icon.
-Pane selection no longer dims terminal output and its failures; native keyboard
-focus stays with the existing terminal owner. Review caught dark
-selected-background contrast loss and stopped edges falsely painted as errors;
-neutral selection composition and lifted dark inks repair both.
+Read these complete local artifacts before implementation:
+- `scratch/rendering-state-review.html`: red/green data structures and APIs. Green
+  is a proposal, not implemented code or verified native behavior.
+- `scratch/cmux-implementation-study.html`: pinned source/test research and limits.
+- `scratch/swift-relevance-audit.html` and `swift-relevance-inventory.json`: every
+  tracked Swift file/declaration inventoried; 183 unresolved symbol entries require
+  judgment, not blanket deletion. Runtime callbacks and public APIs need evidence.
 
-Remaining: publication, matching-app demo in both
-appearances, native hover/focus/link dispatch, pending profiling/trust acceptance.
-The existing apps and drafts were not touched. No native acceptance is claimed.
+Build the smallest coherent cut:
+1. Move Task conversation preparation-to-pane handoff into the existing model/
+   workspace owner. Install the resolved Session into its retained workspace before
+   clearing opening. Remove the view-observed linkedSession mailbox for that role,
+   replacing it through the same opening owner for deep links and CLI companions.
+   Preserve request generations, Machine locations, readiness/failure receipts,
+   explicit takeover and delayed-result destination identity. A late A result may
+   populate A, never redirect a person who selected B.
+2. Render the selected destination immediately. Keep cached Work, Workflow, panes,
+   native surfaces, focus and drafts across reads and switching. Refresh must not
+   clear a good value. Derive presentation from existing state rather than add
+   another persisted lifecycle or copied selected-Session field. Prepared permits
+   mounting; it does not prove responsive coding-agent input.
+3. Keep sidebar, compact header and terminal host structurally stable. Any necessary
+   initial opening feedback belongs inside the terminal area, with one vocabulary;
+   errors remain actionable without replacing retained content. Reduce cold Workflow
+   height jumps by placing expanded graph/detail in Overview while keeping compact
+   current-position/available-action information visible. This is a reversible
+   implementation choice for the next demo, not claimed visual acceptance.
+4. Learn cmux's separation of retained native ownership, mounted visibility, focus
+   and diagnostic readiness. Reuse our existing surface pool; no AppKit portal
+   rewrite, custom Observation registrar, TCA adoption or new Swift SQLite reader.
+   Rust/lf retains datastore and legal-action ownership. Narrow observation where
+   concrete dependencies cause rebuilding, not speculative global debouncing.
+5. Apply audit-backed deletions relevant to this current app: obsolete reachable
+   Session inventory/chrome, dead presentation branches and replaced handoff paths,
+   plus their obsolete tests. Resolve remaining inventory entries by evidence or
+   explicitly retain uncertainty. Do not infer dead code from textual call counts
+   or erase history/CLI access to make the UI simpler. Preserve platform consumers.
 
-Review: preserved report/Waiting provenance and data ownership; removed the duplicate
-terminal status mapping and opaque stopped-edge error assumption. The native pane's
-retained selection cannot establish first responder, so it uses the neutral selection
-edge; control focus uses the distinct outline. Emphasized-button focus sits outside
-its filled background to avoid burgundy-on-burgundy disappearance. Inline native
-prose retains native text-link behavior; navigation/control links use WorkLinkStyle.
-
-Compression removes `TaskRowProgramStatus.active`, the misleading row-specific
-reducer name, ambient `WorkTone.ink` / `Color.adaptive` resolution and duplicate
-`MetricEvidence.stateColor`. `SessionProgramStatus` now serves sidebar, history and
-pane presentation; shared records still retain client liveness. Waiting/failure
-tone names match their visible meaning. Views use their supplied palette for ink,
-chip text/fills, borders and loop tints; existing color values are preserved.
-No deletion targets remain in this cut. Review caught mixed palette/native-appearance
-resolution; the contrast regression covers explicit palette selection. Native
-appearance, focus and retained-input judgment remains with demo.
-
-Earlier implementation checks: `c5ff92d50f:scratch/get-me-using-lf.md`, this section.
-The first compression build found a missing WorkflowEditor palette reference,
-repaired before the passing run.
-Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkPaletteTests|TaskRowMetadataTests|ProgramStatusTests|DesktopHeadlessTests|FlowGraphTests|TaskFlowTests|WorkflowGraphTests'` PASS 44 tests in 5 suites (reused `/tmp/loo462-compress-semantics.log`, code unchanged by realign); `git diff --check` PASS; `lf context` within both limits. Affected-suite gate/publication and native demo remain.
-
-Publication review: inspected the range from actual base `e3c3a038aa`, including
-compression and reconciled notes. Shared Session evidence remains the status owner;
-palette resolution is explicit; neither selection nor client liveness invents
-program activity. No new blocker found for Jack Heart's demo-review boundary.
-Native acceptance and updated walkthrough remain with demo; no landing is requested.
-Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` PASS 526 tests in 62 suites (`/tmp/loo462-publish-desktop.log`); optional display diagnostics and opt-in CLI Portfolio readback skipped; `uv run python scripts/check_swift_multiplatform_boundaries.py` PASS; `git diff --check` PASS. No Rust changes since earlier verification.
+Tests must observe intermediate transitions, not only final state: first opening
+never flashes empty between resolution and pane installation; cached switch retains
+exact pane/draft without preparing again; late replies stay with their Work;
+metadata errors retain content; stale readiness cannot mark another surface ready.
+Run focused headless Swift build/tests; repair failures. Keep existing end-to-end
+Codex/Claude readiness profiling obligations honest: native input readiness is not
+surface creation. Do not claim timings, flamegraphs or visual stability from mocks.
+Record one-line checks and concrete review findings; refresh the HTML walkthrough
+with actual APIs after implementation. The running demo and user clients stay intact.

@@ -429,10 +429,11 @@ struct TaskFilesTests {
                                  ("issue-now", "loopflow.make-lf-work-the-machine")] {
             model.select(.task(id: task))
             model.navigation.content = .terminals
-            let text = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location").text().string()
+            let toolbar = try view.inspect().find(viewWithAccessibilityIdentifier: "work-toolbar")
+            let text = try toolbar.find(viewWithAccessibilityIdentifier: "task-worktree-location").text().string()
             #expect(text == location)
             #expect(throws: (any Error).self) {
-                try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
+                try toolbar.find(viewWithAccessibilityIdentifier: "worktree-chip")
             }
         }
     }

@@ -1,59 +1,48 @@
-# v0.13.14
+# v0.13.15
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.14 makes it easier to set work aside, return to interrupted conversations, and deliver changes within a repository's existing conventions. Tasks can pause without losing their work, Session opening is explicit, and delivery preserves existing scratch documents. Contributors also get less repeated build work, faster verification, and bounded cleanup of completed build output.
+v0.13.15 makes it easier to return to the right conversation and carry it forward with current settings or a different provider. Session launch settings now apply consistently across CLI, Desktop and headless work, while native prompt delivery handles large requests through terminal wrappers more reliably. Readable Task labels make work easier to recognize, and disposable offline data clones let contributors explore retained planning and history without modifying the source installation.
 
-## Leave work intact while taking a break
+## Return to the conversation and keep going
 
-Pausing an unfinished Task now keeps its checkout, PR, conversations, Workflow and execution history together while holding new automated work. Conversation recovery also preserves saved native history when a provider exits without its exit being recorded.
+Resuming work now follows its Task and checkout context. Stopped Sessions pick up current launch settings, and an explicit provider switch carries earlier conversation text into a fresh native conversation while preserving the Loopflow Session.
 
-- Use `lf task pause <issue>` and `lf task resume <issue>`, or Pause Task and Resume Task in the Desktop Task header's context menu. Paused Tasks remain in the Wave plan and leave the default active sidebar, including those with retained Sessions.
-- Pause holds new Task Flow runs, CI repair and automatic completion reconciliation. It does not stop running processes or move the Workflow; resume starts nothing. The hold persists through planning exchange, independently of Linear disposition.
-- `lf session ensure` and `lf session replace` prepare conversations; `lf session connect SESSION` opens them in the current terminal. This replaces the tmux conversation launcher.
-- Recovery requires the recorded provider's exact PID and birth time to establish its death. A live or unknown provider does not permit a duplicate launch, and observed death is not recorded as success.
-- Explicitly reconnecting to a replaced Session preserves its completion marker and the successor's primary selection, even when the first launch produced no native history.
+- `lf resume` prefers the active Task's conversation, then interactive recency within the worktree. From the main checkout, recency spans the repository's worktrees. Explicit `--task` and `--wave` selectors override discovery.
+- `lf connect` selects a Session ID, Task or Wave and prepares a primary conversation when needed. Desktop uses the same preparation. Add `--prepare` to return connection data, including remote SSH commands, without launching a provider.
+- Stopped Sessions reload settings from their saved checkout, including permissions and Chrome integration. Same-provider continuation retains native history and account; live connections keep their existing settings, and historical replay retains captured inputs.
+- Use `lf resume -a <agent>` or `lf connect <session> -a <agent>` to change providers. The Session keeps its identity, name, Work and feedback. The new provider receives a conversation log and opening/latest excerpts, without reusing the earlier provider's native token or account.
+- If the new provider fails to start, retry `lf connect <session>` without `-a`; the saved continuation still targets the selected provider. Earlier native conversation selections remain in Session history.
+- Native Codex receives instructions, hooks and the exact first request through its provider protocol; Claude receives its first request through stdin. Preparation feedback and retained failed-start input improve recovery, and normal disconnects no longer report a broken pipe or replay the first turn. Codex retains terminal-owned approvals, native tools, workspace roots and wrapper hooks.
 
-## Deliver within the repository's conventions
+## Recognize work across Sessions and checkouts
 
-Worktree creation and integration now follow more of the repository's existing Git setup. Review handoffs are explicit, and delivery cleanup removes notes introduced by the current work while preserving existing documents.
+Tasks now share a readable label across CLI and Desktop views, Session history, automation and reports. Generated names follow that label without changing durable Task identity or moving existing work.
 
-- When at least two live branch checkouts share a parent, new worktrees follow that placement. Existing checkouts are reused without fetching; bare and separate Git directories are supported. Checkout-hook failures are reported without discarding the checkout.
-- Integration discovers the default branch through Git and follows its configured upstream. Explicit local sync targets require no remote fetch.
-- Use `lf pr request-review`, `lf pr reviews` and `lf pr checks --required` for review handoffs and required-check inspection. Submission leaves reviewers and assignees unchanged; auto-merge follows GitHub's allowed methods, repository preferences and merge queues.
-- Rejected pushes no longer trigger an automatic force-push fallback. Release regeneration preserves published ancestry, and required CI failures remain actionable regardless of job name.
-- Submit and land preparation use `lf scratch clear` to remove committed scratch additions. Existing files, edits, detected renames—including documents moved into scratch—and `.gitkeep` survive. Direct cleanup leaves untracked and staged-only additions untouched.
-- Scratch files commit and merge normally in persistent and stacked checkouts; children retain inherited notes. PR open and publish do not perform general scratch cleanup.
+- Known Linear identifiers remain usable offline. Local-only Tasks use short hexadecimal codes that start at six characters and extend when needed to distinguish collisions, including completed Tasks.
+- New branches combine the author, Task identifier and a short title, such as `<author>/eng-123-fix-login`. Explicit workspace names remain supported; an unrelated existing branch produces an actionable error.
+- Generated Session names begin with the Task label. Identifier updates, binding and attachment repair outdated labels while preserving manually assigned names; passive reads do not rename Sessions.
+- Label changes leave recorded branches and checkout paths intact. This naming change requires no schema migration.
 
-## Give agents guidance that fits the work
+## Explore real history in a disposable offline Machine
 
-Standalone launches no longer receive Task-management and operator procedures by default. Associated work receives shared guidance without that association selecting an operator or Workflow.
+A raw database copy can retain credentials, provider paths and live-client claims. `lf clone create`, `run`, `show` and `dispose` provide an isolated development path that preserves useful planning and history while removing copied connections to the live installation.
 
-- Task and Wave launches preload Work guidance, including associations recovered from existing checkouts and resumed Sessions. Existing conversations can read `lf help skill work`.
-- Operating procedures stay in selected skills and Flows. Association alone does not authorize Wave memory maintenance; standalone contributions keep proposed updates in scratch.
-- `lf history show SESSION --instructions` explains recorded instruction inclusion, omission and deduplication, with JSON and earlier-input support. Missing historical evidence remains unavailable rather than reconstructed.
-- Automatic scratch and repository-memory gathering no longer follows symlinks.
-
-## Spend less time rebuilding and reclaim finished output
-
-Verification reuses prepared CLIs, compiled tests and independent fixtures, then runs independent checks in parallel. Local cleanup now requires evidence that work is completed and inactive before deleting regenerable build output.
-
-- CI compiles and archives Rust once, consolidates ordinary integration targets and partitions execution. Installation checks reuse dependency preparation while retaining disposable account/Home isolation and a distinct published-title build; installation verdicts are not cached.
-- macOS cache misses overlap control CLI and Xcode builds. Local `scripts/test.py` prepares the verification CLI with test targets and pins Cargo's executable artifact.
-- The CI restructuring recorded a full Actions workload pass in 4:25, against a roughly 20-minute baseline. Matched local measurements showed a small edit/test median of 70.0 seconds versus 106.3 seconds, and fresh prepared allocation of 3.39 GiB versus 4.47 GiB. These are recorded measurements, not a release-wide timing guarantee.
-- `lf wt prune --builds --dry-run` explains cleanup candidates and retention reasons. Cleanup defaults are 24 hours, eight roots and 64 GiB; completed ownership, fresh execution/process inspection and a worktree lease govern eligibility.
-- Unknown or busy work retains output. Cleanup preserves source, dirty and untracked edits, history and registered checkouts, and replaces the Python age-only deletion path. Direct build or clean commands racing cleanup outside Loopflow's lease are not universally excluded.
+- Clone creation backs up SQLite under source write protection and applies canonical migrations and this build's drafts only to the destination. Ordinary database opens remain validation-only; draft SQL gains no published migration provenance.
+- Clones retain planning identities, Session history and Task-primary selection, while removing copied credentials, routes, PIDs, endpoints and attachment tokens. Codex and Claude JSONL archives can be supplied explicitly.
+- An inherited macOS sandbox confines descendant writes, networking, Unix sockets and process control. Source repositories remain read-only, and Desktop helpers and embedded-terminal environments stay pinned to the clone.
+- Browse retained history or supply offline stand-in executables for fresh disposable conversations. Copied provider continuation is unavailable.
 
 ## Operational notes
 
-- **Move authored Wave files to `.lf/wave/`.** Goals, memory and metrics now use that location across CLI, Desktop, context gathering and skills. Update references when upgrading existing repositories: there is no automatic migration or old-path fallback. Top-level `wave/` is ordinary repository content.
-- The Task-pause SQLite migration leaves existing Tasks unpaused. Install through the normal release path before exercising pause against a live store; native controls and configured live-store acceptance remain unverified in the supplied evidence.
-- Session recovery has stand-in-provider coverage, but installed recovery and real Codex terminal interaction remain unverified. Live model behavior for the revised instruction scoping also remains unverified.
-- Worktree placement does not register workspaces with another host or run its setup scripts. PR publication and stacked remotes retain GitHub/origin assumptions.
-- Installation image acquisition now consistently uses `docker.io/library/rust:trixie` after ECR exhausted its public data quota. Stable/trixie policy and isolated installation checks remain; full disposable installation acceptance on that repair was still pending in the supplied record.
-- The supplied checks do not establish a passing full hosted matrix for the combined release. Ten consecutive sub-five-minute CI runs, merge-queue timing and push-to-merge timing remain unproved. Local storage measurements do not establish exclusive APFS savings.
+- **Update Session callers.** Replace `resume ID` with `connect ID`; use `--message TEXT` for headless continuation. Add `--prepare` wherever `connect --json` previously meant preparation only: `--json` now controls output format only. Primary-conversation replacement is `session new`; takeover of the same conversation is `connect --takeover`. The old spellings have no compatibility aliases.
+- Provider import supplies a transcript, not a summary. Long conversations are excerpted in the first turn, so the new agent must read the log for the middle. OpenCode import requires `opencode` installed and runnable from the Session's working directory. Directly opening a saved native session with a mismatched provider still fails; use the Loopflow Session continuation commands instead.
+- **Offline clones were verified on macOS 26; macOS 15 is unsupported.** Creation probes sandbox capability before reading source data and refuses without an unsandboxed fallback. Refusal can leave an incomplete disposable directory. Native window/PTY draft switching and real-account continuation are not established by this release's clone evidence.
+- Required execution boundaries remain independent of YOLO settings. OpenCode still cannot satisfy managed Task execution requirements; its prompt transport is unchanged. Claude background/attach reconnect remains excluded from the verified native paths.
+- Real Codex plain and wrapped terminal launch/reconnect and Claude large-message stdin delivery were exercised. Settings propagation and provider switching use stand-ins and simulated SSH; installed-app and visual Desktop acceptance remain unverified. Linux planning reconnect and shutdown acceptance remain CI-owned, and the supplied record does not establish a full hosted matrix pass for the combined release.
 
 ## Small changes
 
-- Remove duplicate architecture scans and brittle metric-prose, title and Session-history assertions while retaining checker fixtures, portable HTML freshness and behavioral coverage. The cleanup removes 21 assertions and three cases; migration, recovery, Task ownership, network, account and process-safety proofs remain unchanged.
-- Replace timing and display-order assumptions in planning and rate-limit tests with identity, state-preservation and convergence checks.
+- macOS process observation uses the SDK kernel reader instead of privileged `ps`, retaining process birth and zombie evidence. Linux keeps its existing reader.
+- Provider and relay sockets use the caller's temporary root so isolated clones can launch safely.
+- Claimed Session inputs record the provider and model actually launched.

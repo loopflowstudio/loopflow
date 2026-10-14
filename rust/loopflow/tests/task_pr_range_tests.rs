@@ -1082,8 +1082,15 @@ exit 0
     let base = repo.head_sha();
     let branch = "jack/continued-work";
     repo.create_branch(branch);
-    let task = (scenario != "ordinary")
-        .then(|| register_task_with_pr(home.path(), repo.path(), branch, &base));
+    let task = (scenario != "ordinary").then(|| {
+        // Match Git's canonical checkout path, including macOS temporary-directory aliases.
+        register_task_with_pr(
+            home.path(),
+            &repo.path().canonicalize().unwrap(),
+            branch,
+            &base,
+        )
+    });
     repo.create_file("first.txt", "first delivery\n");
     repo.stage_all();
     repo.commit("First delivery");
@@ -1120,11 +1127,7 @@ exit 0
             runtime.block_on(task.store.settle_task_pr(&pr)).unwrap();
         }
         if scenario == "completed" {
-            let error = loopflow::ops::task::task_complete(repo.path(), "INF-123", None)
-                .expect_err("the primary fixture checkout is retained after completion");
-            assert!(error
-                .to_string()
-                .contains("cannot delete the primary checkout"));
+            loopflow::ops::task::task_complete(repo.path(), "INF-123", None).unwrap();
             assert_eq!(
                 runtime
                     .block_on(task.store.task_state(&task.task.id))

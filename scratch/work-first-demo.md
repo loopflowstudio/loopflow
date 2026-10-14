@@ -233,58 +233,32 @@ belongs to the primary demo. No trust clicks or live restart performed.
 
 Checks: 13 focused tests, cargo fmt, all-target Clippy passed; native approval proof deferred.
 
-## Failed native refresh — October 13
+## Native refresh and release prerequisite — October 13
 
-Jack Heart reported launching only `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`
-(0480344945, `studio.loopflow.work-demo.compress`, PID 87480) with its validation-only
-bundled lf and real `/Users/jack/.lf`. Cached rows initially showed the new layout;
-fresh planning failed with `no such column: t.paused`, then rows disappeared.
-“No workflow yet” appeared despite the expected saved Workflow. No Session was
-opened, no input sent, and no existing app or retained draft was replaced.
-This failed demo supersedes the earlier unlaunched-app account. The attributed
-observation is the evidence: `/tmp/loo462-oct13-demo.log` is empty and the named
-input trace is absent. Neither supplies a diagnostic timeline.
+Failed attempts and diagnosis: `b284342fcf:scratch/work-first-demo.md`,
+**Failed native refresh — October 13**. Jack Heart observed cached rows disappearing
+and an unexpected null Workflow. The old demo lacked `tasks.paused`; the isolated
+reproduction fails before planning, not inside a partial frame. Separate partial-frame
+retention and stale-Workflow bugs were repaired (62 focused Desktop tests passed),
+but neither establishes the native disappearance's cause. Cache selected LOO-382,
+which has no captured Workflow; LOO-462 has feature/demo. No Workflow was backfilled.
+Earlier app receipts and failed observations remain in that archive.
 
-Read-only inspection during this repair found canonical frontier
-`0.13.13.001_release`, no `tasks.paused`, and LOO-462's stored `feature` Workflow
-at node `demo`, edge 3. `task_paused.sql` remains an unreleased draft. A published
-release containing that migration, installed through the supported installation
-boundary, is the real-schema prerequisite. Reinstalling 0.13.13 cannot supply it.
-No live schema, migration ledger or provider state was changed.
+v0.13.14 published from `de368eda46`; authorized `lf install` applied the released
+migration with a backup. Installation succeeded; skill sync rejected portable name
+`.system-imagegen` and left skills unchanged. The prior validation-only demo helper
+then refused the newly named release migration. `lf sync` merged release main
+conflict-free as `fe0cf994a1`; no schema provenance was fabricated.
 
-The isolated released-schema fixture reaches `t.paused` while counting a Wave's
-active Tasks, before emitting planning. The earlier inference that this exact
-failure arrives inside a partial frame was wrong. Top-level planning errors
-already preserve the last-good value; the native row disappearance remains
-unconfirmed without a captured stream. Regressions cover the exact top-level
-failure after cached launch, plus a separate discovered bug: successful frames
-containing failed/truncated per-Wave readings discarded previously available rows.
-Those now retain planning and its disk cache, with an error and no automatic
-empty-repo entry. Already unavailable Waves do not block other successful readings.
-Selected panes/drafts survive, and successful refresh replaces the retained snapshot.
+Current demo: `/tmp/loo462-post-release/Loopflow Work Demo.app`, bundle
+`studio.loopflow.work-demo.release14`. Unchanged Swift executable from `a590ecb7ee`,
+new validation-only helper built from `fe0cf994a1`, ad-hoc signed. Retained-checkout
+SwiftPM resources remain required. Launched against real `/Users/jack/.lf` and
+`/Users/jack/src/loopflow`; embedded commands select the bundled helper.
 
-Task Work remains an independent stream. Reader disconnection now marks its last
-value stale; a stale null Workflow cannot claim “No workflow yet,” and stale
-Workflow actions are disabled. The precise native null-Workflow trigger remains
-unconfirmed without a captured Task frame/selection. Roadmap `workflow_name` is
-not proof of a captured Workflow: Rust may fill it from the Project recommendation.
-No Workflow is invented from that name and no stored Workflow is backfilled.
-
-Current read-only cache inspection names LOO-382 as the saved Loopflow selection;
-its Task has no captured Workflow. The cache and database name the same Machine.
-This is a plausible explanation for the null Workflow, not proof of the October 13
-screen's selected Task. LOO-462 remains the required known-Workflow native case.
-
-Matching unlaunched review app: `/tmp/loo462-oct13-retention-compress/Loopflow Work Demo.app`,
-revision `a590ecb7ee`, bundle `studio.loopflow.work-demo.retention-compress`.
-The refresh repair's earlier app remains at `/tmp/loo462-oct13-refresh/Loopflow Work Demo.app`
-(`279078f02d`). The new app shares roadmap publication across stream and one-shot
-reads; 62 focused Desktop tests passed. Validation-only lf build and ad-hoc
-signature verification PASS; source/signed hashes are in adjacent `build.json`.
-SwiftPM resources still require this retained checkout. Existing apps and drafts
-remain untouched; gate/publication and native review remain ahead.
-October 13 reconciliation confirmed the receipt and inspected the repair's reader,
-retention and Workflow paths. Later main merge `c89c789fd1` changes CI build
-scheduling, not those runtime sources; it does not resolve the schema prerequisite
-or supply another native observation. The exact disappearance/null-Workflow cause
-remains unconfirmed; the isolated regressions are not a successful real-schema demo.
+Check: bundled `monitor work --json` PASS, planning frame has 48 Waves and no top-level unavailable error; `/tmp/loo462-release14-work.{json,err}`. This is not sidebar membership or native readiness proof.
+Native inspection remains blocked by the locked macOS screen. PID 24383 was live;
+no screenshot or usable provider input is claimed. Existing root client 38604/38805
+was preserved. Next: unlock, inspect the rendered sidebar and LOO-462 feature/demo,
+then verify Task conversation opening without taking over an existing client.
+PR #1531 is published, not approved to land. Profiling and hook acceptance remain.

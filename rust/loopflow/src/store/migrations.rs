@@ -150,6 +150,26 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
 }
 
+/// Only the clone creator calls this, on its newly backed-up private destination.
+/// Drafts change the experiment schema, never the published migration ledger.
+pub(crate) fn prepare_clone_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+    let drafts = crate::build_info::migration_draft_manifest();
+    if validate_experimental_schema(conn, drafts).is_ok() {
+        return Ok(());
+    }
+    _migration_transaction(conn, |conn| {
+        apply_set(conn, MIGRATIONS)?;
+        validate_schema(conn, MIGRATIONS)?;
+        for draft in drafts {
+            conn.execute_batch(draft.sql)?;
+            seed_peer_planning(conn, draft.sql)?;
+        }
+        validate_foreign_keys(conn)?;
+        validate_persisted_json(conn)?;
+        _validate_development_schema(conn, drafts)
+    })
+}
+
 /// Initialize an empty experiment with this build's exact schema.
 /// Concurrent initializers recheck under the writer lock; existing schemas are
 /// validated without appending drafts, adopting releases or creating backups.

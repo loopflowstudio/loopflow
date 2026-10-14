@@ -9,8 +9,11 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 
 The development app and its children use this checkout's bundled CLI against
 main-Machine data by default. Explicit `LF_HOME` selects separate data, not a
-different binary. A copied Machine retains real checkout paths, so file edits
-still affect those checkouts.
+different binary. For populated data, use [offline data clones](../docs/data-clones.md):
+`lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
+terminals, preserves source checkouts read-only, and reports copied Sessions'
+continuation limits. A bare SQLite copy provides no filesystem, provider or client
+isolation.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 

@@ -101,6 +101,7 @@ pub(crate) fn preview_prompt(
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
+    crate::data_clone::require_writable_session(id)?;
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(id)?

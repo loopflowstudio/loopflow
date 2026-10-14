@@ -66,10 +66,19 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// The app and its CLI are one build; never substitute an installed helper.
+    /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
     static func controlLfPath(
-        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf")
+        bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
+        if let root = environment["LF_CLONE_ROOT"] {
+            let helper = URL(fileURLWithPath: root).appendingPathComponent("bin/lf").path
+            guard environment["LF_HOME"] == root, environment["LF_BIN"] == helper,
+                  FileManager.default.isExecutableFile(atPath: helper) else {
+                throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
+            }
+            return helper
+        }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
                 errorDescription: "Loopflow.app is missing its executable bundled lf helper at Contents/MacOS/lf. "

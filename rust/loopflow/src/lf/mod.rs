@@ -362,6 +362,11 @@ pub enum ScratchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Create and use an offline, isolated development data clone (macOS)
+    Clone {
+        #[command(subcommand)]
+        cmd: crate::data_clone::CloneCommand,
+    },
     /// Pull request lifecycle
     Pr {
         #[command(subcommand)]

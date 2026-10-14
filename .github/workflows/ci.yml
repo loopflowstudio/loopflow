@@ -398,7 +398,11 @@ jobs:
   macos-process-test:
     needs: [merge-proof, scratch-clear]
     if: ${{ !cancelled() && needs.scratch-clear.outputs.candidate == 'true' }}
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
@@ -412,13 +416,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         id: rust-cache
         with:
-          key: macos-process-${{ steps.rust-profiles.outputs.key }}
+          key: macos-process-${{ matrix.os }}-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
       - name: Test macOS installation process discovery
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
           uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
+      - name: Test isolated data clones and native process identity
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          /usr/bin/time -l cargo test -p loopflow --test integration data_clones:: --no-run
+          # These fixtures install their own inherited sandbox; the outer runner
+          # permits an unsandboxed system ps and cannot be nested with this policy.
+          if [ "${{ matrix.os }}" = macos-26 ]; then
+            cargo test --offline -p loopflow --test integration data_clones:: < /dev/null
+          else
+            cargo test --offline -p loopflow --test integration data_clones::clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source < /dev/null
+          fi
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
 
   loopflow-ui-test:
     needs: [merge-proof, scratch-clear]

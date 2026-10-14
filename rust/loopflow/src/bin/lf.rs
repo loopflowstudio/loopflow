@@ -1420,6 +1420,7 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
+    loopflow::data_clone::enter_selected()?;
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1496,6 +1497,12 @@ fn run() -> anyhow::Result<()> {
     };
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
+    }
+    // Clone creation must reach an incompatible source read-only, without
+    // admitting a Process or forwarding the development binary to an install.
+    if let Some(Commands::Clone { cmd }) = &cli.command {
+        journal::mark_effect_free_read();
+        return loopflow::data_clone::run(cmd);
     }
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
@@ -2313,6 +2320,7 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
+        Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {

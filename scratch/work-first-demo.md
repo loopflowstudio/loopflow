@@ -216,3 +216,14 @@ It correctly showed “Active in another terminal” with explicit Move here; no
 other client was stopped or input sent. This verifies launch/navigation, not
 responsive provider input, complete sidebar cleanup or overall UX acceptance.
 PR #1531 remains published, not approved to land. Profiling and hook acceptance remain.
+
+
+## Semantic demo — October 14
+
+Built Swift and matching validation-only helper from `e7e3e0fc6d`; ad-hoc signed
+`/tmp/loo462-semantic-demo/Loopflow Work Demo.app` (bundle
+`studio.loopflow.work-demo.semantic`). Launched on the real Loopflow repo/Home.
+Native AX inspection confirms links and absent unknown/client-only labels;
+selected LOO-462 for review. Existing clients were not explicitly replaced.
+Capture returned a malformed tall bitmap, so full visual/color acceptance remains
+with Jack Heart; no provider-input or both-appearance proof is claimed.

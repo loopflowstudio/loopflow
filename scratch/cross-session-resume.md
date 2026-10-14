@@ -4,6 +4,8 @@ Status: implemented (2026-10-14); headless path lacks its own test. Jack request
 
 Decided 2026-10-14 (Jack): no `--fresh` flag. When the provider matches, resume stays native. Jack is fixing the Claude permission block separately. The log format is the designer's call: whatever helps the next agent.
 
+Decided 2026-10-14 (Jack): the skill belongs in the log and is not re-sent with the continuation. The first turn quotes the log's beginning and end, size-limited (6k + 14k chars), rather than only pointing at it. `lf session connect ID -a codex` imports the same way as resume. `resume_choice` takes the selected agent explicitly, matching the parameter shape of `resume_model` on `jack-heart/claude-permissions`.
+
 ## Problem
 
 Jack had a Claude Session stop because it was blocked by permissions, then ran:

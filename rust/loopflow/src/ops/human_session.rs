@@ -627,9 +627,11 @@ pub(crate) async fn open(
             .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
-            if let crate::config::Resume::Import { agent } =
-                crate::config::resume_choice(provider, session.model.as_deref())
-            {
+            if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
+                provider,
+                session.model.as_deref(),
+                crate::config::agent_override().as_deref(),
+            ) {
                 mode.require_action(surface(store, session).await?.state)?;
                 import(store, &session.id, &agent).await?;
                 let session = store
@@ -920,6 +922,8 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
     let (provider, model) = crate::config::parse_agent(agent);
     next.provider = Some(provider);
     next.model = model;
+    // The skill ran in the earlier conversation and is in its log.
+    next.skill = None;
     let mut next = append_input(store, next).await?;
     // The Session's original request stays on its row; this turn opens the new provider.
     next.request = Some(request);

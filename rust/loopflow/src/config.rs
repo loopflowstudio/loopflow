@@ -89,8 +89,8 @@ pub(crate) enum Resume {
     Import { agent: String },
 }
 
-pub(crate) fn resume_choice(provider: &str, model: Option<&str>) -> Resume {
-    let Some(agent) = agent_override() else {
+pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Option<&str>) -> Resume {
+    let Some(agent) = selected.map(str::to_owned) else {
         return Resume::Native(model.map(str::to_owned));
     };
     let (selected, model) = parse_agent(&agent);
@@ -567,19 +567,16 @@ mod tests {
     #[test]
     fn resume_stays_native_until_the_provider_changes() {
         use super::Resume;
-        let _lock = crate::journal::test_env_lock();
-        let _environment = crate::test_ambient::EnvGuard::clear(&[super::AGENT_OVERRIDE_ENV]);
         assert_eq!(
-            super::resume_choice("claude", Some("haiku")),
+            super::resume_choice("claude", Some("haiku"), None),
             Resume::Native(Some("haiku".into()))
         );
-        std::env::set_var(super::AGENT_OVERRIDE_ENV, "claude:opus");
         assert_eq!(
-            super::resume_choice("claude", Some("haiku")),
+            super::resume_choice("claude", Some("haiku"), Some("claude:opus")),
             Resume::Native(Some("opus".into()))
         );
         assert_eq!(
-            super::resume_choice("codex", None),
+            super::resume_choice("codex", None, Some("claude:opus")),
             Resume::Import {
                 agent: "claude:opus".into()
             }

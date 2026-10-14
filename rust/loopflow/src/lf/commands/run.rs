@@ -110,9 +110,11 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // Another provider starts a fresh AgentSession whose turn points to the log.
     let mut message = message.to_owned();
     if let Some(provider) = session.provider.as_deref() {
-        if let crate::config::Resume::Import { agent } =
-            crate::config::resume_choice(provider, session.model.as_deref())
-        {
+        if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
+            provider,
+            session.model.as_deref(),
+            crate::config::agent_override().as_deref(),
+        ) {
             let request =
                 crate::ops::human_session::conversation_log::continuation(&store, &session)?;
             message = format!("{request}\n\n{message}");

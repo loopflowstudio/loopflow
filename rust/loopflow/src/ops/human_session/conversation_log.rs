@@ -16,13 +16,10 @@ use crate::store::sqlite::SqliteStore;
 
 const TOOL_INPUT_CHARS: usize = 200;
 const ERROR_TAIL_CHARS: usize = 400;
-
-/// Plain-text log of one native conversation and the last thing a person asked in it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ConversationLog {
-    markdown: String,
-    last_request: Option<String>,
-}
+/// The first turn quotes the log's opening request and its latest exchanges,
+/// staying well under the terminal argument cap.
+const EXCERPT_HEAD_CHARS: usize = 6_000;
+const EXCERPT_TAIL_CHARS: usize = 14_000;
 
 #[derive(Debug)]
 enum Entry {
@@ -60,19 +57,31 @@ pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<S
         .ok_or_else(|| anyhow!("Session {id} has an invalid capture reference"))?
         .join("conversation.md");
     fs::create_dir_all(path.parent().expect("a capture file has a directory"))?;
-    fs::write(&path, &log.markdown).context("write conversation log")?;
-    let mut request = format!(
-        "This Session continues a conversation that began in {from}. Its full log is at {}; read it before acting.",
-        path.display()
-    );
-    if let Some(last) = &log.last_request {
-        request.push_str(&format!(" The last request was:\n\n{last}"));
+    fs::write(&path, &log).context("write conversation log")?;
+    Ok(format!(
+        "This Session continues a conversation that began in {from}. Its full log is at {}; \
+         the excerpt below is its beginning and end. Pick up where it left off.\n\n{}",
+        path.display(),
+        excerpt(&log)
+    ))
+}
+
+/// The log's beginning and end, within what one terminal turn can carry.
+fn excerpt(log: &str) -> String {
+    let count = log.chars().count();
+    if count <= EXCERPT_HEAD_CHARS + EXCERPT_TAIL_CHARS {
+        return log.trim().to_owned();
     }
-    Ok(request)
+    let omitted = count - EXCERPT_HEAD_CHARS - EXCERPT_TAIL_CHARS;
+    format!(
+        "{}\n\n[… {omitted} characters omitted; read the full log …]\n\n{}",
+        head(log, EXCERPT_HEAD_CHARS).trim_end_matches('…').trim(),
+        tail(log, EXCERPT_TAIL_CHARS).trim_start_matches('…').trim()
+    )
 }
 
 /// Plain-text log of a native transcript: user and assistant text, one line per tool call.
-fn render(provider: Provider, transcript: &Path) -> Result<ConversationLog> {
+fn render(provider: Provider, transcript: &Path) -> Result<String> {
     let file = fs::File::open(transcript)
         .with_context(|| format!("open transcript {}", transcript.display()))?;
     let mut entries = Vec::new();
@@ -85,10 +94,6 @@ fn render(provider: Provider, transcript: &Path) -> Result<ConversationLog> {
             _ => claude_row(&row, &mut entries),
         }
     }
-    let last_request = entries.iter().rev().find_map(|entry| match entry {
-        Entry::User(text) => Some(text.clone()),
-        _ => None,
-    });
     let mut markdown = String::new();
     for entry in &entries {
         match entry {
@@ -105,10 +110,7 @@ fn render(provider: Provider, transcript: &Path) -> Result<ConversationLog> {
             }
         }
     }
-    Ok(ConversationLog {
-        markdown,
-        last_request,
-    })
+    Ok(markdown)
 }
 
 fn claude_row(row: &Value, entries: &mut Vec<Entry>) {
@@ -217,11 +219,26 @@ fn codex_request(text: &str) -> Option<String> {
     (!injected).then(|| text.to_owned())
 }
 
-/// The person's words inside a Loopflow launch turn.
+/// A Loopflow launch turn: the skill it invoked and the person's words.
 fn lf_message(text: &str) -> Option<String> {
-    let start = text.find("<lf:message>")? + "<lf:message>".len();
-    let end = text[start..].find("</lf:message>")? + start;
-    Some(text[start..end].trim().to_owned())
+    let skill = text.find("<lf:skill:").and_then(|open| {
+        let name_start = open + "<lf:skill:".len();
+        let name_end = text[name_start..].find('>')? + name_start;
+        let name = &text[name_start..name_end];
+        let close = format!("</lf:skill:{name}>");
+        let body_end = text[name_end..].find(&close)? + name_end;
+        Some(format!(
+            "Skill {name}:\n\n{}",
+            text[name_end + 1..body_end].trim()
+        ))
+    });
+    let message = text.find("<lf:message>").and_then(|open| {
+        let start = open + "<lf:message>".len();
+        let end = text[start..].find("</lf:message>")? + start;
+        Some(text[start..end].trim().to_owned())
+    });
+    let turn = [skill, message].into_iter().flatten().collect::<Vec<_>>();
+    (!turn.is_empty()).then(|| turn.join("\n\n"))
 }
 
 fn tool(call: Option<&str>, name: Option<&str>, input: &str) -> Entry {
@@ -331,24 +348,17 @@ mod tests {
             serde_json::json!({"type":"user","userType":"external","isMeta":true,"message":{"content":"meta line"}}),
             serde_json::json!({"type":"user","userType":"external","message":{"content":[{"type":"text","text":"Try again with sudo"}]}}),
         ]);
-        let log = render(Provider::Claude, transcript.path()).unwrap();
-        let text = &log.markdown;
-        assert!(text.contains("## user\n\nFix the parser"));
+        let text = &render(Provider::Claude, transcript.path()).unwrap();
+        assert!(text.contains("## user\n\nSkill fix:\n\nFix things.\n\nFix the parser"));
         assert!(text.contains("## assistant\n\nReading the parser."));
         assert!(text.contains(r#"- tool: Read {"file_path":"src/parser.rs"}"#));
         assert!(text.contains("- tool: Bash"));
         assert!(text.contains("permission denied"));
         assert!(!text.contains(&"x".repeat(500)));
-        for absent in [
-            "fn parse",
-            "secret plan",
-            "sidechain",
-            "meta line",
-            "Fix things.",
-        ] {
+        for absent in ["fn parse", "secret plan", "sidechain", "meta line"] {
             assert!(!text.contains(absent), "{absent} leaked into {text}");
         }
-        assert_eq!(log.last_request.as_deref(), Some("Try again with sudo"));
+        assert!(text.trim_end().ends_with("Try again with sudo"));
     }
 
     #[test]
@@ -365,8 +375,7 @@ mod tests {
             serde_json::json!({"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c2","output":[{"type":"input_text","text":"Exit code: 0\nOutput:\npatched cleanly"}]}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"duplicate"}}),
         ]);
-        let log = render(Provider::Codex, transcript.path()).unwrap();
-        let text = &log.markdown;
+        let text = &render(Provider::Codex, transcript.path()).unwrap();
         assert!(text.contains("## user\n\nShip the fix"));
         assert!(text.contains("## assistant\n\nRunning tests."));
         assert!(text.contains("- tool: shell"));
@@ -381,6 +390,19 @@ mod tests {
         ] {
             assert!(!text.contains(absent), "{absent} leaked into {text}");
         }
-        assert_eq!(log.last_request.as_deref(), Some("Ship the fix"));
+    }
+
+    #[test]
+    fn excerpt_keeps_the_beginning_and_end_of_a_long_log() {
+        let log = format!(
+            "## user\n\nFirst request\n\n{}\n\n## user\n\nLatest request\n",
+            "middle ".repeat(10_000)
+        );
+        let quoted = excerpt(&log);
+        assert!(quoted.starts_with("## user\n\nFirst request"));
+        assert!(quoted.ends_with("Latest request"));
+        assert!(quoted.contains("characters omitted"));
+        assert!(quoted.chars().count() < EXCERPT_HEAD_CHARS + EXCERPT_TAIL_CHARS + 200);
+        assert_eq!(excerpt("## user\n\nShort\n"), "## user\n\nShort");
     }
 }

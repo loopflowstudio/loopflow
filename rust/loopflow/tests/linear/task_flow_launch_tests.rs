@@ -229,7 +229,8 @@ for line in sys.stdin:
             |row| row.get(0),
         )
         .unwrap();
-    // Resuming with another provider continues the same Session from a log.
+    // Connecting with another provider continues the same Session from a log;
+    // contextual resume reaches the same open.
     let transcript = home
         .path()
         .join("accounts/claude/fixture/projects/fixture/agent-fixture.jsonl");
@@ -253,7 +254,7 @@ for line in sys.stdin:
     let imported = command(
         repo.path(),
         home.path(),
-        &["session", "resume", &session, "-a", "codex"],
+        &["session", "connect", &session, "-a", "codex"],
     )
     .output()
     .unwrap();
@@ -280,6 +281,8 @@ for line in sys.stdin:
     let turn = fs::read_to_string(home.path().join("codex-turn")).unwrap();
     assert!(turn.contains("began in claude"), "{turn}");
     assert!(turn.contains("Rename the parser module"), "{turn}");
+    // The skill ran in the Claude conversation; the continuation does not re-send it.
+    assert!(!turn.contains("<lf:skill:first"), "{turn}");
     let log_path = turn
         .split_whitespace()
         .find_map(|word| {

@@ -218,7 +218,11 @@ pub(crate) fn resume_session_with_env(
     remote: Option<NativeConnection>,
     attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
-    let selected_model = match crate::config::resume_choice(harness, model) {
+    let selected_model = match crate::config::resume_choice(
+        harness,
+        model,
+        crate::config::agent_override().as_deref(),
+    ) {
         crate::config::Resume::Native(model) => model,
         crate::config::Resume::Import { agent } => bail!(
             "{harness} native history cannot resume in {agent}; continue it with lf resume -a {agent}"

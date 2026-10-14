@@ -84,7 +84,7 @@ struct WorkNavigator: View {
         .font(Typography.body(12))
         .foregroundStyle(palette.text)
         .tint(palette.text)
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .background(palette.surfaceMuted)
         .contextMenu { repositoryActions() }
         .accessibilityIdentifier("work-navigator")
@@ -109,7 +109,7 @@ struct WorkNavigator: View {
                 Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
                     ?? "Choose repository")
                     .font(Typography.sectionTitle(25))
-                    .foregroundStyle(palette.accentInk)
+                    .foregroundStyle(palette.emphasisInk)
                     .lineLimit(1)
             }
             .disabled(model.repoPath == nil)
@@ -146,12 +146,12 @@ struct WorkNavigator: View {
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(hoveringPresentation ? palette.accentInk : palette.textSecondary)
+                    .foregroundStyle(hoveringPresentation ? palette.text : palette.textSecondary)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 28, height: 28)
-            .background(hoveringPresentation ? palette.accentInk.opacity(0.08) : Color.clear,
+            .background(hoveringPresentation ? palette.actionHover : Color.clear,
                         in: RoundedRectangle(cornerRadius: 6))
             .onHover { hoveringPresentation = $0 }
             .help("Outline presentation")
@@ -205,7 +205,7 @@ struct WorkNavigator: View {
                 .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
             } else {
                 // The slot stays so titles align whether or not a Task has a dot.
-                Circle().fill(status?.tone.ink ?? .clear)
+                Circle().fill(status?.tone?.ink(in: palette) ?? .clear)
                     .frame(width: 6, height: 6).frame(width: 14)
                     .accessibilityHidden(true)
             }
@@ -219,9 +219,7 @@ struct WorkNavigator: View {
                 } label: {
                     Text(row.title)
                         .font(isWave ? Typography.textStrong : Typography.text)
-                        .foregroundStyle(isWave
-                            ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
-                            : palette.text)
+                        .foregroundStyle(isWave ? palette.textSecondary : palette.text)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -236,14 +234,8 @@ struct WorkNavigator: View {
         }
         .padding(.horizontal, 6)
         .frame(minHeight: isWave ? 28 : 44)
-        .background(isSelected(row) ? palette.selectionTint : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if isSelected(row) {
-                RoundedRectangle(cornerRadius: 1).fill(palette.accentInk)
-                    .frame(width: 2).padding(.vertical, 7).offset(x: -10)
-            }
-        }
+        .workSelection(isSelected(row))
+        .accessibilityAddTraits(isSelected(row) ? [.isSelected] : [])
         .padding(.top, isWave ? 8 : 0)
         .padding(.leading, CGFloat(row.depth) * 14)
         .contextMenu {
@@ -286,6 +278,6 @@ struct WorkNavigator: View {
 
     private func warning(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.triangle")
-            .foregroundStyle(Color.statusWarning).textSelection(.enabled).padding(4)
+            .foregroundStyle(WorkTone.human.ink).textSelection(.enabled).padding(4)
     }
 }

@@ -133,7 +133,7 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkPlainButtonStyle())
             .focusable(interactions: .edit)
             .onKeyPress(keys: [.space, .return, .rightArrow, .leftArrow]) { press in
                 switch press.key {
@@ -478,12 +478,12 @@ struct FlowDiagram: View {
             }
             .overlay {
                 if selected {
-                    RoundedRectangle(cornerRadius: 9).stroke(palette.accentInk, lineWidth: 2).padding(-3)
+                    RoundedRectangle(cornerRadius: 9).stroke(palette.selectionEdge, lineWidth: 2).padding(-3)
                 }
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .help(node.label)
         .accessibilityLabel("\(node.label), \(FlowPalette.describe(state))")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -614,7 +614,7 @@ enum FlowPalette {
         case .completed: .done
         case .running: .running
         case .pendingHuman: .human
-        case .blocked, .stalled: .blocked
+        case .blocked, .stalled: .human
         case .stopped, .unknown: .stopped
         case .pending: .neutral
         }

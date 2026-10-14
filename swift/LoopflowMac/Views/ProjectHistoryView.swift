@@ -19,7 +19,7 @@ struct ProjectHistoryView: View {
                 Spacer()
                 Button("Done") { dismiss() }
             }
-            if let error { Text(error).foregroundStyle(Color.statusWarning) }
+            if let error { Text(error).foregroundStyle(WorkTone.human.ink) }
             if !loaded { ProgressView("Reading Projects…") }
             if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.") }
             Picker("Project", selection: $selected) {

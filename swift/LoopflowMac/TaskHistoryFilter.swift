@@ -42,7 +42,7 @@ struct TaskHistoryControls: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            TaskHistoryInlineControl(filter: $filter, color: NSColor(filter.showCompleted ? palette.accentInk : palette.textSecondary))
+            TaskHistoryInlineControl(filter: $filter, color: NSColor(palette.actionInk))
                 .frame(width: 112, height: 26)
                 .background(hovered ? palette.surfaceMuted : .clear, in: RoundedRectangle(cornerRadius: 4))
                 .onHover { hovered = $0 }
@@ -50,7 +50,7 @@ struct TaskHistoryControls: View {
             if let message = filter.validationMessage {
                 Text(message)
                     .font(Typography.caption())
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(WorkTone.human.ink)
             }
         }
     }

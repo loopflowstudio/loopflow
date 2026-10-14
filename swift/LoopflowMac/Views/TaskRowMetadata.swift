@@ -33,16 +33,14 @@ enum TaskRowProgramStatus {
         } else { self = .unknown }
     }
 
-    var label: String {
+    var label: String? {
         switch self {
         case .reported(_, let report):
             let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
             let progress = report.progress.map { " · \($0)%" } ?? ""
             return "\(report.state.rawValue.capitalized)\(kind)\(progress)"
         case .waiting: return "Waiting · inferred"
-        case .active: return "Active · inferred"
-        case .unknown: return "Status unknown"
-        case .unavailable: return "Status unavailable"
+        case .active, .unknown, .unavailable: return nil
         }
     }
 
@@ -57,19 +55,12 @@ enum TaskRowProgramStatus {
         }
     }
 
-    var tone: WorkTone {
+    var tone: WorkTone? {
         switch self {
         case .reported(_, let report):
-            switch report.state {
-            case .blocked: .human
-            case .error: .blocked
-            case .working: .running
-            case .done: .done
-            case .idle, .clear: .neutral
-            }
+            report.state.workTone
         case .waiting: .human
-        case .active: .running
-        case .unknown, .unavailable: .neutral
+        case .active, .unknown, .unavailable: nil
         }
     }
 }
@@ -91,10 +82,17 @@ struct TaskRowMetadata: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Text(verbatim: status.label)
-                .foregroundStyle(status.tone.ink)
-                .help(Text(verbatim: status.help))
-                .accessibilityIdentifier("work-program-status-\(task.id)")
+            if let label = status.label, let tone = status.tone {
+                Text(verbatim: label)
+                    .foregroundStyle(tone.ink(in: palette))
+                    .help(Text(verbatim: status.help))
+                    .accessibilityIdentifier("work-program-status-\(task.id)")
+            } else if case .unavailable = status {
+                Image(systemName: "info.circle")
+                    .help(Text(verbatim: status.help))
+                    .accessibilityLabel(Text(verbatim: status.help))
+                    .accessibilityIdentifier("work-program-status-unavailable-\(task.id)")
+            }
             if let url = task.reference.issueUrl {
                 destination(task.task.identifier, url: url, kind: "task")
             }
@@ -119,8 +117,7 @@ struct TaskRowMetadata: View {
     private func destination(_ title: String, url: URL, kind: String) -> some View {
         // A sibling control to the title button: external links never select Work.
         Link(destination: url) { Text(verbatim: title) }
-            .buttonStyle(.plain)
-            .foregroundStyle(palette.accentInk)
+            .buttonStyle(WorkLinkStyle())
             .help(url.absoluteString)
             .accessibilityLabel("Open \(kind == "pr" ? "PR" : "Task") \(title)")
             .accessibilityIdentifier("work-\(kind)-link-\(task.id)")

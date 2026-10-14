@@ -26,6 +26,7 @@ struct TaskFilesView: View {
             documentPane
         }
         .background(palette.background)
+        .tint(palette.actionInk)
         .task(id: "\(store.base)|\(store.needsComparison)|\(checkoutBase ?? "")") {
             // Later readings follow the checkout and its Git metadata changing.
             if store.needsComparison { await store.refreshChanges() }
@@ -44,7 +45,7 @@ struct TaskFilesView: View {
         VStack(spacing: 0) {
             if let prURL {
                 HStack {
-                    Link("Pull request ↗", destination: prURL)
+                    Link("Pull request ↗", destination: prURL).buttonStyle(WorkLinkStyle())
                     Spacer()
                 }
                 .font(Typography.caption(11))
@@ -86,6 +87,7 @@ struct TaskFilesView: View {
                     .padding(8)
                 }
                 .focusable().focused($navigatorFocused)
+                .keyboardFocusRing(navigatorFocused)
                 .onMoveCommand { direction in
                     let rows = visibleFiles("").map { ($0, TaskFilesStore.Mode.file) }
                         + (store.showsChanges ? (store.changes?.files ?? []).map { ($0.path, TaskFilesStore.Mode.diff) } : [])
@@ -100,7 +102,7 @@ struct TaskFilesView: View {
             if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions ↗") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: directory))
-                }.buttonStyle(.plain).font(.caption).lineLimit(1).padding(8)
+                }.buttonStyle(WorkPlainButtonStyle()).font(.caption).lineLimit(1).padding(8)
             }
         }
         .background(palette.surfaceMuted)
@@ -110,7 +112,7 @@ struct TaskFilesView: View {
     private func directoryRows(_ path: String) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 2) {
             if let error = store.directoryErrors[path] {
-                Text(error).font(.caption).foregroundStyle(Color.statusWarning)
+                Text(error).font(.caption).foregroundStyle(WorkTone.human.ink)
             }
             ForEach(store.directories[path]?.entries ?? []) { entry in
                 if entry.kind == .directory {
@@ -126,7 +128,7 @@ struct TaskFilesView: View {
                               systemImage: store.expandedDirectories.contains(entry.path) ? "folder.fill" : "folder")
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.vertical, 5)
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(WorkPlainButtonStyle())
                     if store.expandedDirectories.contains(entry.path) {
                         directoryRows(entry.path).padding(.leading, 12)
                     }
@@ -162,6 +164,7 @@ struct TaskFilesView: View {
                             await store.refresh()
                         }
                     }
+                    .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                     .disabled(!document.canSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .fixedSize()
@@ -178,7 +181,7 @@ struct TaskFilesView: View {
             .background(palette.surfaceMuted)
             Divider()
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(Color.statusWarning).padding(8)
+                Text(error).font(.caption).foregroundStyle(WorkTone.human.ink).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(.caption).padding(8)
@@ -222,7 +225,7 @@ struct TaskFilesView: View {
                 Spacer(minLength: 0)
             }.padding(.vertical, 5).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityLabel(title)
+        .buttonStyle(WorkPlainButtonStyle()).accessibilityLabel(title)
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
     }
 
@@ -239,9 +242,9 @@ struct TaskFilesView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4).padding(.vertical, 5)
-            .background(store.selection == path && store.mode == mode ? palette.selectionTint : .clear)
+            .workSelection(store.selection == path && store.mode == mode)
             .contentShape(Rectangle())
-        }.buttonStyle(.plain).help(path)
+        }.buttonStyle(WorkPlainButtonStyle()).help(path)
             .id("\(mode.rawValue):\(path)")
             .accessibilityLabel(path)
     }

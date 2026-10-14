@@ -34,12 +34,19 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Task rows show a title above program status, stored Task/PR links and the recorded
-Machine name for remote checkouts. Click the title to return to the retained
-conversation; links open their destinations separately. Hover status for its Session
-source and full report. Nonreporting clients show **inferred** activity or Waiting;
-missing evidence stays unknown. Program Done/Error does not complete the Task.
-Saved workspace readings wait for fresh program status.
+Task rows show a title above reported program status, stored Task/PR links and the
+recorded remote Machine. Local Machine names stay hidden. The title opens the
+conversation; links open separately and underline on hover or keyboard focus.
+Unknown activity and live clients without program reports show no activity label
+or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
+distinct. Status read errors stay inspectable through a quiet info icon. A program's
+Done never completes its Task. Saved readings wait for fresh status.
+
+Selection uses a neutral fill and edge; keyboard focus has a separate outline.
+Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
+Blue means reported work, amber means supported Waiting/blocked, red means failure.
+The same roles apply in light and dark appearances without changing terminal ANSI
+colors or replacing retained panes and drafts.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks

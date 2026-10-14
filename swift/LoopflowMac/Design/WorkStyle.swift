@@ -1,19 +1,9 @@
-// Shared visual language for the workspace (polish direction D): A's sidebar,
-// B's dense center structure, C's warm surfaces. Colors come from the active
-// `LoopflowPalette` ramp; depth is a surface ladder joined by hairlines, and
-// blue belongs to running work and loop regions only.
+// Workspace roles come from LoopflowPalette. Selection, keyboard focus and
+// program activity remain independent; terminal ANSI has its own owner.
 
 import AppKit
 import Loopflow
 import SwiftUI
-
-extension LoopflowPalette {
-    /// The sidebar's selected row: a lifted tint, marked by the accent edge.
-    var selectionTint: Color { surface.opacity(0.72) }
-    /// Accent used as text or a hairline. Burgundy reads on cream; on the dark
-    /// palettes it falls below text contrast, so it lifts to a rose.
-    var accentInk: Color { .adaptive(light: 0x722F37, dark: 0xD9959D) }
-}
 
 /// Every workspace section heading: small tracked caps, one system.
 struct WorkSectionHeading<Trailing: View>: View {
@@ -53,15 +43,19 @@ extension WorkSectionHeading where Trailing == EmptyView {
 enum WorkTone {
     case running, done, human, blocked, stopped, neutral
 
-    var ink: Color {
+    func ink(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running: adaptive(0x2F6BC0, 0x86B0EA)
-        case .done: adaptive(0x3E7A4E, 0x8DC79C)
-        case .human: adaptive(0x9A6B12, 0xE3B866)
-        case .blocked: adaptive(0xB23A30, 0xF08B80)
-        case .stopped: adaptive(0x6F6862, 0xB5ADA5)
-        case .neutral: adaptive(0x6F665F, 0xA39B93)
+        case .running: palette.working
+        case .done: palette.success
+        case .human: palette.waiting
+        case .blocked: palette.failure
+        case .stopped: palette.textSecondary
+        case .neutral: palette.textTertiary
         }
+    }
+
+    var ink: Color {
+        .adaptive(light: ink(in: .light), dark: ink(in: .dark))
     }
 
     /// Opaque fill so a tone keeps its hue over a loop tint.
@@ -106,14 +100,20 @@ extension TaskExecutionState {
     var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
-        case .blocked: ("Blocked", .blocked)
-        case .stalled: ("Stalled", .blocked)
+        case .blocked: ("Blocked", .human)
+        case .stalled: ("Stalled", .human)
         case .idle, .unknown: (nil, .stopped)
         }
     }
 }
 
 extension Color {
+    static func adaptive(light: Color, dark: Color) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            NSColor(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light)
+        })
+    }
+
     /// Resolves against the view's effective appearance, so one workspace
     /// color serves the light and dark palettes.
     static func adaptive(light: UInt, dark: UInt) -> Color {
@@ -166,26 +166,28 @@ private struct WorkPanel: ViewModifier {
     }
 }
 
-/// Primary actions as an accent outline: burgundy marks the action, never fills.
+/// Ordinary actions stay neutral; only a deliberately emphasized action uses burgundy.
 struct WorkOutlineButtonStyle: ButtonStyle {
+    var emphasized = false
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? palette.accentInk : palette.textTertiary)
+            .foregroundStyle(isEnabled ? (emphasized ? palette.emphasisInk : palette.actionInk) : palette.textTertiary)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? palette.accentInk.opacity(0.10) : palette.surface)
+                    .fill(configuration.isPressed ? palette.actionHover : palette.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled ? palette.accentInk : palette.borderStrong, lineWidth: 1)
+                    .strokeBorder(isEnabled && emphasized ? palette.emphasisInk : palette.borderStrong, lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 6))
+            .workFocusRing()
     }
 }
 
@@ -225,7 +227,7 @@ struct WorkDisclosureHeading: View {
                 .foregroundStyle(palette.textTertiary)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkPlainButtonStyle())
             .help(help)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityIdentifier("\(identifier)-toggle")
@@ -244,6 +246,70 @@ struct WorkDisclosureHeading: View {
                     .controlSize(.small)
                     .accessibilityIdentifier("\(identifier)-retry")
             }
+        }
+    }
+}
+
+/// Focus is an outline independent of a row's selection fill/edge and error ink.
+private struct WorkFocusRing: ViewModifier {
+    @Environment(\.isFocused) private var focused
+    func body(content: Content) -> some View {
+        content.keyboardFocusRing(focused, cornerRadius: 4)
+    }
+}
+
+extension View {
+    func workFocusRing() -> some View { modifier(WorkFocusRing()) }
+
+    func workSelection(_ selected: Bool) -> some View {
+        modifier(WorkSelection(selected: selected))
+    }
+}
+
+private struct WorkSelection: ViewModifier {
+    let selected: Bool
+    @Environment(\.palette) private var palette
+
+    func body(content: Content) -> some View {
+        content
+            .background(selected ? palette.selectionFill : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(alignment: .leading) {
+                if selected {
+                    RoundedRectangle(cornerRadius: 1).fill(palette.selectionEdge)
+                        .frame(width: 2).padding(.vertical, 4)
+                }
+            }
+    }
+}
+
+struct WorkPlainButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.workFocusRing()
+    }
+}
+
+struct WorkLinkStyle: ButtonStyle {
+    @Environment(\.palette) private var palette
+    @Environment(\.isFocused) private var focused
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(hovering || focused ? palette.linkHover : palette.linkInk)
+            .underline(hovering || focused)
+            .workFocusRing()
+            .onHover { hovering = $0 }
+    }
+}
+
+extension ProgramStatusState {
+    var workTone: WorkTone {
+        switch self {
+        case .working: .running
+        case .blocked: .human
+        case .error: .blocked
+        case .done: .done
+        case .idle, .clear: .neutral
         }
     }
 }

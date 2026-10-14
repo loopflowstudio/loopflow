@@ -240,7 +240,7 @@ struct FlowCatalogInspector: View {
                 }
             }
             if let error = sourceError ?? model.flowCatalog.errorMessage {
-                Text(error).foregroundStyle(Color.statusWarning)
+                Text(error).foregroundStyle(WorkTone.human.ink)
             }
             Button("Refresh") { Task { await model.loadFlowCatalog(force: true) } }
             if let graph = entry?.graph, let composition = entry?.composition {
@@ -268,7 +268,7 @@ struct WorkflowCatalogInspector: View {
                 .disabled(model.breadcrumb?.wave?.roadmap.wave == nil)
             }
             if let error = model.workflowCatalog.errorMessage {
-                Text(error).foregroundStyle(Color.statusWarning)
+                Text(error).foregroundStyle(WorkTone.human.ink)
             }
             Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
             if let workflow = entry?.workflow {

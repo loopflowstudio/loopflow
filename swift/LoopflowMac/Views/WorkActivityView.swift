@@ -130,7 +130,7 @@ struct WorkActivityView: View {
                 if let github = entry.fact.github {
                     Link("Open PR #\(github.number)", destination: github.url)
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(Color.loopflowBurgundy)
+                        .buttonStyle(WorkLinkStyle())
                         .accessibilityIdentifier("loopflow-open-pr-\(github.number)")
                 }
             }
@@ -183,20 +183,20 @@ struct WorkActivityView: View {
 
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
-        case .workCreated: ("plus", .statusNeutral)
-        case .inputCaptured, .providerHistoryRecorded: ("play.fill", .statusInfo)
+        case .workCreated: ("plus", WorkTone.neutral.ink)
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", WorkTone.running.ink)
         case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
-                    ? .statusSuccess
-                    : .statusWarning
+                    ? WorkTone.done.ink
+                    : WorkTone.human.ink
             )
-        case .prStarted: ("arrow.triangle.branch", .statusNeutral)
-        case .prPublishRequested: ("arrow.up.right", .statusInfo)
-        case .prMergeRequested: ("arrow.triangle.merge", .statusInfo)
-        case .prMerged: ("checkmark.seal.fill", .statusSuccess)
-        case .prAbandoned: ("xmark", .statusWarning)
+        case .prStarted: ("arrow.triangle.branch", WorkTone.neutral.ink)
+        case .prPublishRequested: ("arrow.up.right", WorkTone.running.ink)
+        case .prMergeRequested: ("arrow.triangle.merge", WorkTone.running.ink)
+        case .prMerged: ("checkmark.seal.fill", WorkTone.done.ink)
+        case .prAbandoned: ("xmark", WorkTone.human.ink)
         case .steerIssued: ("arrow.turn.down.right", Color.loopflowBurgundy)
         }
     }
@@ -214,13 +214,13 @@ struct WorkActivityView: View {
     private func evidenceBanner(_ reason: String) -> some View {
         Label(reason, systemImage: "exclamationmark.triangle.fill")
             .font(Typography.caption(9))
-            .foregroundStyle(Color.statusWarning)
+            .foregroundStyle(WorkTone.human.ink)
             .lineLimit(2)
             .textSelection(.enabled)
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.statusWarning.opacity(0.10))
+            .background(WorkTone.human.ink.opacity(0.10))
     }
 
 }

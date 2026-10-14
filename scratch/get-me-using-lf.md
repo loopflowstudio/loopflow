@@ -363,72 +363,16 @@ headless implementation; they leave named demo proof outstanding, never a claime
 end-to-end pass. Current lookup repair and 63 passing tests are in
 scratch/task-opening-latency.md; historical read durations are not endpoint timings.
 
-### Delivery and demo
+### Delivery and remaining demo
 
-Hook fix `185c0b3c2e` and sidebar/lookup checkpoint `0bb13e9261` are preserved;
-their focused checks remain applicable. Main `414d4dd27c` brings the authored
-Wave move into `.lf/wave/` and shared Task pause handling; `cf67067b0d` removed
-the duplicate pause method introduced by integration. Its five Rust and 31 Swift
-focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
-
-Affected-suite checks and fixture repairs are complete below; publication is for demo review.
-Unlaunched review app:
-`/tmp/loo462-oct13-retention-compress/Loopflow Work Demo.app` (`a590ecb7ee`),
-with matching validation-only helper and verified signature; receipt in
-work-first-demo.md. Main `37ca5fca81`, merged as `c89c789fd1`, changes CI build
-scheduling and helper preparation without changing Work or the helper's migration
-authority. It supplies no native acceptance or newer app receipt.
-Earlier app: `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`,
-built from `0480344945` with its matching validation-only bundled lf; signature
-verified. Jack Heart subsequently launched it and reported a failed fresh-planning
-demo; see work-first-demo.md. Its build-time `launched: false` is historical.
-`build.json` beside it records source/signed hashes and revision.
-The earlier sidebar app at `/tmp/loo462-oct13-sidebar/Loopflow Work Demo.app`
-(`88d91e53ca`) remains preserved.
-SwiftPM resource lookup still relies on the retained checkout build directory;
-this private review artifact is not portable. Earlier profiling/demo apps remain.
-Jack Heart requested
-relaunch after UX fixes, preserving both existing apps' live panes and unsent
-drafts. A replacement must not destroy that input. Real Loopflow repo/Task review,
-six provider/case timing trials, measured-cause optimization and stable-hook proof
-remain; Portfolio review follows the main experience. No global install, takeover,
-live migration, broader cleanup or landing is authorized. No product decision is
-needed for the remaining implementation; visual acceptance stays with demo review.
-
-Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check; not a current gate.
-
-### Native failure repair — October 13
-
-Jack Heart observed the 0480344945 app launch, failed fresh planning (`t.paused`),
-lost cached rows and “No workflow yet.” The log is empty and input trace absent;
-this supersedes the unlaunched-app account above, without supplying diagnostics.
-Delete — do not maintain: unconditional replacement/cache writes for partial
-planning; stale-null Workflow absence claims; disconnected Task readings left
-current. These paths are removed. Last-good navigation, pane/draft identity,
-independent Task reads and successful-null Workflow semantics survive. A new
-partial reading cannot discard previously available content; already unavailable
-Waves do not prevent healthy readings from advancing. The released-schema fixture
-reproduces the SQL failure before planning, so the separate partial-frame bug is
-not a proven explanation for the native disappearance. The exact native trigger
-remains for demo. Current saved selection is LOO-382 (no captured Workflow), while
-LOO-462 retains feature/demo; that later inspection is not a screen receipt.
-
-The real store needs a published release containing the currently unreleased
-`task_paused` migration, installed through `lf install`; reinstalling 0.13.13
-cannot supply it. No live schema change or invented compatibility value. Remaining:
-publication, then real-schema review, six provider timing cases, hook trust and
-visual acceptance.
-
-Review found and fixed stale Workflow mutation buttons and old tests that expected
-Task ancestry to vanish on incomplete planning. No new Workflow/cache authority.
-Reconciliation inspected the production reader, shared roadmap publication,
-Workflow header and regressions. The repair is implemented; no additional code
-mismatch was established. The installation prerequisite remains outside this
-publication-only pursuit, and no native acceptance follows from retained fixtures.
-
-Publication review repaired the missing Portfolio architecture owner and integration registration, narrowed toolbar inspection to avoid traversing an unmounted terminal, and updated two hook fixtures to follow the current manifest/environment handoff. The Workflow fixture now supplies valid planning after an action instead of treating the new stale-data disabling as a failure. Production behavior was unchanged by these repairs. The full Rust run reported one leaked child in the passing, unrelated `checkout_restoration_reserves_stashed_sidecar_directories` test; no native acceptance follows from the automated runs.
-
-Check: `uv run python scripts/test.py --reuse-passing --base 37ca5fca81` plus its bounded Rust/Swift repair commands: Python 455 PASS + sandbox 1 PASS, website 75 PASS; full Rust 2590 PASS/2 stale-fixture failures/18 skipped, then affected Flow/steer 32 PASS; full Swift 518 tests/1 stale-fixture issue, then `scripts/test_desktop.sh --jobs 4 --filter DesktopHeadlessTests -Xswiftc -gnone` 12 PASS (toolbar repair 1 PASS before full rerun); architecture, Rust inventory, fmt, Clippy, source CLI build, Swift boundaries and `git diff --check` PASS. One passing Rust sync test leaked a child; hosted matrix remains with delivery/CI, native schema/input/trust/visual proof with demo. Local receipts: `.lf/tmp/gate/run-51987`, `.lf/tmp/gate/loo462-publication-rust`, `.lf/tmp/gate/loo462-publication-repairs`, `/tmp/loo462-publication-desktop-repair.log`.
+October 13 publication checks, fixture repairs and earlier app receipts remain at
+`945686275c:scratch/get-me-using-lf.md`, **Delivery and demo** through **Native
+failure repair**. The full-suite run plus focused repairs is not a clean rerun.
+v0.13.14 installation and release-main integration resolved the schema prerequisite;
+current real-repo navigation evidence is in work-first-demo.md. None supplies
+responsive input, six provider timing cases, hook approval-once, Portfolio or
+complete visual acceptance. No new installation, live migration, client takeover,
+broader cleanup or landing is authorized by this pursuit.
 
 ## Color and activity redesign — October 13 review direction
 
@@ -438,8 +382,8 @@ restrained burgundy emphasis, and evidence-backed blue/amber/red activity. Keep
 Task lifecycle and Workflow separate from program activity. Omit unknown activity;
 a live client alone cannot claim Working. This supersedes the sidebar's current
 “Status unknown”/“Active · inferred” presentation, not its underlying observations.
-The semantic-token cutover and rendered redesign remain unimplemented. The review
-in `pr-review.html` exposes this mismatch rather than treating the request as done.
+The semantic-token cutover is implemented below; rendered judgment remains with
+demo. The local `pr-review.html` now distinguishes implementation from acceptance.
 
 
 ### Implementation cut — October 14
@@ -476,3 +420,34 @@ Desktop cut in LOO-462, returning to demo; no landing or installation authority.
   → Files/Workflow. Inspect both appearances, hover/focus/selection and status
   combinations without creating fake live reports or interrupting user clients.
   Refresh `pr-review.html` after implementation so it stops describing old code.
+
+### Implementation state — October 14
+
+Delete — do not maintain: `accentInk`/`selectionTint`; `TerminalPalette.stateDot`
+and its live-client state switch; per-row active/unknown labels and dots;
+`WorkSurfaceView.sessionTone`; red stopped-Workflow presentation; burgundy row
+selection; Desktop consumers of marketing `Color.status*`; duplicated `nowColor`.
+These predecessors are removed. Keep underlying Session evidence, program report
+severity/identity, terminal ANSI, native clients, stored records, retained layouts
+and drafts. No data model, persistence or execution change.
+
+`LoopflowPalette` owns selection/focus/link/action/status ink. Shared controls and
+Files use those roles. Reported working/error and shared Waiting survive; unknown
+and client-only activity are omitted. Failed reads remain a quiet inspectable icon.
+Pane selection no longer dims terminal output and its failures; native keyboard
+focus stays with the existing terminal owner. Review caught dark
+selected-background contrast loss and stopped edges falsely painted as errors;
+neutral selection composition and lifted dark inks repair both.
+
+Remaining: affected-suite gate and publication, matching-app demo in both
+appearances, native hover/focus/link dispatch, pending profiling/trust acceptance.
+The existing apps and drafts were not touched. No native acceptance is claimed.
+
+Review: preserved report/Waiting provenance and data ownership; removed the duplicate
+terminal status mapping and opaque stopped-edge error assumption. The native pane's
+retained selection cannot establish first responder, so it uses the neutral selection
+edge; control focus uses the distinct outline. Emphasized-button focus sits outside
+its filled background to avoid burgundy-on-burgundy disappearance. Inline native
+prose retains native text-link behavior; navigation/control links use WorkLinkStyle.
+
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkPaletteTests|TaskRowMetadataTests|TaskFilesTests|ProgramStatusTests|DesktopHeadlessTests|WorkNavigationTests|WorkDestinationTests'` PASS 147; focused after focus/selection review (`WorkPaletteTests|TaskRowMetadataTests|DesktopHeadlessTests|WorkNavigationTests`) PASS 63, final pane semantics (`DesktopHeadlessTests|WorkPaletteTests`) PASS 15; `git diff --check` PASS; affected-suite gate/publication and native demo remain with later Flow steps. Logs: `/tmp/loo462-semantics-{tests,final,pane}.log`.

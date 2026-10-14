@@ -851,7 +851,7 @@ struct SessionsContentView: View {
                             HStack {
                                 Text(error).textSelection(.enabled)
                                 Button("Retry", action: retryConversation)
-                            }.foregroundStyle(Color.statusWarning).padding(8)
+                            }.foregroundStyle(WorkTone.human.ink).padding(8)
                         }
                         ZStack {
                             Group {
@@ -864,7 +864,7 @@ struct SessionsContentView: View {
                                         if let task = fileTask { Text(task.task.task.description) }
                                         Button("Prepare workspace") { prepareTaskWorkspace(conversation: false) }
                                         Button("New conversation") { prepareTaskWorkspace(conversation: true) }
-                                        if let error = launchError { Text(error).foregroundStyle(Color.statusWarning) }
+                                        if let error = launchError { Text(error).foregroundStyle(WorkTone.human.ink) }
                                     }.padding()
                                 } else {
                                     WorkspacePanesView(workspace: workspace,
@@ -899,7 +899,7 @@ struct SessionsContentView: View {
             }
         }
         .background(palette.background)
-        .tint(palette.accent)
+        .tint(palette.actionInk)
         .environment(model)
         .overlay {
             if terminalsVisible, navigation.palette == nil {
@@ -1476,8 +1476,13 @@ private struct SessionPaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TerminalPalette.background)
-        // Focus is the pane at full opacity; unfocused panes dim, no border.
-        .opacity(isFocused || !showsStrip ? 1 : 0.85)
+        // Retained pane selection is not proof of native keyboard focus.
+        .overlay {
+            if isFocused && showsStrip {
+                Rectangle().strokeBorder(LoopflowPalette.dark.selectionEdge, lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -1510,14 +1515,17 @@ private struct SessionPaneView: View {
     /// close and zoom otherwise live in keybinds and the context menu.
     private var strip: some View {
         HStack(spacing: 8) {
-            Circle().fill(stateDot).frame(width: 6, height: 6)
+            if let tone = programTone {
+                Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+            }
             Text(_title)
                 .font(Typography.code(11))
                 .foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1)
             if let status = _programStatus, status.summary != nil {
                 ProgramStatusLabel(status: status)
-                    .foregroundStyle(TerminalPalette.dim)
+                    .environment(\.palette, LoopflowPalette.dark)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
@@ -1527,7 +1535,7 @@ private struct SessionPaneView: View {
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(TerminalPalette.stateDot(.human))
+                    .foregroundStyle(LoopflowPalette.dark.waiting)
                     .accessibilityLabel("Session ready")
             }
             if isFocused && hovering {
@@ -1604,14 +1612,9 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// The conversation's shared state, or nothing for a shell, files or the Flow process log.
-    private var stateDot: Color {
-        guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
-        switch state {
-        case .unknown: return TerminalPalette.divider
-        case .active: return TerminalPalette.stateDot(.running)
-        case .closed: return TerminalPalette.stateDot(.stopped)
-        }
+    private var programTone: WorkTone? {
+        if let report = _programStatus?.summary { return report.state.workTone }
+        return TaskRowProgramStatus(sessions: paneSessions.map(\.record), unavailable: nil).tone
     }
 
     private var paneSessions: [SessionItem] {
@@ -1711,7 +1714,7 @@ private struct SessionPaneView: View {
                     Label("New shell", systemImage: "terminal")
                 }
                 .buttonStyle(.bordered)
-                .tint(TerminalPalette.accent)
+                .tint(TerminalPalette.foreground)
                 .accessibilityIdentifier("sessions-empty-new-shell")
             }
         }
@@ -1772,7 +1775,7 @@ private struct SessionPaneView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .tint(TerminalPalette.accent)
+            .tint(TerminalPalette.foreground)
             .foregroundStyle(TerminalPalette.foreground)
             .disabled(action.unavailableReason != nil)
             .help(action.unavailableReason ?? action.help)
@@ -1806,7 +1809,7 @@ private struct SessionPaneView: View {
                         Label(action.label, systemImage: "arrow.down.forward.square")
                     }
                     .buttonStyle(.bordered)
-                    .tint(TerminalPalette.accent)
+                    .tint(TerminalPalette.foreground)
                     .foregroundStyle(TerminalPalette.foreground)
                     .disabled(action.unavailableReason != nil)
                     .help(action.unavailableReason ?? action.help)

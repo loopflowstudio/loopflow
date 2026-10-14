@@ -79,7 +79,7 @@ struct ReferenceTextView: NSViewRepresentable {
 
     private func applyLinkStyle(to view: NSTextView) {
         view.linkTextAttributes = [
-            .foregroundColor: NSColor(palette.accent),
+            .foregroundColor: NSColor(palette.linkInk),
             .underlineStyle: NSUnderlineStyle.single.rawValue,
             .cursor: NSCursor.pointingHand,
         ]
@@ -90,7 +90,7 @@ struct ReferenceTextView: NSViewRepresentable {
             for: text,
             font: font,
             textColor: NSColor(textColor),
-            accentColor: NSColor(palette.accent),
+            accentColor: NSColor(palette.linkInk),
             references: parseChatReferences(in: text)
         )
     }
@@ -325,7 +325,7 @@ private struct ReferencePopover: View {
                     .font(Typography.caption())
                 }
                 .buttonStyle(.borderless)
-                .foregroundStyle(palette.accent)
+                .foregroundStyle(palette.linkInk)
             }
         }
         .padding(Spacing.md)

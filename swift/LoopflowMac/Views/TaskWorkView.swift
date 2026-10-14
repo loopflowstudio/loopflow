@@ -329,7 +329,7 @@ struct FlowProcessView: View {
                 .lineLimit(1)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkPlainButtonStyle())
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("task-work-\(flow.id)")
             if expanded { detail.padding(.leading, 18) }
@@ -340,7 +340,7 @@ struct FlowProcessView: View {
     private var tone: WorkTone? {
         switch flow.state {
         case .current: .running
-        case .stopped: .blocked
+        case .stopped: .stopped
         case .completed: nil
         }
     }

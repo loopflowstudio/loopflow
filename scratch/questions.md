@@ -87,15 +87,6 @@ ties; source appears in the tooltip. Recorded ownership alone supplies Machine
 labels; unstarted assignments are omitted. These reversible choices add no status
 or placement authority. Native external-link dispatch remains a demo check.
 
-## Context accounting — October 13
-
-Main moved Product memory to `.lf/wave/product/`; no immediate child directories
-or child memories exist there. The supplied manifest and available `lf context`
-still use the old path and omit memory usage. Direct cl100k_base accounting covers
-the actual memory against the command's default 16,000-token/131,072-byte limits;
-scratch remains measured by `lf context`. No missing memory is inferred from the
-stale command's omission.
-
 ## Failed planning retention — October 13
 
 Jack Heart's native observation supersedes the unlaunched-app account. Reversible
@@ -104,3 +95,13 @@ and reports its error; already unavailable Waves do not block healthy reads; no 
 Fresh Task/Session streams remain independent. A released installation containing
 the pause migration is required for current-code planning against the real store;
 0.13.13 has no `tasks.paused`. No fabricated unpaused fallback or live migration.
+
+## Color roles — October 14
+
+Reversible choice for Jack Heart's accepted semantic cut: neutral lifted selection
+with a secondary-ink edge; burgundy/rose keyboard outline; neutral ordinary controls
+and muted links. Save and legal Workflow-edge actions receive explicit emphasis.
+A retained selected pane gets a neutral edge, not a keyboard-focus claim; the
+existing native terminal owns its responder/caret. No program report/client-only
+evidence means no activity indicator; unavailable
+reads retain an info icon and reason. Native interaction judgment remains with demo.

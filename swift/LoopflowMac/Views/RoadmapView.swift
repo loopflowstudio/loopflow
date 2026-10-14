@@ -407,7 +407,7 @@ struct RoadmapView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.statusWarning)
+                .foregroundStyle(WorkTone.human.ink)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.caption(11).weight(.semibold))
@@ -421,7 +421,7 @@ struct RoadmapView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(Color.statusWarning.opacity(0.12))
+        .background(WorkTone.human.ink.opacity(0.12))
     }
 
     @MainActor
@@ -525,7 +525,7 @@ private struct RoadmapWaveCard: View {
             if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(Color.statusWarning)
+                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(WorkTone.human.ink)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
@@ -533,10 +533,10 @@ private struct RoadmapWaveCard: View {
                         activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
-                if truncated { Text("Older Tasks are truncated.").foregroundStyle(Color.statusWarning) }
+                if truncated { Text("Older Tasks are truncated.").foregroundStyle(WorkTone.human.ink) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(Color.statusWarning)
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(WorkTone.human.ink)
             }
         }
         .padding(Spacing.lg)
@@ -546,7 +546,7 @@ private struct RoadmapWaveCard: View {
             RoundedRectangle(cornerRadius: CornerRadius.lg)
                 .stroke(
                     selection == .wave(id: roadmap.wave.id)
-                        ? Color.loopflowBurgundy : palette.border,
+                        ? palette.selectionEdge : palette.border,
                     lineWidth: selection == .wave(id: roadmap.wave.id) ? 2 : 1
                 )
         }
@@ -570,7 +570,7 @@ struct RoadmapTaskRow: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.isSuccessful ? Color.statusSuccess : task.section.color)
+                .foregroundStyle(task.task.isSuccessful ? WorkTone.done.ink : task.section.color)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -607,15 +607,13 @@ struct RoadmapTaskRow: View {
             }
         }
         .padding(Spacing.sm)
-        .background(
-            isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.background.opacity(0.6)
-        )
+        .background(palette.background)
+        .workSelection(isSelected)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier("loopflow-task-\(task.id)")
-        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
 
@@ -629,7 +627,7 @@ struct WorkChannelChips: View {
         HStack(spacing: Spacing.xs) {
             channel("Condition", task.condition.state.rawValue, task.condition.state.color)
             channel("PM", task.task.terminalLabel ?? "open",
-                    task.task.isSuccessful ? Color.statusSuccess : palette.textSecondary)
+                    task.task.isSuccessful ? WorkTone.done.ink : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {
@@ -651,7 +649,7 @@ struct WorkChannelChips: View {
     }
 
     private func statusColor(_ status: TaskState) -> Color {
-        status.isTerminal ? .statusNeutral : .statusInfo
+        status.isTerminal ? WorkTone.neutral.ink : WorkTone.running.ink
     }
 }
 
@@ -704,7 +702,7 @@ struct NowSectionView: View {
             HStack(spacing: Spacing.sm) {
                 Text(section.group.title)
                     .font(Typography.sectionTitle(15))
-                    .foregroundStyle(nowColor(section.group))
+                    .foregroundStyle(section.group.color)
                 Text("\(section.rows.count)")
                     .font(Typography.caption(10).weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
@@ -728,14 +726,7 @@ struct NowSectionView: View {
         .accessibilityIdentifier("loopflow-now-\(section.group.rawValue)")
     }
 
-    private func nowColor(_ group: TaskConditionState) -> Color {
-        switch group {
-        case .waiting: WaveLensColor.blue.glow
-        case .blocked: .statusError
-        case .clear: .statusNeutral
-        case .unknown: .statusWarning
-        }
-    }
+
 }
 
 private struct NowRowView: View {
@@ -787,7 +778,8 @@ private struct NowRowView: View {
             )
         }
         .padding(Spacing.sm)
-        .background(isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.surface)
+        .background(palette.surface)
+        .workSelection(isSelected)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
@@ -797,7 +789,6 @@ private struct NowRowView: View {
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier("loopflow-task-\(task.id)")
-        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
 
@@ -813,10 +804,10 @@ extension RoadmapSection {
 
     var color: Color {
         switch self {
-        case .now: .statusSuccess
-        case .waiting: .statusWarning
-        case .available: .statusInfo
-        case .later: .statusNeutral
+        case .now: WorkTone.neutral.ink
+        case .waiting: WorkTone.human.ink
+        case .available: WorkTone.neutral.ink
+        case .later: WorkTone.neutral.ink
         }
     }
 }
@@ -824,10 +815,10 @@ extension RoadmapSection {
 private extension TaskConditionState {
     var color: Color {
         switch self {
-        case .blocked: .statusError
-        case .waiting: WaveLensColor.blue.glow
-        case .clear: .statusNeutral
-        case .unknown: .statusWarning
+        case .blocked: WorkTone.human.ink
+        case .waiting: WorkTone.human.ink
+        case .clear: WorkTone.neutral.ink
+        case .unknown: WorkTone.neutral.ink
         }
     }
 }

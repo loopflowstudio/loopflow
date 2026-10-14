@@ -54,7 +54,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         HStack(spacing: 6) {
             if let work = crumb.waveWork {
                 Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
-                    .buttonStyle(.plain)
+                    .buttonStyle(WorkPlainButtonStyle())
                     .foregroundStyle(palette.textSecondary)
                     .help(crumb.wave == nil ? "Wave name unavailable" : "Show Wave")
                     .disabled(crumb.wave == nil)
@@ -66,14 +66,14 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                 // Session the ancestor carries the title to navigate upward.
                 if let onTaskDetails {
                     Button(task.task.task.name, action: onTaskDetails)
-                        .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
+                        .buttonStyle(WorkPlainButtonStyle()).foregroundStyle(palette.textSecondary)
                         .lineLimit(1).truncationMode(.tail).layoutPriority(-2)
                         .help("Task details and Flow")
                         .accessibilityIdentifier("breadcrumb-task")
                 } else if crumb.session != nil {
                     // The ancestor's title gives way first when the bar is narrow.
                     Button(task.task.task.name) { model.select(task.id.work) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WorkPlainButtonStyle())
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -85,9 +85,8 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                     Link(destination: url) {
                         Text(task.task.task.identifier)
                             .font(Typography.code(12))
-                            .underline(color: palette.accentInk.opacity(0.35))
                     }
-                    .foregroundStyle(palette.accentInk)
+                    .buttonStyle(WorkLinkStyle())
                         .accessibilityIdentifier("breadcrumb-issue")
                 } else {
                     Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
@@ -132,7 +131,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                 .disabled(draft.submitting)
             if let error = draft.error {
                 Text(error)
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(WorkTone.human.ink)
                     .lineLimit(2)
                     .accessibilityIdentifier("session-rename-error")
             }
@@ -208,7 +207,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                         .accessibilityIdentifier("session-bind-preview")
                 }
                 if let error = draft.error {
-                    Text(error).foregroundStyle(Color.statusWarning)
+                    Text(error).foregroundStyle(WorkTone.human.ink)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)
@@ -281,13 +280,13 @@ struct WorkGlyphButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13))
-                .foregroundStyle(hovering ? palette.accentInk : palette.textTertiary)
+                .foregroundStyle(hovering ? palette.text : palette.textTertiary)
                 .frame(width: 28, height: 28)
-                .background(hovering ? palette.accentInk.opacity(0.08) : Color.clear,
+                .background(hovering ? palette.actionHover : Color.clear,
                             in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .onHover { hovering = $0 }
         .help(label)
         .accessibilityLabel(label)
@@ -298,10 +297,12 @@ struct WorkGlyphButton: View {
 /// Report text is always literal; the tooltip exposes the other bounded records.
 struct ProgramStatusLabel: View {
     let status: ProgramStatusRecords
+    @Environment(\.palette) private var palette
 
     var body: some View {
         if let report = status.summary {
             Text(verbatim: report.displayText)
+                .foregroundStyle(report.state.workTone.ink(in: palette))
                 .font(Typography.code(11))
                 .lineLimit(1)
                 .truncationMode(.tail)

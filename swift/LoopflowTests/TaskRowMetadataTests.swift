@@ -38,22 +38,22 @@ struct TaskRowMetadataTests {
         #expect(status.help.contains("(b)"))
     }
 
-    @Test("Nonreporters distinguish inferred activity, Waiting, unknown and unavailable")
+    @Test("Live clients and unknown readings omit activity; shared Waiting remains visible")
     func inference() throws {
         let active = try session("active")
         let waiting = try session("waiting", attention: .waiting)
-        #expect(TaskRowProgramStatus(sessions: [active], unavailable: nil).label == "Active · inferred")
+        #expect(TaskRowProgramStatus(sessions: [active], unavailable: nil).label == nil)
         #expect(TaskRowProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Waiting · inferred")
         let unknown = try session("unknown", state: .unknown)
         let closed = try session("closed", state: .closed, attention: .waiting)
-        #expect(TaskRowProgramStatus(sessions: [unknown, closed], unavailable: nil).label == "Status unknown")
-        #expect(TaskRowProgramStatus(sessions: [active], unavailable: "Offline").label == "Status unavailable")
+        #expect(TaskRowProgramStatus(sessions: [unknown, closed], unavailable: nil).label == nil)
+        #expect(TaskRowProgramStatus(sessions: [active], unavailable: "Offline").label == nil)
     }
 
     @Test("Cleared reporter records do not revive inferred activity or Waiting")
     func clearDoesNotInfer() throws {
         let cleared = try session("cleared", attention: .waiting, status: .init(seen: true, records: []))
-        #expect(TaskRowProgramStatus(sessions: [cleared], unavailable: nil).label == "Status unknown")
+        #expect(TaskRowProgramStatus(sessions: [cleared], unavailable: nil).label == nil)
     }
 
     @Test("Saved readings cannot resurrect program reports or Waiting")
@@ -76,7 +76,40 @@ struct TaskRowMetadataTests {
                               repoPath: "/src/loopflow", cache: WorkCache(directory: directory))
         let restored = try #require(model.sessions.value)
         #expect(restored.map(\.id) == [record.id])
-        #expect(TaskRowProgramStatus(sessions: restored, unavailable: nil).label == "Status unknown")
+        #expect(TaskRowProgramStatus(sessions: restored, unavailable: nil).label == nil)
+    }
+
+    @Test("Unknown and live-client-only rows omit status; read failures stay inspectable")
+    func quietStatus() throws {
+        let task = try #require(roadmap().waves.first?.tasks.items[1])
+        for status in [TaskRowProgramStatus.unknown, .active(try session("live"))] {
+            #expect(status.label == nil)
+            #expect(status.tone == nil)
+            let view = TaskRowMetadata(task: task, status: status, localMachineId: nil)
+            #expect(throws: (any Error).self) {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-\(task.id)")
+            }
+        }
+        let unavailable = TaskRowMetadata(task: task, status: .unavailable("Offline"), localMachineId: nil)
+        let icon = try unavailable.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-unavailable-\(task.id)")
+        #expect(try icon.accessibilityLabel().string().contains("Offline"))
+    }
+
+    @Test("Selection preserves reported failure and shared Waiting semantics")
+    func selectedStatus() throws {
+        let task = try #require(roadmap().waves.first?.tasks.items[1])
+        let error = ProgramStatusReport(state: .error, id: nil, kind: nil, progress: nil,
+                                       app: nil, title: nil, msg: "Build failed")
+        let reported = TaskRowProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
+        #expect(reported.tone == .blocked)
+        let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
+        #expect(try selected.inspect().find(text: "Error").string() == "Error")
+        let waiting = TaskRowProgramStatus(sessions: [try session("waiting", attention: .waiting)], unavailable: nil)
+        #expect(waiting.tone == .human)
+        #expect(waiting.label == "Waiting · inferred")
+        #expect(ProgramStatusState.working.workTone == .running)
+        #expect(ProgramStatusState.blocked.workTone == .human)
+        #expect(ProgramStatusState.done.workTone == .done)
     }
 
     @Test("Only a known remote checkout gets a Machine name")

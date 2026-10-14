@@ -753,7 +753,9 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/loopflow")
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.navigation.content == .details)
-        #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
+        #expect(model.projection.unmatchedSessions.isEmpty)
+        #expect(model.roadmap.errorMessage != nil)
+        #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
     }
 
 
@@ -916,7 +918,7 @@ struct WorkNavigationTests {
     }
 
     @Test("Bound Sessions retain ancestry and panes across planning loss and return",
-          arguments: ["absent-task", "unavailable", "no-current-project", "no-waves"])
+          arguments: ["absent-task", "no-current-project", "no-waves"])
     func boundSessionRetainsAncestry(planning: String) async throws {
         let work = WorkReference.task(id: "ts_review00000000000000000000000000")
         let records = try [session("first", work: work, waveId: "wave-1"),
@@ -924,9 +926,7 @@ struct WorkNavigationTests {
         let original = try roadmapJSON()
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        waves[0]["tasks"] = planning == "unavailable"
-            ? ["state": "unavailable", "reason": "planning offline"]
-            : ["state": "ok", "items": [], "truncated": false]
+        waves[0]["tasks"] = ["state": "ok", "items": [], "truncated": false]
         waves[0]["unavailable_tasks"] = []
         if planning == "no-current-project" {
             waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
@@ -1004,7 +1004,9 @@ struct WorkNavigationTests {
         let absent = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .available(empty))
         #expect(try absent.inspect().find(text: "No workflow yet").string() == "No workflow yet")
         let stale = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .unavailable(lastGood: empty, reason: "Offline"))
-        #expect(try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-refresh-error").text().string() == "Workflow refresh failed: Offline")
+        #expect(try stale.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
+        #expect(throws: (any Error).self) { try stale.inspect().find(text: "No workflow yet") }
+        #expect(throws: (any Error).self) { try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start") }
     }
 
     @Test("Task conversations keep their exact title without sibling picker or Flow chrome")

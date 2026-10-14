@@ -433,6 +433,100 @@ struct WorkModelStreamTests {
         #expect(model.observingMachineId == "machine-local")
     }
 
+    @Test("Failed or truncated planning retains saved rows, selection, panes and cache")
+    func incompletePlanningRetainsSavedWork() async throws {
+        let fixture = try WorkTestFixture.load()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = WorkCache(directory: directory)
+        cache.saveRoadmap(fixture.roadmapJSON)
+        cache.saveSelection(.task(id: "issue-review"), repo: "/src/loopflow")
+        cache.flush()
+        let cacheURL = directory.appendingPathComponent("workspace.json")
+        let saved = try Data(contentsOf: cacheURL)
+        let feed = WorkFeed()
+        let registry = SessionsWorkspaceRegistry()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
+        model.bindWorkspaces(registry, repository: "/src/loopflow")
+        let key = WorkNodeKey(repo: "/src/loopflow", work: .task(id: "issue-review"))
+        let workspaceKey = model.workspaceKey(for: key.work, repository: "/src/loopflow")
+        let workspace = try #require(registry.retained(workspaceKey))
+        workspace.multiplexer.load(sessionId: "retained")
+        let layout = workspace.multiplexer.layout
+        model.navigation.renaming = SessionRenameDraft(sessionId: "retained", text: "Unsent name")
+        let initial = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        #expect(initial.contains { $0.id == key })
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let scope = try await feed.request(1)
+        await feed.send(WorkFrame(sequence: 1, answers: scope.id, home: "/home", revisions: nil,
+            unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
+        try await eventually { model.roadmap.errorMessage?.contains("t.paused") == true }
+        #expect(model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+        #expect(model.selection == key.work)
+        #expect(workspace.multiplexer.layout == layout)
+        for (index, truncated) in [false, true].enumerated() {
+            var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
+            var waves = try #require(wire["waves"] as? [[String: Any]])
+            waves[0]["tasks"] = truncated
+                ? ["state": "ok", "items": [], "truncated": true]
+                : ["state": "unavailable", "reason": "Task snapshot: no such column: t.paused"]
+            wire["waves"] = waves
+            let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+            await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
+                body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
+            try await eventually { model.roadmap.errorMessage?.contains(truncated ? "incomplete" : "Task snapshot") == true }
+            #expect(model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+            #expect(model.selection == key.work)
+            #expect(model.navigation.renaming?.text == "Unsent name")
+            #expect(registry.retained(workspaceKey) === workspace)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(!model.repositoryEntryReady)
+            #expect(model.showsSavedPlanning)
+            cache.flush()
+            #expect(try Data(contentsOf: cacheURL) == saved)
+        }
+        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Recovered"))
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "Recovered" }
+        #expect(model.roadmap.errorMessage == nil)
+        #expect(!model.showsSavedPlanning)
+    }
+
+    @Test("Task Workflow survives planning failure and becomes stale when its reader disconnects")
+    func workflowSurvivesPlanningFailure() async throws {
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await feed.opened(1)
+        let initial = try await feed.request(1)
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: initial.id))
+        try await eventually { model.task(id: "issue-now") != nil }
+        model.select(.task(id: "issue-now"))
+        model.syncWorkScope()
+        let scope = try await feed.request(2)
+        let found = try #require(model.task(id: "issue-now"))
+        let workURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_work.json")
+        let work = try String(contentsOf: workURL, encoding: .utf8)
+        await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id,
+            body: "{\"task\":\"\(found.task.task.identifier)\",\"work\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"flow_processes\":[]}"))
+        try await eventually { model.taskWork[found.task.id].value?.workflow != nil }
+        let workflow = model.taskWork[found.task.id].value?.workflow
+        await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", revisions: nil,
+            unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
+        try await eventually { model.roadmap.errorMessage != nil }
+        #expect(model.taskWork[found.task.id].value?.workflow == workflow)
+        let header = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: model.taskWork[found.task.id])
+        #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
+        #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
+        await feed.fail(RegistryQueryError("reader exited"))
+        try await eventually { model.taskWork[found.task.id].errorMessage == "reader exited" }
+        #expect(model.taskWork[found.task.id].value?.workflow == workflow)
+    }
+
     @Test("Peer status updates independently, preserves failures and rejects old scopes")
     func peerPlanningFrames() async throws {
         let fixture = try WorkTestFixture.load()

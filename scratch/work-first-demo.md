@@ -156,45 +156,16 @@ superseded below; exact failed attempts remain at
 `bdb1658348:scratch/work-first-demo.md`, this section. Preserve foreign-choice
 validation before checkout restoration and inline errors only on a matching Task page.
 
-## CI conversation rate-limit incident — October 12
+## Rate limits and recovery — retained October 12 evidence
 
-Jack Heart reported Linear warning flooding made the CI-under-five Task Session
-unusable; audit this alongside Task entry, without discarding the Task or history.
-Native Codex history `01a131de-262e-74f2-b91b-4e25fb33e47d` shows the resumed
-headless audit child emitting `linear rate limited; retrying`, attempts 1–3 with
-`delay_seconds=0`. Its parent polled PTY tool session 19377: at 21:00:25Z the
-response reported 5,121 lines / 103,667 pre-truncation tokens. This is diagnostic
-flooding through tool output; the parent later answered at 21:00:49Z, so a provider
-crash or permanent conversation corruption is not established. No Session was
-replaced, provider killed or history deleted during inspection.
-
-#1540 (`9d0d41f5e0`, already in this branch) removes per-agent polling and shares
-cooldown across clients. The old warning text and immediate retry loop are absent
-here; existing launchers do not acquire new code merely by updating Desktop.
-A remaining current-code hole accepted stale reset / Retry-After: 0 as no pause.
-Use the existing conservative one-hour fallback when no future deadline is supplied;
-future provider deadlines remain unchanged. A five-client fixture requires only
-one rejected HTTP request. Live quota consumption and Session usability remain
-unverified; do not call another demo ready from this test.
-
-Review: reuse the existing fallback and shared cooldown; no new retry loop or
-per-Session rate-limit state. This does not prove aggregate live request volume.
-Check: three focused Linear cooldown tests PASS (including five callers/one request); `cargo fmt`, all-target Clippy and diff check PASS. No native relaunch or live provider requests for this check.
-
-Check: Task primary lifecycle plus seven primary-scope tests PASS; 88 Swift WorkDestination/WorkNavigation tests PASS; fmt/all-target Clippy/diff PASS. Earlier launcher-failure fixture exposed a remaining tmux inspection during preparation; preparation now avoids that too. Initial Clippy found 14 test callers needing the new explicit prepare argument; corrected before the final pass. Native launch remains pending.
-Recovery backup: `/tmp/loo462-sidebar-audit/LOO-312-recovered-history.patch`, SHA256 `75dc37dcb326c5760bb6115f585e282d19f4c4d99b101f3cdfb898ce36dde006`; no branch or live Task changed.
-
-## Recovery and upstream composition — October 12
-
-Main 0.13.13 and lf-8fed729's committed `9ccaac2e48` are composed; its live
-driver was left alone, no gate or acceptance borrowed. Ordinary ensure/replace
-prepare input; connect owns foreground launch. Our temporary --prepare is removed;
-missing-checkout recovery and inline errors survive. Exact integration, failed
-checks and dependency design: `bdb1658348:scratch/work-first-demo.md`, this heading.
-`2235694dd4` adds explicit `task checkout --recover-from COMMIT` without resetting
-existing work; focused recovery test, fmt and all-target Clippy passed.
-
-Composed check: three Session lifecycle cases and 37 Swift navigation tests PASS; all-target Clippy/fmt/diff PASS. LOO-312 recovered through the new API at exact `d5c043c13a`, clean checkout and unchanged branch. Fresh roster is 13 after lf-8fed729 appeared; every ensured Session has its exact Task membership. JSON connect passes 12; LOO-462 refuses its active other terminal (no takeover). These are preparation, not native acceptance. Records: `prepare-results.json` in the audit directory.
+Exact CI warning flood, shared-cooldown repair, check failures, recovery and
+composition receipts: `dde8ba1a12:scratch/work-first-demo.md`, **CI conversation
+rate-limit incident** and **Recovery and upstream composition**. The cooldown
+fixture is not native usability proof. LOO-312 recovered at `d5c043c13a`, with
+Task/Session identity intact; LOO-462 refused its active other terminal. No takeover.
+Recovery patch: `/tmp/loo462-sidebar-audit/LOO-312-recovered-history.patch`, SHA256
+`75dc37dcb326c5760bb6115f585e282d19f4c4d99b101f3cdfb898ce36dde006`.
+Preparation/JSON connect results do not establish foreground acceptance.
 
 ## Native foreground opening — October 12
 
@@ -261,3 +232,45 @@ README.md. Native approval-once, distinct Tasks, resume and compaction proof sti
 belongs to the primary demo. No trust clicks or live restart performed.
 
 Checks: 13 focused tests, cargo fmt, all-target Clippy passed; native approval proof deferred.
+
+## Failed native refresh — October 13
+
+Jack Heart reported launching only `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`
+(0480344945, `studio.loopflow.work-demo.compress`, PID 87480) with its validation-only
+bundled lf and real `/Users/jack/.lf`. Cached rows initially showed the new layout;
+fresh planning failed with `no such column: t.paused`, then rows disappeared.
+“No workflow yet” appeared despite the expected saved Workflow. No Session was
+opened, no input sent, and no existing app or retained draft was replaced.
+This failed demo supersedes the earlier unlaunched-app account. The attributed
+observation is the evidence: `/tmp/loo462-oct13-demo.log` is empty and the named
+input trace is absent. Neither supplies a diagnostic timeline.
+
+Read-only inspection during this repair found canonical frontier
+`0.13.13.001_release`, no `tasks.paused`, and LOO-462's stored `feature` Workflow
+at node `demo`, edge 3. `task_paused.sql` remains an unreleased draft. A published
+release containing that migration, installed through the supported installation
+boundary, is the real-schema prerequisite. Reinstalling 0.13.13 cannot supply it.
+No live schema, migration ledger or provider state was changed.
+
+The isolated released-schema fixture reaches `t.paused` while counting a Wave's
+active Tasks, before emitting planning. The earlier inference that this exact
+failure arrives inside a partial frame was wrong. Top-level planning errors
+already preserve the last-good value; the native row disappearance remains
+unconfirmed without a captured stream. Regressions cover the exact top-level
+failure after cached launch, plus a separate discovered bug: successful frames
+containing failed/truncated per-Wave readings discarded previously available rows.
+Those now retain planning and its disk cache, with an error and no automatic
+empty-repo entry. Already unavailable Waves do not block other successful readings.
+Selected panes/drafts survive, and successful refresh replaces the retained snapshot.
+
+Task Work remains an independent stream. Reader disconnection now marks its last
+value stale; a stale null Workflow cannot claim “No workflow yet,” and stale
+Workflow actions are disabled. The precise native null-Workflow trigger remains
+unconfirmed without a captured Task frame/selection. Roadmap `workflow_name` is
+not proof of a captured Workflow: Rust may fill it from the Project recommendation.
+No Workflow is invented from that name and no stored Workflow is backfilled.
+
+Current read-only cache inspection names LOO-382 as the saved Loopflow selection;
+its Task has no captured Workflow. The cache and database name the same Machine.
+This is a plausible explanation for the null Workflow, not proof of the October 13
+screen's selected Task. LOO-462 remains the required known-Workflow native case.

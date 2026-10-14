@@ -706,7 +706,7 @@ final class WorkModel {
     @ObservationIgnored private(set) var savedMachineId: String?
     var observingMachineId: String? { workMachine ?? savedMachineId }
     /// Parts still showing saved text instead of a read from this launch.
-    private var showsSavedPlanning = false
+    private(set) var showsSavedPlanning = false
     private var savedSessionRepos: Set<RepositoryReadingKey> = []
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
@@ -1019,7 +1019,7 @@ final class WorkModel {
 
     /// The reader ended. What is shown stays, marked as no longer current.
     private func workUnavailable(_ reason: String) {
-        if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
+        roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
         peerPlanningReadings = peerPlanningReadings.mapValues {
@@ -1027,6 +1027,10 @@ final class WorkModel {
         }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
+        taskWork.values = taskWork.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
+        if let selection, selection.kind == .task {
+            taskWork.values[selection.id] = .unavailable(lastGood: taskWork[selection.id].value, reason: reason)
+        }
     }
 
     private func apply(_ frame: WorkFrame) async {
@@ -1122,8 +1126,14 @@ final class WorkModel {
 
     private func applyPlanning(_ body: WorkFrame.Planning?, wire: WorkFrame.Wire?, reason: String) async {
         taskHistoryNow = Date()
+        // Failed stream readings supersede older one-shot requests too.
+        roadmapGeneration &+= 1
         guard let body else {
             roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
+            return
+        }
+        if let reason = planningFailure(body.roadmap, replacing: roadmap.value) {
+            roadmap = .unavailable(lastGood: roadmap.value ?? body.roadmap, reason: reason)
             return
         }
         await Self.resolveRepoOrigins(body.waves.map(\.repo))
@@ -1131,11 +1141,9 @@ final class WorkModel {
         if waves != nextWaves { waves = nextWaves }
         let next = WorkReading.available(body.roadmap)
         if roadmap != next { roadmap = next }
-        if showsSavedPlanning || roadmapGeneration == 0 {
+        if showsSavedPlanning || roadmapGeneration == 1 {
             LaunchJournal.home.refreshed("planning", ms: workOpened.elapsedMs, ok: true)
         }
-        // A one-shot read still in flight is older than this frame.
-        roadmapGeneration &+= 1
         showsSavedPlanning = false
         if let text = wire?.roadmap { cache?.saveRoadmap(text) }
         if let text = wire?.waves { cache?.saveWaves(text) }
@@ -1900,11 +1908,32 @@ final class WorkModel {
 
     /// A successful read replaces the saved workspace, on screen and on disk.
     private func publishRoadmap(_ result: Result<(RoadmapSnapshot, String), Error>, lastGood: RoadmapSnapshot?) {
+        if case .success(let (snapshot, _)) = result, let reason = planningFailure(snapshot, replacing: lastGood) {
+            roadmap = .unavailable(lastGood: lastGood ?? snapshot, reason: reason)
+            return
+        }
         let next = reading(from: result.map(\.0), lastGood: lastGood)
         if roadmap != next { roadmap = next }
         guard case .success(let (_, text)) = result else { return }
         showsSavedPlanning = false
         cache?.saveRoadmap(text)
+    }
+
+    /// Do not replace previously readable planning with a failed partial frame.
+    /// An already unavailable Wave must not prevent other Waves from refreshing.
+    private func planningFailure(_ snapshot: RoadmapSnapshot, replacing previous: RoadmapSnapshot?) -> String? {
+        for wave in snapshot.waves {
+            guard let old = previous?.waves.first(where: { $0.wave.id == wave.wave.id }) else { continue }
+            if case .available = old.projects {
+                if let reason = wave.projects.unavailableReason { return "\(wave.wave.displayName): \(reason)" }
+                if case .available(_, true) = wave.projects { return "\(wave.wave.displayName): Project reading is incomplete" }
+            }
+            if case .available = old.tasks {
+                if let reason = wave.tasks.unavailableReason { return "\(wave.wave.displayName): \(reason)" }
+                if case .available(_, true) = wave.tasks { return "\(wave.wave.displayName): Task reading is incomplete" }
+            }
+        }
+        return nil
     }
 
     private func readWaves() async -> Result<[Wave], Error> {

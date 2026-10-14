@@ -950,6 +950,65 @@ mod tests {
     use super::{fingerprint, Part, PartState, StoreRevisions, WorkContent};
     use crate::lf::commands::top::ActivitySnapshot;
 
+    #[test]
+    fn released_planning_failure_keeps_the_stored_workflow_readable() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("released.db");
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        crate::store::migrations::apply_before_current_draft(&conn, "task_paused");
+        let task = crate::durable::TaskId::new();
+        let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
+            .replace("{wave}", crate::id::WaveId::new().as_str())
+            .replace("{project}", crate::durable::ProjectId::new().as_str())
+            .replace("{task}", task.as_str())
+            .replace("{repo}", directory.path().to_str().unwrap());
+        conn.execute_batch(&fixture).unwrap();
+        let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
+        // Use the released shared schema through a read-only connection. The
+        // fixture lives outside the real Machine and has no draft provenance.
+        let reader = super::Reader {
+            store: Some(std::sync::Arc::new(crate::store::Store {
+                sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
+            })),
+            database,
+            refused: None,
+            scope: super::Scope {
+                task: Some("PROOF-1".into()),
+                ..Default::default()
+            },
+            parts: Default::default(),
+            checkouts: Default::default(),
+            watched_at: None,
+            quiet: None,
+            runtime: tokio::runtime::Runtime::new().unwrap(),
+            planning_sync: None,
+        };
+        let reason = reader.project(Part::Planning).unwrap_err().to_string();
+        assert!(reason.contains("no such column: t.paused"), "{reason}");
+        let WorkContent::Task(Some(reading)) = reader.project(Part::Task).unwrap() else {
+            panic!("the independent Task reading must remain available");
+        };
+        let workflow = reading.work.workflow.unwrap();
+        assert_eq!(workflow.definition.name, "feature");
+        assert!(
+            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "demo")
+        );
+        assert_eq!(
+            crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
+            frontier
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='paused'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+
     fn revisions(planning: i64, sessions: i64, flows: i64, processes: i64) -> StoreRevisions {
         StoreRevisions {
             planning,

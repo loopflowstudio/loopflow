@@ -37,16 +37,16 @@ struct TaskWorkflowHeader: View {
                         }
                     }
                     .fixedSize()
-                    .disabled(acting)
+                    .disabled(acting || readingUnavailable != nil)
                     .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
                     if task.runtime?.status != .done {
                         Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
-                            .disabled(acting)
+                            .disabled(acting || readingUnavailable != nil)
                             .help("lf task complete \(task.task.identifier)")
                             .accessibilityIdentifier("task-complete")
                     }
-                } else if work.value != nil {
+                } else if work.value != nil, work.errorMessage == nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
                     Button("Start") { Task { await model.startTask(nil, task: task, wave: wave) } }
@@ -55,7 +55,7 @@ struct TaskWorkflowHeader: View {
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
                     Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
-                        .disabled(acting)
+                        .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-workflow-end")
                     Spacer()
                 } else {
@@ -66,7 +66,7 @@ struct TaskWorkflowHeader: View {
                 }
                 if acting { ProgressView().controlSize(.small) }
             }
-            if work.value != nil, let error = work.errorMessage {
+            if work.value?.workflow != nil, let error = work.errorMessage {
                 Text("Workflow refresh failed: \(error)")
                     .foregroundStyle(WorkTone.blocked.ink)
                     .textSelection(.enabled)
@@ -94,7 +94,7 @@ struct TaskWorkflowHeader: View {
                         Task { await model.completeTask(task, wave: wave) }
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
-                    .disabled(acting)
+                    .disabled(acting || readingUnavailable != nil)
                     .help("lf task complete \(task.task.identifier)")
                     .accessibilityIdentifier("task-completion-retry")
                 }
@@ -111,7 +111,7 @@ struct TaskWorkflowHeader: View {
             if task.runtime?.status.isTerminal != true {
                 Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
                     Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
-                }.disabled(acting)
+                }.disabled(acting || readingUnavailable != nil)
             }
         }
         .font(Typography.body(12))
@@ -126,7 +126,13 @@ struct TaskWorkflowHeader: View {
     /// Why no edge can be started now.
     private var unavailable: String? {
         if acting { return "Starting" }
-        return task.runControl.unavailable
+        return readingUnavailable ?? task.runControl.unavailable
+    }
+
+    private var readingUnavailable: String? {
+        if let error = work.errorMessage ?? model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return nil
     }
 }
 

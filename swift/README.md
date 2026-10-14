@@ -20,7 +20,10 @@ and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed
-reading unchanged; a new error or recovery updates it. Delete the file to start
+reading unchanged; failed per-Wave or truncated replacements keep previously readable planning,
+including its saved copy. A new error or recovery updates it.
+The bundled helper cannot migrate the installed store: schema changes require a
+published release installed through `lf install`. Delete the file to start
 from **Loading workspace…**.
 
 ```sh
@@ -175,7 +178,8 @@ node. **Move to** changes Workflow position; `end` requests completion.
 failed request without replaying the Flow.
 Linear completion leaves the displayed Workflow and live Processes intact.
 Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
-the last recorded graph. A Task with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
+the last recorded graph with its actions disabled. Only a successful Task reading
+with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
 The toolbar's **+** changes what the multiplexer shows: **New shell**,
 **Files** or **Flow processes**. The Flow process log lists every Flow process in the

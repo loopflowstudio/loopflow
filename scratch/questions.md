@@ -95,3 +95,12 @@ still use the old path and omit memory usage. Direct cl100k_base accounting cove
 the actual memory against the command's default 16,000-token/131,072-byte limits;
 scratch remains measured by `lf context`. No missing memory is inferred from the
 stale command's omission.
+
+## Failed planning retention — October 13
+
+Jack Heart's native observation supersedes the unlaunched-app account. Reversible
+choice: an incomplete replacement retains the previously readable planning snapshot
+and reports its error; already unavailable Waves do not block healthy reads; no saved-cache replacement or empty-repo acquisition.
+Fresh Task/Session streams remain independent. A released installation containing
+the pause migration is required for current-code planning against the real store;
+0.13.13 has no `tasks.paused`. No fabricated unpaused fallback or live migration.

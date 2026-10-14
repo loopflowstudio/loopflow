@@ -382,9 +382,11 @@ the duplicate pause method introduced by integration. Its five Rust and 31 Swift
 focused passes are recorded at `cf67067b0d:scratch/get-me-using-lf.md`.
 
 Remaining delivery includes affected-suite gate and publication for review.
-Prepared unlaunched app: `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`,
+Earlier app: `/tmp/loo462-oct13-compress/Loopflow Work Demo.app`,
 built from `0480344945` with its matching validation-only bundled lf; signature
-verified. `build.json` beside it records source/signed hashes and revision.
+verified. Jack Heart subsequently launched it and reported a failed fresh-planning
+demo; see work-first-demo.md. Its build-time `launched: false` is historical.
+`build.json` beside it records source/signed hashes and revision.
 The earlier sidebar app at `/tmp/loo462-oct13-sidebar/Loopflow Work Demo.app`
 (`88d91e53ca`) remains preserved.
 SwiftPM resource lookup still relies on the retained checkout build directory;
@@ -398,4 +400,32 @@ live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
 Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check. These remain evidence for that revision, not an affected-suite gate.
-Check: `git diff --check` PASS (prose reconciliation); reused `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57) and bundled build/signature results at `30b70b75b3` (code unchanged). Gate owns affected suites; demo owns native timing/trust/link/density proof.
+
+### Native failure repair — October 13
+
+Jack Heart observed the 0480344945 app launch, failed fresh planning (`t.paused`),
+lost cached rows and “No workflow yet.” The log is empty and input trace absent;
+this supersedes the unlaunched-app account above, without supplying diagnostics.
+Delete — do not maintain: unconditional replacement/cache writes for partial
+planning; stale-null Workflow absence claims; disconnected Task readings left
+current. These paths are removed. Last-good navigation, pane/draft identity,
+independent Task reads and successful-null Workflow semantics survive. A new
+partial reading cannot discard previously available content; already unavailable
+Waves do not prevent healthy readings from advancing. The released-schema fixture
+reproduces the SQL failure before planning, so the separate partial-frame bug is
+not a proven explanation for the native disappearance. The exact native trigger
+remains for demo. Current saved selection is LOO-382 (no captured Workflow), while
+LOO-462 retains feature/demo; that later inspection is not a screen receipt.
+
+The real store needs a published release containing the currently unreleased
+`task_paused` migration, installed through `lf install`; reinstalling 0.13.13
+cannot supply it. No live schema change or invented compatibility value. Remaining:
+matching review artifact, gate's affected suites, publication, then real-schema
+review, six provider timing cases, hook trust and visual acceptance.
+
+Review found and fixed stale Workflow mutation buttons and old tests that expected
+Task ancestry to vanish on incomplete planning. No new Workflow/cache authority.
+Context: `lf context` under scratch limits; actual `.lf/wave/product/MEMORY.md`
+15,997/16,000 tokens and 75,077/131,072 bytes (unchanged; manifest path is stale).
+
+Check: `scripts/test_desktop.sh --filter 'WorkModelStreamTests|WorkNavigationTests|WorkCacheTests' -Xswiftc -gnone` PASS (62; updated stream cases rerun, 9 PASS); `cargo test -p loopflow --lib released_planning_failure_keeps_the_stored_workflow_readable` PASS; `cargo fmt --check`, all-target Clippy and diff check PASS; gate retains affected suites and demo retains native proof.

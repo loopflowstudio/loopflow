@@ -574,7 +574,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     /// The surface's child process ended — a provider exit, a shell exit, or an
-    /// external `--replace` takeover. Frees the dead surface so pool and
+    /// external `--takeover`. Frees the dead surface so pool and
     /// Session state stop reporting it live, and announces the closure so the
     /// UI can reclassify immediately instead of waiting for the next poll.
     func handleSurfaceClose() {

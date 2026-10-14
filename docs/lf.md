@@ -390,20 +390,24 @@ lf usage --task LOO-265 --context   # each step's input by source, flagged over 
 lf history show SESSION --context       # input cost by source
 lf history show SESSION --instructions  # why guidance was included or omitted
 lf session ensure                   # this repository's one ongoing conversation
-lf session ensure -w growth         # a Wave's one ongoing conversation
-lf session ensure --task EXP-12     # a Task's primary conversation
+lf connect --wave growth            # open a Wave's primary conversation
+lf connect --task EXP-12 --prepare  # prepare a Task conversation without launching
 lf --task EXP-12 skill task-session # another conversation about that Task
 lf session connect SESSION         # stop headless Claude/OpenCode and resume history
-lf session replace SESSION         # fresh conversation for the same scope
+lf session new SESSION         # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
 The repository and each Wave have one ongoing conversation. `session ensure`
 finds it or prepares it, a Wave's with its goal and memory, and repeats return the
-same Session. `replace` stops that conversation, keeps it as history, and prepares
+same Session. `session new` stops that conversation, keeps it as history, and prepares
 a fresh one. Neither launches a provider; `session connect SESSION` opens it in
 the current terminal.
+
+`connect --prepare` and `resume --prepare` print a terminal command without
+launching the provider. Add `--json` for connection data. Remote preparation
+returns an SSH command in either format.
 
 A Task's primary is one of its own conversations: the one named with
 `--choose SESSION`, else its only unfinished interactive conversation, else the
@@ -729,11 +733,11 @@ execution. The URL is not a window reservation, readiness receipt or input targe
 installed-app and retained-window state remain uninspected.
 
 `session connect SESSION --explain` reports start, native resume or possible live
-connection, replacement/try intent and the shared Session actions.
-`session resume --explain` selects the latest interactive conversation in the checkout, just like
-ordinary resume. JSON adds `action`, `state`, `actions`, `impediments` and
-`unavailable` to `resolution`. `session connect --json` normally prepares launch
-arguments without takeover; its explanation preserves that distinction. Live
+connection, takeover/try intent and the shared Session actions.
+`resume --explain` uses the same Task preference and checkout/repository recency
+as ordinary resume; explicit `--task` or `--wave` overrides discovery. JSON adds `action`, `state`, `actions`, `impediments` and
+`unavailable` to `resolution`. `connect --prepare` prepares launch
+arguments without takeover, with or without `--json`. JSON changes representation only. Live
 endpoints are not probed, unrecorded native conversations are not admitted, and
 missing workspace/provider/account evidence stays explicit. Nothing acquires or
 signals a client, prepares a checkout or launches a provider.

@@ -4,7 +4,7 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
 use crate::flow::load_skill;
 use crate::git::{
@@ -192,6 +192,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
 
     let launch = AgentConfig {
+        chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
@@ -203,11 +204,8 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
         stream: false,
         ..Default::default()
     };
-    let capabilities = AgentCapabilities {
-        chrome: config.chrome,
-    };
 
-    let result = run_agent(&launch, &process, &capabilities)
+    let result = run_agent(&launch, &process)
         .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(

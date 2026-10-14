@@ -152,8 +152,8 @@ fn clone_migrates_only_its_snapshot_and_confines_children() {
     for provider in ["copied-codex", "copied-claude"] {
         for args in [
             vec!["session", "connect", provider],
-            vec!["session", "replace", provider],
-            vec!["-b", "session", "resume", provider, "again"],
+            vec!["session", "new", provider],
+            vec!["-b", "session", "connect", provider, "--message", "again"],
         ] {
             let mut command = vec![lf.to_str().unwrap()];
             command.extend(args);

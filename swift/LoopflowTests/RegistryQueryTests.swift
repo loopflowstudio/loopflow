@@ -498,7 +498,8 @@ struct RegistryQueryTests {
             switch args {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "connect", session.id, "--json"]:
+            case ["session", "connect", session.id, "--prepare", "--json"],
+                 ["session", "connect", "--task", "INF-123", "--prepare", "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
@@ -506,10 +507,12 @@ struct RegistryQueryTests {
         }
 
         let listed = try await query.sessionPage(cwd: "/tmp/repo").entries
-        let opened = try await query.openSession(id: session.id, cwd: "/tmp/repo")
+        let opened = try await query.prepareSession(id: session.id, cwd: "/tmp/repo")
 
         #expect(listed == sessions)
         #expect(opened == session)
+        let primary = try await query.prepareTaskSession(issue: "INF-123", cwd: "/tmp/repo")
+        #expect(primary == session)
     }
 
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")

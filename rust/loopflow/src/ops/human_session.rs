@@ -24,6 +24,7 @@ use crate::work::task::Task;
 
 #[cfg(test)]
 pub(crate) mod action_test;
+pub(crate) mod conversation_log;
 pub(crate) mod primary;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
@@ -41,6 +42,11 @@ pub async fn latest_interactive_session(
     let Some(current) = checkout(cwd) else {
         return Ok(None);
     };
+    let repository_wide = crate::git::worktrees::main_repo_root(&current)
+        .ok()
+        .and_then(|root| fs::canonicalize(root).ok())
+        .as_ref()
+        == Some(&current);
     let mut roots = BTreeMap::new();
     let candidates = store
         .resume_candidates()
@@ -49,7 +55,14 @@ pub async fn latest_interactive_session(
         .filter(|(session, _)| {
             roots
                 .entry(session.cwd.clone())
-                .or_insert_with(|| checkout(&session.cwd))
+                .or_insert_with(|| {
+                    let root = checkout(&session.cwd)?;
+                    if repository_wide {
+                        fs::canonicalize(crate::git::worktrees::main_repo_root(&root).ok()?).ok()
+                    } else {
+                        Some(root)
+                    }
+                })
                 .as_ref()
                 == Some(&current)
         })
@@ -100,14 +113,14 @@ pub(crate) enum HumanSessionToken {
 #[serde(rename_all = "snake_case")]
 pub enum OpenMode {
     Refuse,
-    Replace,
+    Takeover,
     Try,
 }
 
 impl OpenMode {
-    pub(crate) fn from_flags(replace: bool, try_open: bool) -> Self {
-        if replace {
-            Self::Replace
+    pub(crate) fn from_flags(takeover: bool, try_open: bool) -> Self {
+        if takeover {
+            Self::Takeover
         } else if try_open {
             Self::Try
         } else {
@@ -123,19 +136,72 @@ impl OpenMode {
     }
 }
 
-/// The ordinary resume command and its preview choose the same conversation.
+/// A Session identity or Work target; contextual discovery never creates a conversation.
+#[derive(Debug, Clone, Copy)]
+pub enum SessionTarget<'a> {
+    Context,
+    Session(&'a str),
+    Task(&'a str),
+    Wave(&'a str),
+}
+
+impl<'a> SessionTarget<'a> {
+    pub fn from_selectors(
+        id: Option<&'a str>,
+        task: Option<&'a str>,
+        wave: Option<&'a str>,
+    ) -> Result<Self> {
+        match (id, task, wave) {
+            (None, None, None) => Ok(Self::Context),
+            (Some(id), None, None) => Ok(Self::Session(id)),
+            (None, Some(task), None) => Ok(Self::Task(task)),
+            (None, None, Some(wave)) => Ok(Self::Wave(wave)),
+            _ => bail!("select one Session, Task or Wave target"),
+        }
+    }
+}
+
 pub(crate) async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
-    id: Option<&str>,
+    target: SessionTarget<'_>,
+    prepare_primary: bool,
 ) -> Result<String> {
-    match id {
-        Some(id) => Ok(id.to_owned()),
-        None => latest_interactive_session(store, cwd)
-            .await?
+    use crate::ops::WorkSelection;
+    let selection = match target {
+        SessionTarget::Session(id) => return Ok(id.to_owned()),
+        SessionTarget::Task(task) if prepare_primary => {
+            return Ok(primary::ensure_task(store, cwd, task, None).await?.id)
+        }
+        SessionTarget::Wave(wave) if prepare_primary => {
+            return Ok(primary::ensure(store, cwd, Some(wave)).await?.id)
+        }
+        SessionTarget::Task(task) => WorkSelection {
+            task: Some(task),
+            wave: None,
+        },
+        SessionTarget::Wave(wave) => WorkSelection {
+            task: None,
+            wave: Some(wave),
+        },
+        SessionTarget::Context => WorkSelection::default(),
+    };
+    if let Some(work) = crate::ops::run::select_work(store, cwd, selection).await? {
+        let session = if let Some(task) = work.task {
+            primary::task_conversation(store, &task.id).await?
+        } else {
+            store
+                .sqlite
+                .primary_session(&crate::session::PrimaryScope::Wave(work.wave.id().clone()))?
+        };
+        return session
             .map(|session| session.id)
-            .context("No interactive session found in this worktree"),
+            .context("No interactive Session found for this Work");
     }
+    latest_interactive_session(store, cwd)
+        .await?
+        .map(|session| session.id)
+        .context("No interactive Session found in this repository or worktree")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -522,7 +588,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
     command
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
-    command.args(conversation_launch_args(store, session).await);
+    command.args(conversation_launch_args(store, session).await?);
     let mut child = spawn_session_process(&mut command, &session.artifact_key).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
@@ -534,11 +600,12 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
     }
 }
 
-async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> Vec<String> {
+async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> Result<Vec<String>> {
+    let config = crate::agent::resolve_session_config(session, &crate::lf::Cli::default())?;
     let mut args = vec![
         "-i".to_string(),
         "--agent".to_string(),
-        launch_model(session),
+        config.agent().to_owned(),
         "--__cwd".to_string(),
         session.cwd.display().to_string(),
     ];
@@ -563,7 +630,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> V
             .clone()
             .unwrap_or_else(|| PRIMARY_MESSAGE.to_string()),
     );
-    args
+    Ok(args)
 }
 
 pub(crate) fn capture_subjects(
@@ -620,13 +687,26 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
-    if store
-        .sqlite
-        .input_provider_session(&session.artifact_key)?
-        .is_some()
+    if resume
+        && store
+            .sqlite
+            .input_provider_session(&session.artifact_key)?
+            .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
-            crate::config::resume_model(provider, session.model.as_deref())?;
+            if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
+                provider,
+                session.model.as_deref(),
+                crate::config::agent_override().as_deref(),
+            ) {
+                mode.require_action(surface(store, session).await?.state)?;
+                import(store, &session.id, &agent).await?;
+                let session = store
+                    .session(&session.id)
+                    .await?
+                    .ok_or_else(|| session_not_found(&session.id))?;
+                return surface(store, &session).await;
+            }
         }
     }
     let admitted;
@@ -665,22 +745,16 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(&session.id))?;
         return surface(store, &session).await;
     }
-    if resume && mode == OpenMode::Replace {
+    if resume && mode == OpenMode::Takeover {
         crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     }
     let mut result = surface(store, session).await?;
     mode.require_action(result.state)?;
     if resume {
-        crate::lf::commands::util::resume_session(
-            native.provider,
-            session.model.as_deref(),
-            &session.cwd,
-            &session.artifact_key,
-            &provider_session,
-        )?;
+        crate::lf::commands::util::resume_session(&session.artifact_key, &provider_session)?;
     } else {
         match mode {
-            OpenMode::Replace => result.open_argv.push("--replace".to_string()),
+            OpenMode::Takeover => result.open_argv.push("--takeover".to_string()),
             OpenMode::Try => result.open_argv.push("--try".to_string()),
             OpenMode::Refuse => {}
         }
@@ -835,9 +909,12 @@ async fn connect_live_codex(
             serde_json::to_string(&launch_attachment.caller(session.id.clone()))?,
         )]);
         let result = tokio::task::spawn_blocking(move || {
-            crate::lf::commands::util::open_saved_session_with_env(
-                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, Some(&provider),
-                &environment, None, Some(crate::lf::commands::util::NativeConnection { relay: remote, upstream }),
+            crate::lf::commands::util::resume_session_with_env(
+                &session.artifact_key,
+                Some(&provider),
+                &environment,
+                None,
+                Some(crate::agent::NativeConnection { relay: remote, upstream }),
                 Some((session.id.clone(), launch_attachment)),
             )
         }).await;
@@ -884,18 +961,15 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     let session = if capture_is_prepared(&session.artifact_key)? {
         session
     } else {
-        let replaced = session.captured;
-        let mut next = session;
-        if next.input_published {
-            next.artifact_key = crate::session_record::new_artifact_key();
-            next.input_published = false;
-            next = store.replace_session_input(replaced, next).await?;
+        if session.input_published {
+            append_input(store, session).await?
+        } else {
+            publish_prepared_input(
+                &store.sqlite,
+                &session,
+                crate::session_record::SessionFlowMembership::Independent,
+            )?
         }
-        publish_prepared_input(
-            &store.sqlite,
-            &next,
-            crate::session_record::SessionFlowMembership::Independent,
-        )?
     };
     serve_locked(
         store,
@@ -903,6 +977,43 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         launch_lock.expect("an unresumed Session retains its launch lock"),
     )
     .await
+}
+
+/// Continue a conversation on another provider. The Session keeps its name,
+/// Work and feedback; a fresh AgentSession starts from a log of the current one.
+async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
+    let lock_id = id.to_string();
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let session = store
+        .session(id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    let session = primary::admit_workspace(store, session).await?;
+    let request = conversation_log::continuation(&store.sqlite, &session)?;
+    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    let mut next = session;
+    let (provider, model) = crate::config::parse_agent(agent);
+    next.provider = Some(provider);
+    next.model = model;
+    // The skill ran in the earlier conversation and is in its log. The
+    // continuation is stored so a relaunch after a failed start still carries it.
+    next.skill = None;
+    next.request = Some(request);
+    let next = append_input(store, next).await?;
+    serve_locked(store, &next, launch_lock).await
+}
+
+/// Append a fresh, published input to the Session; earlier inputs stay in its history.
+async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
+    let replaced = next.captured;
+    next.artifact_key = crate::session_record::new_artifact_key();
+    next.input_published = false;
+    let next = store.replace_session_input(replaced, next).await?;
+    publish_prepared_input(
+        &store.sqlite,
+        &next,
+        crate::session_record::SessionFlowMembership::Independent,
+    )
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
@@ -1228,10 +1339,7 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
-    crate::lf::commands::util::open_saved_session_with_env(
-        native.provider,
-        session.model.as_deref(),
-        &session.cwd,
+    crate::lf::commands::util::resume_session_with_env(
         &session.artifact_key,
         provider_session.as_ref(),
         &environment,

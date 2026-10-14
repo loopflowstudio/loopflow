@@ -753,8 +753,8 @@ async fn command_failure_records_the_process_result() {
             "--wave",
             "fixture-wave-does-not-exist",
             "session",
-            "list",
-            "--all",
+            "resume",
+            "--prepare",
             "--json",
         ],
     ] {

@@ -108,7 +108,7 @@
     },
     "action": {
       "intent": "resume",
-      "mode": "replace",
+      "mode": "takeover",
       "prepare_only": true
     },
     "state": "unknown",

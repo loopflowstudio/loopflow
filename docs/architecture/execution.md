@@ -223,7 +223,7 @@ Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
 including captured input, native identity and historical outcomes.
 
-`session connect --replace` stops the exact owned clients and reconnects to the
+`session connect --takeover` stops the exact owned clients and reconnects to the
 live AgentProcess, preserving the active turn and sibling conversations.
 There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
@@ -243,7 +243,7 @@ iteration counts to FlowProcess, beside the Flow's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
 answer contract in its message and the Flow process reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
-resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
+resuming the same conversation (`lf -b connect ID --message TEXT`), at most
 twice, then the Flow fails. A mechanical step is its own child Process and invents
 no LfSession. After an operation the Flow process stops the Flow when a landing of
 its checkout is still being watched; neither failed. A killed Flow process leaves its Processes

@@ -76,11 +76,11 @@ pub(crate) fn codex_config(
     Ok(json!({"hooks":hooks}))
 }
 
-pub(crate) fn opencode_config(
+pub(crate) fn add_opencode_context(
+    config: &mut Value,
     context: &ContextDelivery,
     instructions: &str,
-    existing: Option<&str>,
-) -> Result<String> {
+) -> Result<()> {
     let spec = json!({"executable":crate::os_process::resolve_lf_binary(), "delivery":context, "instructions":instructions});
     let delivery = write_prompt_log(
         &context.repo,
@@ -97,12 +97,6 @@ pub(crate) fn opencode_config(
     let path = write_prompt_log(&context.repo, &source, "opencode-plugin", None)?;
     let plugin = path.with_extension("mjs");
     std::fs::rename(path, &plugin)?;
-    let inherited = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
-    let mut config: Value = existing
-        .or(inherited.as_deref())
-        .map(serde_json::from_str)
-        .transpose()?
-        .unwrap_or_else(|| json!({}));
     config
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("OpenCode configuration must be an object"))?
@@ -111,20 +105,6 @@ pub(crate) fn opencode_config(
         .as_array_mut()
         .ok_or_else(|| anyhow::anyhow!("OpenCode plugin config must be an array"))?
         .push(json!(format!("file://{}", plugin.display())));
-    Ok(serde_json::to_string(&config)?)
-}
-
-pub(crate) fn configure_opencode(
-    command: &mut std::process::Command,
-    context: &ContextDelivery,
-    instructions: &str,
-) -> Result<()> {
-    let existing = command
-        .get_envs()
-        .find(|(key, _)| *key == "OPENCODE_CONFIG_CONTENT")
-        .and_then(|(_, value)| value.map(|v| v.to_string_lossy().into_owned()));
-    let config = opencode_config(context, instructions, existing.as_deref())?;
-    command.env("OPENCODE_CONFIG_CONTENT", config);
     Ok(())
 }
 
@@ -137,7 +117,7 @@ pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::opencode_config;
+    use super::add_opencode_context;
     use crate::context_block::ContextDelivery;
 
     #[test]
@@ -155,10 +135,8 @@ mod tests {
             "permission": {"edit": "deny"},
             "model": "fixture/model"
         });
-        let config: serde_json::Value = serde_json::from_str(
-            &opencode_config(&context, "Fixed instructions", Some(&original.to_string())).unwrap(),
-        )
-        .unwrap();
+        let mut config = original.clone();
+        add_opencode_context(&mut config, &context, "Fixed instructions").unwrap();
         assert_eq!(config["permission"], original["permission"]);
         assert_eq!(config["model"], original["model"]);
         let plugins = config["plugin"].as_array().unwrap();

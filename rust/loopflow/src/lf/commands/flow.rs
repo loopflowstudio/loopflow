@@ -669,8 +669,9 @@ impl SkillExecutor for &RunningFlow<'_> {
                 "--output-schema".to_owned(),
                 output.schema().to_string(),
                 "session".to_owned(),
-                "resume".to_owned(),
+                "connect".to_owned(),
                 conversation,
+                "--message".to_owned(),
                 format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work.{}", output.instructions()),
             ];
         }

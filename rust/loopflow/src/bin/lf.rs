@@ -1502,6 +1502,15 @@ fn run() -> anyhow::Result<()> {
         .as_ref()
         .map(|agent| EnvGuard::set(loopflow::config::AGENT_OVERRIDE_ENV, agent));
     cli.agent = selected_agent;
+    let _yolo_override = cli
+        .yolo
+        .then(|| EnvGuard::set(loopflow::config::YOLO_OVERRIDE_ENV, "1"));
+    let _chrome_override = cli.chrome_setting().map(|enabled| {
+        EnvGuard::set(
+            loopflow::config::CHROME_OVERRIDE_ENV,
+            if enabled { "on" } else { "off" },
+        )
+    });
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {
@@ -1979,28 +1988,31 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let connection = match &cli.command {
         Some(Commands::Session {
             cmd:
-                loopflow::lf::SessionCommand::Open {
+                loopflow::lf::SessionCommand::Connect {
                     id,
-                    replace,
+                    connection,
+                    takeover,
                     try_open,
-                    json,
                 },
-        }) => Some((Some(id.as_str()), *replace, *try_open, *json)),
+        }) => Some((
+            connection.target(cli, id.as_deref())?,
+            *takeover,
+            *try_open,
+            connection.prepare,
+        )),
         Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::Resume { id, message: None },
-        }) if !cli.batch => Some((id.as_deref(), false, false, false)),
+            cmd: loopflow::lf::SessionCommand::Resume(connection),
+        }) => Some((
+            connection.target(cli, None)?,
+            false,
+            false,
+            connection.prepare,
+        )),
         _ => None,
     };
-    if let Some((id, replace, try_open, prepare_only)) = connection {
-        anyhow::ensure!(
-            cli.task.is_none() && cli.wave.is_none(),
-            "select Work or a Session, not several independent targets"
-        );
+    if let Some((target, takeover, try_open, prepare)) = connection {
         let report = loopflow::lf::commands::context::explain_session_connect(
-            id,
-            replace,
-            try_open,
-            prepare_only,
+            target, takeover, try_open, prepare,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2215,6 +2227,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
+    if let Some(Commands::Session { cmd }) = &cli.command {
+        journal::admit_process(&std::env::current_dir()?, args);
+        return loopflow::lf::commands::session::run(cmd, &cli);
+    }
     // Task run/checkout own preparation above; ordinary invocations bind existing
     // Work. Admit this Process at the directory reached, even if binding fails.
     let mut _work_declaration = None;
@@ -2330,16 +2346,7 @@ fn execute_command(
         Some(Commands::SessionTitle { .. }) => {
             unreachable!("title callbacks dispatch before command admission")
         }
-        Some(Commands::Session {
-            cmd:
-                loopflow::lf::SessionCommand::Resume {
-                    id: Some(id),
-                    message: Some(message),
-                },
-        }) if cli.batch => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::run::resume(id, message, cli)
-        }),
-        Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
+        Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
             provider,

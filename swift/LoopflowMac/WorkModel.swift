@@ -96,6 +96,7 @@ struct LinkedSession: Equatable {
     let task: RoadmapTask
     let showsChanges: Bool
     let location: TaskLocationObservation?
+    var prepared = false
 }
 
 struct LinkedTaskPage: Equatable {
@@ -291,14 +292,16 @@ final class WorkModel {
         let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
         let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
+        var preparation: SessionRecord?
         if let selected = link.session {
             sessionID = selected
         } else {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
-            let record = try await executionQuery.ensureTaskSession(issue: executionTask, cwd: wave.wave.repo)
+            let record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: wave.wave.repo)
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
+            preparation = record
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
             if location == nil {
@@ -327,7 +330,7 @@ final class WorkModel {
                 after = page.next
             } while after != nil
         }
-        guard let record = records.first(where: { $0.id == sessionID }),
+        guard let record = preparation ?? records.first(where: { $0.id == sessionID }),
               record.taskIds.contains(executionTask) || record.workspace?.taskId == executionTask else {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
@@ -353,7 +356,7 @@ final class WorkModel {
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
-        linkedSession = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location)
+        linkedSession = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, prepared: preparation != nil)
     }
 
     /// Called by the requested Task's mounted page (or its unavailable surface).
@@ -392,6 +395,7 @@ final class WorkModel {
             taskOpening = taskOpening.map { DesktopOpening(url: $0.url, status: .failed, reason: "Opening panes are no longer available.") }
             return
         }
+        if destination.prepared { store.adoptPreparation(destination.record) }
         await store.select(destination.record.id)
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         if let files { await files.refreshChanges() }

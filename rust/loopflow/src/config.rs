@@ -72,6 +72,13 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
+pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
+pub const CHROME_OVERRIDE_ENV: &str = "LF_CHROME_OVERRIDE";
+
+pub fn yolo_override() -> bool {
+    std::env::var(YOLO_OVERRIDE_ENV).is_ok_and(|value| value == "1")
+}
+
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
 pub fn agent_override() -> Option<String> {
@@ -80,16 +87,25 @@ pub fn agent_override() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-pub(crate) fn resume_model(provider: &str, model: Option<&str>) -> anyhow::Result<Option<String>> {
-    let Some(agent) = agent_override() else {
-        return Ok(model.map(str::to_owned));
+/// How a recorded conversation continues under the invocation's agent choice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Resume {
+    /// The same provider resumes its native history with this model.
+    Native(Option<String>),
+    /// Another provider starts fresh from a log of the native history.
+    Import { agent: String },
+}
+
+pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Option<&str>) -> Resume {
+    let Some(agent) = selected.map(str::to_owned) else {
+        return Resume::Native(model.map(str::to_owned));
     };
     let (selected, model) = parse_agent(&agent);
-    anyhow::ensure!(
-        selected == provider,
-        "This Session's native history belongs to {provider}; it cannot resume with {selected}. Start a new Session with lf -a {agent} : <message>."
-    );
-    Ok(model)
+    if selected == provider {
+        Resume::Native(model)
+    } else {
+        Resume::Import { agent }
+    }
 }
 
 /// Agent used when neither the caller, config, nor skill chooses one: the
@@ -556,25 +572,22 @@ pub fn load_config_or_default(repo_root: Option<&Path>) -> Config {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn native_resume_keeps_history_with_its_provider() {
-        let _lock = crate::journal::test_env_lock();
-        let _environment = crate::test_ambient::EnvGuard::clear(&[super::AGENT_OVERRIDE_ENV]);
+    fn resume_stays_native_until_the_provider_changes() {
+        use super::Resume;
         assert_eq!(
-            super::resume_model("claude", Some("haiku"))
-                .unwrap()
-                .as_deref(),
-            Some("haiku")
+            super::resume_choice("claude", Some("haiku"), None),
+            Resume::Native(Some("haiku".into()))
         );
-        std::env::set_var(super::AGENT_OVERRIDE_ENV, "claude:opus");
         assert_eq!(
-            super::resume_model("claude", Some("haiku"))
-                .unwrap()
-                .as_deref(),
-            Some("opus")
+            super::resume_choice("claude", Some("haiku"), Some("claude:opus")),
+            Resume::Native(Some("opus".into()))
         );
-        let error = super::resume_model("codex", None).unwrap_err().to_string();
-        assert!(error.contains("native history belongs to codex"));
-        assert!(error.contains("Start a new Session"));
+        assert_eq!(
+            super::resume_choice("codex", None, Some("claude:opus")),
+            Resume::Import {
+                agent: "claude:opus".into()
+            }
+        );
     }
 
     use super::*;

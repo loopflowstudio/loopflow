@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::agent::{opencode_worktree_config, AgentConfig, AgentWriteScope};
+use crate::agent::{AgentConfig, AgentWriteScope};
 use crate::chat::types::{ConversationEvent, FailureEvidence};
 use crate::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -85,16 +85,7 @@ impl OpenCodeHarness {
             command.current_dir(cwd);
         }
         super::configure_agent_env(&mut command, config);
-        if config.write_scope == AgentWriteScope::Worktree {
-            command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
-        }
-        if let Some(context) = &config.conversation_context {
-            super::context::configure_opencode(
-                command.as_std_mut(),
-                context,
-                &crate::agent::system_prompt_with_structured_replies(config),
-            )?;
-        }
+        command.envs(crate::agent::session_environment(config, None)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let mut child = super::agent_process::spawn(command, None, &owner)?;
         let stderr = child

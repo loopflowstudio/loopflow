@@ -85,10 +85,16 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
     let output = run(home.path(), &["session", "connect"]);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("connect requires a Session ID"));
     let output = run(
         home.path(),
-        &["session", "connect", "missing-session", "--json"],
+        &[
+            "session",
+            "connect",
+            "missing-session",
+            "--prepare",
+            "--json",
+        ],
     );
     assert!(!output.status.success());
     assert_eq!(
@@ -111,11 +117,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     let other = bin.join("lf");
     std::fs::write(&other, "#!/bin/sh\necho wrong-Machine >&2\nexit 91\n").unwrap();
     std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let mut paths = vec![bin];
-    paths.extend(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    ));
-    let path = std::env::join_paths(paths).unwrap();
+    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
     let (id, ..) = prepare_conversation(
         home.path(),
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
@@ -144,7 +146,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         command
     };
     let prepared = command(env!("CARGO_BIN_EXE_lf"))
-        .args(["session", "connect", &id, "--json"])
+        .args(["session", "connect", &id, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -167,6 +169,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     let reopened = command(argv[0].as_str().unwrap())
         .args(argv[1..].iter().map(|arg| arg.as_str().unwrap()))
         .env("LF_HOME", other_home.path())
+        .arg("--prepare")
         .arg("--json")
         .output()
         .unwrap();
@@ -193,7 +196,10 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
         serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest["artifact_key"], run_id.as_str());
     assert_eq!(manifest["caller_artifact_key"], CALLER);
-    let opened = run(home.path(), &["session", "connect", &id, "--json"]);
+    let opened = run(
+        home.path(),
+        &["session", "connect", &id, "--prepare", "--json"],
+    );
     assert!(
         opened.status.success(),
         "{}",
@@ -347,7 +353,14 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let metadata_stderr = home.path().join("metadata-stderr");
         let mut second = command(
             home.path(),
-            &["session", "connect", selector, "--try", "--json"],
+            &[
+                "session",
+                "connect",
+                selector,
+                "--try",
+                "--prepare",
+                "--json",
+            ],
         )
         .stdout(Stdio::from(
             std::fs::File::create(&metadata_stdout).unwrap(),
@@ -711,7 +724,14 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &["--batch", "session", "resume", &id, "another instruction"],
+            &[
+                "--batch",
+                "session",
+                "connect",
+                &id,
+                "--message",
+                "another instruction",
+            ],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -812,7 +832,14 @@ for line in sys.stdin:
     .unwrap();
     let output = command(
         home.path(),
-        &["-b", "session", "resume", &id, "Continue here"],
+        &[
+            "-b",
+            "session",
+            "connect",
+            &id,
+            "--message",
+            "Continue here",
+        ],
     )
     .current_dir(&caller)
     .env("PATH", path)
@@ -990,7 +1017,10 @@ fn session_names_are_shared_and_human_names_win() {
     let readback = listed(home.path(), id);
     assert_eq!(readback["title"], "Launch notes");
     assert_eq!(readback["title_source"], "human");
-    let reopened = run(home.path(), &["session", "connect", id, "--json"]);
+    let reopened = run(
+        home.path(),
+        &["session", "connect", id, "--prepare", "--json"],
+    );
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
     // Naming touches only the Session row, never capture or provider state.
@@ -1412,7 +1442,8 @@ fn resume_shorthand_help_and_empty_worktree() {
     for args in [&["resume", "--help"][..], &["session", "resume", "--help"]] {
         let output = run(home.path(), args);
         assert!(output.status.success(), "{output:?}");
-        assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("[ID]"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("--task"));
     }
     for args in [&["resume"][..], &["session", "resume"]] {
         let output = command(home.path(), args)
@@ -1422,7 +1453,7 @@ fn resume_shorthand_help_and_empty_worktree() {
         assert!(!output.status.success());
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("No interactive session found in this worktree"),
+                .contains("No interactive Session found in this repository or worktree"),
             "{output:?}"
         );
     }
@@ -1466,12 +1497,12 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         "#!{}\n",
         home.path().join("missing-interpreter").display()
     ));
-    let failed = open(&["session", "connect", &id, "--replace"]);
+    let failed = open(&["session", "connect", &id, "--takeover"]);
     assert!(!failed.status.success());
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
     for args in [
         vec!["session", "resume"],
-        vec!["session", "connect", &id, "--replace"],
+        vec!["session", "connect", &id, "--takeover"],
     ] {
         let result = open(&args);
         assert!(result.status.success(), "{result:?}");
@@ -1597,7 +1628,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     );
     install_codex_fixture(home.path(), Some("native-b"));
     for selector in [&b, "native-b"] {
-        let result = resume(&["resume", selector]);
+        let result = resume(&["connect", selector]);
         assert!(result.status.success(), "{result:?}");
         assert_eq!(
             std::fs::read_to_string(codex.join("opened")).unwrap(),
@@ -1607,14 +1638,14 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     // An unavailable provider must not add another opening receipt.
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
     let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
-    assert!(!resume(&["resume", &b]).status.success());
+    assert!(!resume(&["connect", &b]).status.success());
     let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
     assert_eq!(before, after);
 }
 
 #[cfg(unix)]
 #[test]
-fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
+fn connect_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
     use std::os::unix::fs::PermissionsExt;
     for provider in ["claude", "codex"] {
         let home = tempfile::tempdir().unwrap();
@@ -1659,8 +1690,8 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
                 .unwrap()
         };
         for args in [
-            vec!["resume", id.as_str()],
-            vec!["session", "resume", id.as_str()],
+            vec!["connect", id.as_str()],
+            vec!["session", "connect", id.as_str()],
         ] {
             let output = resume(&args);
             assert!(output.status.success(), "{provider}: {output:?}");
@@ -1685,7 +1716,7 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, "{}").unwrap();
         }
-        let output = resume(&["resume", &ambiguous]);
+        let output = resume(&["connect", &ambiguous]);
         assert!(!output.status.success());
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("ambiguous"),

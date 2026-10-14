@@ -157,6 +157,10 @@ The Session inventory controls and top strip are deleted; contextual exact-Sessi
 links and full membership still serve retained Work. Do not delete those owners.
 The 28-point single-line Task row and Flow-only taskTone dot are removed; the
 surviving metadata reads shared Session evidence without changing Task state.
+The summary severity order now lives once in `ProgramStatusState.summaryOrder`,
+shared by terminal and sidebar reports. Wave headings skip Task-status aggregation;
+outline Task data is immutable. Local Machine labels return nil rather than an
+empty-string sentinel. No deletion targets remain in this metadata slice.
 Task action feedback now shares one helper across run/move/pause/complete, retaining
 the originating navigation and Task. Profiling has one endpoint decision that returns
 status and elapsed time together; failure cannot leave a usable comparison number.
@@ -389,4 +393,5 @@ remain; Portfolio review follows the main experience. No global install, takeove
 live migration, broader cleanup or landing is authorized. No product decision is
 needed for the remaining implementation; visual acceptance stays with demo review.
 
-Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WorkCacheTests' -Xswiftc -gnone` PASS (21), ProgramStatusTests + DTOFixtureTests.roadmapFixturePreservesTaskReferences PASS (12); `cargo test -p loopflow --lib task_reference_names_recorded_checkout_owner_after_delegation_changes` and `cargo test -p loopflow --test integration dto_fixtures::status_and_roadmap_require_the_shared_metric_portfolio` PASS; `cargo fmt`, all-target Clippy and diff PASS. Affected suites remain with gate; native timing/trust/link/density proof remains with demo.
+Earlier sidebar Rust/DTO/cache checks: `69f7005b05:scratch/get-me-using-lf.md`, final check. These remain evidence for that revision, not an affected-suite gate.
+Check: `scripts/test_desktop.sh --filter 'TaskRowMetadataTests|ProgramStatusTests|WorkNavigationTests' -Xswiftc -gnone` PASS (57); `git diff --check` PASS. Gate owns affected suites; demo owns native timing/trust/link/density proof.

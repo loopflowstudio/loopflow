@@ -170,7 +170,7 @@ struct WorkOutlineRow: Identifiable {
     let inlineSessions: [SessionRecord]
     let depth: Int
     let ancestors: [WorkOutlineSubject]
-    var task: RoadmapTask? = nil
+    let task: RoadmapTask?
 
     var id: WorkNodeKey { subject.key }
     var title: String { subject.title }

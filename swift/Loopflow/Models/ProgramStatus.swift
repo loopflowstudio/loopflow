@@ -2,6 +2,10 @@ import Foundation
 
 public enum ProgramStatusState: String, Codable, Sendable, Hashable {
     case idle, working, done, blocked, error, clear
+
+    /// Attention order for summaries within a terminal or across Sessions.
+    /// Clear removes records; it is never a summary state.
+    public static let summaryOrder: [Self] = [.blocked, .error, .working, .done, .idle]
 }
 
 public enum ProgramStatusKind: String, Codable, Sendable, Hashable {
@@ -67,8 +71,7 @@ public struct ProgramStatusRecords: Codable, Sendable, Hashable {
     }
 
     public var summary: ProgramStatusReport? {
-        let priorities: [ProgramStatusState] = [.blocked, .error, .working, .done, .idle]
-        for state in priorities {
+        for state in ProgramStatusState.summaryOrder {
             if let report = records.last(where: { $0.state == state }) { return report }
         }
         return nil

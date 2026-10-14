@@ -186,7 +186,9 @@ struct WorkNavigator: View {
     /// Waves head the outline; Tasks keep title navigation separate from metadata links.
     private func outlineRow(_ row: WorkOutlineRow) -> some View {
         let isWave = row.id.work.kind == .wave
-        let status = TaskRowProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage)
+        let status = row.task.map { _ in
+            TaskRowProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage)
+        }
         return HStack(spacing: 6) {
             if row.hasChildren {
                 let key = row.id
@@ -203,7 +205,7 @@ struct WorkNavigator: View {
                 .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
             } else {
                 // The slot stays so titles align whether or not a Task has a dot.
-                Circle().fill(isWave ? .clear : status.tone.ink)
+                Circle().fill(status?.tone.ink ?? .clear)
                     .frame(width: 6, height: 6).frame(width: 14)
                     .accessibilityHidden(true)
             }
@@ -227,7 +229,7 @@ struct WorkNavigator: View {
                 }
                 .help(row.title)
                 .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
-                if let task = row.task {
+                if let task = row.task, let status {
                     TaskRowMetadata(task: task, status: status, localMachineId: model.observingMachineId)
                 }
             }

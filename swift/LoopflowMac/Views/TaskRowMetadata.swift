@@ -19,7 +19,7 @@ enum TaskRowProgramStatus {
         let reports = ordered.compactMap { session in
             session.programStatus?.summary.map { (session, $0) }
         }
-        for state: ProgramStatusState in [.blocked, .error, .working, .done, .idle] {
+        for state in ProgramStatusState.summaryOrder {
             if let (session, report) = reports.first(where: { $0.1.state == state }) {
                 self = .reported(session, report); return
             }
@@ -75,9 +75,9 @@ enum TaskRowProgramStatus {
 }
 
 extension TaskWorktreeSnapshot {
-    func sidebarMachine(localMachineId: String?) -> String {
+    func sidebarMachine(localMachineId: String?) -> String? {
         guard let machineId, let localMachineId else { return "Machine unknown" }
-        guard machineId != localMachineId else { return "" }
+        guard machineId != localMachineId else { return nil }
         guard let machineLabel, !machineLabel.isEmpty else { return "Remote · name unavailable" }
         return ProgramStatusReport.displaySafe(machineLabel)
     }
@@ -103,8 +103,7 @@ struct TaskRowMetadata: View {
             }
             // Only recorded checkout ownership is shown; assignment is not execution.
             if let workspace = task.reference.workspace {
-                let machine = workspace.sidebarMachine(localMachineId: localMachineId)
-                if !machine.isEmpty {
+                if let machine = workspace.sidebarMachine(localMachineId: localMachineId) {
                     Text(verbatim: machine).help(Text(verbatim: "Recorded checkout Machine · \(machine)"))
                         .accessibilityIdentifier("work-machine-\(task.id)")
                 }

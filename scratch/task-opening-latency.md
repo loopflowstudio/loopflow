@@ -53,38 +53,22 @@ planning failure, cancellation and retained workspace reuse.
 
 Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (63 tests); `git diff --check` PASS. No Rust changed; fmt/Clippy not applicable. Lookup changes checkpointed in `0bb13e9261`.
 
-## October 13 profiling implementation
+## Profiling evidence and remaining proof
 
-Jack Heart requested separate Codex/Claude cached/resume/fresh input trials.
-`agent_input.py` records the existing Desktop signposts and opt-in lf wall
-milestones, process ancestry/CPU snapshots and all-process Time Profiler stacks.
-The report correlates actual Task click, preparation/connect, launch lock,
-fresh/resume selection, spawn, surface, key and draw with native observer captures.
-Flamegraphs use real exported samples; missing exports/symbols remain unknown.
-Exact-Session input plus ordered captures are required; first draw cannot produce
-an endpoint. Provider/case/condition mismatches refuse before/after comparison.
-Reproducible commands, provenance fields and observer limits are in
-scripts/benchmarks/desktop-performance/agent-input.md.
+The recorder and six-case acceptance contract are maintained in
+`scripts/benchmarks/desktop-performance/agent-input.md` and the design's
+**Profiling and optimization** section. Implementation: `5b62453be7`; reduction:
+`ae691073c9`. Exact-Session ordered captures are required; failed or incomplete
+trials never supply elapsed comparison values. CPU samples cannot explain waits.
 
-No paired native receipts or further measured optimization is claimed. The lookup
-repair above removes a known redundant serial read. Full six-case timing, CPU/wall
-wait attribution, comparable before/after, native hook proof and review remain.
-Neither existing app, pane nor draft was touched. No provider input/takeover,
-installation or live migration was performed.
+A real 1-second headless Time Profiler export produced 6,452 samples and an SVG;
+its first premature export failed. Review restricted stacks to Running samples,
+excluded preexisting CPU and replaced a quadratic tree walk (0.38 s final
+parse/render). This validates the parser, not a native provider endpoint.
+Full evidence, checks and the earlier unlaunched app/signing failure remain at
+`69f7005b05:scratch/task-opening-latency.md`, **October 13 profiling implementation**.
+The current review artifact is recorded in `get-me-using-lf.md`.
 
-Review removed false CPU accounting: only Running time-profile samples enter the
-flamegraph, and process CPU deltas exclude preexisting CPU. A real 1-second
-headless export produced 6,452 samples and a valid SVG; this validates the parser,
-not any provider endpoint. Its first premature export failed before trace saving;
-completed export passed. Rendering exposed a quadratic tree walk, replaced by
-one parent/child index (final real-export render/parse 0.38 s).
-
-Unlaunched pre-compression debug app: `/tmp/loo462-oct13-profile/Loopflow Work Demo.app`;
-validation-only bundled lf, signature verified, private build receipt `build.json`.
-Initial signing rejected root SwiftPM resources; moved them under Contents/Resources.
-SwiftPM resolves its existing retained-checkout build-path fallback; this private
-artifact is not portable without that build directory.
-This artifact predates `ae691073c9` and main integration; the later demo requires
-a fresh matching build. Neither existing app nor its drafts was changed.
-Check: 38 WorkNavigation tests plus two final chrome/Workflow regressions PASS; seven profiling Python tests and one Rust timing test PASS; real xctrace export/SVG, cargo fmt/all-target Clippy, Ruff/diff PASS. Native six-case timing/trust proof remains with demo; affected-suite gate remains with gate. Review kept each Rust append in one
-serialized buffer so concurrent lf processes cannot interleave formatting writes.
+No paired native timings, measured speedup or hook approval-once proof exists.
+Codex/Claude cached/resume/fresh trials and native trust remain with demo; affected
+suites remain with gate. Existing apps, retained panes and unsent drafts survive.

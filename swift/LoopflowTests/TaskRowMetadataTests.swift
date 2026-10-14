@@ -83,7 +83,7 @@ struct TaskRowMetadataTests {
     func machineOwnership() throws {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
         let workspace = try #require(task.reference.workspace)
-        #expect(workspace.sidebarMachine(localMachineId: workspace.machineId) == "")
+        #expect(workspace.sidebarMachine(localMachineId: workspace.machineId) == nil)
         #expect(workspace.sidebarMachine(localMachineId: "other-machine") == "build-server")
         #expect(workspace.sidebarMachine(localMachineId: nil) == "Machine unknown")
         let unknown = try JSONDecoder().decode(TaskWorktreeSnapshot.self, from: Data("""

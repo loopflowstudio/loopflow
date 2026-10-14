@@ -106,10 +106,19 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
-    if let Some(provider) = session.provider.as_deref() {
-        crate::config::resume_model(provider, session.model.as_deref())?;
-    }
     let mut turn = cli.process_options();
+    // Another provider starts a fresh AgentSession whose turn points to the log.
+    let mut message = message.to_owned();
+    if let Some(provider) = session.provider.as_deref() {
+        if let crate::config::Resume::Import { agent } =
+            crate::config::resume_choice(provider, session.model.as_deref())
+        {
+            let request =
+                crate::ops::human_session::conversation_log::continuation(&store, &session)?;
+            message = format!("{request}\n\n{message}");
+            turn.agent = Some(agent);
+        }
+    }
     if turn.agent.is_none() {
         turn.agent = match (&session.provider, &session.model) {
             (Some(provider), Some(model)) => Some(format!("{provider}:{model}")),
@@ -131,8 +140,8 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
     let mut built = build_prompt_at(
         None,
-        Some(message),
-        message,
+        Some(&message),
+        &message,
         &turn,
         session.cwd,
         None,

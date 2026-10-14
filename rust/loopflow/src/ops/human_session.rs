@@ -24,6 +24,7 @@ use crate::work::task::Task;
 
 #[cfg(test)]
 pub(crate) mod action_test;
+pub(crate) mod conversation_log;
 pub(crate) mod primary;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
@@ -619,13 +620,24 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
-    if store
-        .sqlite
-        .input_provider_session(&session.artifact_key)?
-        .is_some()
+    if resume
+        && store
+            .sqlite
+            .input_provider_session(&session.artifact_key)?
+            .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
-            crate::config::resume_model(provider, session.model.as_deref())?;
+            if let crate::config::Resume::Import { agent } =
+                crate::config::resume_choice(provider, session.model.as_deref())
+            {
+                mode.require_action(surface(store, session).await?.state)?;
+                import(store, &session.id, &agent).await?;
+                let session = store
+                    .session(&session.id)
+                    .await?
+                    .ok_or_else(|| session_not_found(&session.id))?;
+                return surface(store, &session).await;
+            }
         }
     }
     let admitted;
@@ -874,18 +886,15 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     let session = if capture_is_prepared(&session.artifact_key)? {
         session
     } else {
-        let replaced = session.captured;
-        let mut next = session;
-        if next.input_published {
-            next.artifact_key = crate::session_record::new_artifact_key();
-            next.input_published = false;
-            next = store.replace_session_input(replaced, next).await?;
+        if session.input_published {
+            append_input(store, session).await?
+        } else {
+            publish_prepared_input(
+                &store.sqlite,
+                &session,
+                crate::session_record::SessionFlowMembership::Independent,
+            )?
         }
-        publish_prepared_input(
-            &store.sqlite,
-            &next,
-            crate::session_record::SessionFlowMembership::Independent,
-        )?
     };
     serve_locked(
         store,
@@ -893,6 +902,41 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         launch_lock.expect("an unresumed Session retains its launch lock"),
     )
     .await
+}
+
+/// Continue a conversation on another provider. The Session keeps its name,
+/// Work and feedback; a fresh AgentSession starts from a log of the current one.
+async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
+    let lock_id = id.to_string();
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    let session = store
+        .session(id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    let session = primary::admit_workspace(store, session).await?;
+    let request = conversation_log::continuation(&store.sqlite, &session)?;
+    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    let mut next = session;
+    let (provider, model) = crate::config::parse_agent(agent);
+    next.provider = Some(provider);
+    next.model = model;
+    let mut next = append_input(store, next).await?;
+    // The Session's original request stays on its row; this turn opens the new provider.
+    next.request = Some(request);
+    serve_locked(store, &next, launch_lock).await
+}
+
+/// Append a fresh, published input to the Session; earlier inputs stay in its history.
+async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
+    let replaced = next.captured;
+    next.artifact_key = crate::session_record::new_artifact_key();
+    next.input_published = false;
+    let next = store.replace_session_input(replaced, next).await?;
+    publish_prepared_input(
+        &store.sqlite,
+        &next,
+        crate::session_record::SessionFlowMembership::Independent,
+    )
 }
 
 pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {

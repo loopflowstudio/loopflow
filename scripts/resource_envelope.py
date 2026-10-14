@@ -394,29 +394,28 @@ def _prune_completed_builds(
     maximum_roots: int,
     maximum_bytes: int,
 ) -> tuple[RecoveryAction, ...]:
-    executable = os.environ.get("LF_BIN") or shutil.which("lf")
-    command = [
-        executable or "lf",
-        "wt",
-        "prune",
-        "--builds",
-        "--json",
-        "--retention-hours",
-        str(policy.build_cache_retention_hours),
-        "--maximum-roots",
-        str(maximum_roots),
-        "--maximum-bytes",
-        str(maximum_bytes),
-    ]
     # Retain the selected Home; inherited work attribution grants no cleanup authority.
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     if "LF_HOME" in os.environ:
         environment["LF_HOME"] = os.environ["LF_HOME"]
     try:
+        executable = os.environ.get("LF_BIN") or shutil.which("lf")
         if executable is None:
             raise FileNotFoundError("no lf executable available")
         result = subprocess.run(
-            command,
+            [
+                executable,
+                "wt",
+                "prune",
+                "--builds",
+                "--json",
+                "--retention-hours",
+                str(policy.build_cache_retention_hours),
+                "--maximum-roots",
+                str(maximum_roots),
+                "--maximum-bytes",
+                str(maximum_bytes),
+            ],
             cwd=repo,
             env=environment,
             stdin=subprocess.DEVNULL,

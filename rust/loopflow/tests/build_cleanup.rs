@@ -30,19 +30,8 @@ impl Fixture {
             "target/\n.build/\nswift/.build/\nwebsite/node_modules/\n",
         )
         .unwrap();
-        let status = Command::new("git")
-            .current_dir(repo.path())
-            .args(["add", ".gitignore"])
-            .status()
-            .unwrap();
-        assert!(status.success());
-        assert!(Command::new("git")
-            .current_dir(repo.path())
-            .args(["commit", "-m", "ignore generated output"])
-            .output()
-            .unwrap()
-            .status
-            .success());
+        repo.stage_all();
+        repo.commit("ignore generated output");
         let directory = tempfile::tempdir().unwrap();
         let checkout = directory.path().canonicalize().unwrap().join("completed");
         worktree_add(
@@ -422,7 +411,31 @@ fn build_cleanup_normal_python_recovery_uses_same_owner_without_pressure() {
         .join("../../scripts/resource_envelope.py")
         .canonicalize()
         .unwrap();
-    let code = "import importlib.util, sys, json, shutil; from pathlib import Path; s=importlib.util.spec_from_file_location('resources',sys.argv[1]); m=importlib.util.module_from_spec(s); sys.modules[s.name]=m; s.loader.exec_module(m); p=m.load_policy(); target=Path(sys.argv[3]); before=m._allocated_bytes(target); free=shutil.disk_usage(target).free; r=m.inspect_resources(Path(sys.argv[2]),p,True); print(json.dumps({'before_bytes':before,'after_bytes':m._allocated_bytes(target),'removed_bytes':sum(a.removed_bytes for a in r.recovery),'free_delta_bytes':shutil.disk_usage(target.parent).free-free,'entries':[m.asdict(a) for a in r.recovery]}))";
+    let code = r#"
+import importlib.util
+import json
+import shutil
+import sys
+from dataclasses import asdict
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("resources", sys.argv[1])
+resources = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = resources
+spec.loader.exec_module(resources)
+
+target = Path(sys.argv[3])
+before = resources._allocated_bytes(target)
+free = shutil.disk_usage(target).free
+report = resources.inspect_resources(Path(sys.argv[2]), resources.load_policy(), True)
+print(json.dumps({
+    "before_bytes": before,
+    "after_bytes": resources._allocated_bytes(target),
+    "removed_bytes": sum(action.removed_bytes for action in report.recovery),
+    "free_delta_bytes": shutil.disk_usage(target.parent).free - free,
+    "entries": [asdict(action) for action in report.recovery],
+}))
+"#;
     let mut command = Command::new("uv");
     command
         .args(["run", "--no-sync", "python", "-c", code])

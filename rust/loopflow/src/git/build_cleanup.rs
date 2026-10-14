@@ -442,13 +442,37 @@ mod tests {
         let database = db.clone();
         let task_id = task.to_string();
         let writer_marker = marker.clone();
-        AFTER_SELECTION.with(|hook| *hook.borrow_mut() = Some(Box::new(move || {
-            let code = "import fcntl,sys; f=open(sys.argv[1],'a');\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(23)\nopen(sys.argv[2],'w').write('writer acquired')";
-            let status = Command::new("uv").args(["run", "--no-sync", "python", "-c", code])
-                .arg(&lock).arg(&writer_marker).stdin(Stdio::null()).status().unwrap();
-            assert_eq!(status.code(), Some(23));
-            Connection::open(database).unwrap().execute("UPDATE tasks SET planning_completed=0 WHERE id=?1", [task_id]).unwrap();
-        })));
+        AFTER_SELECTION.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                let code = r#"
+import fcntl
+import sys
+from pathlib import Path
+
+with open(sys.argv[1], "a") as lock:
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit(23)
+    Path(sys.argv[2]).write_text("writer acquired")
+"#;
+                let status = Command::new("uv")
+                    .args(["run", "--no-sync", "python", "-c", code])
+                    .arg(&lock)
+                    .arg(&writer_marker)
+                    .stdin(Stdio::null())
+                    .status()
+                    .unwrap();
+                assert_eq!(status.code(), Some(23));
+                Connection::open(database)
+                    .unwrap()
+                    .execute(
+                        "UPDATE tasks SET planning_completed=0 WHERE id=?1",
+                        [task_id],
+                    )
+                    .unwrap();
+            }))
+        });
         let report = prune_builds(
             repo.path(),
             repo.path(),

@@ -272,9 +272,9 @@ cross CLI → read-only store → cleanup → JSON → Python receipt and prove 
 without disk pressure plus apply idempotence. Affected gate also includes
 `python/tests/test_gate_bounded.py` (changed by this branch), existing materializer
 and resource-envelope tests, worktree/prune preservation, and released ownership.
-No app launcher implementation or lease test changed in this branch. Full hosted
-CI remains required. Compression passes precede #1545 integration; they are focused
-evidence, not a gate pass for the integrated tree. Final measurements built and
+App builds remain unchanged controls. Full hosted CI remains required.
+Compression checks are focused evidence, not a gate pass
+for the integrated tree. Final measurements built and
 exercised the integrated tree but do not replace affected-suite verification.
 
 Final measurements/usage belong in TESTING.md and docs/reviews/storage-footprint.md
@@ -296,6 +296,13 @@ execution fixtures use a current start. Prior implementation evidence remains at
 `.lf/tmp/local-build-reclamation/{focused-all,receipt,ownership-unknown,clippy}.log`
 and `1b0fc20c980fda14340d0b35f04f6893b8582eb8`.
 
+Final compression reuses TestRepo's staging/commit helpers and spells out the
+embedded recovery and cooperating-writer probes, keeping their preservation
+assertions readable. Python constructs the prune command only after resolving
+its executable; the redundant command variable and unreachable fallback are gone.
+The deletion cut above remains complete. Existing timing and allocation evidence
+remains applicable; no acceptance boundary is waived by these reductions.
+
 Resource inspection now bounds each `du` measurement to five seconds and records
 measurement failures as issues. Python inventory supplies no build candidates or
 deletion authority: recovery delegates independently to Rust, whose Git/process
@@ -303,4 +310,4 @@ inspections and generated-tree walk have their own five-second limits. Unknown
 ownership/activity/content retains output. Whole inventory still scales with the
 number of roots; no broad-inventory latency claim follows.
 
-Check: `.lf/tmp/local-build-final/measure.py` and `--app` — eight Rust runs × eight tests and sixteen Swift/control builds passed, source/lockfile preserved; `git diff --check` and context budgets pass; prior cleanup/ownership evidence retained, affected suites deferred to gate and full matrix to hosted CI.
+Check: `uv run pytest python/tests/test_resource_envelope.py -q` — 15 passed; materialized/network-isolated `cargo nextest run -p loopflow -E 'test(build_cleanup)' --no-tests fail` — 13 passed (`.lf/tmp/local-build-reclamation/final-compress.log`); fmt, Clippy `--all-targets -- -D warnings`, Ruff, diff/context checks pass; matched measurements retained at `c2ccce13c7`, affected suites deferred to gate and full matrix to hosted CI.

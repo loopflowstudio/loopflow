@@ -979,3 +979,392 @@ its signed DerivedData but spent 256 seconds compiling the CLI, finishing at
 The first main run must populate the new cache namespaces; subsequent real PR
 and queue observations are still needed. No warmed rerun is substituted for
 that acceptance.
+
+## October 13 follow-up: shell overlap rejected before publication
+
+Jack Heart authorized lf-ddf2d53 to continue measured macOS critical-path work.
+The supplied latest real queue, [38452715134](https://github.com/loopflowstudio/loopflow/actions/runs/38452715134),
+remains **6:24 creation-to-aggregate completion**; #1543 is merged. No new
+hosted acceptance run, PR or merge is claimed by this experiment.
+
+The prototype started the exact development/validation-only app CLI build next
+to ordinary signed Xcode `build-for-testing`. One private function built the CLI
+for preparation and the existing copy/sign phase. Cargo compiled `loopflow`
+once per sample; the post-build invocation waited on Cargo's lock and reported
+`Fresh loopflow`. Process snapshots observed simultaneous rustc and
+swift-frontend work, rather than inferring overlap from buffered Xcode logs.
+
+Matched snapshots were restored at the same checkout, Cargo target and
+DerivedData paths before every sample. Source-cold retains compiled Cargo
+dependencies and downloaded Swift package sources, but removes workspace and
+Xcode compilation outputs. Warm restores identical complete outputs, then
+changes AppearanceMode's Light label and a Rust error message, with identical
+contents/timestamps in both variants. These temporary source edits were restored;
+none is a typical-code PR or ten-run acceptance sample.
+
+| Inputs and execution order | Ordinary Xcode, seconds | Overlap including settings/preparation/cleanup, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold: baseline then overlap | 85.311 | 45.643 | 39.668 |
+| Source-cold: overlap then baseline | 60.298 | 46.845 | 13.453 |
+| Changed-source warm: overlap then baseline | 33.841 | 30.868 | 2.973 |
+| Changed-source warm: baseline then overlap | 36.835 | 40.225 | -3.390 |
+
+Both cold pairs improve; combined warm overlap takes **0.417 seconds longer**.
+That small warm delta alone does not establish material regression: acceptance
+requires useful margin without material warm regression, not improvement in every
+sample. Cleanup complexity and hosted benefit remain unresolved. The first cold
+saving shrinks sharply with reversed order; do not attribute all 39.668 seconds
+to the mechanism. Machine contention and shared Xcode services remain confounders.
+The prototype and workflow wiring are removed; ordinary CI, tests, signatures,
+compiled authority, caches and job conditions retain their previous behavior.
+
+Inputs: source baseline `160adc7e6fe7f04d8a707003e8af04d3971e9b94`, rustup
+rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), Xcode 26.2 (17C52), SDK 26.2,
+deployment 15.0, dev/test debug=0 and unchanged Cargo.lock. Initial empty compiled
+outputs took 130.787s; package sources were already available, so this is not a
+fresh network-cache timing. An early mismatched Homebrew 1.98.1 preparation
+sample rebuilt dependencies and was excluded. Matching the app shell's existing
+Cargo search path eliminated that mismatch.
+
+Native preparation `(real/user/sys seconds; peak RSS bytes)` was
+`32.70/37.34/1.40;3446652928`, `33.20/39.81/1.35;3440082944` for cold,
+and `29.18/37.27/1.08;3443621888`, `38.46/36.77/1.46;3439296512` for warm.
+Xcode's native user/sys ranges were 1.11–1.58/0.38–0.60s cold and
+0.77–0.81/0.23–0.26s warm; peak RSS was 198131712–200081408 bytes.
+Those Xcode figures exclude the shared build service and its compilers; they
+are not total compilation CPU/RSS or evidence of lower runner cost.
+
+Real cancellation exposed a compiler outside the owned process groups:
+Xcode returned BUILD INTERRUPTED while a running swift-frontend still emitted
+Darwin.pcm into this build's DerivedData. Scoped cleanup subsequently passed a
+real simultaneous Rust/Swift cancellation check with status 143 and no remaining
+checkout compiler. Eight focused process tests passed during the prototype,
+including preservation of pre-existing compiler work and other output paths.
+A candidate interrupted by concurrently running process fixtures was excluded;
+fixtures were moved to disposable source/output roots. Full gate, signature and
+runtime acceptance and hosted/queue verification were not performed after the
+performance rejection. No installed Home or Applications contents were modified.
+
+The locally checkpointed prototype is
+`34c40623b19d7176a3f8e452aa2bac9c8e753013`; raw timing/process logs and snapshot
+scripts use `/tmp/macos-ci-*`. The remaining blocker is a reliable macOS margin
+on changed-source builds, without adding unjustified scheduling/cleanup
+complexity. lf-ddf2d53 remains unfinished; lf-12be237 still owns the independent
+ten-real-run, queue and push-to-merged demonstration. Five minutes is not waived.
+
+
+## October 13 follow-up: control CLI code-generation trial rejected
+
+Jack Heart authorized the targeted follow-up after shell overlap failed. This
+iteration measured the existing control CLI rather than repeating overlap. Source
+`38e0b19b6f160de356d2270f0c5c000bff6422a4`, unchanged Cargo.lock, rustup
+rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), dev/test debug=0,
+nonincremental ordinary dev optimization, development provenance and
+validation-only migration authority. Xcode remains 26.2 (17C52), SDK 26.2;
+this trial measures its serial Rust helper segment, not an Xcode build.
+
+The initial empty compiled target built in **55.66s** with downloaded registry
+sources available. Cargo's stable `--timings` report assigns the library 26.47s:
+22.29s frontend, 4.18s code generation. The build-script run initially took
+8.57s, then 0.62–0.70s in matched trials; its initial elapsed cost is not assumed
+to recur. More backend parallelism therefore has limited headroom.
+
+Trial: package-only `profile.dev.package.loopflow.codegen-units=256`, passed
+through Cargo's `--config`; no tracked profile or production script was changed.
+It retains optimization, assertions, source, target, build-script authority and
+all dependency profiles. The first unmatched candidate library took 24.98s
+(21.22s frontend, 3.76s code generation), which was insufficient for adoption.
+
+| Matched inputs and order | Ordinary CLI + copy/sign, seconds | 256 units + copy/sign, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold: baseline then candidate | 30.644 | 32.945 | -2.301 |
+| Source-cold: candidate then baseline | 28.695 | 28.230 | 0.465 |
+| Changed-source warm: candidate then baseline | 31.333 | 29.853 | 1.480 |
+| Changed-source warm: baseline then candidate | 34.438 | 32.258 | 2.180 |
+
+Cold pairs total **1.836s slower**; warm pairs save **3.660s**. Cold improvement
+is neither consistent nor positive overall, so the required cold/warm outcome
+fails. No numeric criterion is waived. The first cold candidate also spent 2.98s
+compiling the build script versus 0.50–0.52s in the other cold samples; the whole
+segment counts, without excluding this contrary sample. Concurrent unrelated
+Rust work and machine load limit attribution. Frontend elapsed varies
+21.49–26.56s and code generation 3.60–4.77s; these are Cargo phase boundaries,
+not an independent compiler CPU profile.
+
+Reproduction: use the same target path and toolchain as the Xcode post-build
+script, `target/dev-app-control`; set `CARGO_PROFILE_DEV_DEBUG=0`,
+`CARGO_PROFILE_TEST_DEBUG=0`, `LOOPFLOW_BUILD_PROVENANCE=development`, and
+`LOOPFLOW_MIGRATION_AUTHORITY=validation_only`. Build with:
+
+```sh
+cargo build --locked --bin lf --target-dir target/dev-app-control --timings
+cargo --config profile.dev.package.loopflow.codegen-units=256 build \
+  --locked --bin lf --target-dir target/dev-app-control --timings
+```
+
+After dependency preparation,
+`cargo clean -p loopflow --target-dir target/dev-app-control` produces a
+source-cold snapshot. Restore that identical
+snapshot with APFS `cp -cRp` at the same path before each cold sample. Capture
+separate complete ordinary/candidate output snapshots for warm samples, then
+restore the corresponding original snapshot before each warm sample. Replace
+`git could not resolve {upstream}` with `CI benchmark: git could not resolve
+{upstream}` in `rust/loopflow/src/build_info.rs`, with identical contents and
+nanosecond timestamps for both variants. This forces real current-source
+library/CLI compilation. Time Cargo, copy the resulting `debug/lf` into a
+disposable bundle, and ad-hoc sign it with `codesign --force --sign -`. Input
+snapshot restoration is experimental setup outside the timer; the candidate
+adds no production preparation or background cleanup. All eight samples built
+and signed successfully; final strict helper signature verification passed.
+Native Cargo `(user+sys)` totals: cold ordinary 78.31s / candidate 77.92s;
+warm ordinary 80.23s / candidate 80.15s. Peak RSS was 3.44–3.45 GB ordinary,
+3.23–3.25 GB candidate. These are local process-tree figures, not hosted cost.
+
+Raw records and the replay script remain at
+`/tmp/macos-ci-codegen-snapshots/results.jsonl`,
+`/tmp/macos-ci-codegen-bench.py`, and `/tmp/macos-ci-codegen-*.log`.
+Temporary Rust source edits were restored; the ordinary output snapshot was
+restored; no compiler from this checkout remained. No installed Home or app was
+modified. No trial profile, wrapper or duplicated production implementation
+remains, and no test was removed.
+
+Review finding: backend parallelism does not establish useful source-cold
+margin, while frontend compilation dominates this segment. Reject before
+changing the Xcode cache namespace or adding configuration. Full Xcode timing,
+app signatures, runtime acceptance, gate, hosted CI and verified delivery were
+not attempted for this rejected candidate. The next mechanism needs a small
+frontend work reduction with reliable matched cold/warm proof. lf-ddf2d53 remains
+unfinished; lf-12be237 retains ten-real-run, queue and push-to-merged acceptance.
+
+
+## October 13 follow-up: nested planning future attribution
+
+The next source-level trial follows Jack Heart's authorization for measured
+macOS CI margin. Baseline `d27b81c14dee724171a209f5fc8216d06b0d8fd5`, unchanged
+Cargo.lock, rustup rustc 1.99.0 (`b940084d7`, aarch64-apple-darwin), dev/test
+debug=0, nonincremental dev optimization. No overlap, backend override, test
+deletion or cache identity change participates.
+
+The library was profiled with rustc's [self profiler](https://doc.rust-lang.org/beta/unstable-book/compiler-flags/self-profile.html),
+using `cargo rustc -p loopflow --locked --lib --target-dir target/dev-app-control
+-- -Zself-profile=<output> -Zself-profile-events=default,args -Ztime-passes`
+and diagnostic-only `RUSTC_BOOTSTRAP=1`. Official `rust-lang/measureme` tools
+decoded the trace. Those flags are absent from production and measured builds.
+Query-string recording alone cost 23.07s baseline / 23.23s candidate: profiled
+elapsed time is explicitly excluded from performance acceptance.
+
+Attribution found dispersed work: 17,898 type-check roots and 16,159 borrow-check
+queries, with no single multi-second source function. The largest borrow-check
+query was Flow `run_skill` (208.114ms); the largest instance-analysis query was
+Flow `run_command` (223.758ms). Both carry the nested planning future returned by
+`ops::linear_observe::sync_repository`.
+
+Trial: replace that function's concrete async return with a `BoxFuture`, keeping
+its body in one `Box::pin(async move { ... })`. No wrapper or second implementation.
+Callers still await the same work with the same deadlines and drop cancellation;
+the cost is one allocation and dynamic polling per sync. This moved the caller
+queries to 4.540ms and 1.398ms respectively. The sync function's own borrow check
+rose from 5.913ms to 15.113ms. Total self-time for obligation evaluation fell
+1.60s → 1.22s and instance analysis 1.14s → 0.979s, but total type checking and
+borrow checking increased. These diagnostic observations establish attribution,
+not a reliable end-to-end gain.
+
+Matched builds used SDK 26.2 (Xcode 26.2/17C52), deployment 15.0, and explicit
+development provenance / validation-only migrations. Preparation compiled the
+ordinary dependency set once (39.75s, excluded experimental setup); both variants
+then restored one identical source-cold snapshot at `target/dev-app-control`.
+Warm samples restored each variant's full output snapshot before the same
+`build_info.rs` error-message edit, with matching contents/timestamps. The only
+variant source difference was the boxed future. Ordinary Cargo flags, copy and
+ad-hoc signing were timed together. No candidate preparation or background cleanup
+exists; snapshot resets are experimental setup, outside both timers.
+
+| Inputs and execution order | Ordinary CLI + copy/sign, seconds | Boxed future + copy/sign, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| cold: baseline then candidate | 27.849 | 28.678 | -0.829 |
+| cold: candidate then baseline | 28.511 | 28.603 | -0.092 |
+| warm: candidate then baseline | 27.330 | 27.167 | 0.163 |
+| warm: baseline then candidate | 27.209 | 27.819 | -0.610 |
+
+Cold pairs total **0.921s slower**; warm pairs total **0.446s slower**. Neither
+condition establishes useful end-to-end margin. Cargo library frontend ranges
+20.56–21.30s; isolated query savings do not turn into a meaningful build saving.
+All eight build/copy/sign samples completed; strict helper signature verification
+passed. Native Cargo user+sys totals: cold ordinary 75.11s / boxed 75.32s;
+warm ordinary 73.04s / boxed 72.57s. Peak RSS: ordinary 3.440–3.453GB,
+boxed 3.409–3.411GB. These are local process-tree measurements, not hosted cost;
+shared machine contention still limits attribution of sub-second differences.
+
+Review decision: reject the candidate. The allocation/type-erasure boundary adds
+maintenance and runtime cost without a measured CI benefit. Original source and
+ordinary output snapshot are restored. No production code, flags, dependencies,
+cache wiring, tests or installed Home changed. No full Xcode trial, runtime
+acceptance, gate, hosted CI, publication or merge is claimed for this candidate.
+
+Replay and raw evidence: `/tmp/macos-ci-frontend-bench.py`,
+`/tmp/macos-ci-frontend-snapshots/results.jsonl`,
+`/tmp/macos-ci-frontend-{baseline,candidate}.rs`, and
+`/tmp/macos-ci-frontend{,-boxed}-profile/`. The benchmark script preserves both
+source variants and restores temporary edits in `finally`; profile outputs use
+`summary.txt` and `chrome_profiler.json`. Benchmark logs have the prefix
+`/tmp/macos-ci-frontend-`.
+
+At this trial's conclusion, frontend cost was distributed across the large library; the
+largest specifically attributed small source boundary did not improve the
+ordinary build. This supplies no qualifying small frontend reduction; another
+unchanged backend or boxing trial is not justified.
+
+October 13 reconciliation: the supplied Task brief selects overlap only on
+exact-source DerivedData cache misses, with ordinary Xcode on cache hits. This
+changes the earlier always-overlap proposal and supersedes frontend reduction
+as a prerequisite. The two cold gains justify controlled evaluation; they do not
+prove hosted benefit. Changed-source warm snapshots are not exact-source cache
+hits. The selected variant remains unimplemented and needs actual hit/miss-path
+measurements, bounded failure cleanup, signed Xcode proof and full hosted CI/queue.
+lf-ddf2d53 remains unfinished. lf-12be237 retains ten-real-run, queue and
+push-to-merged acceptance; the supplied latest real queue remains 6:24.
+
+## October 13 follow-up: exact-cache-miss overlap
+
+Jack Heart's supplied Task brief selected overlap on exact-source DerivedData
+misses, preserving ordinary Xcode on hits. The implementation now takes the
+existing `xcode-cache` result; cache keys, job conditions and signed Xcode
+arguments are unchanged. Preparation and the post-build copy share
+`_build_control_tools` in `scripts/loopflow-dev.py`, using `target/dev-app-control`.
+The post-build phase still asks Cargo to verify freshness and copies/signs the
+result. The command-specific runner cancels its process groups and, on failure,
+compilers emitting into its DerivedData; it never stops the shared Xcode service.
+
+Local comparison: source baseline `39651041f8f8d082d6a492f712aeedfe3c97d108`
+plus this implementation, unchanged Cargo.lock, rustup rustc 1.99.0 (`b940084d7`,
+aarch64-apple-darwin), Xcode 26.2 (17C52), SDK 26.2, deployment 15.0, dev/test
+debug=0. Preparation reads Xcode's effective SDK/deployment and uses the app
+shell's Cargo search path. Both builds retain development provenance and
+validation-only migration authority.
+
+| Inputs and execution order | Ordinary Xcode, seconds | Selected path, seconds | Saving, seconds |
+|---|---:|---:|---:|
+| Source-cold miss: ordinary then selected | 58.028 | 59.946 | -1.918 |
+| Source-cold miss: selected then ordinary | 72.551 | 65.839 | 6.712 |
+| Changed-source warm miss: selected then ordinary | 45.307 | 33.283 | 12.024 |
+| Changed-source warm miss: ordinary then selected | 40.166 | 33.615 | 6.551 |
+| Exact-source hit: ordinary then selected | 3.930 | 4.026 | -0.096 |
+| Exact-source hit: selected then ordinary | 3.787 | 3.755 | 0.032 |
+
+Cold pairs save **4.794s combined**, with opposite signs; changed-source warm
+pairs save **18.575s combined**, improving in both orders. Exact hits take
+**0.064s longer combined** and launch no preparation/settings query. These are
+local selector-path measurements, not hosted cache downloads or typical-code
+PR runs. Useful warm margin and the absence of material warm regression support
+proceeding to gate and hosted evaluation. The modest, order-sensitive cold gain
+is contrary evidence against repeating the earlier 13–40s saving as a forecast.
+Concurrent unrelated Rust/Swift builds and shared Xcode services limit causal
+attribution. No numeric acceptance or five-minute goal is waived.
+
+All samples restore matching APFS snapshots at identical Cargo/DerivedData paths.
+Source-cold keeps compiled Cargo dependencies and downloaded Swift package
+sources, removing workspace and Xcode compiled outputs. Warm samples restore one
+common complete snapshot before the same AppearanceMode Light-label and Rust
+`build_info.rs` error-message edits, with matching contents/timestamps. They use
+the **miss** selector; changed-source warm output is not an exact-source hit.
+Hit samples restore the original sources and complete snapshot, then use the
+**hit** selector. Initial preparation took 62.451s; preparation of experimental
+snapshots and their restoration are outside each timer. The selected command's
+`uv`/Python launch, settings query, helper preparation, Xcode build, wait and
+cleanup are all inside the measured interval. Temporary source edits and ordinary
+output snapshots were restored afterwards.
+
+Every cold/warm sample compiled `loopflow` once. Each overlap sample's post-build
+Cargo invocation reported `Fresh loopflow`; exact hits compiled it zero times.
+Process snapshots observed concurrent rustc/swift-frontend work in all four
+miss candidates (45/49 cold and 2/2 warm sampled intervals), versus zero in
+ordinary samples. No duplicated compilation was observed. Native preparation
+real/user/sys seconds were `37.57/40.56/1.29`, `48.39/57.55/1.87` cold and
+`31.14/37.61/1.32`, `31.61/36.77/1.08` warm. Xcode client CPU/RSS excludes its
+shared service and compiler children; these figures establish neither total
+runner cost nor hosted savings.
+
+All 12 ordinary signed app/test-runner builds and strict helper/deep app signature
+checks passed. Ten focused process tests passed with external egress denied,
+covering either build failing, launch failure, SIGINT/SIGTERM, unrelated outputs,
+pre-existing compilers, and exact-hit success/failure. A real simultaneous
+Rust/Swift cancellation returned 143 in 5.123s including preparation and cleanup,
+with no remaining compiler from this checkout. The ordinary warm output snapshot
+was restored after cancellation.
+
+Source/bundle `doctor --json` checks inside the network boundary and a disposable
+`LF_HOME` agreed on development/validation-only authority and current source
+revision/root. No installation preflight, promotion or installed Home mutation
+was performed. A first comparison after signature removal failed: codesign left
+different `__LINKEDIT` virtual sizes. Both binaries have the same Mach-O UUID;
+removing then reapplying identical ad-hoc signatures to disposable copies produced
+identical bytes (SHA256 `2c753e61779b3044744d7af9ac11278bb5d324359b8adc498b5dda981eb47757`).
+Re-signing without removal also retained different padding and was insufficient.
+The corrected proof changes no production artifact or signing behavior.
+
+Review findings: preserve scoped cleanup despite its cost, since process groups
+alone previously left real Xcode compilers alive; keep it specific to this pair
+of builds. Cache hits bypass all preparation. Fixture PID readiness now uses an
+atomic rename, removing a cancellation race. One Xcode command and one control
+build implementation serve both paths. The implementation adds no scheduler,
+test deletion, cache relaxation, paid runner or retry.
+
+Replay/raw evidence: `/tmp/macos-ci-selected-bench.py`,
+`/tmp/macos-ci-selected-measure.py`,
+`/tmp/macos-ci-selected-snapshots/results.jsonl`, and
+`/tmp/macos-ci-selected-*.log` / `*-processes.jsonl`. Cancellation and authority
+scripts are `/tmp/macos-ci-selected-cancel-real.py` and
+`/tmp/macos-ci-selected-runtime.py`. Gate once, full Swift execution, installation
+coverage and hosted CI/queue remain later Flow obligations before verified delivery.
+The measured follow-up is not complete. lf-12be237 independently retains the ten
+real typical-code runs and separate queue/push-to-merged proof; latest supplied
+real queue remains 6:24.
+
+### Gate verification — October 13
+
+At `38a843dce1`, `uv run --no-sync python scripts/test.py --reuse-passing`
+passed architecture and the full headless Swift plan: current transport CLI
+build, 505 tests in 62 suites, and multiplatform boundaries. Optional display
+diagnostics remained skipped. The network-isolated Python run passed 418 tests,
+skipped 20 and exposed one stale signing guard: it expected the flags inline in
+CI after this branch moved them to `scripts/build_xcode_ci.py`. The guard now
+checks the workflow entrypoint and that command's signing/package-resolution
+flags. Its complete ten-test module passed under network isolation after repair;
+the ten overlap process tests had already passed in the full run. The separately
+scheduled checkout-observation sandbox proof also passed. No production build
+logic changed during gate.
+
+Website dependency acquisition failed before tests ran. Preparing cached packages
+with `uv sync --offline --project website --extra test` resolved setup;
+`UV_OFFLINE=1 uv run --offline --no-sync python dev.py test` from `website/`
+then passed all 75 checks, including Chromium and accessibility, with external
+egress denied during execution.
+
+`uv run --no-sync python scripts/test_task_installation.py` passed all nine
+managed/migration/authority proofs. Its separate `--native-titles` invocation
+passed published promotion, preview, failed-hook recovery, preservation and
+idempotence. Both used disposable Docker OS accounts and the locally available
+`rust:trixie` image with rustc 1.99.0; neither touched the host installation.
+
+The current `XCODE_CACHE_HIT=false` wrapper with CI's dev/test debug=0 settings
+passed signed app/test-runner compilation in 35.911s including settings and
+cleanup, compiling `loopflow` once. This reused local build outputs and is a
+correctness check, not another matched timing sample. Strict helper and deep app
+signature checks passed. The network-isolated source/bundle authority probe
+matched current source revision/root, development provenance and validation-only
+authority; identically re-signed disposable copies matched bytes. Full Swift
+execution and this Xcode fallback build retain their separate compile coverage.
+
+Ruff lint/format checks passed for changed Python files. An optional actionlint
+invocation was unavailable because its Go module was not cached for offline use;
+the 35 CI behavior checks passed in the Python suite. Review also corrected the
+workflow comment to describe hosted UI execution as an optional display diagnostic.
+No unrelated untracked Flow definition was adopted. Logs: `/tmp/macos-ci-gate.log`,
+`.lf/tmp/gate/run-39830/`, `/tmp/macos-ci-gate-website.log`,
+`/tmp/macos-ci-installation.log`, `/tmp/macos-ci-native-titles.log` and
+`/tmp/macos-ci-gate-xcode.log`.
+
+Local correctness verification is complete. Hosted matrix/queue results, measured
+useful margin and verified merge remain required before this follow-up completes.
+The mixed cold result and cleanup maintenance cost remain acceptance limits;
+gate establishes no five-minute result or aggregate ten-run proof.

@@ -3,17 +3,14 @@
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective test cleanup and delivery, without retries or a
-five-minute CI claim. One CI repository architecture scan plus checker fixtures
-and one portable HTML renderer freshness check retain their distinct proof.
-Editorial metric/roadmap/title fragments cannot prove agent judgment; catalog,
-command resolution, safety contracts and unresolved prompt goldens remain.
+five-minute CI claim. CI's architecture scan, checker fixtures and portable HTML
+freshness retain distinct proof; editorial fragments cannot prove agent judgment.
+Catalog, command resolution, safety contracts and prompt goldens remain.
 [Assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13)
-records the net 49-line reduction. CLI/disk and macOS overlap remain separate.
-Installation image acquisition failed before tests on #1545;
-other product jobs passed. Acquisition failure supplies no installation acceptance,
-and source completion establishes no delivery. Release's cold-image and
-operation-entry lessons apply; earlier retry recovery grants no
-exception to Jack's current no-retries boundary.
+records the net 49-line test reduction. #1545 merged as `414d4dd27`, including
+Docker Hub acquisition after ECR quota failure. Merge supplies no installation
+acceptance or measured CI saving. Release's cold-image/operation-entry lessons
+apply; earlier retry recovery grants no exception to Jack's no-retries boundary.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
 
@@ -704,40 +701,21 @@ Real SSH, live Linear, installation and cron activation remain unproved. Exact
 candidate/run IDs and repairs:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Tasks across machines.
 
-## Planning and launch preservation (curated 2026-10-02)
+## Planning and launch preservation (curated 2026-10-13)
 
-The September 28–29 details remain at
-`3a219561ad029224aed4692d4ce23d6f17cad350:wave/infrastructure/MEMORY.md`
-under this heading and in its linked pre-curation history. Current one-Home,
-Session and LOO-406 unified-plan decisions supersede development-store routing,
-intermediate migration, Run owners and provider-authority selection. Records prove no configured acceptance. Repository-authored Wave identity and
-preservation obligations below remain; no-remote policy/outward definition sync
-were unresolved, not authorization to restore old writers.
+Earlier evidence:
+`9e8ed2abcc703e78e07d5c0ea94fe94516643172:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Current contracts supersede archived routing/provider authority.
 
-LOO-334's durable constraints survive (`57ac8b09f:wave/infrastructure/MEMORY.md`): presence, freshness and execution eligibility
-are separate; omission is not deletion; acquisition time is not provider revision.
-Partial/unknown-revision webhooks invalidate rather than invent complete facts.
-Preserve removal evidence across lookup races. Project revisions cannot order
-independent Initiative/Team relations; contradictions require explicit repair.
-Repository-alias repair moves normalized planning atomically, without combining
-conflicting observations. Explicit relocation and configured Linear completion
-remain unproved. Historical chapter membership requires frozen evidence, not
-reconstruction from current normalized entities. Lost completion responses require
-provider readback; archive acknowledgement never proves KRs or transferred Tasks done.
-Cached-Task outage admission belongs to LOO-326's current review, not these notes.
+Presence, freshness and eligibility differ. Omission is not deletion; acquisition
+is not revision. Partial facts invalidate. Preserve removals, conflicts and frozen
+historical membership; unrelated relations share no revision. Readback settles
+lost replies, not KRs. Relocation/completion remain unproved.
 
-The launch-hardening incident, unknown initiator, failed retry and unresolved
-configured continuity remain at `b3cd894f3:wave/infrastructure/MEMORY.md` under
-this heading, with its original design link. Selected-store absence proves no
-deletion. Preserve failure, executable/data ownership, native identity and pending
-decisions across retry; prohibit timestamp-based store merging. Prepared identity
-and window output prove no conversation access.
-
-LOO-321 / PR #1308’s superseded isolated-store design and unproved configured
-continuity remain at `b3cd894f3:wave/infrastructure/MEMORY.md` under this heading.
-Database isolation never isolates provider or checkout effects. Preserve saved
-Task/PR/checkout identity; explicit replacement owns new definitions. Current
-mechanics and ownership replace the archived store-routing and command names.
+Preserve failed launches, executable/data ownership, native and Task/PR/checkout
+identity, and pending decisions. No timestamp merge; database isolation does not
+isolate provider/checkout effects. Inspection proves no continuity or conversation
+access. Replacement owns new definitions; archives restore no deleted writers.
 
 ## Managed account identity (LOO-339, curated 2026-10-08)
 
@@ -1096,6 +1074,29 @@ overhead remains, and no production speedup or live compliance is proved.
 Hosted CI, merge and completion remain unproved. Exact checks and prior-cost
 references: `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 Direct invocation and large inputs.
+
+## macOS CI evidence (lf-ddf2d53, 2026-10-13)
+
+Jack Heart authorized CI delivery. lf-12be237 retains ten consecutive typical-code
+PRs under five minutes and separate queue/push-to-merged proof. #1543 merged;
+queue 38452715134 remains 6:24 (6:25 updatedAt).
+
+Selected DerivedData-miss overlap is implemented; hits use ordinary Xcode.
+Matched pairs save 4.794s cold (opposite signs), 18.575s changed-source warm;
+exact hits add 0.064s. Warm changes miss. Earlier overlap gains are no forecast;
+codegen/boxing remain rejected. Query savings prove no build gain. Contention
+limits attribution; Xcode client CPU/RSS omits compilers.
+
+Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
+Process groups left a compiler alive; scoped cancellation passed. Toolchain/SDK/deployment and
+source/target must match. Signature removal alone leaves Mach-O padding;
+identical re-signing of disposable copies proved bytes equal.
+
+Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/network
+proof remains; Release's lesson separates local proof from delivery.
+Preserve copy/sign, development/validation-only authority and disposable
+OS accounts for installation. No paid runners, test removal, cache relaxation or
+retries. [Trials and limits](../../../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-exact-cache-miss-overlap).
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 

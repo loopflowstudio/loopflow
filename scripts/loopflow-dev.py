@@ -38,7 +38,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
 # Dev build runs under its own bundle id so it keeps preferences separate from
@@ -627,7 +627,7 @@ def _apply_dev_identity(plist: Path) -> None:
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 
 
-def _copy_bundled_tools(app_macos_dir: Path) -> None:
+def _build_control_tools() -> Path:
     # The app is a live operator surface even when its Swift shell is a dev
     # build. The app selects its bundled CLI for every child;
     # it has no authority to migrate the main Machine.
@@ -644,17 +644,21 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
         "--target-dir",
         str(target_dir),
     ]
-    bin_dir = target_dir / "debug"
+    run(cargo_cmd, cwd=REPO_ROOT)
+    source = target_dir / "debug" / "lf"
+    if not source.exists():
+        raise RuntimeError(f"Missing built binary: {source}")
+    return source
 
-    result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
-    if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled control binaries")
 
-    for binary in ("lf",):
-        source = bin_dir / binary
-        if not source.exists():
-            raise RuntimeError(f"Missing built binary: {source}")
-        shutil.copy(source, app_macos_dir / binary)
+def _copy_bundled_tools(app_macos_dir: Path) -> None:
+    shutil.copy(_build_control_tools(), app_macos_dir / "lf")
+
+
+def cmd_prepare_control_tools() -> int:
+    """Prepare the same control binary the app verifies and copies."""
+    _build_control_tools()
+    return 0
 
 
 def cmd_bundle_control_tools(output: Path) -> int:
@@ -693,6 +697,7 @@ COMMANDS = {
         cmd_bundle_control_tools,
         "Build validation-only control tools into an app bundle",
     ),
+    "prepare-control-tools": (cmd_prepare_control_tools, "Prepare validation-only control tools"),
     "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
 }

@@ -27,13 +27,15 @@ impl SqliteStore {
 
     pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.unchecked_transaction()?;
+        let issue = super::children::short_task_id(&conn, task)?.ok_or(StoreError::NotFound)?;
         Ok(conn.query_row(
-            "SELECT automation_enabled AND paused=0,issue_identifier FROM tasks WHERE id=?1",
+            "SELECT automation_enabled AND paused=0 FROM tasks WHERE id=?1",
             [task.as_str()],
             |row| {
                 Ok(TaskAutomation {
                     task_id: task.to_string(),
-                    issue: row.get(1)?,
+                    issue,
                     enabled: row.get(0)?,
                 })
             },

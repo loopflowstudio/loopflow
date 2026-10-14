@@ -77,7 +77,7 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         rusqlite::params![attachment.agent_process_id, agent.0.id(), started],
     )
     .unwrap();
-    let detached = store
+    let _detached = store
         .release_session_attachment("orphan", &attachment)
         .unwrap();
     let before = store
@@ -98,61 +98,65 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
     assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
     assert_eq!(row.pid, Some(agent.0.id()));
 
-    let bin = home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let ps = bin.join("ps");
-    for (args, single_pid_reads) in [
-        (["task", "reconcile", "--json"], false),
-        (["monitor", "prune", "--json"], false),
-        // Exact leader observation succeeds, but descendant inventory fails.
-        // The reaper must refuse before signaling, not assume no descendants.
-        (["task", "reconcile", "--json"], true),
-    ] {
-        let forward = if single_pid_reads {
-            "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
-        } else {
-            ""
-        };
-        std::fs::write(
-            &ps,
-            format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let output = command(home.path(), repo.path(), &args)
-            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-            .output()
+    // Only the portable reader invokes ps; macOS observes the kernel directly.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let ps = bin.join("ps");
+        for (args, single_pid_reads) in [
+            (["task", "reconcile", "--json"], false),
+            (["monitor", "prune", "--json"], false),
+            // Exact leader observation succeeds, but descendant inventory fails.
+            // The reaper must refuse before signaling, not assume no descendants.
+            (["task", "reconcile", "--json"], true),
+        ] {
+            let forward = if single_pid_reads {
+                "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
+            } else {
+                ""
+            };
+            std::fs::write(
+                &ps,
+                format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
+            )
             .unwrap();
-        assert!(
-            !output.status.success(),
-            "failed observation was reported successful: {output:?}"
-        );
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
-            "{output:?}"
-        );
-        if args[0] == "task" {
-            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let output = command(home.path(), repo.path(), &args)
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .output()
+                .unwrap();
             assert!(
-                result["errors"].as_array().unwrap().iter().any(|error| {
-                    error
-                        .as_str()
-                        .unwrap()
-                        .contains(attachment.agent_process_id.as_str())
-                }),
-                "{result}"
+                !output.status.success(),
+                "failed observation was reported successful: {output:?}"
             );
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
+                "{output:?}"
+            );
+            if args[0] == "task" {
+                let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert!(
+                    result["errors"].as_array().unwrap().iter().any(|error| {
+                        error
+                            .as_str()
+                            .unwrap()
+                            .contains(attachment.agent_process_id.as_str())
+                    }),
+                    "{result}"
+                );
+            }
+            assert!(agent.0.try_wait().unwrap().is_none());
+            assert_eq!(
+                store.process(&attachment.agent_process_id).unwrap(),
+                Some(before.clone())
+            );
+            assert_eq!(
+                store.session_attachment("orphan").unwrap(),
+                Some(_detached.clone())
+            );
+            assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
         }
-        assert!(agent.0.try_wait().unwrap().is_none());
-        assert_eq!(
-            store.process(&attachment.agent_process_id).unwrap(),
-            Some(before.clone())
-        );
-        assert_eq!(
-            store.session_attachment("orphan").unwrap(),
-            Some(detached.clone())
-        );
-        assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
     }
 
     // This is the same operation the schedule invokes, not evidence of an
@@ -256,6 +260,7 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     assert!(worktree.exists());
 }
 
+#[cfg(not(target_os = "macos"))] // Failure injection replaces the portable ps reader.
 #[tokio::test]
 async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
     use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};

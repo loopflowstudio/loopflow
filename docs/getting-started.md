@@ -104,6 +104,12 @@ Matching a host's worktree directory does not register a workspace in that host
 or run its setup scripts. Git checkout-hook failures retain the checkout and
 report the setup error instead of reporting success.
 
+Task checkout adds its readable identifier: `lf checkout ENG-123` creates
+`<author>/eng-123-fix-login` for “Fix login”, with `eng-123-fix-login` as the
+workspace segment. Local Tasks use six hex characters, extended only for
+collisions. Known Linear IDs work offline. Later Linear synchronization changes
+Task labels and generated Session names; existing branches and checkouts stay put.
+
 Reusing an existing worktree stays local, even when its remote is unavailable.
 For new work, lf refreshes the default branch from its configured Git upstream;
 a repository without a remote uses its local base. Advertised remote defaults,

@@ -40,6 +40,37 @@ pub(crate) fn generated_session_title(
     .unwrap_or_else(|| "Session".to_string())
 }
 
+/// Keep generated names on the same Task label as every other projection.
+pub(crate) fn task_session_title(
+    title: &str,
+    id: &crate::durable::TaskId,
+    label: &str,
+    previous: Option<&str>,
+) -> String {
+    let hex = id.as_str().trim_start_matches("task_");
+    let purpose = title
+        .split_whitespace()
+        .filter(|word| {
+            let token = word.trim_matches(|ch: char| !ch.is_ascii_alphanumeric());
+            let local = token
+                .strip_prefix("lf-")
+                .or_else(|| token.strip_prefix("task_"))
+                .unwrap_or(token);
+            token != label
+                && previous != Some(token)
+                && !(local.len() >= 6
+                    && local.bytes().all(|ch| ch.is_ascii_hexdigit())
+                    && hex.starts_with(&local.to_ascii_lowercase()))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{label} {purpose}")
+        .trim()
+        .chars()
+        .take(SESSION_TITLE_MAX_CHARS)
+        .collect()
+}
+
 pub(crate) fn request_title(source: &str) -> Option<String> {
     let title = source
         .split_whitespace()
@@ -164,6 +195,25 @@ pub fn git_user(repo: &Path) -> Result<String, GitError> {
 #[cfg(test)]
 mod tests {
     use super::sanitize_for_branch;
+
+    #[test]
+    fn generated_task_title_repairs_tokens_and_bounds_unicode_purpose() {
+        let task = crate::durable::TaskId::from_raw("task_abcdef10000000000000000000000001");
+        for title in [
+            "abcdef Fix login",
+            "lf-abcdef1 Fix login",
+            "task_abcdef10000000000000000000000001 Fix login",
+            "ENG-1 Fix login",
+        ] {
+            assert_eq!(
+                super::task_session_title(title, &task, "ENG-2", Some("ENG-1")),
+                "ENG-2 Fix login"
+            );
+        }
+        let title = super::task_session_title(&"λ".repeat(100), &task, "ENG-2", None);
+        assert!(title.starts_with("ENG-2 λ"));
+        assert_eq!(title.chars().count(), 80);
+    }
 
     #[test]
     fn generated_titles_use_work_when_the_turn_has_no_request() {

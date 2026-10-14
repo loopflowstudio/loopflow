@@ -1122,7 +1122,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
     assert_eq!(fixture.count("agent_sessions"), before);
     let created = primary(&["INF-125"]);
-    assert_eq!(created["title"], "Sibling INF-125");
+    assert_eq!(created["title"], "INF-125 Sibling");
     assert_eq!(fixture.count("agent_sessions"), before + 1);
     let (skill, cwd): (String, String) = fixture
         .db()

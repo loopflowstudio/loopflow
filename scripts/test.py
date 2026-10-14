@@ -247,9 +247,15 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
+    macos = platform.system() == "Darwin"
+    if macos:
+        if "nextest" in test_argv:
+            test_argv.extend(["-E", "not test(data_clones::)"])
+        else:
+            test_argv.extend(["--skip", "data_clones::"])
     runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
     test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
-    return [
+    commands = [
         Command(
             ["uv", "run", "--no-sync", "python", "scripts/check_rust_test_inventory.py"],
             REPO_ROOT,
@@ -284,6 +290,41 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             "rust",
         ),
     ]
+    if macos:
+        # Clone fixtures install their own sandbox, which cannot nest with the
+        # network runner's unsandboxed ps exception. Match macOS CI's boundary.
+        selector = "data_clones::"
+        if int(platform.mac_ver()[0].split(".")[0]) < 26:
+            selector += (
+                "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
+            )
+        commands.append(
+            Command(
+                [
+                    "uv",
+                    "run",
+                    "python",
+                    "scripts/materialize_rust_tests.py",
+                    "--prepare-cli",
+                    "--",
+                    "cargo",
+                    "test",
+                    "-p",
+                    "loopflow",
+                    "--test",
+                    "integration",
+                    "--jobs",
+                    str(MAX_PARALLEL_JOBS),
+                    selector,
+                    "--",
+                    "--test-threads",
+                    str(MAX_PARALLEL_JOBS),
+                ],
+                REPO_ROOT,
+                "rust-clones",
+            )
+        )
+    return commands
 
 
 def _python_commands(changed: list[str]) -> list[Command]:
@@ -635,7 +676,12 @@ SUITES: list[Suite] = [
         slow=False,
         trigger_desc="swift/ (headless app build and view tests)",
         match=lambda c: (
-            _touches(c, "swift/")
+            _touches(
+                c,
+                "swift/",
+                "rust/loopflow/src/store/sqlite/sessions.rs",
+                "rust/loopflow/src/naming.rs",
+            )
             or _touches_exact(c, "scripts/test_desktop.sh", "scripts/desktop-headless.sb")
         ),
         build=_swift_commands,

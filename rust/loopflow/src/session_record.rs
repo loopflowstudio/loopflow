@@ -4156,11 +4156,27 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
+        // Production settlement has a bounded telemetry budget. This fixture
+        // needs the recorder's acknowledgement, not a scheduling deadline.
+        let drain = || {
+            let (acknowledge, drained) = std::sync::mpsc::channel();
+            capture
+                .0
+                .lock()
+                .unwrap()
+                .recorder
+                .sender
+                .as_ref()
+                .unwrap()
+                .send(super::RecorderMessage::Drain(acknowledge))
+                .unwrap();
+            drained.recv().unwrap();
+        };
         let first = crate::store::ProviderAccountId::parse("primary").unwrap();
         let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
         capture.mark_spawn_requested();
         capture.observe_provider(None, Some(first.clone()));
-        capture.0.lock().unwrap().recorder.drain_after_settlement();
+        drain();
 
         assert!(!dir.join("terminal.json").exists());
         assert!(read_provider_session(&dir).unwrap().is_none());
@@ -4180,7 +4196,7 @@ mod tests {
             .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
             .unwrap();
         capture.observe_provider(Some("second-session".into()), Some(second.clone()));
-        capture.0.lock().unwrap().recorder.drain_after_settlement();
+        drain();
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
             "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
@@ -4197,6 +4213,7 @@ mod tests {
             .unwrap();
         capture.observe_provider(Some("ambient-session".into()), None);
         capture.finish("completed").unwrap();
+        drain();
 
         let events: Vec<serde_json::Value> = fs::read_to_string(dir.join("events.jsonl"))
             .unwrap()

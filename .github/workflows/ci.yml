@@ -464,7 +464,7 @@ jobs:
         # Compile the app and signed test runners with the terminal fallback;
         # SwiftPM exercises the suites with GhosttyKit. build-for-testing keeps
         # that separate configuration's compile proof without launching a host.
-        # The real hosted UI run is the separately named required gate
+        # The real hosted UI run is an optional display diagnostic:
         # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
         env:
           XCODE_CACHE_HIT: ${{ steps.xcode-cache.outputs.cache-hit }}

@@ -1319,3 +1319,52 @@ coverage and hosted CI/queue remain later Flow obligations before verified deliv
 The measured follow-up is not complete. lf-12be237 independently retains the ten
 real typical-code runs and separate queue/push-to-merged proof; latest supplied
 real queue remains 6:24.
+
+### Gate verification — October 13
+
+At `38a843dce1`, `uv run --no-sync python scripts/test.py --reuse-passing`
+passed architecture and the full headless Swift plan: current transport CLI
+build, 505 tests in 62 suites, and multiplatform boundaries. Optional display
+diagnostics remained skipped. The network-isolated Python run passed 418 tests,
+skipped 20 and exposed one stale signing guard: it expected the flags inline in
+CI after this branch moved them to `scripts/build_xcode_ci.py`. The guard now
+checks the workflow entrypoint and that command's signing/package-resolution
+flags. Its complete ten-test module passed under network isolation after repair;
+the ten overlap process tests had already passed in the full run. The separately
+scheduled checkout-observation sandbox proof also passed. No production build
+logic changed during gate.
+
+Website dependency acquisition failed before tests ran. Preparing cached packages
+with `uv sync --offline --project website --extra test` resolved setup;
+`UV_OFFLINE=1 uv run --offline --no-sync python dev.py test` from `website/`
+then passed all 75 checks, including Chromium and accessibility, with external
+egress denied during execution.
+
+`uv run --no-sync python scripts/test_task_installation.py` passed all nine
+managed/migration/authority proofs. Its separate `--native-titles` invocation
+passed published promotion, preview, failed-hook recovery, preservation and
+idempotence. Both used disposable Docker OS accounts and the locally available
+`rust:trixie` image with rustc 1.99.0; neither touched the host installation.
+
+The current `XCODE_CACHE_HIT=false` wrapper with CI's dev/test debug=0 settings
+passed signed app/test-runner compilation in 35.911s including settings and
+cleanup, compiling `loopflow` once. This reused local build outputs and is a
+correctness check, not another matched timing sample. Strict helper and deep app
+signature checks passed. The network-isolated source/bundle authority probe
+matched current source revision/root, development provenance and validation-only
+authority; identically re-signed disposable copies matched bytes. Full Swift
+execution and this Xcode fallback build retain their separate compile coverage.
+
+Ruff lint/format checks passed for changed Python files. An optional actionlint
+invocation was unavailable because its Go module was not cached for offline use;
+the 35 CI behavior checks passed in the Python suite. Review also corrected the
+workflow comment to describe hosted UI execution as an optional display diagnostic.
+No unrelated untracked Flow definition was adopted. Logs: `/tmp/macos-ci-gate.log`,
+`.lf/tmp/gate/run-39830/`, `/tmp/macos-ci-gate-website.log`,
+`/tmp/macos-ci-installation.log`, `/tmp/macos-ci-native-titles.log` and
+`/tmp/macos-ci-gate-xcode.log`.
+
+Local correctness verification is complete. Hosted matrix/queue results, measured
+useful margin and verified merge remain required before this follow-up completes.
+The mixed cold result and cleanup maintenance cost remain acceptance limits;
+gate establishes no five-minute result or aggregate ten-run proof.

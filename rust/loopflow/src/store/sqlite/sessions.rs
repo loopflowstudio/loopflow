@@ -674,46 +674,21 @@ impl SqliteStore {
                 FROM eligible JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
-            let rows = query.query_map(
-                params![
-                    wave,
-                    project,
-                    task,
-                    caller,
-                    window.0,
-                    window.1,
-                    input,
-                    window.2.map(|n| n as i64)
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, Option<String>>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        (row.get::<_, Option<String>>(6)?, None),
-                        row.get::<_, Option<i64>>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, Option<String>>(9)?,
-                        row.get::<_, Option<String>>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, bool>(13)?,
-                        row.get::<_, Option<bool>>(14)?.unwrap_or(false),
-                        row.get::<_, Option<String>>(15)?,
-                        row.get::<_, Option<i64>>(16)?,
-                        row.get::<_, Option<AgentSessionId>>(17)?,
-                        row.get::<_, Option<String>>(18)?,
-                    ))
-                },
-            )?;
-            let mut inputs = rows.collect::<Result<Vec<_>, _>>()?;
+            let mut rows = query.query(params![
+                wave,
+                project,
+                task,
+                caller,
+                window.0,
+                window.1,
+                input,
+                window.2.map(|n| n as i64)
+            ])?;
+            let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();
-            for input in &mut inputs {
-                input.6 .1 = input
-                    .4
+            while let Some(row) = rows.next()? {
+                let task: Option<String> = row.get(4)?;
+                let task_identifier = task
                     .as_ref()
                     .map(|id| {
                         super::children::cached_short_task_id(
@@ -724,6 +699,27 @@ impl SqliteStore {
                     })
                     .transpose()?
                     .flatten();
+                inputs.push((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    task,
+                    row.get::<_, Option<String>>(5)?,
+                    (row.get::<_, Option<String>>(6)?, task_identifier),
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, bool>(13)?,
+                    row.get::<_, Option<bool>>(14)?.unwrap_or(false),
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<i64>>(16)?,
+                    row.get::<_, Option<AgentSessionId>>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                ));
             }
             inputs
         };
@@ -1146,23 +1142,18 @@ impl SqliteStore {
              FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
              WHERE s.bound_at IS NOT NULL ORDER BY s.bound_at,s.id",
         )?;
-        let rows = query.query_map([], |row| {
-            Ok(crate::session::SessionBind {
+        let mut rows = query.query([])?;
+        let mut binds = Vec::new();
+        let mut labels = std::collections::HashMap::new();
+        while let Some(row) = rows.next()? {
+            let task = TaskId::from_raw(row.get::<_, String>(2)?);
+            binds.push(crate::session::SessionBind {
                 session_id: row.get(0)?,
                 at: row.get(1)?,
-                task: row.get(2)?,
+                task: super::children::cached_short_task_id(&conn, &mut labels, &task)?
+                    .ok_or(StoreError::NotFound)?,
                 wave: row.get(3)?,
-            })
-        })?;
-        let mut binds = rows.collect::<Result<Vec<_>, _>>()?;
-        let mut labels = std::collections::HashMap::new();
-        for bind in &mut binds {
-            bind.task = super::children::cached_short_task_id(
-                &conn,
-                &mut labels,
-                &TaskId::from_raw(&bind.task),
-            )?
-            .ok_or(StoreError::NotFound)?;
+            });
         }
         Ok(binds)
     }

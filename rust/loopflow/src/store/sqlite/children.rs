@@ -1308,18 +1308,19 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     let mut query = conn.prepare(
         "SELECT lower(substr(id,6)) FROM tasks WHERE id!=?1 AND substr(lower(id),6,6)=?2",
     )?;
-    let others = query
-        .query_map(params![id.as_str(), &hex[..6]], |row| {
-            row.get::<_, String>(0)
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let length = (6..=hex.len())
-        .find(|length| {
-            others
-                .iter()
-                .all(|other| !other.starts_with(&hex[..*length]))
-        })
-        .unwrap_or(hex.len());
+    let others = query.query_map(params![id.as_str(), &hex[..6]], |row| {
+        row.get::<_, String>(0)
+    })?;
+    // Distinguish every collision with one character beyond its shared prefix.
+    let mut length = 6;
+    for other in others {
+        let shared = hex
+            .bytes()
+            .zip(other?.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        length = length.max(shared + 1).min(hex.len());
+    }
     Ok(Some(hex[..length].to_string()))
 }
 

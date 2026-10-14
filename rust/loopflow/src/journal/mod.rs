@@ -1850,16 +1850,23 @@ mod tests {
                 ProcessIdentityEvidence::Live
             );
 
-            // A failed OS observation stays unknown, including during pruning.
+            // macOS reads identity natively; other hosts need ps on PATH.
             let previous_path = std::env::var_os("PATH");
             std::env::set_var("PATH", guard.home().join("no-programs"));
-            let unknown = super::process_evidence(&store, &context.lf_process_id);
+            let without_path = super::process_evidence(&store, &context.lf_process_id);
             let pruned = super::prune_process_receipts_at(guard.home(), &[std::process::id()]);
             match previous_path {
                 Some(path) => std::env::set_var("PATH", path),
                 None => std::env::remove_var("PATH"),
             }
-            assert_eq!(unknown, ProcessIdentityEvidence::Unknown);
+            assert_eq!(
+                without_path,
+                if cfg!(target_os = "macos") {
+                    ProcessIdentityEvidence::Live
+                } else {
+                    ProcessIdentityEvidence::Unknown
+                }
+            );
             assert_eq!(pruned.unwrap(), 0);
 
             // Model a reused PID: the retained birth belongs to an earlier process.

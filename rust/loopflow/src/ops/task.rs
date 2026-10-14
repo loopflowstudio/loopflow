@@ -1137,17 +1137,16 @@ fn plan_task_placement(
         format!("{}-{title}", task.identifier.to_ascii_lowercase()).trim_end_matches('-'),
     )
     .map_err(task_error)?;
-    let generated_branch = WorktreeName::new(git_user(main_repo)?, segment.clone())
-        .expect("git_user returns a nonempty branch-safe author")
-        .branch();
+    let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
+    let branch = match recorded_branch {
+        Some(branch) => branch.to_string(),
+        None => WorktreeName::new(git_user(main_repo)?, segment.clone())
+            .expect("git_user returns a nonempty branch-safe author")
+            .branch(),
+    };
     let segment = explicit_segment.unwrap_or(segment);
     let workspace_slug = segment.as_str().to_string();
-    let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
-    let plan = plan_branch_placement(
-        main_repo,
-        segment,
-        Some(recorded_branch.unwrap_or(&generated_branch)),
-    )?;
+    let plan = plan_branch_placement(main_repo, segment, Some(&branch))?;
     if recorded_branch.is_none() && plan.strategy != PlacementStrategy::Create {
         return Err(task_error(format!(
             "branch {} already exists; choose another workspace name with --name",

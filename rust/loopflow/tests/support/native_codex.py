@@ -10,6 +10,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -44,6 +45,10 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
         return
     if (home / "fail-terminal").exists():
         raise SystemExit(24)
+    if native_home := os.environ.get("CODEX_HOME"):
+        Path(native_home).mkdir(parents=True, exist_ok=True)
+        (Path(native_home) / "opened").write_text(os.environ.get("LF_CAPTURE_KEY", ""))
+    print("\n".join(sys.argv[1:]), flush=True)
     with (home / "launched").open("a") as file:
         file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
     with socket.socket(socket.AF_UNIX) as stream:
@@ -98,6 +103,13 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             if rpc.get("method") == "item/commandExecution/requestApproval":
                 _send(stream, {"id": rpc["id"], "result": {"decision": "decline"}}, True)
             if rpc.get("method") == "turn/completed":
+                if "TITLE_HOST" in os.environ:
+                    (home / "args").write_text("\n".join(sys.argv[1:]))
+                    (home / "ready").touch()
+                    deadline = time.monotonic() + 30
+                    while not (home / "release").exists() and time.monotonic() < deadline:
+                        time.sleep(.02)
+                    print("latest agent message: done", flush=True)
                 stream.sendall(b"\x88\x80\x00\x00\x00\x00")
                 try:
                     _message(stream)

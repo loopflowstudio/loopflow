@@ -177,6 +177,29 @@ native output and no later writes; redirected output contained no indicator.
 Review corrected a remaining worktree test that still expected Claude argv input.
 No OpenCode transport edit is included in this checkpoint.
 
+The subsequent actual OpenCode server-and-attach probe preserved the exact
+440,000-byte initial request and accepted a typed follow-up, using a local
+stand-in model API. A Loopflow implementation also passed exact-input, native
+permission-rejection, cleanup and retry fixtures, plus actual-terminal input.
+However, its actual OpenCode 1.18.33 permission probe failed: `/permission`
+retained a pending `bash` request while the attached terminal showed the tool
+running and never displayed its approval dialog. No permission was approved by
+the harness. This contradicts the fixture's apparent approval success.
+
+The exploratory OpenCode implementation was removed; existing argv launch,
+argument cap and native stop/resume remain. No OpenCode transport recovery is
+claimed. The next required check is a real terminal that renders and answers a
+permission raised by the HTTP-submitted first turn, followed by a completed typed
+reply. The attach UI/API mismatch is suspected, not established; a guessed v2
+permission query returned HTTP 400 and proves nothing about that explanation.
+
+Evidence: `/tmp/lf-opencode-{attach,lf,permission}-probe.py`; terminal and pending
+permission logs under system-temporary `lf-opencode-permission-ha20prq8`,
+`lf-opencode-permission-ij_23gsa`, and `lf-opencode-permission-re_agvj5`.
+The exploratory diff is retained at
+`/tmp/lf-opencode-native-approval-investigation.patch`; it includes fixture edits
+and is evidence, not an implementation to apply without review.
+
 ## Actual cmux disconnect regression
 
 The real cmux pane exposed a client-side broken pipe on normal Ctrl-D. The relay
@@ -202,5 +225,12 @@ The original timing record is retained with an explicit invalidation. This is
 branch-build evidence, not installed-release recovery.
 
 Checks: Oct 14 `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`,
-both Codex context-launch regressions and the relay close regression passed;
-real cmux resume/reply/clean exit passed. Installed release verification remains.
+21 Session CLI tests, both Codex context-launch regressions and the relay close
+regression passed; real cmux launch/resume/reply/clean exit passed. Installed
+release verification remains. OpenCode's actual permission check failed as above.
+
+Review also found resume-admission and terminal-title fixtures still assuming
+Codex launched directly and Claude consumed keyboard input from stdin. They now
+use the existing Codex protocol fixture and a separate release signal for the
+title check. Native-ID admission, worktree recency, failed-start recovery,
+metadata inspection during active work and title behavior remain covered.

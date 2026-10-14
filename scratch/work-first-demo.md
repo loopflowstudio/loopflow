@@ -204,15 +204,10 @@ Task sync publishes saved identities; per-operation deadlines prevent starvation
 Review retained uncertainty refusal and added a slow-first-export regression.
 Check: library planning suite PASS (73), Clippy all-targets PASS, fmt/diff PASS; `/tmp/loo462-linear-{regressions,clippy,live-batch,live-reconcile}.log`. Native links remain unverified.
 
-October 14 continuation: Jack Heart approved explicitly retrying the five saved
-issue IDs, including possible recreation of a deleted provider issue. Ordinary
-uncertain sync remains non-replaying. Jack also requested whole-repo LF/Linear
-agreement and stated he uses Linear only through Loopflow. Explicit
-`task sync --retry-creation` preserves identity, capture and execution. All five
-retries succeeded as LOO-481–485; zero non-deleted repo Tasks lack Linear IDs.
-Found the same shared five-second deadline in `sync_after_save`, now removed;
-creation output must show the saved identifier and warn only while unmapped.
-Checks: slow-export regressions PASS (2), normal creation PASS (1; initial nonexistent `started_at` assertion removed), explicit/ordinary retry PASS (3, including rate-limited retry preserving earlier uncertainty), all-target Clippy PASS. Logs: `/tmp/loo462-linear-{retry-rate-tests,retry-final-clippy,approved-retries}.log`.
+October 14: Jack Heart approved retrying five saved issue IDs (LOO-481–485), then
+whole-repo alignment; he uses Linear only through Loopflow. All Tasks now have IDs.
+Explicit retries preserve identity and uncertainty. Save-time export starvation and
+creation output were repaired. Earlier checks/evidence: `7fde075f90`, this section.
 Audit: 373 Tasks; 372 read from Linear, 371 match title/description/state.
 `task sync` now reads/delivers fields too and reports pending receipts instead of
 claiming only state success. Explicit `--retry-updates` preserves saved intentions,
@@ -224,8 +219,15 @@ IDs through readback. Lost-reply/readback regression passes; initial fixture fai
 on missing IssueObservation support, repaired. Live delivery leaves six rejected comments; state/field/Project queues are empty.
 Evidence: `/tmp/loo462-linear-{every-task-audit,audit-recovery}.ndjson` and
 `/tmp/loo462-linear-{updates-suite,historical-comment-test2,comment-live-proof}.log`.
-Remaining: W2-86 is unavailable; LOO-276's retired list Wave lacks authored ownership
-and retains canceled locally versus completed in Linear. Six historical comments
-now fail because Linear rejects their target Issues, not UUIDs. Preserve these,
-not silent recreation/unarchiving. Full refresh refused missing spend/engbot/list
-GOAL files; four active Wave refreshes succeeded. Clippy PASS; planning suite PASS (79), `/tmp/loo462-linear-comment-suite.log`.
+Jack Heart authorized deleting W2-86, canceling LOO-276 on both sides, and dropping
+the six rejected comments. W2-86 is locally deleted; unavailable provider deletion
+remains pending. Removed only six outbound comment receipts after exact-set validation,
+retaining local history and `/tmp/loo462-discarded-comment-deliveries.json` for recovery.
+Linear reads those Issues but rejects comment mutation; closed/canceled status is
+not an established cause. Project observations show none of the six Projects archived.
+LOO-276 exposed migrated abandonment without any delivery receipt: explicit repeat now
+queues the missing cancellation, preserving existing uncertain receipts. LOO-276 now
+reads canceled on both sides; all 372 remaining Tasks match title/description/state.
+Check: legacy cancellation regression, build, Clippy, fmt/diff PASS; logs
+`/tmp/loo462-legacy-cancel-{test,build,clippy,live}.log`.
+Earlier audit evidence and 79-test/Clippy passes: `7fde075f90`, this section.

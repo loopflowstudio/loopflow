@@ -5276,3 +5276,44 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         assert!(watermark.is_some());
     });
 }
+
+#[test]
+fn repeated_legacy_abandonment_delivers_missing_cancellation_once() {
+    with_planning_task(|runtime, fixture, _repo, task, state| {
+        fixture
+            .store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET abandoned_at=1,planning_state='canceled' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime.block_on(async {
+            fixture
+                .store
+                .abandon(&work, "explicit legacy cancellation")
+                .await
+                .unwrap();
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            fixture.store.abandon(&work, "repeat").await.unwrap();
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "canceled");
+            assert_eq!(provider.completion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+    });
+}

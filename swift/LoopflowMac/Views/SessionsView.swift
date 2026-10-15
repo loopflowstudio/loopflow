@@ -1079,7 +1079,13 @@ struct SessionsContentView: View {
         }, onOpenTask: { work in
             dismissNavigationForSelection()
             openTask(work)
-        }, onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+        }, onOpenRepository: {
+            dismissNavigationForSelection()
+            openRepositoryConversation()
+        }, onOpenWave: { work in
+            dismissNavigationForSelection()
+            openWaveConversation(work)
+        })
     }
 
     private func dismissNavigationForSelection() {
@@ -1417,12 +1423,15 @@ private struct WorkLayoutView<Content: View>: View {
                 let vertical = axis == .vertical && geometry.size.width >= 720
                 let extent = vertical ? geometry.size.width : geometry.size.height
                 let effectiveAxis: SplitAxis = vertical ? .vertical : .horizontal
+                let sizing = SplitSizing(extent: extent, firstMinimum: vertical ? 360 : 200,
+                                         secondMinimum: vertical ? 360 : 200)
+                let displayedRatio = sizing.constrain(ratio)
                 let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 stack {
                     WorkLayoutView(layout: first, registry: registry, content: content)
-                        .frame(width: vertical ? max(0, extent * ratio - 3) : nil,
-                               height: vertical ? nil : max(0, extent * ratio - 3))
-                    SplitDivider(axis: effectiveAxis, ratio: ratio, extent: extent, update: { value in
+                        .frame(width: vertical ? max(0, extent * displayedRatio - 3) : nil,
+                               height: vertical ? nil : max(0, extent * displayedRatio - 3))
+                    SplitDivider(axis: effectiveAxis, ratio: displayedRatio, sizing: sizing, update: { value in
                         if let firstKey = first.keys.first, let secondKey = second.keys.first {
                             registry.resize(between: firstKey, and: secondKey, ratio: value)
                         }
@@ -1525,30 +1534,26 @@ private struct MultiplexerNodeView: View {
         case .split(let axis, let first, let second, let ratio):
             return AnyView(
                 GeometryReader { geometry in
-                    if axis == .vertical {
-                        HStack(spacing: 0) {
-                            _child(first)
-                                .frame(width: max(120, geometry.size.width * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.width,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            _child(first)
-                                .frame(height: max(100, geometry.size.height * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.height,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
+                    let vertical = axis == .vertical
+                    let extent = vertical ? geometry.size.width : geometry.size.height
+                    let firstSize = first.minimumPaneSize
+                    let secondSize = second.minimumPaneSize
+                    let sizing = SplitSizing(extent: extent,
+                        firstMinimum: vertical ? firstSize.width : firstSize.height,
+                        secondMinimum: vertical ? secondSize.width : secondSize.height)
+                    let displayedRatio = sizing.constrain(ratio)
+                    let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
+                    let secondExtent = max(0, extent - firstExtent - sizing.divider)
+                    let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                    stack {
+                        _child(first)
+                            .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
+                            .clipped()
+                        SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
+                            update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
+                        _child(second)
+                            .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
+                            .clipped()
                     }
                 }
             )
@@ -1566,35 +1571,86 @@ private struct MultiplexerNodeView: View {
     }
 }
 
+/// Minimums follow the visible split tree; short windows shrink them together.
+extension LayoutNode {
+    var minimumPaneSize: CGSize {
+        switch self {
+        case .leaf: return CGSize(width: 240, height: 140)
+        case .split(let axis, let first, let second, _):
+            let a = first.minimumPaneSize, b = second.minimumPaneSize
+            if axis == .vertical {
+                return CGSize(width: a.width + b.width + 6, height: max(a.height, b.height))
+            } else {
+                return CGSize(width: max(a.width, b.width), height: a.height + b.height + 6)
+            }
+        }
+    }
+}
+
+struct SplitSizing {
+    let extent: CGFloat
+    let firstMinimum: CGFloat
+    let secondMinimum: CGFloat
+    var divider: CGFloat { min(6, max(0, extent)) }
+
+    func constrain(_ ratio: Double) -> Double {
+        guard extent > 0 else { return 0.5 }
+        let available = max(0, extent - divider)
+        let scale = min(1, available / max(1, firstMinimum + secondMinimum))
+        let lower = (firstMinimum * scale + divider / 2) / extent
+        let upper = 1 - (secondMinimum * scale + divider / 2) / extent
+        return min(max(ratio, lower), max(lower, upper))
+    }
+
+    func snapped(_ ratio: Double) -> Double {
+        let bounded = constrain(ratio)
+        for target in [1 - LayoutNode.goldenRatio, LayoutNode.goldenRatio] {
+            if abs(bounded - target) * extent <= 10, abs(constrain(target) - target) < 0.000001 {
+                return target
+            }
+        }
+        return bounded
+    }
+}
+
 private struct SplitDivider: View {
     let axis: SplitAxis
     let ratio: Double
-    let extent: CGFloat
+    let sizing: SplitSizing
     let update: (Double) -> Void
-
+    @Environment(\.palette) private var palette
     @State private var dragStart: Double?
+    @State private var hovering = false
 
     var body: some View {
         Rectangle()
-            .fill(Color.clear)
-            .frame(
-                width: axis == .vertical ? 6 : nil,
-                height: axis == .horizontal ? 6 : nil
-            )
+            .fill(hovering || dragStart != nil ? palette.borderActive : .clear)
+            .frame(width: axis == .vertical ? sizing.divider : nil,
+                   height: axis == .horizontal ? sizing.divider : nil)
             .contentShape(Rectangle())
+            .onHover { inside in
+                guard hovering != inside else { return }
+                hovering = inside
+                if inside { (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() }
+                else { NSCursor.pop() }
+            }
+            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
                         let start = dragStart ?? ratio
                         if dragStart == nil { dragStart = ratio }
-                        let delta = axis == .vertical
-                            ? value.translation.width
-                            : value.translation.height
-                        guard extent > 0 else { return }
-                        update(start + Double(delta / extent))
+                        let delta = axis == .vertical ? value.translation.width : value.translation.height
+                        guard sizing.extent > 0 else { return }
+                        update(sizing.snapped(start + Double(delta / sizing.extent)))
                     }
                     .onEnded { _ in dragStart = nil }
             )
+            .accessibilityLabel(axis == .vertical ? "Resize panes horizontally" : "Resize panes vertically")
+            .accessibilityValue("\(Int(ratio * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                update(sizing.constrain(ratio + (direction == .increment ? 0.02 : -0.02)))
+            }
     }
 }
 

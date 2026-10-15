@@ -48,6 +48,24 @@ struct WorkNavigationTests {
         #expect(root.multiplexer.layout == layout)
     }
 
+    @Test("Repo and Wave selections dismiss temporary navigation and preserve pinned navigation", arguments: [false, true])
+    func selectingWorkClosesDropdown(pinned: Bool) async throws {
+        let model = try model()
+        await model.refresh()
+        model.navigation.showsNavigator = pinned
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        for identifier in ["work-wave-wave-1", "work-wave-conversation-wave-1", "work-open-repository", "work-open-repository"] {
+            model.navigation.palette = .search
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: identifier).button().tap()
+            #expect(model.navigation.palette == nil)
+            #expect(model.navigation.showsNavigator == pinned)
+        }
+        model.navigation.palette = .search
+        model.setRepoPath("/src/loopflow")
+        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.showsNavigator == pinned)
+    }
+
     @Test("Navigation shortcuts leave Escape and extra-modifier provider shortcuts alone")
     func navigationShortcutOwnership() {
         #expect(WorkNavigationShortcut(characters: "k", modifiers: .command) == .search)

@@ -248,7 +248,10 @@ public final class MultiplexerStore {
         if let axis {
             let pane = PaneState(content: content)
             insertedId = pane.id
-            layout = layout.splitting(paneId, axis: axis, newPane: pane)
+            let ratio: Double
+            if case .shell = content { ratio = LayoutNode.goldenRatio }
+            else { ratio = 0.5 }
+            layout = layout.splitting(paneId, axis: axis, newPane: pane, ratio: ratio)
         } else {
             insertedId = paneId
             layout = layout.replacingContent(of: paneId, with: content)

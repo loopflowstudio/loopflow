@@ -40,8 +40,7 @@ the Machine. Durations and command names only; the files stay on this machine.
 Navigation starts closed, with the repository selected in the Session workspace
 header. Click the location control or press **⌘K** to drop the full navigator over
 your panes. It keeps the same Needs you queue, Wave/Task rows and Find Work field
-as the sidebar. Repo and Wave selection drill in; choosing a Task or Session closes
-the dropdown. Escape or a click outside dismisses it and restores your previous focus.
+as the sidebar. Choosing a repository, Wave, Task or Session closes the dropdown. Escape or a click outside dismisses it and restores your previous focus.
 
 Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
 Open a Wave to enter its conversation and fill the sidebar with its Tasks.
@@ -306,6 +305,10 @@ custom postprocessing are outside the opaque-text contrast guarantee.
 
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
+Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
+61.8%. New shell splits give 61.8% to the existing pane and 38.2% to the shell.
+Both sides retain usable minimum sizes, including nested splits; small windows
+shrink those minimums together.
 
 Press **⌘K** to open and focus Find Work in the navigator. Search filters the
 existing Wave/Task rows. Flow and Workflow definitions remain in the repository

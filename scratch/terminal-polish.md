@@ -287,3 +287,28 @@ Pinned Command-K focuses its existing search instead of mounting a second
 navigator. Pane focus is withheld while navigation owns input, and the shortcut
 monitor retains the original responder until dismissal. No terminal is released.
 Check: `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkDestinationTests|SessionChromeProofTests|DesktopHeadlessTests' -Xswiftc -gnone --jobs 4` PASS (115 tests reported; three native tests skipped); platform boundary and diff checks PASS. `/tmp/loo487-dropdown-tests-verified.log`. The prior run exposed a sidebar-hide fixture that had not opened the now-default-closed sidebar; it now explicitly pins before testing Hide. Native dropdown geometry/focus remains demo judgment.
+
+### Selection dismissal and split resizing
+
+Jack Heart accepted Demo 5's layout, then canceled the shipping request to fix
+selection dismissal: Wave and repository selections must close temporary navigation
+just like Tasks and Sessions, including selecting the already-current destination.
+Pinned navigation stays open. Shipping remains held for this review correction.
+Jack also requested dragging dividers throughout the multiplexer, with sensible
+size limits. Preserve nested panes, contents and focus; constrain both sides, show
+a resize cursor, and adapt minimum sizes when the window cannot fit them all.
+
+Jack Heart added golden-ratio snapping at 38.2% and 61.8%, and requested that new
+shell splits start at 61.8/38.2 (existing pane/new shell). The initial Session/Task
+browser split remains its separately requested 70/30. Resize minimums are 240pt
+wide and 140pt high per pane, accumulated through nested splits and proportionally
+reduced only when the viewport cannot fit them. A 10pt snap zone cannot override
+minimums. Divider dragging uses screen coordinates so the moving divider does not
+feed back into pointer movement.
+
+Review: both split children now receive bounded frames; nested minimums replace
+the old first-child-only limit. Screen-coordinate dragging avoids a moving-origin
+jump. Accessibility increments use constrained free movement so repeated steps
+cannot become stuck inside a snap zone. Shell creation changes only the inserted
+split; retained pane identity and existing surrounding ratios survive.
+Check: `scripts/test_desktop.sh --filter 'PaneResizeTests|WorkNavigationTests|MultiplexerStoreTests|DesktopPaneControlTests' -Xswiftc -gnone --jobs 4` PASS (104 tests reported, two optional native cases skipped); platform boundary and diff checks PASS. `/tmp/loo487-resize-tests-final.log`. Native pointer feel remains demo review.

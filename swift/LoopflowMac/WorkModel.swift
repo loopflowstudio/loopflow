@@ -1427,6 +1427,7 @@ final class WorkModel {
     }
 
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
+        if navigation.palette == .search { navigation.palette = nil }
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
@@ -1508,6 +1509,7 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
+        if navigation.palette == .search { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil

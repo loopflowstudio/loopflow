@@ -115,6 +115,12 @@ Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.
 
+Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
+description and change totals. Expand **Files changed** and individual files to
+read published patches. Refresh updates GitHub data using the signed-in GitHub
+CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
+local uncommitted edits stay in Files.
+
 Hover over or click **Task** in the compact workspace header to reveal Complete,
 Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
 alternate right/down. The main Session's menu switches between **Claude**,

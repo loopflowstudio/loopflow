@@ -575,8 +575,10 @@ struct DesktopPerformanceTests {
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
                 multiplexer.show(.files(taskId: "perf-task-0", location: workspace.location))
-                try await wait(window) { files.directories[""]?.entries.first?.path == "notes.txt" }
+                try await wait(window) { files.changedPaths.first == "notes.txt" }
+                files.navigator = .dropdown
                 try pressElement("notes.txt", in: window, property: "Label")
+                files.mode = .file
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
                 let document = try #require(files.selectedDocument)
                 document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))

@@ -37,32 +37,20 @@ struct TaskFilesView: View {
                 }
                 .accessibilityIdentifier("browser-task-overview")
             } else if task != nil, store.page == .pullRequest {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Pull request").font(Typography.strong(16))
-                    if let prURL {
-                        Link(prURL.absoluteString, destination: prURL).buttonStyle(WorkLinkStyle())
-                        Text("Open the pull request to review discussion and checks.")
-                            .foregroundStyle(palette.textSecondary)
-                        Button("Browse changes") { store.showsChanges = true; store.page = .files }
-                    } else {
-                        Text("No pull request published yet.").foregroundStyle(palette.textSecondary)
-                    }
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-                .accessibilityIdentifier("browser-pull-request")
+                TaskPullRequestView(store: store.pullRequest, url: prURL)
             } else {
                 VStack(spacing: 0) {
                     navigationBar
                     GeometryReader { geometry in
+                        let docked = store.navigator == .pinned && geometry.size.width >= 360
                         HSplitView {
-                            if store.navigator == .pinned {
+                            if docked {
                                 navigator.frame(minWidth: 140, idealWidth: 220, maxWidth: 300)
                             }
                             documentPane
                         }
                         .overlay(alignment: .topLeading) {
-                            if store.navigator == .dropdown {
+                            if store.navigator != .closed && !docked {
                                 ZStack(alignment: .topLeading) {
                                     Color.black.opacity(0.001).contentShape(Rectangle())
                                         .onTapGesture { dismissNavigator() }
@@ -175,48 +163,49 @@ struct TaskFilesView: View {
     }
 
     private var navigationBar: some View {
-            HStack(spacing: 8) {
-                Button { toggleNavigator() } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                        Text(store.selection ?? "Scratch & changes")
-                            .font(Typography.strong(12)).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 0)
-                        Text("⌘P").font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
-                        Image(systemName: store.navigator == .closed ? "chevron.down" : "chevron.up")
-                            .font(.system(size: 9, weight: .semibold))
-                    }.contentShape(Rectangle())
+        HStack(spacing: 8) {
+            Button { toggleNavigator() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text(store.selection ?? "Scratch & changes")
+                        .font(Typography.strong(12)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 0)
+                    Text("⌘P").font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
+                    Image(systemName: store.navigator == .closed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 9, weight: .semibold))
+                }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Choose file")
+            .accessibilityIdentifier("files-toggle-navigator")
+            if let document = store.selectedDocument, document.snapshot?.state == .text {
+                Button {
+                    Task {
+                        await document.save(issue: store.issue, cwd: store.cwd, query: store.query)
+                        await store.refresh()
+                    }
+                } label: {
+                    Image(systemName: document.saving ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Choose file")
-                .accessibilityIdentifier("files-toggle-navigator")
-                if let document = store.selectedDocument, document.snapshot?.state == .text {
-                    Button {
-                        Task {
-                            await document.save(issue: store.issue, cwd: store.cwd, query: store.query)
-                            await store.refresh()
-                        }
-                    } label: {
-                        Image(systemName: document.saving ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
-                    }
-                    .buttonStyle(.plain)
-                    .help(document.saving ? "Saving…" : "Save")
-                    .accessibilityLabel("Save")
-                    .disabled(!document.canSave)
-                    .keyboardShortcut("s", modifiers: .command)
-                    .fixedSize()
-                }
-                Picker("View", selection: $store.mode) {
-                    Text("File").tag(TaskFilesStore.Mode.file)
-                    Text("Diff").tag(TaskFilesStore.Mode.diff)
-                        .disabled(store.changesError != nil)
-                }.pickerStyle(.menu).labelsHidden()
-                    .accessibilityLabel("View").frame(width: 65).fixedSize()
+                .help(document.saving ? "Saving…" : "Save")
+                .accessibilityLabel("Save")
+                .disabled(!document.canSave)
+                .keyboardShortcut("s", modifiers: .command)
+                .fixedSize()
             }
-            .font(Typography.caption(11)).padding(.horizontal, 10)
-            .frame(height: TaskFileChrome.headerHeight)
-            .background(palette.surfaceMuted)
+            Picker("View", selection: $store.mode) {
+                Text("File").tag(TaskFilesStore.Mode.file)
+                Text("Diff").tag(TaskFilesStore.Mode.diff)
+                    .disabled(store.changesError != nil)
+            }.pickerStyle(.menu).labelsHidden()
+                .accessibilityLabel("View").frame(width: 65).fixedSize()
+        }
+        .font(Typography.caption(11)).padding(.horizontal, 10)
+        .frame(height: TaskFileChrome.headerHeight)
+        .background(palette.surfaceMuted)
     }
+
 
     private var documentPane: some View {
         VStack(spacing: 0) {

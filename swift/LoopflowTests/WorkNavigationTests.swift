@@ -54,7 +54,7 @@ struct WorkNavigationTests {
         await model.refresh()
         model.navigation.showsNavigator = pinned
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        for identifier in ["work-wave-wave-1", "work-wave-conversation-wave-1", "work-open-repository", "work-open-repository"] {
+        for identifier in ["work-wave-wave-1", "work-wave-wave-1", "work-open-repository", "work-open-repository"] {
             model.navigation.palette = .search
             try navigator.inspect().find(viewWithAccessibilityIdentifier: identifier).button().tap()
             #expect(model.navigation.palette == nil)

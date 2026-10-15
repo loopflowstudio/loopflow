@@ -132,7 +132,11 @@ enum LocalWaveAgentLauncher {
         return process
     }
 
-    private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {
+    static func queryGitHub(_ args: [String]) throws -> String {
+        try runCheckedOutput(["gh"] + args, cwd: nil)
+    }
+
+    private static func runCheckedOutput(_ args: [String], cwd: String?) throws -> String {
         let result = run(args, cwd: cwd)
         guard let result else {
             throw LocalLfError(

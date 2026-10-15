@@ -360,3 +360,19 @@ remain in Files. Request file patches when the list expands, handle pagination,
 and disclose unavailable/truncated patches instead of manufacturing a diff.
 Reference: https://cli.github.com/manual/gh_pr_view and
 https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files.
+
+Sync: merged LOO-462 through `eb4e00c478`, preserving its expanded Wave hierarchy,
+Available section, session evidence and bundled-helper routing. Resolved shared
+navigation/header and copy-cleanup conflicts; retained both meaningful file tests.
+The sync merge completed; its postcondition initially reported the newly written
+PR design note as dirty. That note was checkpointed; no sync remains in progress.
+
+Review: delete the old whole-repository directory state and UI, retain the existing
+parent comparison and file/draft owner. Narrow pinned lists become overlays instead
+of forcing pane overflow. The PR page reads GitHub on the display Machine, paginates
+published patches only when expanded, checks both head and base after loading,
+and labels unknown/skipped checks and partial patches honestly. No write action is
+introduced by reading PR data. The previous Demo 7 app inspection confirmed this
+Task's Session and Files in a vertical split with ratio 0.618.
+
+Checks: combined pane/navigation/Files/PR suites PASS (155 tests reported, optional native cases skipped); final PR/Files PASS (25); merged terminal/input/Files PASS (47); app and bundled `lf` builds PASS; platform boundaries and diff check PASS. Logs: `/tmp/loo487-pr-files-tests.log`, `/tmp/loo487-pr-final-tests.log`, `/tmp/loo487-merged-terminal-tests.log`, `/tmp/loo487-synced-helper-build.log`. Earlier failures were stale breadcrumb and removed-directory fixture references, corrected to the accepted hierarchy and parent-change list. Native visual review remains pending.

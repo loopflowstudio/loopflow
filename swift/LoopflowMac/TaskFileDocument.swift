@@ -269,6 +269,7 @@ final class TaskFilesStore {
         case pullRequest = "PR"
         case files = "Files"
     }
+    let pullRequest = PullRequestStore()
     var page = Page.files
     enum Navigator { case closed, dropdown, pinned }
     var navigator = Navigator.closed

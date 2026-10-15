@@ -239,10 +239,10 @@ struct GhosttyShellBlockTests {
         #expect(frame == CGRect(x: 12, y: 200 - 8 - 4 * 18, width: 276, height: 18))
     }
 
-    @Test("only a reported failure is red; a resting block has no fill")
-    func commandBlockStyle() throws {
-        func style(exit: Int?, selected: Bool = false, hovered: Bool = false) -> GhosttyCommandBlockStyle {
-            GhosttyCommandBlockStyle(
+    @Test("only a reported failure has a red gutter")
+    func commandBlockAccent() {
+        func accent(exit: Int?, selected: Bool = false, hovered: Bool = false) -> NSColor {
+            ghosttyCommandBlockAccent(
                 block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
                 hovered: hovered, palette: .light
             )
@@ -251,35 +251,11 @@ struct GhosttyShellBlockTests {
             color.alphaComponent > 0 && color.redComponent > color.greenComponent * 1.5
         }
 
-        #expect(style(exit: 0).fill.alphaComponent == 0)
-        #expect(style(exit: nil).fill.alphaComponent == 0)
-        #expect(isRed(style(exit: 127).fill))
-        #expect(isRed(style(exit: 1, selected: true).fill))
-        #expect(!isRed(style(exit: 0, selected: true).fill))
-        #expect(!isRed(style(exit: nil, hovered: true).fill))
-        // Selection is never red: a selected failure keeps its fill and changes its bar.
-        #expect(isRed(style(exit: 1).accent))
-        #expect(!isRed(style(exit: 1, selected: true).accent))
-        #expect(!isRed(style(exit: 0, selected: true).accent))
-        #expect(style(exit: 0, selected: true).accent == style(exit: 1, selected: true).accent)
-    }
-
-    @Test("default text stays readable on every block fill")
-    func commandBlockFillContrast() throws {
-        for theme in ThemeDefinition.builtins {
-            for exit in [0, 1] {
-                for (selected, hovered) in [(false, true), (true, false), (false, false)] {
-                    let fill = try #require(GhosttyCommandBlockStyle(
-                        block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
-                        hovered: hovered, palette: theme.palette
-                    ).fill.usingColorSpace(.sRGB))
-                    let rgb = ThemeRGB(UInt32(fill.redComponent * 255) << 16 | UInt32(fill.greenComponent * 255) << 8 | UInt32(fill.blueComponent * 255))
-                    let shown = theme.terminal.background.mixed(with: rgb, amount: fill.alphaComponent)
-                    #expect(theme.terminal.foreground.contrast(shown) >= 4.5,
-                            "\(theme.name): exit=\(exit), selected=\(selected), hovered=\(hovered)")
-                }
-            }
-        }
+        // Selection uses a neutral gutter; the renderer preserves the failure background.
+        #expect(isRed(accent(exit: 1)))
+        #expect(!isRed(accent(exit: 1, selected: true)))
+        #expect(!isRed(accent(exit: 0, selected: true)))
+        #expect(accent(exit: 0, selected: true) == accent(exit: 1, selected: true))
     }
 
     @Test("a right-click on the selected block keeps it; anywhere else goes to the terminal")
@@ -519,7 +495,7 @@ struct GhosttyTerminalInputTests {
         try click(row: initial[0].start_row)
         #expect(blocks().map(\.selected) == [true, false])
         #expect(copied() == "echo alpha\nalpha")
-        #expect(view.copyConfirmation?.stringValue == "Copied 2 lines")
+        #expect(view.copyConfirmation == "Copied 2 lines")
         try click(row: initial[1].end_row)
         #expect(blocks().map(\.selected) == [false, true])
         #expect(copied() == "sdl\ncommand not found: sdl")

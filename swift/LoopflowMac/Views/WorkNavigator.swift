@@ -11,6 +11,7 @@ struct WorkNavigator: View {
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
+    @FocusState private var searchFocused: Bool
     @State private var scrollPosition: ScrollPosition
 
     init(model: WorkModel, onOpenSession: @escaping (SessionRecord) -> Void,
@@ -93,6 +94,7 @@ struct WorkNavigator: View {
                     }))
                     .textFieldStyle(.plain).font(Typography.body(13))
                     .accessibilityIdentifier("work-search")
+                    .focused($searchFocused)
             }
             .padding(10)
             .background(palette.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 7))
@@ -105,6 +107,18 @@ struct WorkNavigator: View {
         .background(palette.surfaceMuted)
         .contextMenu { repositoryActions() }
         .accessibilityIdentifier("work-navigator")
+        .onAppear { if navigation.palette == .search { searchFocused = true } }
+        .onChange(of: navigation.palette) { _, presentation in
+            if presentation == .search { searchFocused = true }
+        }
+        .task {
+            await model.loadFlowCatalog()
+            await model.loadWorkflowCatalog()
+        }
+        .onExitCommand {
+            if navigation.palette == .search { navigation.palette = nil }
+            else { navigation.showsNavigator = false }
+        }
         .onChange(of: navigation.search) { _, _ in
             Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
         }
@@ -162,8 +176,10 @@ struct WorkNavigator: View {
                 } label: { Image(systemName: "ellipsis").frame(width: 20, height: 28) }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                 .accessibilityLabel("Choose repository").accessibilityIdentifier("work-repository")
-                WorkGlyphButton("sidebar.left", label: "Hide sidebar", identifier: "work-toggle-sidebar") {
-                    model.navigation.showsNavigator = false
+                WorkGlyphButton("sidebar.left", label: model.navigation.showsNavigator ? "Hide sidebar" : "Pin sidebar",
+                    identifier: "work-toggle-sidebar") {
+                    if model.navigation.showsNavigator { model.navigation.toggleNavigator() }
+                    else { model.navigation.pinNavigator() }
                 }
             }
             if let wave, !wave.roadmap.wave.goal.isEmpty {
@@ -310,6 +326,20 @@ struct WorkNavigator: View {
         if let onOpenRepository { Button("Repository conversation", action: onOpenRepository) }
         if let onNewShell { Button("New shell", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
         if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
+        if let flows = model.flowCatalog.value, !flows.isEmpty {
+            Menu("Flow definitions") {
+                ForEach(flows, id: \.name) { entry in
+                    Button(entry.name) { model.navigation.palette = .flow(entry.name) }
+                }
+            }
+        }
+        if let workflows = model.workflowCatalog.value, !workflows.isEmpty {
+            Menu("Workflow definitions") {
+                ForEach(workflows, id: \.name) { entry in
+                    Button(entry.name) { model.navigation.palette = .workflow(entry.name) }
+                }
+            }
+        }
     }
 
     private func selectRepository(_ path: String) {

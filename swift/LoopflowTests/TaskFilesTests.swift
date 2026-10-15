@@ -408,6 +408,30 @@ struct TaskFilesTests {
         #expect(retained == nil)
     }
 
+    @Test func taskBrowserSwitchesViewsWithoutLosingItsFileSelection() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from:
+            Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
+        let task = try #require(roadmap.waves.first?.tasks.items.first)
+        let store = TaskFilesStore(issue: task.task.identifier, cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        store.selection = "draft.txt"
+        store.page = .task
+        let view = TaskFilesView(store: store, prURL: nil, checkoutBase: nil, task: task)
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
+            .find(text: task.task.name).string() == task.task.name)
+        store.page = .pullRequest
+        #expect(try view.inspect().find(text: "No pull request published yet.").string() == "No pull request published yet.")
+        store.page = .files
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(!store.showsNavigator)
+        #expect(store.selection == "draft.txt")
+        store.page = .task
+        store.page = .files
+        #expect(!store.showsNavigator)
+        #expect(store.selection == "draft.txt")
+    }
+
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])

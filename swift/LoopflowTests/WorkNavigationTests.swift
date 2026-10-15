@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import SwiftUI
 import Testing
@@ -9,6 +10,74 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Navigation starts closed at the repository; chooser and pinned sidebar preserve panes")
+    func closedChooserAndPinnedSidebar() async throws {
+        let model = try model()
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let view = SessionsContentView(model: model, repoPath: "/src/loopflow", workspaces: registry,
+            machineId: fixtureMachineId, repository: "repo", query: RegistryQuery { _, _ in "{}" })
+        let rootKey = try #require(registry.selectedWork)
+        let root = try #require(registry.retained(rootKey))
+        let layout = root.multiplexer.layout
+        let picker = try view.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
+        #expect(try picker.accessibilityValue().string() == "loopflow")
+        #expect(!model.navigation.showsNavigator)
+        try picker.button().tap()
+        #expect(model.navigation.palette == .search)
+        #expect(root.multiplexer.layout == layout)
+        let chooser = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository")
+        }
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-search")
+        }
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar")
+            .find(ViewType.Button.self).tap()
+        #expect(model.navigation.showsNavigator)
+        #expect(model.navigation.palette == nil)
+        model.navigation.resizeSidebar(460, availableWidth: 1200)
+        model.select(.wave(id: "wave-1"))
+        #expect(model.navigation.showsNavigator)
+        model.navigation.toggleNavigator()
+        #expect(!model.navigation.showsNavigator)
+        model.navigation.toggleNavigator()
+        #expect(model.navigation.showsNavigator)
+        #expect(model.navigation.sidebarWidth == 460)
+        #expect(root.multiplexer.layout == layout)
+    }
+
+    @Test("Repo and Wave selections dismiss temporary navigation and preserve pinned navigation", arguments: [false, true])
+    func selectingWorkClosesDropdown(pinned: Bool) async throws {
+        let model = try model()
+        await model.refresh()
+        model.navigation.showsNavigator = pinned
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        for identifier in ["work-wave-wave-1", "work-wave-conversation-wave-1", "work-open-repository", "work-open-repository"] {
+            model.navigation.palette = .search
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: identifier).button().tap()
+            #expect(model.navigation.palette == nil)
+            #expect(model.navigation.showsNavigator == pinned)
+        }
+        model.navigation.palette = .search
+        model.setRepoPath("/src/loopflow")
+        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.showsNavigator == pinned)
+    }
+
+    @Test("Navigation shortcuts leave Escape and extra-modifier provider shortcuts alone")
+    func navigationShortcutOwnership() {
+        #expect(WorkNavigationShortcut(characters: "k", modifiers: .command) == .search)
+        #expect(WorkNavigationShortcut(characters: "S", modifiers: [.command, .control, .capsLock]) == .toggleSidebar)
+        for modifiers: NSEvent.ModifierFlags in [[], [.control], [.command, .shift], [.command, .option]] {
+            #expect(WorkNavigationShortcut(characters: "k", modifiers: modifiers) == nil)
+            #expect(WorkNavigationShortcut(characters: "s", modifiers: modifiers) == nil)
+        }
+        #expect(WorkNavigationShortcut(characters: "\u{1b}", modifiers: []) == nil)
+        #expect(WorkNavigationShortcut(characters: "c", modifiers: .command) == nil)
+    }
+
     @Test("Repository view reconstruction keeps the Session store's resolved location")
     func repositoryViewKeepsResolvedLocation() throws {
         let repo = "/workspace-alias-\(UUID().uuidString)"
@@ -1161,6 +1230,7 @@ struct WorkNavigationTests {
         model.goForward()
         #expect(model.selection == nil)
         model.goBack()
+        model.navigation.showsNavigator = true
         try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true

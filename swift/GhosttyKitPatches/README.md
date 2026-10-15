@@ -4,7 +4,7 @@
 uv run python scripts/loopflow-dev.py ghostty-build
 ```
 
-Requires Zig 0.16.0. Runs the patches' Zig tests, builds the pinned upstream revision,
+Requires Zig 0.16.0, `glslangValidator`, and a macOS Metal device. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
 publish the artifact. Packaging normalizes the upstream static archive to
@@ -47,12 +47,58 @@ Desktop validates these compiled colors alongside background, foreground and all
 personal font size, override conflicting colors/conditional theme selectors, and
 reject changes to every managed color key and unresolved cursor colors.
 
-`Package.swift` selects `GhosttyKit-a60e9e2-lf3-theme-readback1.xcframework.zip`.
-The October 15 build passed the patch tests, produced arm64 and x86_64 libraries,
-and passed the headless Desktop build and eight theme tests. The public download
-matches the tested archive; SwiftPM resolved the pinned URL and checksum. Native
-visual/input judgment remains separate. The artifact has its own name because `lf4` was already
-published by separate work; this patch extends this checkout's lf3 patch set.
+## Combined artifact
+
+`Package.swift` selects `GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip`,
+combining lf7 feedback/contrast with fixed-RGB theme readback. The public download
+matches SHA-256 `19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9`.
+October 15's build passed the combined patch/parser/ABI/color getter suites,
+324 offscreen Metal cases and GLSL compilation, producing both architectures.
+The earlier lf3-theme-readback1 and lf7 artifacts remain immutable.
+
+## Terminal feedback and contrast
+
+The universal ReleaseFast build includes the reviewed failure-selection and
+absolute feedback-deadline repairs. Renderer cell-buffer tests keep foreground
+RGBA separate from the expanded background data. Headless checks exercise production Metal
+colors/background fragments, compile GLSL, and verify receipt lifetimes and
+surface-local copy notices.
+
+`0005-terminal-feedback.patch` moves shell block fills into the background pass,
+before text contrast. Swift retains gutter/header chrome and sends shell hover
+intent; Screen supplies the same viewport block list to both consumers.
+
+`ghostty_surface_read_selection_receipt` reads the current text or command-block
+selection and returns an opaque surface-local receipt under one lock. Confirm it
+with `ghostty_surface_confirm_copy` only after a successful clipboard write.
+Selection replacement, reset, reflow, viewport movement and hiding invalidate it.
+`ghostty_surface_set_feedback` updates visibility and Reduce Motion for retained
+surfaces. Copy confirmation appears only in the pane header; the receipt retains
+clear-on-copy behavior without painting cells or scheduling animation. Find edges
+use the background pass and the existing renderer timer; they expire after 160 ms
+without changing stored text or colors. Synchronized output cancels cues while
+preserving frozen text.
+
+Metal and GLSL adjust premultiplied foregrounds toward the nearest feasible
+black/white endpoint, preserving alpha, passing colors and the exact `1` bypass.
+Metal evaluates Display P3 luminance; GLSL evaluates sRGB. Unattainable ratios
+use the best achievable endpoint. Graphics exemptions remain upstream-owned.
+
+`scripts/check_ghostty_shaders.py SOURCE` compiles the include-expanded GLSL and
+runs production Metal color functions and background fragments offscreen.
+`TerminalColorTests` can also run that check with `LOOPFLOW_GHOSTTY_SOURCE=SOURCE`.
+The checks distinguish unattainable faint/high-ratio cases from passing colors.
+Native glyph appearance and presented-pixel timing remain demo evidence.
+
+```sh
+uv run python scripts/desktop_performance.py terminal-feedback --output /tmp/feedback-before
+# Add --mounted --lf target/debug/lf for contained native diagnostics.
+# Repeat on the candidate with --baseline /tmp/feedback-before.
+```
+
+The runner preserves fixture/build hashes, first/warm draw-call observations,
+and native CPU/RSS logs. Draw calls are not presented pixels; GPU time and visible
+onset/expiry require native capture. It launches only its owned fixture shell.
 
 ## Bounded text
 
@@ -75,7 +121,8 @@ an invalidated command-block selection no longer releases its tracked pin:
 selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
 retain their existing unbounded API and viewport metadata.
 
-The earlier `GhosttyKit-a60e9e2-lf3.xcframework.zip` public download matched checksum
+The bounded reader first shipped in `GhosttyKit-a60e9e2-lf3.xcframework.zip`,
+whose public download matched SwiftPM checksum
 `dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
 The October 9 macOS build passed 270 patch tests (four skipped) and exported the
 bounded reader for arm64 and x86_64. Reset now releases command-block selection

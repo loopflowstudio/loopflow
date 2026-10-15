@@ -176,8 +176,4 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
     }
 }
 
-/// Copy feedback must not intercept selection drags or terminal clicks.
-final class TerminalCopyNotice: NSTextField {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
 #endif

@@ -18,6 +18,7 @@ func terminalTemporaryDirectory() -> URL {
 
 extension Notification.Name {
     static let loopflowThemeChanged = Notification.Name("loopflow.themeChanged")
+    static let ghosttyCopyConfirmation = Notification.Name("loopflow.ghosttyCopyConfirmation")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
@@ -101,7 +102,7 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    static let loopflowConfig = "font-size = 13\n"
+    static let loopflowConfig = "font-size = 13\nminimum-contrast = 3\n"
 
     func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws {
         if let baseline {

@@ -37,6 +37,12 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
+Navigation starts closed, with the repository selected in the Session workspace
+header. Click the location control or press **⌘K** to drop the full navigator over
+your panes. It keeps the same Needs you queue, Wave/Task rows and Find Work field
+as the sidebar. Choosing a repository, Wave, Task or Session closes the dropdown. Escape or a click outside dismisses it and restores your previous focus.
+
+Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
 Open a Wave to enter its conversation and fill the sidebar with its Tasks.
 The **Repo / Wave** path returns to either conversation. Each Wave keeps its
 Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
@@ -46,11 +52,11 @@ shared Waiting or reported Blocked evidence.
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
 keeps its own panes, drafts and focus. Close its context header to hide it without
-closing its panes. Context headers appear when multiple workspaces are visible or
-the sidebar is hidden. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
+closing its panes. Context headers appear when multiple workspaces are visible. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
 
-Drag the sidebar edge to resize it. Its own collapse button or **⌃⌘S** hides it;
-the edge button restores it at the remembered width.
+Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
+it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
+across selections.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -104,6 +110,7 @@ quit. The watcher starts a ci-fix when a recorded landing fails its required
 checks; `lf ci watch --status` shows its last poll and what it started.
 
 ```text
+⌘T          new terminal; split right, then down, alternating
 ⌘D          split right
 ⌘⇧D         split down
 ⌘⌥←/→/↑/↓   focus the visual neighbor
@@ -116,6 +123,22 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
+
+Task workspaces start with the Session on the left and Files on the right,
+at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
+**Shell**, and **lf process**. Hidden shells keep running and file drafts stay
+retained. The file tree can be collapsed. Sidebar selection switches the whole
+Task workspace; selections inside a Task can focus its companion.
+Resizing or closing the browser is remembered while the window stays open;
+layouts are not yet restored after quitting the app.
+
+Hover over or click **Task** in the compact workspace header to reveal Complete,
+Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
+alternate right/down. The main Session's menu switches between **Claude**,
+**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Reset session** starts a fresh primary conversation/process from current Work
+instructions, without replaying the previous conversation; its history remains
+available. Switching or resetting replaces the current provider process.
 Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
@@ -290,22 +313,39 @@ the focused header reveals split right, split down and close; its context menu
 and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
 
+Copy selected text with **⌘C**: the pane header briefly confirms the line count,
+without decorating the selected cells. Find navigation briefly emphasizes the
+current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
+Find's persistent match styling. Programs that own selection may show their own
+copy confirmation; terminal feedback describes only a terminal-owned copy.
+
+```ini
+# In your Ghostty configuration; reopen Loopflow after editing.
+minimum-contrast = 1
+```
+
+The default is `3`. Set `1` to preserve original colors. Correction moves only
+low-contrast text toward black or white while retaining its alpha and channel
+ordering. It preserves more color than replacing text with black or white, but
+cannot guarantee exact hue or separation of nearly identical colors. Faint text
+may not reach the requested ratio. Graphics, images, transparent backdrops and
+custom postprocessing are outside the opaque-text contrast guarantee.
+
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
+Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
+61.8%. New shell splits give 61.8% to the existing pane and 38.2% to the shell.
+Both sides retain usable minimum sizes, including nested splits; small windows
+shrink those minimums together.
 
-Press **⌘K** to search Waves, all planned Tasks, Workflows and Flows in the
-selected repository. Empty search shows recent destinations first; arrows select,
-Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
-The sidebar search remains a filter. Each repository retains up to 20 recent
-destinations for the window. Visited historical Tasks remain in recents after
-leaving their pages; opening one reads its exact identity again. This does not
-search all historical Tasks. Failed reads preserve the workspace and offer Retry.
-If a highlighted row disappears, Return opens the first remaining visible result;
-with no results it does nothing.
+Press **⌘K** to open and focus Find Work in the navigator. Search filters the
+existing Wave/Task rows. Flow and Workflow definitions remain in the repository
+menu; selecting one opens its inspector. Session rename and binding remain in
+the conversation's own controls.
+Failed reads preserve the workspace and offer Retry.
 
-With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
-the Session name. Both open the same picker: review the named Task, then choose
+With an unassigned Session selected, choose **Bind to Task…** beside the Session
+name. Review the named Task, then choose
 **Bind permanently**. Opening the picker leaves the conversation and terminal intact.
 
 ```sh

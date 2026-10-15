@@ -428,9 +428,11 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
         f"# Desktop measurements: {summary['status']}",
         "",
         *([
-            "Endpoint: another process's commit to a private Machine, through the real work reader, to native bitmap capture with text verification.",
+            "Endpoint: another process's commit to a private Machine, through the real work "
+            "reader, to native bitmap capture with text verification.",
             "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
-            "The interval starts when the sqlite3 writer exits; each write waits for an idle reader.",
+            "The interval starts when the sqlite3 writer exits; "
+            "each write waits for an idle reader.",
         ] if metadata.get("journey") == "write-visible" else [
         "Endpoint: in-process native bitmap capture with text verification."
         + " Session return also waits for owned PTY replies.",
@@ -877,7 +879,9 @@ def _repository_configs(database: Path) -> list[dict]:
             {
                 str(path.resolve())
                 for repo, wave in db.execute("SELECT repo,name FROM waves")
-                for path in [Path(repo) / ".lf/config.yaml", Path(repo) / ".lf/wave" / wave / "GOAL.md"]
+                for path in [
+                    Path(repo) / ".lf/config.yaml", Path(repo) / ".lf/wave" / wave / "GOAL.md"
+                ]
             }
         )
     return [
@@ -1455,7 +1459,9 @@ def _run(
             try:
                 # SwiftPM can put its test child in a separate process group.
                 # Both journeys build first, then own the native process directly.
-                code, outcome = _run_process(metadata["build_command"], environment, log, timeout=600)
+                code, outcome = _run_process(
+                    metadata["build_command"], environment, log, timeout=600
+                )
                 if outcome:
                     metadata.update(outcome=outcome, exit_code=code)
                 if code != 0 or outcome:
@@ -1495,7 +1501,9 @@ def _run(
             metadata.update(outcome="failed", reason=str(error))
             metadata.setdefault("exit_code", None)
     metadata["source_after"] = _sources()
-    metadata["resources_after"] = {"load_average": os.getloadavg(), "free_bytes": shutil.disk_usage(output).free}
+    metadata["resources_after"] = {
+        "load_average": os.getloadavg(), "free_bytes": shutil.disk_usage(output).free
+    }
     metadata["cli_sha256_after"] = hashlib.sha256(cli.read_bytes()).hexdigest()
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)
@@ -1557,11 +1565,96 @@ def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) ->
     return 1 if result or failure else 0
 
 
+def _terminal_feedback(output: Path, cli: Path, baseline: Path | None, mounted: bool) -> int:
+    output.mkdir(parents=True, exist_ok=False)
+    # No provider transcript or account is needed for the contained renderer fixture.
+    lines = ["\x1b[2J\x1b[Hterminal feedback", "error alpha", "error 界 e\u0301"]
+    for index in range(16):
+        lines.append(f"\x1b[38;5;{index}mANSI {index:02d} error\x1b[0m")
+    lines += [
+        "\x1b[38;2;68;34;34mdark red\x1b[0m \x1b[38;2;34;68;34mdark green\x1b[0m",
+        "\x1b[2mfaint error\x1b[0m \x1b[7minverse\x1b[0m \x1b[8mconcealed\x1b[0m",
+        "\x1b]133;A\x07$ \x1b]133;B\x07false\r\n\x1b]133;C\x07failed output\r\n\x1b]133;D;1\x07",
+        "\x1b]133;A\x07$ \x1b]133;B\x07",
+        "feedback-ready",
+    ]
+    payload = ("\r\n".join(lines) + "\r\n").encode()
+    fixture_input = output / "terminal-feedback.ansi"
+    fixture_input.write_bytes(payload)
+    metadata = {
+        "source": _sources(),
+        "artifact_manifest_sha256": hashlib.sha256(
+            (REPO / "swift/Package.swift").read_bytes()
+        ).hexdigest(),
+        "input_sha256": hashlib.sha256(payload).hexdigest(),
+        "configuration": "isolated default Ghostty configuration; minimum-contrast=3",
+        "viewport_points": [800, 480],
+        "visible_panes": 1,
+        "font_points": 13,
+        "scenarios": ["idle", "typing", "copy", "find", "retained-return"],
+        "build": "release with testing enabled",
+        "mounted": mounted,
+        "presented_pixels": "unmeasured; action_to_draw_call_ms is a diagnostic only",
+        "gpu_time": "unmeasured; collect with native Instruments for demo",
+        "status": "fixture prepared",
+    }
+    if baseline:
+        prior = json.loads((baseline / "terminal-feedback.json").read_text())
+        metadata["baseline"] = str(baseline.resolve())
+        metadata["comparable_fixture"] = all(
+            prior.get(key) == metadata[key]
+            for key in (
+                "input_sha256",
+                "configuration",
+                "viewport_points",
+                "visible_panes",
+                "font_points",
+                "build",
+            )
+        )
+    result = 0
+    if mounted:
+        with (output / "native.log").open("w") as log:
+            result, failure = _run_process(
+                BUILD_COMMAND + OPTIMIZED_FLAGS, os.environ.copy(), log, timeout=600
+            )
+            if not result and not failure:
+                repo = output / "repository"
+                (repo / ".lf").mkdir(parents=True)
+                subprocess.run([str(_benchmark_git()), "init", "--quiet", str(repo)], check=True)
+                fixture = _prepare_native_fixture(output, cli, repo)
+                environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+                environment.update(
+                    LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),
+                    LOOPFLOW_NATIVE_TESTS="1",
+                    LOOPFLOW_TERMINAL_FEEDBACK_INPUT=str(fixture_input),
+                    LOOPFLOW_TERMINAL_FEEDBACK_OUTPUT=str(output / "observations.json"),
+                )
+                command = _native_command("TerminalFeedbackTests", environment, optimized=True)
+                result, failure = _run_process(
+                    ["/usr/bin/time", "-l", *command], environment, log, timeout=120
+                )
+            metadata["status"] = "failed" if result or failure else "native diagnostics complete"
+            metadata["failure"] = failure
+            result = 1 if result or failure else 0
+    _write(output / "terminal-feedback.json", metadata)
+    print(output / "terminal-feedback.json")
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    feedback = commands.add_parser(
+        "terminal-feedback",
+        help="Prepare paired terminal fixtures and optional contained native diagnostics",
+    )
+    feedback.add_argument("--output", type=Path, required=True)
+    feedback.add_argument("--lf", type=Path, default=REPO / "target/debug/lf")
+    feedback.add_argument("--baseline", type=Path)
+    feedback.add_argument("--mounted", action="store_true")
     run = commands.add_parser(
         "run", help="Run both native journeys against fixed small and large populations"
     )
@@ -1628,7 +1721,8 @@ def main() -> int:
         "--output", type=Path, required=True, help="New directory; never overwrites evidence"
     )
     written.add_argument(
-        "--home", type=Path, required=True, help="A private copy of a Machine; rows are written to it"
+        "--home", type=Path, required=True,
+        help="A private copy of a Machine; rows are written to it"
     )
     written.add_argument(
         "--repo", type=Path, required=True, help="Repository whose Waves the window shows"
@@ -1653,6 +1747,10 @@ def main() -> int:
     )
     volume.add_argument("directory", type=Path)
     args = parser.parse_args()
+    if args.command == "terminal-feedback":
+        return _terminal_feedback(
+            args.output.resolve(), args.lf.resolve(), args.baseline, args.mounted
+        )
     if args.command == "verify-fixture":
         return _verify_native_fixture(
             args.output.resolve(), args.lf.resolve(), mounted=args.mounted

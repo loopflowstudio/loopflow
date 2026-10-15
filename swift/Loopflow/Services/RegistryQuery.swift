@@ -461,6 +461,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
+    /// Replace the primary conversation with fresh Work context; retain its history.
+    public func resetSession(id: String, agent: String?, cwd: String?) async throws -> SessionRecord {
+        var args = ["session", "new", id, "--json"]
+        if let agent { args += ["--agent", agent] }
+        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
+    }
+
     public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {
         let stdout = try await run(["session", "bind", "--dry-run", "--json", "--task", task, "--", id], cwd)
         return try Self.decode(SessionBindingPreview.self, from: stdout)

@@ -66,6 +66,8 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
 }
 
 public indirect enum LayoutNode: Codable, Sendable, Equatable {
+    public static let goldenRatio = 0.618
+
     case leaf(PaneState)
     case split(SplitAxis, first: LayoutNode, second: LayoutNode, ratio: Double)
 

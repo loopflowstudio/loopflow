@@ -602,9 +602,9 @@ operation a prerequisite for independent Tasks.
 
 ## Named participants and review feedback (curated 2026-09-25)
 
-Original attribution/continuation sources and dated gate receipts:
+Attribution and receipts:
 `35e759aaf:wave/product/MEMORY.md`, this heading. AGENTS.md owns the naming rule;
-curation changes no ownership or acceptance.
+curation changes neither.
 
 - Personal `user.name`, the current participant and each request's original
   author are different facts. Repository config cannot name every caller.
@@ -635,53 +635,28 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (2026-09-26)
+## Workspace redesign decisions (September 26–October 15)
 
-Jack rejected September 26's native calmer-workspace build: structural fidelity
-missed the mocks' warmth and accumulated inconsistent chrome. LOO-291 addressed
-tokens, rows, toolbar and typography. Diagnosis:
-`8f95d9e4e6:wave/product/MEMORY.md`, this heading.
+Jack Heart rejected September 26's composition despite structural fidelity:
+its warmth and chrome did not match the mocks. Full decisions, deferred owners
+and counterevidence: `77ff8e8eb8:.lf/wave/product/MEMORY.md`, **Workspace redesign decisions (2026-09-26)**.
+Retain serif repo/page/Task titles, sans Wave rows without decorative glyph/count,
+shared Work binding and native surface ownership. October 14's semantic roles
+cover both appearances, superseding the light-first emphasis.
 
-Decisions that outlive the branch (Jack's, verbatim where quoted):
+October 15, LOO-462: Jack selected Ink on Paper, one Work selection mirrored in
+Needs you, drill-in Repo/Wave/Task navigation and nested Work/pane layouts.
+Command-click adds adjacent Work; ordinary click replaces the focused slot;
+close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
+Back/Forward replace persistent adjacent columns and visible history buttons.
+Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
+Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
+acceptance. Cross-launch layout restoration remains excluded.
 
-- September 26 selected light first; October 14's semantic cut above now covers
-  both existing appearances. Neither has new native acceptance.
-- Serif for the repo name and page titles, including the Task title ("I'm
-  kinda liking the serif task title now"). Sidebar Wave rows are sans
-  ("sans-serif wins") with no glyph, no count, no dot ("nothing at all is
-  even simpler"); a needs-you dot may return later.
-- Rust derives Task grouping from checkout identity, including previously
-  unbound Sessions; Swift consumes it without rewriting Run attribution. The
-  former diagnostic Session browser is removed by LOO-462.
-- One universal bind from the room, ⌘K and Task rows ("worth making the
-  design and architecture simple and universal if it takes a little extra").
-  Bind changes a Run's Task, never its name, panes or Flow membership.
-  September 30's location grouping is independent of this attribution operation;
-  it needs no bind to present a Session under its checkout's Task.
-- LOO-462's pane islands/program headers and LOO-488's themes supersede September
-  26's headerless edge-to-edge charcoal terminal. Retain progressive disclosure
-  rather than duplicate Run/Session toolbars; original choices: `28588f8910`, this file.
-- The September 26 two-Flow-view baseline is replaced by October 6's Workflow
-  graph in the Task header; exact captured occurrence identity still holds.
-- The September 30 primary-Session direction supersedes deferring the waveless
-  beginner: repository onboarding must work before any Wave or Task exists.
-
-September typography/row research and Jack's decisions remain in
-[design history](https://github.com/loopflowstudio/loopflow/tree/be7a02db0/scratch).
-Current semantic roles above supersede its narrower blue rule; state glyphs still
-require evidence and only the running node animates. Retain the type ramp
-(Cormorant 34/26/17, Lato 13/11, mono 12) and one row component per sidebar level.
-
-Jack separated follow-ups LOO-298/299/300 (detail at `9771ff7d7`) so LOO-291 can deliver S1–S5, the recorder,
-signposts and assign-on-change fixes. The accepted Run/Session tables and universal
-bind are future implementation, documented in [Infrastructure memory](../infrastructure/MEMORY.md#data-model-and-performance-decisions-2026-09-26).
-Chapter history remains part of that direction; the current contract uses past
-Linear Projects, with no Chapter table. Navigation stays Wave → Task.
-The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
-records the split. Local proof does not establish merger or Jack's acceptance.
-
-Trace removed visual features through their state and undo model
-(`536b0fd56:scratch/compress-pane-state.md`).
+LOO-298/299/300 retain their historical allocations; the archive does not close
+them. Rust owns grouping and binding; September 30's primary repo conversation
+supersedes deferring waveless entry. Trace removed features through state and
+Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 ## Task files beside the conversation (2026-09-28)
 
@@ -1085,8 +1060,9 @@ Watch**. Integration is not acceptance.
   asked that it land; no per-check report, "the bar on the right" unresolved.
 - Block chrome never takes selection or focus from the shell: a right-click
   keeps the selection under it, any key reaching the shell ends a block
-  selection, Command chords keep it. Fills keep the dimmest palette color at
-  3:1. Open: Option-letter inserts the composed character.
+  selection, Command chords keep it. LOO-487 moves fills before glyph contrast;
+  its color limits below replace the fixed-palette fill guarantee.
+  Open: Option-letter inserts the composed character.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
   color. The GUI drops those variables at launch, beside the execution markers.
@@ -1098,7 +1074,9 @@ Watch**. Integration is not acceptance.
   selection in Ghostty's `Screen`; Swift holds only hover. Upstream also splits a
   block when its command line soft-wraps; the patch treats the wrapped row as a
   continuation. A new artifact version accompanies every patch change;
-  publication needs authorization. Jack authorized `lf2`; published 2026-10-05.
+  Jack Heart authorized future artifact updates on October 6 through the patch
+  README workflow: relevant checks, immutable upload, public checksum readback.
+  `lf2` was published October 5; LOO-487 now pins published `lf6`.
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
   carry the patch and now run its Zig tests. Avoid synthetic multi-click
@@ -1117,6 +1095,33 @@ Watch**. Integration is not acceptance.
   output and last-command actions, multi-selection, bookmarks, sharing, exit-code
   or duration badges. Upstream API contribution may reduce patch maintenance
   later (ghostty-org/ghostty#11747).
+
+### Terminal feedback and color (LOO-487, 2026-10-15)
+
+Jack Heart accepted the design for implementation and hands-on review: “seems
+fine. i think i need to try it to know”. Approval of helpful/calm cues, paired
+native performance evidence and landing remain open. LOO-462's separate
+Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
+
+- Screen owns source colors, selection, blocks and search. Swift cell fills
+  tinted glyphs after correction; Ghostty now composes those fills before glyph
+  contrast. Swift retains gutter/header chrome and the parent's Find row.
+- Copy reads bytes and an opaque receipt under one lock, confirming cells only
+  after pasteboard success. Selection/geometry/visibility changes invalidate
+  cues. Incarnation-keyed notices cannot cross windows or replacement views.
+  Existing renderer scheduling supplies finite 160 ms edges; unrelated shader
+  draws must recompute absolute expiry. Reduce Motion preserves static Copy
+  confirmation and persistent Find styling, without replay on hidden returns.
+- Upstream black/white replacement collapsed semantic colors. The 3:1 default
+  instead chooses the feasible linear-RGB correction with least displacement,
+  retaining alpha and channel order; user `minimum-contrast = 1` bypasses it.
+  Faint text can remain unattainable. Exact hue, arbitrary color separation,
+  transparent backdrops, images and postprocessing are not guaranteed.
+- lf6's Zig checks, offscreen production Metal functions/background fragments
+  and GLSL compilation prove components, not full glyph composition, graphics
+  exemptions, imported-palette usability or presented-pixel timing. Draw-call
+  diagnostics are neither visible input latency nor configured-provider proof.
+  No measured improvement, sustained-use KR or external progress follows.
 
 ### Shared viewing boundary
 

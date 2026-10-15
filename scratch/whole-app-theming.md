@@ -47,8 +47,9 @@ October 15 decisions, in order:
 - Jack proposed **12 Light + 12 Dark** (Loopflow Light, Linen + 10; Loopflow Dark,
   Hearth + 10) so each assignment picker lists only its own appearance. This
   supersedes "either assignment accepts any palette". Draft companion set and
-  bench: `scratch/theme-catalogue/index.html`. Open: whether Import over a slot
-  must match the slot's appearance.
+  bench: `scratch/theme-catalogue/index.html`. Import must match the slot's
+  appearance (Jack, October 15): a dark file in a light slot previews an
+  explanation pointing to the Dark picker, and Apply stays disabled.
 - Jack: bias toward excluding anything not 100% clearly licensed. The
   iTerm2-Color-Schemes MIT covers the collection only; each theme keeps its
   author's license. Excluded: Modus (GPL-3.0), Monokai (no license), Man Page

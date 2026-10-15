@@ -323,6 +323,43 @@ struct GhosttyShellBlockTests {
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)
+    @Test("Find reserves space and survives a resize without replacing the terminal")
+    @MainActor
+    func retainedSearchViewport() throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let terminal = GhosttyMetalView(terminal: .shell("find-proof", machineId: fixtureMachineId))
+        terminal.workingDirectory = NSTemporaryDirectory()
+        terminal.command = "/bin/cat"
+        let mount = GhosttyTerminalMount(terminal: terminal)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = mount
+        defer { terminal.destroySurface(); window.contentView = nil }
+        mount.layoutSubtreeIfNeeded()
+        terminal.createSurface(manager: manager)
+        let surface = try #require(terminal.surface)
+        #expect(window.makeFirstResponder(terminal))
+
+        terminal.searchBar.open(needle: "alpha")
+        #expect(terminal.frame.maxY <= terminal.searchBar.frame.minY)
+        #expect(terminal.frame.height == mount.bounds.height - TerminalSearchBar.height)
+        let searchResponder = window.firstResponder
+        #expect(searchResponder !== terminal)
+        mount.setFrameSize(NSSize(width: 220, height: 240))
+        mount.needsLayout = true
+        mount.layoutSubtreeIfNeeded()
+        #expect(terminal.frame.maxY <= terminal.searchBar.frame.minY)
+        #expect(terminal.surface == surface)
+        #expect(window.firstResponder === searchResponder)
+        terminal.performBinding("end_search")
+        terminal.searchBar.end()
+        #expect(terminal.frame == mount.bounds)
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+    }
+
     @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
     @MainActor
     func shellSessionAttachment() async throws {
@@ -481,6 +518,7 @@ struct GhosttyTerminalInputTests {
         try click(row: initial[0].start_row)
         #expect(blocks().map(\.selected) == [true, false])
         #expect(copied() == "echo alpha\nalpha")
+        #expect(view.copyConfirmation?.stringValue == "Copied 2 lines")
         try click(row: initial[1].end_row)
         #expect(blocks().map(\.selected) == [false, true])
         #expect(copied() == "sdl\ncommand not found: sdl")

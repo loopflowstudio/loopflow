@@ -180,6 +180,52 @@ struct TaskRowMetadataTests {
         #expect(conversationOpened)
     }
 
+    @Test("Attention includes only current Waiting or Blocked and keeps organization stable")
+    func attentionUsesEvidence() throws {
+        let snapshot = try roadmap()
+        let waiting = try session("waiting", attention: .waiting)
+        let live = try session("live")
+        let blocked = try session("blocked", status: .init(seen: true, records: [
+            .init(state: .blocked, id: nil, kind: .question, progress: nil, app: nil, title: nil, msg: "Choose a direction")
+        ]))
+        let cleared = try session("cleared", attention: .waiting, status: .init(seen: true, records: []))
+        let closed = try session("closed", state: .closed, attention: .waiting)
+        for records in [[live], [cleared], [closed]] {
+            #expect(WorkProjection(roadmaps: snapshot.waves, sessions: records).attention(unavailable: nil).isEmpty)
+        }
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [live, waiting, blocked])
+        let queue = projection.attention(unavailable: nil)
+        #expect(queue.count == 1)
+        #expect(queue.first?.work == .task(id: "issue-review"))
+        #expect(queue.first?.session.id == waiting.id)
+        #expect(queue.first?.waveID == "wave-1")
+        #expect(projection.attention(unavailable: "Offline").isEmpty)
+        var shared = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(waiting)) as? [String: Any])
+        shared["task_ids"] = ["ts_now00000000000000000000000000000", "ts_review00000000000000000000000000"]
+        var workspace = try #require(shared["workspace"] as? [String: Any])
+        workspace["task_id"] = "ts_review00000000000000000000000000"
+        shared["workspace"] = workspace
+        let sharedSession = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: shared))
+        let sharedQueue = WorkProjection(roadmaps: snapshot.waves, sessions: [sharedSession]).attention(unavailable: nil)
+        #expect(sharedQueue.count == 1)
+        #expect(sharedQueue.first?.work == .task(id: "issue-review"))
+        let before = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        #expect(projection.waves.map(\.id) == before.waves.map(\.id))
+        #expect(projection.waves.flatMap { $0.tasks.map(\.id) } == before.waves.flatMap { $0.tasks.map(\.id) })
+    }
+
+    @Test("Headers name known providers and leave arbitrary shell titles as context")
+    func programHeaders() {
+        let codex = PaneProgramHeading(provider: "codex", title: "Review sidebar", directory: "/src/loopflow", fallback: "Session")
+        #expect(codex.name == "Codex")
+        #expect(codex.context == "Review sidebar · loopflow")
+        #expect(codex.detail.contains("/src/loopflow"))
+        #expect(PaneProgramHeading(provider: "claude", title: "Review", directory: nil, fallback: "Session").name == "Claude")
+        let shell = PaneProgramHeading(provider: nil, title: "vim notes.md", directory: "/src/loopflow", fallback: "Shell")
+        #expect(shell.name == "Shell")
+        #expect(shell.context == "vim notes.md · loopflow")
+    }
+
     private func roadmap() throws -> RoadmapSnapshot {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()

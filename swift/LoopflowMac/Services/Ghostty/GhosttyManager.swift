@@ -216,8 +216,30 @@ final class GhosttyManager: ObservableObject {
             else { return false }
             // Resolve identity while the callback's surface is valid. Deferred
             // notifications carry values, never an unowned terminal pointer.
-            let terminal = MainActor.assumeIsolated {
-                Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminal
+            let (view, terminal) = MainActor.assumeIsolated {
+                let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                return (view, view.terminal)
+            }
+            switch action.tag {
+            case GHOSTTY_ACTION_START_SEARCH:
+                let needle = action.action.start_search.needle.map { String(cString: $0) }
+                Task { @MainActor [weak view] in
+                    guard let view, !view.childExited else { return }
+                    view.searchBar.open(needle: needle)
+                }
+                return true
+            case GHOSTTY_ACTION_END_SEARCH:
+                Task { @MainActor [weak view] in view?.searchBar.end() }
+                return true
+            case GHOSTTY_ACTION_SEARCH_TOTAL:
+                let total = action.action.search_total.total
+                Task { @MainActor [weak view] in view?.searchBar.receive(total: total) }
+                return true
+            case GHOSTTY_ACTION_SEARCH_SELECTED:
+                let selected = action.action.search_selected.selected
+                Task { @MainActor [weak view] in view?.searchBar.receive(selected: selected) }
+                return true
+            default: break
             }
             if action.tag == GHOSTTY_ACTION_PROGRAM_STATUS,
                let status = action.action.program_status?.pointee,

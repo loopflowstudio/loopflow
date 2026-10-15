@@ -11,15 +11,14 @@ import ViewInspector
 private let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 
-/// Session chrome (S3): the toolbar is the only chrome; one pane has none of
-/// its own, two or more get a 24pt strip whose trio appears on hover of the
-/// focused pane; split, close and zoom answer to keybinds. Every proof mounts
+/// Program headers identify each nonempty pane. Their controls appear on hover
+/// of the focused pane; split, close and zoom also answer to keybinds. Each proof mounts
 /// the production `SessionsView` over real Ghostty `/bin/cat` PTYs and checks
 /// the terminal, its unfinished draft and its companion survive.
 @Suite(.requiresDisplay, .serialized)
 @MainActor
 struct SessionChromeProofTests {
-    @Test("A single pane has no chrome; two panes get a strip whose trio appears only on hover of the focused pane",
+    @Test("Program headers survive closing a companion; controls follow hover and focus",
           arguments: [CGSize(width: 1440, height: 900), CGSize(width: 1100, height: 800)])
     func paneStripTrioFollowsHoverAndFocus(size: CGSize) async throws {
         _ = NSApplication.shared
@@ -126,7 +125,7 @@ struct SessionChromeProofTests {
         }
         try snapshot(window, "two-panes-\(Int(size.width))x\(Int(size.height))")
 
-        // Closing the companion from its own strip leaves one pane and no chrome.
+        // Closing the companion keeps the remaining program header and terminal.
         try hover(panes[0], inside: false, in: window)
         workspace.multiplexer.setFocusedPane(panes[1])
         try await settle(window)
@@ -135,7 +134,7 @@ struct SessionChromeProofTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "pane-close").button().tap()
         try await settle(window)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [panes[0]])
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(panes[0])") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(panes[0])")
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-actions") }
         try snapshot(window, "one-pane-\(Int(size.width))x\(Int(size.height))")
 

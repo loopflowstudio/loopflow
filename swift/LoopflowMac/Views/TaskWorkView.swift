@@ -8,9 +8,10 @@ struct TaskWorkflowHeader: View {
     let task: RoadmapTask
     let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskWork>
+    let work: WorkReading<TaskOverview>
     @Environment(\.palette) private var palette
 
+    @State private var confirmingAbandon = false
     @State private var expandedTasks: Set<String> = []
 
     private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
@@ -25,7 +26,12 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if task.runtime?.status == .paused { Text("Paused").foregroundStyle(palette.textSecondary) }
+                if task.runtime?.status == .paused {
+                    Text("Paused").foregroundStyle(palette.textSecondary)
+                } else if task.task.terminalLabel == nil, let state = task.task.state {
+                    Text(state.capitalized).foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
                 if let workflow = work.value?.workflow {
                     Text(positionLabel(workflow))
                         .lineLimit(1)
@@ -53,12 +59,7 @@ struct TaskWorkflowHeader: View {
                     .disabled(acting || readingUnavailable != nil)
                     .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
-                    if task.runtime?.status != .done {
-                        Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
-                            .disabled(acting || readingUnavailable != nil)
-                            .help("lf task complete \(task.task.identifier)")
-                            .accessibilityIdentifier("task-complete")
-                    }
+
                 } else if work.value != nil, work.errorMessage == nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
@@ -67,9 +68,6 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
-                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
-                        .disabled(acting || readingUnavailable != nil)
-                        .accessibilityIdentifier("task-workflow-end")
                     Spacer()
                 } else {
                     Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
@@ -77,7 +75,27 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
-                if acting { ProgressView().controlSize(.small) }
+                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-reopen")
+                } else {
+                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-complete")
+                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
+                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                    }
+                    .disabled(acting || readingUnavailable != nil)
+                    .accessibilityIdentifier("task-pause-resume")
+                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-abandon")
+                }
+                if acting {
+                    ProgressView().controlSize(.small)
+                    Text("Updating Task…").foregroundStyle(palette.textSecondary)
+                }
             }
             .lineLimit(1)
             .frame(minHeight: 28)
@@ -130,12 +148,12 @@ struct TaskWorkflowHeader: View {
                     .accessibilityIdentifier("task-workflow-error")
             }
         }
-        .contextMenu {
-            if task.runtime?.status.isTerminal != true {
-                Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
-                    Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
-                }.disabled(acting || readingUnavailable != nil)
+        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) {
+                Task { await model.abandonTask(task, wave: wave) }
             }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -156,6 +174,12 @@ struct TaskWorkflowHeader: View {
         }
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
+        .onChange(of: work, initial: true) { _, reading in
+            if reading.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: task.id) }
+        }
+        .onChange(of: task.id) { _, id in
+            if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
+        }
     }
 
     private func positionLabel(_ workflow: Workflow) -> String {
@@ -170,7 +194,8 @@ struct TaskWorkflowHeader: View {
 
     /// Why no edge can be started now.
     private var unavailable: String? {
-        if acting { return "Starting" }
+        if acting { return "Updating Task" }
+        if task.task.isTerminal { return "Reopen the Task before starting work" }
         return readingUnavailable ?? task.runControl.unavailable
     }
 
@@ -279,6 +304,21 @@ struct FlowProcessLog: View {
     }
 }
 
+/// Diagnostic history is observed only while explicitly expanded.
+struct TaskDiagnosticsView: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Debug", isExpanded: $expanded) {
+            if expanded { TaskWorkView(model: model, task: task) }
+        }
+        .onChange(of: expanded) { _, visible in model.observeTaskDiagnostics(task, visible: visible) }
+        .onDisappear { model.observeTaskDiagnostics(task, visible: false) }
+    }
+}
+
 /// The Task's conversations and mechanical Processes, including headless work and
 /// conversations without turns: raw records, shown under Debug. Its Flow
 /// processes are listed by `FlowProcessLog`.
@@ -290,9 +330,9 @@ struct TaskWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { Task { await model.refresh() } }
+                Button("Refresh") { model.observeTaskDiagnostics(task, visible: true) }
             }
-            if let work = model.taskWork[task.id].value {
+            if let work = model.taskDiagnostics[task.id].value {
                 ForEach(work.sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
@@ -305,9 +345,9 @@ struct TaskWorkView: View {
                     Text("No recorded work.")
                 }
             }
-            if let error = model.taskWork[task.id].errorMessage {
+            if let error = model.taskDiagnostics[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
-                Button("Retry") { Task { await model.refresh() } }
+                Button("Retry") { model.observeTaskDiagnostics(task, visible: true) }
             }
         }
         .font(Typography.body(12))

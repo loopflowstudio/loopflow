@@ -17,3 +17,9 @@ Accepted:
 Remaining judgment: exact palette values and surface ladder, native coherence,
 provider input/focus continuity and comfortable sustained use at demo review.
 No blocking product choice remains before implementation.
+
+Parent integration, 2026-10-15: synced LOO-462 at 5359c2d77. Its pane islands,
+program headers, attention queue and search remain their existing owners. Parent
+exploration and review holds are historical context, not authorization to implement
+its draft outer Work multiplexer or restart/install the app. Parent details remain
+at `5359c2d77:scratch/` and the inherited workflow-loading note.

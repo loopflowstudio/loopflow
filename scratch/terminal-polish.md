@@ -387,3 +387,19 @@ with an isolated offline snapshot as the alternative. GitHub reads respect the
 existing offline-clone boundary. Demo 8's app build/signature passed, but its
 empty window inventory establishes no successful native demonstration.
 Check: launcher/PR suites PASS (10 tests), app build and diff check PASS after preserving offline-clone GitHub behavior; `/tmp/loo487-pr-helper-tests.log`.
+
+Jack Heart approved installing published 0.13.16. `lf install` succeeded, backed
+up the shared database and applied `0.13.16.001_release`; `lf --version`, Task
+status and Session reads now pass. Skill synchronization separately warned about
+the invalid portable name `.system-imagegen` and left existing skills unchanged.
+No manual database edit or state reset was used. Log:
+`/tmp/loo487-install-0.13.16.log`.
+
+Demo 8 opened the real LOO-487 workspace after installation. Native inspection
+confirmed Session/Files at 0.618, and the app's own capture showed the Files
+document with its closed chooser (`/tmp/loopflow-20261015-150054.png`). The Session
+remained active in its existing terminal; no Move here or provider input occurred.
+Launching repo and Task links together initially left the repo visible; reopening
+the Task link after startup selected the Task. A later AX interaction lost the
+window, so PR-page interaction and full native review remain unproved. The
+migration blocker is resolved; this does not claim demo acceptance or landing.

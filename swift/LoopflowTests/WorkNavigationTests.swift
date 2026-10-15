@@ -1235,11 +1235,12 @@ struct WorkNavigationTests {
         model.navigation.listScrollOffset = 168
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository").button().tap()
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2").button().tap()
+        let repository = try #require(try? navigator.inspect().find(button: "loopflow"), "Repository header")
+        try repository.tap()
+        try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2"), "Second Wave").button().tap()
         #expect(model.selection == .wave(id: "wave-2"))
         #expect(model.navigation.expandedWaves.count == 2)
-        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
+        _ = try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review"), "Retained Task row")
         model.goBack()
         #expect(model.selection == nil)
         model.goBack()
@@ -1248,7 +1249,7 @@ struct WorkNavigationTests {
         #expect(model.selection == nil)
         model.goBack()
         model.navigation.showsNavigator = true
-        let collapse = try navigator.inspect().find(WorkGlyphButton.self).actualView()
+        let collapse = try #require(try? navigator.inspect().find(WorkGlyphButton.self), "Sidebar collapse control").actualView()
         try collapse.inspect().find(ViewType.Button.self).tap()
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true
@@ -1258,7 +1259,7 @@ struct WorkNavigationTests {
         #expect(retained.multiplexer.focusedPane == pane)
         #expect(files.document("notes.md") === draft)
         #expect(draft.editor.string == "keep this thought")
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+        try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1"), "First Wave").button().tap()
         #expect(model.selection == .wave(id: "wave-1"))
         #expect(model.navigation.forwardStack.isEmpty)
     }

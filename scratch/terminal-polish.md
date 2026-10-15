@@ -403,3 +403,10 @@ Launching repo and Task links together initially left the repo visible; reopenin
 the Task link after startup selected the Task. A later AX interaction lost the
 window, so PR-page interaction and full native review remain unproved. The
 migration blocker is resolved; this does not claim demo acceptance or landing.
+
+Jack Heart subsequently reviewed the demo and said “lg2m, ship it”. This approves
+shipping LOO-487 and supersedes its earlier demo/landing hold. Preserve the stack
+on LOO-462 and land the parent first; the fresh parent Task brief now separately
+records shipping authorization. Run the authored ship edge (gate, then landing
+with CI repair). Approval does not turn unmeasured performance or unperformed
+provider scenarios into passing evidence.

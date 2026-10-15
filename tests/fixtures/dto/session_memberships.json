@@ -57,7 +57,7 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "waiting",
+    "attention": "available",
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444"
@@ -402,7 +402,7 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "waiting",
+    "attention": "available",
     "task_primary": false,
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444"

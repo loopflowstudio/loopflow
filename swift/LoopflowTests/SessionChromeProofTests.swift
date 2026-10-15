@@ -95,14 +95,8 @@ struct SessionChromeProofTests {
 
         model.navigation.selectedSessionId = nil
         try await settle(window)
-        #expect(throws: Never.self, "Task-only worktree location") {
-            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-                .text().string()
-            #expect(location == "loopflow")
-        }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
-        }
+        let selectedKey = try #require(registry.selectedWork)
+        #expect(registry.retained(selectedKey)?.location?.worktree == repo)
         model.navigation.selectedSessionId = "release"
         try await settle(window)
 

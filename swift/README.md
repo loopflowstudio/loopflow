@@ -39,15 +39,20 @@ the Machine. Durations and command names only; the files stay on this machine.
 
 Navigation starts closed, with the repository selected in the Session workspace
 header. Click the location control or press **⌘K** to drop the full navigator over
-your panes. It keeps the same Needs you queue, Wave/Task rows and Find Work field
-as the sidebar. Choosing a repository, Wave, Task or Session closes the dropdown. Escape or a click outside dismisses it and restores your previous focus.
-
+your panes. Choosing a repository, Wave, Task or Session closes the dropdown.
+Escape or a click outside dismisses it and restores your previous focus.
 Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
-Open a Wave to enter its conversation and fill the sidebar with its Tasks.
-The **Repo / Wave** path returns to either conversation. Each Wave keeps its
-Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
-including **Needs you**. The queue opens the exact waiting conversation, using
-shared Waiting or reported Blocked evidence.
+
+Open a Wave conversation without moving its row. Its Tasks appear underneath;
+other expanded Waves stay open. Click the Task count to fold a branch without
+navigating. The repository stays at the top. Search filters both sections without
+changing selection. Burgundy fill marks one selected destination.
+
+**Available** shows full-size Tasks with their Wave context and opens the exact
+available conversation. Those Tasks are omitted from the Wave branches, so each
+appears once. Wave conversations stay in the hierarchy. Availability comes from
+shared Session evidence or a reported Blocked state; the CLI exposes it through
+`lf session list --available --json`.
 
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
@@ -64,13 +69,13 @@ Task rows show a title above reported program status, stored Task/PR links and t
 recorded remote Machine. Local Machine names stay hidden. The title opens the
 conversation; links open separately and underline on hover or keyboard focus.
 Unknown activity and live clients without program reports show no activity label
-or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
+or dot. Shared availability is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Selection uses a neutral fill and edge; keyboard focus has a separate outline.
+Work selection uses burgundy fill and cream text; keyboard focus has a separate outline.
 Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
-Blue means reported work, amber means supported Waiting/blocked, red means failure.
+Blue means reported work, amber means Available/blocked, red means failure.
 The same roles apply in light and dark appearances without changing terminal ANSI
 colors or replacing retained panes and drafts.
 
@@ -635,6 +640,11 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+
+Task actions distinguish the running command from confirmation of its updated
+reading. Confirmation expires after ten seconds even while heartbeats arrive;
+an accepted command is never automatically repeated. Refresh readings requests
+fresh observation without repeating the Task action.
 
 The reader's pipes drain off the main actor. Ten seconds without a frame ends
 the reading; cancellation closes stdin, then terminates and reaps only the

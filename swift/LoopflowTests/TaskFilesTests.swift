@@ -437,6 +437,38 @@ struct TaskFilesTests {
         #expect(store.selection == "draft.txt")
     }
 
+    @Test func taskWorkspaceUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
+        let query = RegistryQuery { args, _ in
+            switch args.first {
+            case "wave" where args.dropFirst().first == "show": return roadmap
+            case "ls", "session": return "[]"
+            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: throw RegistryQueryError("Unexpected file/launch request")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        model.bindWorkspaces(registry, repository: "fixture-repository")
+        let rootKey = try #require(registry.selectedWork)
+        let rootWorkspace = try #require(registry.retained(rootKey))
+        let rootLayout = rootWorkspace.multiplexer.layout
+        for (task, location) in [("issue-now", "loopflow.make-lf-work-the-machine"),
+                                 ("issue-review", "loopflow.all-wave-roadmap"),
+                                 ("issue-now", "loopflow.make-lf-work-the-machine")] {
+            model.select(.task(id: task))
+            model.navigation.content = .terminals
+            let key = try #require(registry.selectedWork)
+            let workspace = try #require(registry.retained(key))
+            #expect(workspace.location?.worktree.hasSuffix(location) == true)
+            #expect(registry.retained(rootKey) === rootWorkspace)
+            #expect(rootWorkspace.multiplexer.layout == rootLayout)
+        }
+    }
+
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])

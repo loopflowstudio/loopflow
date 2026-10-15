@@ -241,12 +241,12 @@ provider generation in caller provenance, turn origin and Program Status.
 
 Every agent conversation is an LfSession: skills, inline prompts, helpers,
 reviews, interactive and headless work. Default views select interactive
-conversations. `lf session list --waiting` selects conversations Waiting on a
+conversations. `lf session list --available` selects conversations Available for a
 person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
 A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
-is never Waiting and never ages into replacement or checkout-cleanup authority.
+is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
 Sessions without one remain unknown; client files are not read. Terminal placement
 belongs to the attached LfProcess, fenced by its attachment.
@@ -256,11 +256,11 @@ its latest turn's LfProcess completion (the capture owner before any turn), not
 attachment exit events. Events retain
 turn outcomes and history, not process liveness.
 
-Waiting requires positive live evidence before pagination.
+Availability requires positive live evidence before pagination.
 The current AgentProcess's reports take precedence: any blocked record, or
-idle for an interactive Session, means Waiting. Other reports and explicit clear
+idle for an interactive Session, means Available. Other reports and explicit clear
 suppress inference. Without reports, an unanswered question, interactive hand-back
-or 120 seconds of silence without an unresolved tool call means Waiting.
+or 120 seconds of silence without an unresolved tool call means Available.
 No current reading is unknown; replacement providers need fresh observations.
 
 Desktop consumes the embedded Ghostty action for every retained surface. Shell
@@ -606,7 +606,7 @@ kernel locks                 live local exclusion authority
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Planning | `waves`, `wave_workflows`, `projects`, `project_changes`, `project_events`, `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events` | Stored plans and definitions, optional provider links, stable Work identity, creation receipts, comments and deletion recovery |
-| Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the current observations Waiting is judged from |
+| Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the current observations availability is judged from |
 | Flow processes | `flow_processes`, `flow_process_steps` | One append-only row per Flow process and per step it started |
 | Workflows | `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
@@ -618,7 +618,7 @@ kernel locks                 live local exclusion authority
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Machine and provider authority | `machines`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, shared-home account switches, delivery receipts |
 | Local observation/cache | `blob_tokens` | Deterministic Git-blob token counts |
-| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `flows`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: transcript lines (the `events.jsonl` observation types no summary reader selects) move nothing and usage moves only `usage`; provider attempts under the same receipt key move `sessions`. FlowProcess rows move `flows`, a Workflow's position and moves `planning`, and a Session's stream reading `sessions` when Waiting or reported detail could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
+| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `flows`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: transcript lines (the `events.jsonl` observation types no summary reader selects) move nothing and usage moves only `usage`; provider attempts under the same receipt key move `sessions`. FlowProcess rows move `flows`, a Workflow's position and moves `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
 Released migration files remain immutable. Three direct draft groups establish

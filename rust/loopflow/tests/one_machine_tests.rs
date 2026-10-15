@@ -190,7 +190,6 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &account)
         .env("SOURCE_CLI", env!("CARGO_BIN_EXE_lf"))
-        .env("LF_BIN", "/retired/lf")
         .args(["machine", "id", "--json"])
         .output()
         .unwrap();

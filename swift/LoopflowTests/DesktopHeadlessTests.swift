@@ -563,23 +563,23 @@ struct DesktopHeadlessTests {
         #expect(lanes.size.height > lanes.arrows[3].label.y)
     }
 
-    @Test("A Task lists waiting conversations before working ones, its primary leading each")
+    @Test("A Task lists available conversations before working ones, its primary leading each")
     func taskSessions() throws {
         let base = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
-        func session(_ id: String, waiting: Bool = false, primary: Bool = false, state: String = "unknown") throws -> SessionRecord {
+        func session(_ id: String, available: Bool = false, primary: Bool = false, state: String = "unknown") throws -> SessionRecord {
             var value = base
             value["id"] = id
             value["state"] = state
-            value["attention"] = waiting ? "waiting" : NSNull()
+            value["attention"] = available ? "available" : NSNull()
             value["task_primary"] = primary
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         }
         let groups = TaskSessionGroups([
-            try session("working"), try session("closed", waiting: true, state: "closed"),
-            try session("asks", waiting: true), try session("primary", primary: true),
+            try session("working"), try session("closed", available: true, state: "closed"),
+            try session("asks", available: true), try session("primary", primary: true),
         ])
-        #expect(groups.waiting.map(\.id) == ["asks"])
+        #expect(groups.available.map(\.id) == ["asks"])
         #expect(groups.working.map(\.id) == ["primary", "working"])
         #expect(try session("run").statusLabel == "Session")
     }

@@ -8,11 +8,11 @@ public enum SessionState: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionAttention: String, Codable, Sendable, Hashable {
-    case waiting
+    case available
 
     public var label: String {
         switch self {
-        case .waiting: "Waiting"
+        case .available: "Available"
         }
     }
 }
@@ -180,7 +180,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let openArgv: [String]
     public let terminalIds: [String]
 
-    /// One word for a row: Waiting on a person wins over what its client is doing.
+    /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
         if state != .closed, let attention { return attention.label }
         switch state {
@@ -212,17 +212,17 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A Task's open conversations as its page orders them: the ones waiting on a
+/// A Task's open conversations as its page orders them: the ones available for a
 /// person first, its primary leading either group. Closed ones are not listed.
 public struct TaskSessionGroups: Sendable, Equatable {
-    public let waiting: [SessionRecord]
+    public let available: [SessionRecord]
     public let working: [SessionRecord]
 
     public init(_ sessions: [SessionRecord]) {
         let open = sessions.filter { $0.state != .closed }
         let primaryFirst = open.filter(\.taskPrimary) + open.filter { !$0.taskPrimary }
-        waiting = primaryFirst.filter { $0.attention == .waiting }
-        working = primaryFirst.filter { $0.attention != .waiting }
+        available = primaryFirst.filter { $0.attention == .available }
+        working = primaryFirst.filter { $0.attention != .available }
     }
 }
 

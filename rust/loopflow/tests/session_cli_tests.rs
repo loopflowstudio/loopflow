@@ -908,7 +908,7 @@ for line in sys.stdin:
 }
 
 #[test]
-fn waiting_lists_only_conversations_waiting_on_a_person() {
+fn available_lists_only_conversations_ready_for_input() {
     struct Child(std::process::Child);
     impl Drop for Child {
         fn drop(&mut self) {
@@ -949,12 +949,12 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
         .unwrap();
     }
     let list = |flag: &str| run(home.path(), &["session", "list", "--all", "--json", flag]);
-    let waiting = list("--waiting");
-    assert!(waiting.status.success(), "{waiting:?}");
-    let waiting: Vec<serde_json::Value> = serde_json::from_slice(&waiting.stdout).unwrap();
-    assert_eq!(waiting.len(), 1);
-    assert_eq!(waiting[0]["id"], asked.as_str());
-    assert_eq!(waiting[0]["attention"], "waiting");
+    let available = list("--available");
+    assert!(available.status.success(), "{available:?}");
+    let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
+    assert_eq!(available.len(), 1);
+    assert_eq!(available[0]["id"], asked.as_str());
+    assert_eq!(available[0]["attention"], "available");
     assert!(listed(home.path(), &working)["attention"].is_null());
     assert!(!list("--needs-me").status.success());
 }
@@ -1731,7 +1731,7 @@ fn connect_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
 
 #[cfg(unix)]
 #[test]
-fn program_status_cli_observes_waiting_without_completing_work() {
+fn program_status_cli_observes_available_without_completing_work() {
     use std::io::Write;
     use std::process::Stdio;
     use std::time::{Duration, Instant};
@@ -1828,7 +1828,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     input.write_all(&blocked.as_bytes()[..17]).unwrap();
     input.write_all(&blocked.as_bytes()[17..]).unwrap();
     let item = wait_for("blocked");
-    assert_eq!(item["attention"], "waiting");
+    assert_eq!(item["attention"], "available");
     assert_eq!(
         item["program_status"]["records"][0]["msg"],
         "Use **literal** text?"
@@ -1840,7 +1840,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
             "list",
             "--json",
             "--all",
-            "--waiting",
+            "--available",
             "--page",
             "--limit",
             "1",

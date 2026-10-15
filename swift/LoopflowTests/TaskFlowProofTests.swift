@@ -269,7 +269,7 @@ struct TaskFlowTests {
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
         #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
 
-        // Task chrome leaves the Workflow out; the browser starts on its overview.
+        // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
         let header = drawn()

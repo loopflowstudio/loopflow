@@ -654,7 +654,7 @@ mod tests {
             crate::journal::ProcessIdentityEvidence::Dead
         );
         assert!(summary.terminal_id.is_none());
-        assert!(!summary.waiting);
+        assert!(!summary.available);
         assert_eq!(
             store
                 .process(&attachment.agent_process_id)

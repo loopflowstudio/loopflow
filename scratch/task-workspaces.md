@@ -18,8 +18,12 @@ Jack: “there needs to be one selection state”; “two distinct levels of hie
 - One active Work selection. Remembered Wave scope never paints another selection.
 - Search removes nonmatching Waves; Wave-name matches retain their Tasks. Search
   does not switch the active Work. Clearing it restores the navigation view.
-- Selecting a Task moves its Wave into the sidebar's Repo / Wave breadcrumb and
-  gives sibling Tasks the sidebar width. Collapse lives in the sidebar; a narrow
+- Repository entry shows Needs you and a single Wave list. Clicking a Wave opens
+  its conversation and replaces the Wave list with its Tasks; there is no adjacent
+  Task column. Repo / Wave breadcrumbs own the path back. Selecting a Task keeps
+  its siblings visible. This supersedes prototype 03's persistent Wave column and
+  its restore-last-Task Wave click. Keyboard history still restores visited Work.
+  Collapse lives in the sidebar; a narrow
   edge control restores it. Remember width and enforce usable pane widths.
 - No visible Back/Forward buttons; keyboard history remains.
 - Separate Work and pane layout/focus. Shared layout mechanics may serve both;
@@ -27,7 +31,7 @@ Jack: “there needs to be one selection state”; “two distinct levels of hie
 
 ## The demo
 
-[Prototype 04](sidebar-prototypes/04-task-workspaces.html): select a Task, resize
+[Prototype 04](sidebar-prototypes/04-task-workspaces.html): enter a Wave, select a Task, resize
 and collapse the sidebar, switch Waves and return to a draft. Show two Tasks,
 split one internally, then focus the other: only one sidebar row is selected,
 and each Task keeps its own panes and draft. Close an outer workspace and reopen
@@ -61,7 +65,8 @@ drafts, surface pool, remote execution identity and truthful Session status.
 
 Remove `WorkBreadcrumbBar`'s always-visible hierarchy and Back button in the
 single-workspace presentation, its exclusive chrome tests, and the fixed 430pt
-sidebar sizing. Preserve keyboard actions, Task lifecycle/Workflow controls,
+sidebar sizing. Replace the adjacent columns and remembered Wave-click destination
+with the drill-in sidebar. Preserve keyboard actions, Task lifecycle/Workflow controls,
 file access and all Session actions; move their presentation to their Task owner.
 
 ## Constraints and proposed mechanisms

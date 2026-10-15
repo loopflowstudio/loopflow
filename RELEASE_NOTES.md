@@ -1,40 +1,46 @@
-# v0.13.16
+# v0.13.17
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.16 removes setup and cleanup steps that interrupt ongoing work. Publish follow-up changes from the same Task checkout after a merge, create a repository's first release without a seed tag, and keep new worktree names consistent after renaming the primary checkout.
+v0.13.17 keeps conversations, files, and published PRs together in retained Task workspaces. Navigation opens when needed, switching companions preserves drafts and shells, and quieter terminal feedback keeps text readable while working.
 
-## Keep delivering from the same Task
+## Return to the work in place
 
-A merged PR no longer requires another Task or manual branch cleanup before publishing the next change. Publication preserves earlier PR history and carries follow-up work past squash merges, including when the remote branch was pruned.
+Repository launch opens its configured conversation, and Waves organize Tasks without a separate Session inventory. Work navigation starts closed, opens with Command-K, and can be pinned when browsing needs more room.
 
-- Run `lf pr publish` from the existing checkout to create the next PR. Repeated publication updates that PR rather than creating another.
-- Local edits and already-pushed follow-up commits survive branch continuation. Remote history is replaced with a lease only when the exact delivered head is still present; divergent or concurrent remote work remains intact.
-- Creating the successor PR reopens a completed Task and clears its earlier completion intent. An earlier landing cannot complete the new delivery.
-- `lf pr submit` creates a missing PR without `--create-pr`. Repeating `lf land` prepares another PR when new work exists and does nothing for an unchanged merged delivery.
+- Waves stay in place and reveal Tasks inline. Available Tasks appear once above the hierarchy with their Wave context; search filters both sections.
+- Available uses the same definition in Desktop and `lf session list --available`.
+- Command-click opens Work beside the current destination; ordinary click replaces or focuses it. Hiding panes retains their contents and drafts.
+- Each retained Work layout has independent pane splits. Pane controls support alternating terminal splits, Claude/Codex/OpenCode switching, and Session reset.
 
-## Make the first release directly
+## Keep files and review beside the conversation
 
-An explicit initial version now uses repository history when no preceding release exists. There is no need to manufacture a seed tag or roll back an existing manifest version to start the release lifecycle.
+New Task workspaces open with Session and Files side by side at a 61.8/38.2 split. Companion menus replace content in place, so inspecting a file or PR does not require abandoning the conversation.
 
-- Use `lf release notes 0.1.0 --preview` in a configured repository without release tags for the selected target. The baseline is repository start.
-- Initial notes and previews include the root commit and follow first-parent history with target-area filtering. An explicit `--prev-tag` still takes precedence.
-- First releases use the existing single-candidate lifecycle, preserving candidate and tag identity across retries. Relative versions still require a baseline; subsequent minor-cycle behavior is unchanged.
+- Open the Files chooser with Command-P and pin it when needed. Files shows scratch and changes against the recorded parent commit.
+- Resize dividers with constrained golden-ratio snapping. Switching companions retains file drafts and hidden shells.
+- Inspect a published GitHub PR's status, checks, requested reviewers, description, change totals, and expandable patches in the compact PR viewer.
+- Missing GitHub access and incomplete patches remain explicit. Removing the Task's PR link clears its retained PR page.
 
-## Keep checkout names predictable after a rename
+## Read terminal output with less interruption
 
-New sibling worktrees now take their prefix from the primary checkout's current directory name. Older siblings with different prefixes no longer cause Loopflow to drop the repository name from new paths.
+Copy and Find feedback now stays brief, while terminal contrast handling preserves more of the original color. Shortcut handling also leaves provider commands with extra modifiers available.
 
-- Renaming `etude` to `fantasia` makes future siblings use names such as `fantasia.managym-cpu-research`, including when creation starts from an older linked checkout.
-- Existing worktrees stay in place. Dedicated host-directory inference and reuse of an existing branch checkout remain supported, without rename-history configuration.
+- Successful clipboard writes show confirmation in the pane header without decorating terminal cells.
+- Find sits outside the terminal viewport and briefly emphasizes the current match, respecting Reduce Motion.
+- Exact Command-C, Command-V, and Command-F handling preserves provider shortcuts that add modifiers.
+- Ghostty composes shell backgrounds before contrast correction. Low-contrast text retains more color; `minimum-contrast = 1` preserves original colors.
 
 ## Operational notes
 
-- Publication can reopen a completed Task; launching completed Tasks is unchanged. Integrating unrelated upstream changes still requires sync.
-- Delivery continuation and first-release recovery were checked with real Git repositories and simulated hosting. Live GitHub publication and installed acceptance remain unverified in the supplied record. The worktree rename regression exercised real CLI creation across successive renames while retaining dirty work.
-- Focused tests, formatting and Clippy passed for the included changes. The supplied record does not establish a completed hosted full-matrix pass for the release.
+- Layouts persist within the window, not across app relaunch.
+- The bundled Ghostty lf7 artifact is checksum-pinned. Contrast correction does not guarantee exact hue, separation of nearly identical colors, or contrast through transparent backgrounds and custom postprocessing.
+- The supplied record includes headless Desktop builds, broad Swift test runs, and passing focused Rust and Python checks. Final navigation-test repairs still required exact-head CI validation; local verification of the later change was limited by disk space. A completed final full-matrix pass is not established here.
+- Paired native performance and all-provider input scenarios remain unmeasured; this release makes no performance improvement claim.
 
 ## Small changes
 
-- Task checkout names now use the same normalization as `lf wt create`.
-- Task checkout creation or restoration precedes explicit agent selection. Reconciliation skips deleted directories while retaining the Task, PR and landing intent.
+- Task Process history loads only when Debug expands, keeping diagnostics out of normal Task frames.
+- Task lifecycle controls separate command execution from refresh: successful commands no longer leave confirmation busy indefinitely, and refresh failures do not repeat the mutation.
+- Task sync delivers state before fields so its own title update cannot stale the state read.
+- Terminal teardown no longer initializes Find while its view is being deallocated.

@@ -294,7 +294,8 @@ struct WorkSurfaceView: View {
                 TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Flow process log disagree with them.
-                DisclosureGroup("Debug") { TaskWorkView(model: model, task: task) }
+                TaskDiagnosticsView(model: model, task: task)
+                    .id(task.id)
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")

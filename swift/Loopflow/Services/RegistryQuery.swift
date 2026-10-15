@@ -326,6 +326,14 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "complete", issue], cwd)
     }
 
+    public func reopenTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "reopen", issue], cwd)
+    }
+
+    public func abandonTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "abandon", issue], cwd)
+    }
+
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
@@ -415,9 +423,11 @@ public struct RegistryQuery: Sendable {
         try Self.decode([WaveSnapshot].self, from: await run(["wave", "list", "--json"], cwd))
     }
 
-    /// The repository's configured, retained conversation; explicit opening only.
-    public func ensureRepositorySession(cwd: String) async throws -> SessionRecord {
-        try Self.decode(SessionRecord.self, from: await run(["session", "ensure", "--json"], cwd))
+    /// The repository or Wave's retained conversation; explicit opening only.
+    public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
+        var args = ["session", "ensure", "--json"]
+        if let wave { args += ["--wave", wave] }
+        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
 
     /// The Task's one ongoing conversation: the one already chosen, else its

@@ -226,6 +226,54 @@ extension WorkProjection {
     }
 }
 
+/// One Work destination with current, actionable Session evidence.
+struct WorkAttentionItem: Identifiable {
+    let work: WorkReference
+    let waveID: String
+    let waveName: String
+    let title: String
+    let reason: String
+    let detail: String
+    let session: SessionRecord
+    var id: WorkReference { work }
+}
+
+extension WorkProjection {
+    func attention(unavailable: String?) -> [WorkAttentionItem] {
+        guard unavailable == nil else { return [] }
+        var items: [WorkAttentionItem] = []
+        var includedSessions: Set<String> = []
+        let tasks = waves.flatMap(\.tasks)
+        for wave in waves {
+            let subjects = [(wave.id.work, wave.roadmap.wave.displayName, wave.sessions)]
+                + wave.tasks.filter { !$0.task.task.isTerminal }.map { ($0.id.work, $0.task.task.name, $0.sessions) }
+            for (work, title, sessions) in subjects {
+                // Inspect each Session: another Session's busy report cannot
+                // hide a question, and process liveness is never attention.
+                for session in sessions where session.state != .closed && !includedSessions.contains(session.id) {
+                    if let owner = session.workspace?.taskId,
+                       let task = tasks.first(where: { $0.task.runtime?.workId == owner || $0.id.work.id == owner }),
+                       task.id.work != work { continue }
+                    let status = SessionProgramStatus(sessions: [session], unavailable: nil)
+                    let reason: String
+                    switch status {
+                    case .waiting: reason = "Waiting"
+                    case .reported(_, let report) where report.state == .blocked:
+                        reason = report.kind.map { $0.rawValue.capitalized } ?? "Blocked"
+                    default: continue
+                    }
+                    includedSessions.insert(session.id)
+                    items.append(WorkAttentionItem(work: work, waveID: wave.roadmap.wave.id,
+                        waveName: wave.roadmap.wave.displayName, title: title,
+                        reason: reason, detail: status.help, session: session))
+                    break
+                }
+            }
+        }
+        return items
+    }
+}
+
 /// One exact Session's assignment confirmation, retained through a failed commit.
 struct SessionBindingDraft: Equatable {
     let id = UUID()
@@ -308,29 +356,32 @@ final class WorkNavigation {
     var expandedNotices: Set<String> = []
     /// Flow processes whose graph and steps are open, keyed by Flow process.
     var expandedFlowProcesses: Set<String> = []
-    /// Collapsed Work rows; search temporarily reveals their descendants.
-    var collapsed: Set<WorkNodeKey> = []
     var search = ""
     var selection: WorkReference?
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [WorkReference?] = []
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
+    var showsNavigator = true
+    var navigatorWaveID: String?
+    var waveDestinations: [String: WorkReference] = [:]
+    var taskListScrollOffsets: [String: CGFloat] = [:]
+
+    /// The scope is remembered when the repository itself is selected.
+    func remember(_ destination: WorkReference, in waveID: String) {
+        navigatorWaveID = waveID
+        waveDestinations[waveID] = destination
+    }
 
     /// Selections and visits from another Machine name no Work on this one.
     func clearSelection() {
         selection = nil
         backStack = []
+        navigatorWaveID = nil
+        waveDestinations = [:]
+        taskListScrollOffsets = [:]
         selectedTaskEvidence = nil
         content = .overview
     }
 
-    func isExpanded(_ key: WorkNodeKey) -> Bool {
-        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !collapsed.contains(key)
-    }
-
-    func toggle(_ key: WorkNodeKey) {
-        guard search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        if !collapsed.insert(key).inserted { collapsed.remove(key) }
-    }
 }

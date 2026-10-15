@@ -125,7 +125,7 @@ struct WorkCLISubscriptionTests {
     }
 
     private func rows(_ model: WorkModel) -> [WorkOutlineRow] {
-        model.visibleWork.outline(collapsed: model.navigation.collapsed, search: model.navigation.search,
+        model.visibleWork.outline(collapsed: [], search: model.navigation.search,
                                   planningReadable: model.roadmap.errorMessage == nil, selection: model.selection)
     }
 

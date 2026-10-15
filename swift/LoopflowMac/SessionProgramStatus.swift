@@ -1,3 +1,4 @@
+import Foundation
 import Loopflow
 
 /// Presentation of shared Session evidence; never Task completion or Workflow state.
@@ -61,3 +62,27 @@ enum SessionProgramStatus {
     }
 }
 
+
+/// Existing provider and terminal metadata, with no process-name guessing.
+struct PaneProgramHeading: Equatable {
+    let name: String
+    let symbol: String
+    let context: String
+    let detail: String
+
+    init(provider: String?, title: String, directory: String?, fallback: String) {
+        switch provider?.lowercased() {
+        case "codex": name = "Codex"; symbol = "terminal"
+        case "claude": name = "Claude"; symbol = "sparkle"
+        case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
+        case .some(let value) where !value.isEmpty:
+            name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
+        default:
+            name = fallback; symbol = fallback == "Shell" ? "terminal" : "rectangle"
+        }
+        let title = ProgramStatusReport.displaySafe(title)
+        let folder = directory.map { URL(fileURLWithPath: $0).lastPathComponent }
+        context = [title == name ? nil : title, folder].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        detail = [title, directory].compactMap { $0 }.joined(separator: "\n")
+    }
+}

@@ -318,7 +318,7 @@ struct TaskHistoryFilterTests {
         var work = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         work["workflow"] = NSNull()
-        let unstarted = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: work))
+        let unstarted = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work))
         for id in ["LOO-318", "recent", "LOO-309"] {
             let task = try #require(model.task(id: id)?.task)
             let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(unstarted))

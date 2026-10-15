@@ -373,6 +373,7 @@ private final class ScriptedReader {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
         case .refresh(let request): id = request
         case .checkpoint(let request, _): id = request
+        case .taskHistory(let request, _): id = request
         }
         send("planning", answers: id, body: planning)
         send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])

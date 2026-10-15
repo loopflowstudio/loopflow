@@ -110,7 +110,8 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.onSurfaceCreated = onSurfaceCreated
             nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
-            nsView.sizeDidChange(size)
+            let searchHeight = nsView.searchBar.isHidden ? 0 : TerminalSearchBar.height
+            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight)))
 
             if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
                size.width > 0, size.height > 0 {
@@ -150,9 +151,18 @@ final class GhosttyTerminalMount: NSView {
         terminal.recordMountLifecycle("mount-window", host: self)
         guard window != nil else { return }
         configure?(terminal)
-        terminal.frame = bounds
-        terminal.autoresizingMask = [.width, .height]
+        terminal.autoresizingMask = []
         addSubview(terminal)
+        addSubview(terminal.searchBar)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard terminal.superview === self else { return }
+        let searchHeight = terminal.searchBar.isHidden ? 0 : min(TerminalSearchBar.height, bounds.height)
+        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
+        terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
 
@@ -418,6 +428,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
     }
     var terminalTitle: String?
+    lazy var searchBar = TerminalSearchBar(terminal: self)
+    private(set) var copyConfirmation: NSTextField?
+    private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -556,6 +569,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func destroySurface() {
+        copyDismissal?.cancel()
+        copyConfirmation?.removeFromSuperview()
+        copyConfirmation = nil
+        searchBar.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
         // Only an explicit reopen with a fresh view may launch another child.
@@ -872,6 +889,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 return copySelection()
             } else if event.charactersIgnoringModifiers == "v" {
                 return pasteFromClipboard()
+            } else if event.charactersIgnoringModifiers == "f" {
+                searchBar.open(needle: nil)
+                return true
             }
         }
 
@@ -1225,7 +1245,42 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        return pasteboard.setString(selection, forType: .string)
+        guard pasteboard.setString(selection, forType: .string) else { return false }
+        showCopyConfirmation(selection)
+        return true
+    }
+
+    private func showCopyConfirmation(_ text: String) {
+        guard let message = terminalCopyMessage(text) else { return }
+        copyDismissal?.cancel()
+        copyConfirmation?.removeFromSuperview()
+        let notice = TerminalCopyNotice(labelWithString: message)
+        notice.font = .systemFont(ofSize: 11, weight: .medium)
+        notice.textColor = NSColor(TerminalPalette.foreground)
+        notice.backgroundColor = TerminalPalette.nsBackground
+        notice.drawsBackground = true
+        notice.isSelectable = false
+        notice.setAccessibilityIdentifier("terminal-copy-confirmation")
+        notice.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(notice)
+        NSLayoutConstraint.activate([
+            notice.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            notice.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+        ])
+        copyConfirmation = notice
+        NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
+            .announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+        ])
+        copyDismissal = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(1.4)) } catch { return }
+            self?.copyConfirmation?.removeFromSuperview()
+            self?.copyConfirmation = nil
+        }
+    }
+
+    func performBinding(_ action: String) {
+        guard let surface else { return }
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
 
     private func focusForPointerInput() {

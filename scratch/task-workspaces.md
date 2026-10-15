@@ -16,9 +16,11 @@ Jack: “there needs to be one selection state”; “two distinct levels of hie
 ## Accepted direction
 
 - One active Work selection. Remembered Wave scope never paints another selection.
-- Jack requested trying a thin top selection rule on both header targets and Task
-  rows. The prototype applies it to repo, Wave and Task selection consistently;
-  this treatment remains a visual experiment pending review.
+- Jack rejected the top selection rule on October 15 after trying it on both
+  header targets and Tasks. [Selection comps](sidebar-prototypes/05-selection-comps.html)
+  compare neutral fill (Notion-inspired), pale blue fill (Figma-inspired), and
+  solid burgundy fill. Each uses smaller header typography and no edge rule.
+  These treatments remain drafts; prototype 04 preserves the rejected experiment.
 - Search removes nonmatching Waves; Wave-name matches retain their Tasks. Search
   does not switch the active Work. Clearing it restores the navigation view.
 - Repository entry shows Needs you and a single Wave list. Clicking a Wave opens
@@ -108,6 +110,18 @@ navigation interactions with fictional data. Native demo judges orientation,
 usable minimum widths and focus; it does not substitute for those checks.
 
 Open: exact add/replace gesture, workspace limit, mixed Repo/Wave/Task layouts,
-and whether each repository restores an outer arrangement across launch.
+whether each repository restores an outer arrangement across launch, and the
+selection treatment. No new native styling is accepted by the comparison.
 
-Check: `uv run --with playwright python /tmp/loo462-check-workspaces.py` PASS — one selection, nested layouts, retained panes/drafts, search, resizing, collapse and reopen; no JavaScript errors or horizontal overflow. Single/multiple workspace screenshots reviewed.
+## Selection references
+
+Jack requested Notion/Figma visual comps after rejecting the top rule. Official
+screenshots inspected October 15: [Notion's workspace guide](https://www.notion.com/en-gb/help/intro-to-workspaces)
+shows a rounded neutral fill behind To-dos; [Figma's sidebar guide](https://help.figma.com/hc/en-us/articles/360039831974-Explore-the-navigation-bar-and-left-sidebar)
+shows a neutral current page and a pale blue selected layer. The comparison
+borrows surface treatments, not those products' full navigation or selection models.
+It preserves one Work selection, the drill-in sidebar and Needs you. The burgundy
+option is a Loopflow proposal, not a reference-product claim. Reference images
+and attribution are available inside the comparison. No native code changed.
+
+Check: `uv run --with playwright python /tmp/loo462-check-selection.py` PASS — repo/Wave/Task, one selected target per sidebar, synchronized clicks, no edge rules, narrow layout and no JavaScript errors; screenshots reviewed. Earlier prototype 04 interaction pass remains applicable except embedded width persistence, which now leaves the standalone preference untouched.

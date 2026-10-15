@@ -24,7 +24,7 @@ function record(){history.push(selected);future=[]}
 function focus(id,remember=true){if(id===selected)return;if(remember)record();selected=id;renderSidebar();for(const slot of work.querySelectorAll('.work-slot'))slot.classList.toggle('active',slot.dataset.work===id)}
 function show(id,beside=false,remember=true){saveScroll();if(id!==selected&&remember)record();if(!openWork.includes(id)){if(beside)openWork.push(id);else openWork[openWork.indexOf(selected)]=id;}selected=id;query='';document.querySelector('input').value='';render()}
 function render(){renderSidebar();renderWork();app.classList.toggle('collapsed',hidden)}
-function setWidth(value){width=Math.min(600,Math.max(260,Math.min(value,innerWidth-420)));app.style.setProperty('--width',width+'px');document.querySelector('.resize').setAttribute('aria-valuenow',Math.round(width));localStorage.setItem('study04-sidebar-width',width)}
+function setWidth(value){width=Math.min(600,Math.max(260,Math.min(value,innerWidth-420)));app.style.setProperty('--width',width+'px');document.querySelector('.resize').setAttribute('aria-valuenow',Math.round(width));if(window.self===window.top)localStorage.setItem('study04-sidebar-width',width)}
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
  if(b.hasAttribute('data-open'))show(b.dataset.open,e.metaKey||e.ctrlKey);
  if(b.hasAttribute('data-collapse')){saveScroll();hidden=!hidden;render()}

@@ -16,6 +16,22 @@ Final styling: “Ink on Paper”; “selection also highlights in needs youwhen
 
 ## Accepted behavior / The demo
 
+October 15 native review — Jack Heart rejected the Wave selection relocating
+into the header: “having the selection jump to the header when you click on a
+wave is super jarring.” The drill-in replacement described below is the current
+implementation, no longer an accepted navigation outcome. Ink on Paper, one Work
+selection, Needs you mirroring and retained workspaces remain accepted.
+
+Replacement under discussion: keep Wave rows in the sidebar and reveal Tasks
+below their Wave, preserving the clicked row and existing expanded branches.
+Wave selection opens its conversation; Task selection highlights only the Task
+(and its Needs you appearance). Expansion is presentation state, independent of
+Work selection. A task-count control could fold a branch without chevrons or
+navigation. This proposal is not approved for implementation. The alternative
+is Figma's stacked sections: a persistent Wave index above the scoped Task list.
+Tradeoff: inline branches consume vertical space; stacked sections separate
+Tasks spatially from their Wave. No return to adjacent sidebar columns is proposed.
+
 Repository entry shows Needs you and a single Wave list. A Wave opens its
 conversation and replaces that list with Tasks. Repo / Wave breadcrumbs return
 to their conversations; selecting a Task keeps its siblings visible. Search hides

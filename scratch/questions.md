@@ -33,3 +33,18 @@ These prototype gestures carry into implementation. Cross-launch outer layout
 restoration remains outside this change. The existing reader watches focused Task
 Workflow detail; inactive workspaces retain live panes and offer focus for actions.
 Native demo judgment and landing remain distinct from implementation authorization.
+
+October 15 native feedback: Jack Heart rejected selection jumping from a Wave
+row to the header. Replacement is unresolved: stable Wave rows with inline Tasks,
+or a persistent Wave index above a scoped Task section. Preserve Ink on Paper,
+one Work selection and Needs you mirroring. Neither replacement is authorized
+by this design discussion.
+
+Dashboard exploration is separate [LOO-489](https://linear.app/loopflow/issue/LOO-489),
+stacked on LOO-462 at 7d10108eaf. Jack Heart clarified that a Wave dashboard is
+strictly query-derived (Wave conversation plus open Tasks), offered on Wave click
+by default or alongside conversation-only. Expandable sections remain a proposal.
+Only the pinned repo dashboard is customizable; it initially contains the repo
+session. Tasks have no dashboards. The child owns `scratch/dashboard-design.md`
+in its checkout. Feature's task-design/kickoff edge is running; its primary
+Session is open in the existing cmux window as LOO-489 Dashboards.

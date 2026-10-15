@@ -416,6 +416,8 @@ KRs and targets. Separate dependent Tasks stack on a published parent PR and
 can publish before it merges. `lf sync` preserves child code and design through
 parent updates and squash merge. Use `lf checkout CHILD --stack-on PARENT
 --design PATH` to transfer a child-specific design before launch.
+For existing work, `lf checkout CHILD --stack-on PARENT` explicitly selects a
+different parent without replacing the checkout or PR. Run `lf sync` to integrate it.
 
 LfSessions and Processes own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless

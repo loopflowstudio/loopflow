@@ -511,10 +511,9 @@ impl SqliteStore {
         if child.parent_pr_id.as_ref() == Some(parent_id) {
             return Ok(());
         }
-        if child.parent_pr_id.is_some() {
+        if child.parent_pr_id != expected.parent_pr_id {
             return Err(StoreError::InvalidAuthority(
-                "Task already has a parent; retain its dependency until explicit reparenting"
-                    .into(),
+                "Task parent changed; retry preparation".into(),
             ));
         }
         if active_task_pr_on(&tx, &child.id)?

@@ -300,7 +300,7 @@ a resize cursor, and adapt minimum sizes when the window cannot fit them all.
 
 Jack Heart added golden-ratio snapping at 38.2% and 61.8%, and requested that new
 shell splits start at 61.8/38.2 (existing pane/new shell). The initial Session/Task
-browser split remains its separately requested 70/30. Resize minimums are 240pt
+browser split was initially 70/30, superseded by the Files default below. Resize minimums are 240pt
 wide and 140pt high per pane, accumulated through nested splits and proportionally
 reduced only when the viewport cannot fit them. A 10pt snap zone cannot override
 minimums. Divider dragging uses screen coordinates so the moving divider does not
@@ -312,3 +312,26 @@ jump. Accessibility increments use constrained free movement so repeated steps
 cannot become stuck inside a snap zone. Shell creation changes only the inserted
 split; retained pane identity and existing surrounding ratios survive.
 Check: `scripts/test_desktop.sh --filter 'PaneResizeTests|WorkNavigationTests|MultiplexerStoreTests|DesktopPaneControlTests' -Xswiftc -gnone --jobs 4` PASS (104 tests reported, two optional native cases skipped); platform boundary and diff checks PASS. `/tmp/loo487-resize-tests-final.log`. Native pointer feel remains demo review.
+
+### Initial Files and remembered layouts
+
+Jack Heart requested trying the initial Session/Files split at 61.8/38.2,
+superseding the earlier 70/30 Task-overview default. Existing window layouts
+remain intact, including deliberately closed panes. A fresh demo window exercises
+the default without deleting Session history or stopping existing providers.
+
+Jack agreed that closed panes must stay closed and proposed database persistence.
+LOO-416 already owns relaunch restoration; carry this direction there rather than
+add a second persistence implementation here. Save the Work identity, split tree,
+pane contents, ratios and focus. No saved layout gets the current default; a saved
+single-pane layout is deliberate and must not recreate the browser. Restore
+placement separately from process execution and state what survives quit/crash.
+Current retention lasts only within the window; no database persistence is claimed.
+
+Persistence handoff is saved here but not yet filed on LOO-416: its Task read
+succeeded, but the owning Wave read failed with a Linear Project/Team mismatch.
+No planning repair or duplicate Task was attempted.
+
+Review: reuse the existing golden-ratio constant and Files page default. The
+initial-layout guard still preserves resized and deliberately closed panes.
+Check: `scripts/test_desktop.sh --filter 'DesktopPaneControlTests|TaskFilesTests|PaneResizeTests' -Xswiftc -gnone --jobs 4` PASS (48 tests reported, three optional native cases skipped); `git diff --check` PASS. `/tmp/loo487-files-default-tests.log`. Native review remains pending.

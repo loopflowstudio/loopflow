@@ -16,7 +16,7 @@ struct DesktopPaneControlTests {
 
     private var workKey: WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: "task") }
 
-    @Test("A Task starts at 70/30; choosing content uses its companion and preserves resized layouts")
+    @Test("A Task starts with Files at the golden ratio; switching preserves resized and closed panes")
     func taskStartsWithRetainedCompanion() throws {
         let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
         let store = workspace.multiplexer
@@ -25,12 +25,10 @@ struct DesktopPaneControlTests {
         workspace.prepareTaskPanes()
         let browser = try #require(store.layout.allPanes.last)
         #expect(browser.content == .files(taskId: "task", location: identity))
-        #expect(workspace.browserPage(for: "task") == .task)
-        workspace.selectFilesPage(taskId: "task")
         #expect(workspace.browserPage(for: "task") == .files)
         #expect(store.focusedPane == main)
         guard case .split(.vertical, _, _, let ratio) = store.layout else { Issue.record("Missing vertical split"); return }
-        #expect(ratio == 0.7)
+        #expect(ratio == LayoutNode.goldenRatio)
         store.updateRatio(between: main.id, and: browser.id, ratio: 0.6)
         try workspace.selectContent(.flowLog(taskId: "task", location: identity), in: main)
         #expect(store.focusedPaneId == browser.id)

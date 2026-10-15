@@ -98,11 +98,13 @@ The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
 
-Task workspaces start with the Session on the left and a browser on the right,
-at 70/30. Click the companion's name to switch between **Task**, **PR**, **Files**,
+Task workspaces start with the Session on the left and Files on the right,
+at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
 **Shell**, and **lf process**. Hidden shells keep running and file drafts stay
 retained. The file tree can be collapsed. Sidebar selection switches the whole
 Task workspace; selections inside a Task can focus its companion.
+Resizing or closing the browser is remembered while the window stays open;
+layouts are not yet restored after quitting the app.
 
 Hover over or click **Task** in the compact workspace header to reveal Complete,
 Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits

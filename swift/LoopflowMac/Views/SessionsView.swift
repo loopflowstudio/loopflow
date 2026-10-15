@@ -80,9 +80,9 @@ final class SessionsWorkspace {
         let content = PaneContent.files(taskId: key.id,
             location: session.content.location, execution: session.executionLocation)
         // A location error is presented by the browser's normal error view.
-        if let browser = try? files(for: content, task: nil, query: query) { browser.page = .task }
+        _ = try? files(for: content, task: nil, query: query)
         guard let browser = multiplexer.show(content, beside: session.id, focus: false) else { return }
-        multiplexer.updateRatio(between: session.id, and: browser.id, ratio: 0.7)
+        multiplexer.updateRatio(between: session.id, and: browser.id, ratio: LayoutNode.goldenRatio)
     }
 
     @discardableResult

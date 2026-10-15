@@ -183,12 +183,14 @@ enum Part {
 }
 
 impl Part {
+    // Deliver the selected Work before the portfolio; every part still reads
+    // the same snapshot, and a checkpoint follows the complete pass.
     const ALL: [Part; 7] = [
+        Part::Task,
+        Part::Wave,
         Part::Sessions,
         Part::Planning,
         Part::PeerPlanning,
-        Part::Task,
-        Part::Wave,
         Part::WorkActivity,
         Part::Activity,
     ];
@@ -940,6 +942,12 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 reader.observe_checkouts(revisions, &shared);
                 reader.observe_quiet(revisions);
             }
+            // Opening the connection can overlap the first scope request. Apply
+            // it before reading the whole portfolio, not on the following pass.
+            for request in std::mem::take(&mut lock(&shared).requests) {
+                checkpoint |= matches!(request, Request::Checkpoint { .. });
+                answers = Some(reader.accept(request));
+            }
             // Only this loop uses the read-only connection. The first revision
             // query pins the WAL snapshot used by every joined projection below.
             // OS, Git and config observations are not transactional database facts.
@@ -952,7 +960,6 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 .as_ref()
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
-            let mut frames = Vec::new();
             {
                 let mut mailbox = lock(&shared);
                 mailbox.revisions = revisions;
@@ -989,23 +996,30 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 if send {
                     state.last = Some((reason.clone(), content.clone()));
                     state.replay = false;
-                    frames.push((part, reason, content));
+                    let mut mailbox = lock(&shared);
+                    enqueue(&mut mailbox, part.name(), &home, reason, content);
+                    shared.1.notify_all();
                 }
             }
             for (part, state) in &mut reader.parts {
                 if part.selected(&reader.scope) && std::mem::take(&mut state.replay) {
                     if let Some((reason, content)) = &state.last {
                         // This is delivery of an existing projection, not query work.
-                        frames.push((*part, reason.clone(), content.clone()));
+                        let mut mailbox = lock(&shared);
+                        enqueue(
+                            &mut mailbox,
+                            part.name(),
+                            &home,
+                            reason.clone(),
+                            content.clone(),
+                        );
+                        shared.1.notify_all();
                     }
                 }
             }
             drop(snapshot);
             {
                 let mut mailbox = lock(&shared);
-                for (part, reason, content) in frames {
-                    enqueue(&mut mailbox, part.name(), &home, reason, content);
-                }
                 if checkpoint {
                     let failed: Vec<_> = reader
                         .parts

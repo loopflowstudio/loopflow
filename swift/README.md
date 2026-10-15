@@ -552,7 +552,9 @@ turns **Waiting** after two quiet minutes on the reader's clock, with no write.
 Nothing in the window reads on a timer. Stored Workflow definitions follow the
 stream’s planning revision, even when only a heartbeat changes. File definitions
 are reread when the app becomes active or after customization.
-Database joins and their revisions share one read snapshot; Git, file and process
+Selected Task and Wave frames are read first and delivered as soon as ready,
+without waiting for portfolio projections. Confirmation still follows all affected
+frames. Database joins and their revisions share one read snapshot; Git, file and process
 observations remain separate from that transactional guarantee. Each request
 carries an id. A checkpoint follows its changed frames even when the command
 made no visible change. Session commands can replay the reader's cached projection

@@ -479,6 +479,39 @@ fn a_flow_graph_write_does_not_requery_work_history() {
 }
 
 #[test]
+fn selected_task_arrives_before_portfolio_and_confirmation() {
+    let home = Machine::new();
+    home.plan(1);
+    let mut watch = home.watch();
+    watch.request(serde_json::json!({
+        "action":"scope", "id":1, "repo":null, "headless":false,
+        "task":"FIX-1", "wave":null, "activity":null,
+    }));
+    watch.checkpoint(2, &[]);
+    // Make every subscription due; the selected Task must not queue behind
+    // portfolio work, while confirmation must still follow all projections.
+    watch.request(serde_json::json!({"action":"refresh", "id":3}));
+    let frames = watch.checkpoint(4, &[]);
+    let task = frames
+        .iter()
+        .position(
+            |frame| matches!(&frame.content, WorkContent::Task(Some(part)) if part.task == "FIX-1"),
+        )
+        .expect("selected Task was not delivered");
+    let planning = frames
+        .iter()
+        .position(|frame| matches!(&frame.content, WorkContent::Planning(Some(_))))
+        .expect("portfolio was not delivered");
+    assert!(task < planning);
+    assert!(matches!(
+        frames.last().unwrap().content,
+        WorkContent::Checkpoint
+    ));
+    assert_eq!(frames[task].unavailable, None);
+    assert_eq!(frames[task].revisions, frames[planning].revisions);
+}
+
+#[test]
 fn changing_task_scope_reuses_the_unchanged_wave_projection() {
     let home = Machine::new();
     home.plan(1);

@@ -70,3 +70,26 @@ configured conversation. Headless coverage exercises both populated and empty
 repo entry, retained panes, and cached-data restoration without stale selection.
 Check: WorkNavigationTests|WorkModelTests — build and 69 tests PASS;
 /tmp/loo462-repo-entry-tests.log. Native repo-entry review remains after relaunch.
+
+October 15 lifecycle review: Jack Heart requested visible Task status and Complete,
+Pause/Resume, Abandon in the Workflow pane. Complete on LOO-312 appeared hung then
+succeeded; Jack stated it should remain unfinished. `lf task reopen LOO-312`
+returned reopened/Workflow unchanged; fresh status has completed=false, state=unstarted.
+Desktop now offers Reopen for completed/canceled Tasks, visible Pause/Resume and
+confirmed Abandon (CLI cancels, closes PRs and deletes branches; no force), using
+existing action/error/subscription owners. Status remains separate from Workflow;
+progress says Updating Task rather than an unlabeled spinner. Completion delay is
+not diagnosed or claimed fixed. Review found confirmation awaits a stream checkpoint;
+need distinguish command duration from checkpoint delay without another real completion.
+Check: DesktopHeadlessTests|TaskFlowProofTests build and 21 tests PASS; new lifecycle
+regression 3 state cases PASS; optional native diagnostics skipped. Logs:
+/tmp/loo462-lifecycle-{controls-tests,regression}.log. Native review still pending.
+
+Other pending feedback: Jack reported repeated Hook failed/exit 1 in Etude. No
+hook failure cause established yet; app log separately contains AttributeGraph
+cycles. Jack requested Fantasia renamed manabot locally and Studio/Silencio removed.
+Interpretation proposed: portfolio removal, not disk deletion. No mutation succeeded:
+installed lf lacks portfolio; this build's portfolio invocation unexpectedly resolves
+to skill fallback/root-json error despite working help. Need repair dispatch/read
+membership before edits, and resolve folder rename versus display naming. No files,
+planning history or repository directories deleted. Do not report this work complete.

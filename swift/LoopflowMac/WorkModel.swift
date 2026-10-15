@@ -1755,6 +1755,18 @@ final class WorkModel {
         }
     }
 
+    func reopenTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+        await performTaskAction(task.id) {
+            try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
+    func abandonTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+        await performTaskAction(task.id) {
+            try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
     /// Feedback belongs to the navigation and Task that began the command.
     private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async {
         let owner = navigation

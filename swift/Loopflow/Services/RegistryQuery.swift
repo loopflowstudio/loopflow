@@ -326,6 +326,14 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "complete", issue], cwd)
     }
 
+    public func reopenTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "reopen", issue], cwd)
+    }
+
+    public func abandonTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "abandon", issue], cwd)
+    }
+
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {

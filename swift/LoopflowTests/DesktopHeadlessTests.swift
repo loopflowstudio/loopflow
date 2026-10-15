@@ -462,6 +462,36 @@ struct DesktopHeadlessTests {
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
     }
 
+    @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])
+    func taskLifecycleControls(state: String) throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first)
+        let original = try #require(wave.tasks.items.first)
+        let root = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
+        let waves = try #require(root["waves"] as? [[String: Any]])
+        let tasks = try #require(waves.first?["tasks"] as? [String: Any])
+        var row = try #require((tasks["items"] as? [[String: Any]])?.first)
+        var planning = try #require(row["task"] as? [String: Any])
+        planning["state"] = state
+        planning["completed"] = state == "completed"
+        row["task"] = planning
+        let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+        #expect(task.id == original.id)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
+        let view = TaskWorkflowHeader(model: model, task: task, wave: wave.wave,
+            work: .available(TaskOverview(sessions: [], flowProcesses: [], workflow: nil)))
+        if state == "unstarted" {
+            _ = try view.inspect().find(button: "Complete")
+            _ = try view.inspect().find(button: "Pause")
+            _ = try view.inspect().find(button: "Abandon…")
+        } else {
+            _ = try view.inspect().find(button: "Reopen")
+            #expect(throws: (any Error).self) { try view.inspect().find(button: "Complete") }
+        }
+    }
+
     @Test("A workflow is drawn as a graph: circles, described nodes, a loop arc and an arrow per edge")
     func workflowGraph() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,

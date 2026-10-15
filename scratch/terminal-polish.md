@@ -1,356 +1,181 @@
 # Terminal feedback and color — LOO-487
 
-Status: accepted for implementation and demo, 2026-10-15. Jack Heart reviewed
-the proposal: “seems fine. i think i need to try it to know”. Build the proposed
-3:1 contrast default, original-color override and brief feedback for hands-on
-review. Visual acceptance and landing remain pending that demo. Preserve the
-LOO-462 stack. Implementation is complete; native visual acceptance and measured
-performance remain with gate/demo. The delivered LOO-462 owner was integrated
-through `lf sync --manual` at merge `213136cd79` (parent `dc402dc833`).
+Jack Heart accepted implementation for hands-on review on October 15: “seems
+fine. i think i need to try it to know”. Visual acceptance and landing remain
+pending. Preserve the stack on LOO-462/#1531 and land the parent first; its
+separate Workflow-loading hold remains live. Delivered parent owners were
+integrated with `lf sync --manual` at `213136cd79` (parent `dc402dc833`).
+The subsequent parent sync completed at `77ff8e8eb8` (parent `7d10108eaf`);
+its stash restoration conflicted only on `scratch/questions.md`. Recovery kept
+the parent's live questions there and this consolidated design, preserving the
+implementation and published lf6 artifact. No implementation or publication was
+replayed; the recovery stash `8a5e82290558d62211030cb19d8a88a5c4ba3e46`
+remains available as evidence.
+Recovery preserved all 15 implementation/artifact/test files with the parent
+merge and cleared index conflicts. October 15 realignment inspected the merged
+owners: nested Work layouts retain each workspace's surface pool; copy notices
+still route by surface incarnation; pane focus still uses Reduce Motion-aware
+`DesignAnimation.standard`. No bounded implementation mismatch was found.
+The earlier lf6 test results precede this parent merge; they remain component
+evidence, not a completed gate on the merged workspace.
 
-## Problem and intended experience
+The complete accepted design, rejected alternatives and implementation/review
+evidence are preserved at `8486ff005d:scratch/terminal-polish.md` and
+`8486ff005d:scratch/terminal-review.md`. Earlier parent investigations are at
+`8486ff005d:scratch/workflow-loading.md`; they select no work here.
 
-Jack Heart wants terminal workspaces to sustain long coding sessions: copying
-text, finding an error, moving between panes and returning to waiting work should
-give clear, calm feedback. Program-selected colors must remain legible without
-flattening diff, syntax, ANSI or status distinctions. Preserve terminal fidelity,
-fast input, retained clients, drafts, selection and scrolling.
+## Demo handoff
 
-This serves Product's work-first workspace and sustained-use chapter outcomes.
-It establishes no external-project progress or sustained-use KR by itself.
-October 7's retired numeric/soak acceptance stays retired; compare measured costs
-without inventing an input-latency target.
+The interactive pursue runner completed implementation, compression, sync and
+realignment, then failed before launching its routing agent: response schemas
+require headless mode. The operator interrupted the redundant retry and inspected
+the settled steps. Publication is recovered directly; no implementation, artifact
+upload or successful edge is replayed. The PID-less router record never acquired
+an OS process. Broader gate and native judgment remain with ship and demo.
 
-## Demo
+A separate local bundle is prepared at
+`.lf/tmp/terminal-feedback/Loopflow Terminal Demo.app`, with bundle identifier
+`com.loopflow.mac.demo.loo487` and no URL-scheme registration. It uses the current
+Swift app and validation-only bundled CLI; it does not replace Loopflow Dev.
+Keep this checkout's SwiftPM build products for its resource-bundle fallback.
+Native automation is unavailable (Sky native pipe startup failed), so no visual
+acceptance is claimed. Proof and build logs are under `.lf/tmp/terminal-feedback/`.
 
-In the development app, open two retained terminal panes containing an agent CLI
-and a shell. Select and copy a multiline error: the copied cells briefly acquire
-a neutral edge and the existing copy notice confirms the line count. Clipboard
-bytes are unchanged. Find the error, step through matches, then leave and return
-to a waiting Task: the current match and actual keyboard destination are clear,
-with the unsent draft, selection and scroll position intact.
+Check: current merged-source Swift app build, bundled control-tool build,
+ad-hoc bundle signature verification and bundled `lf repo identity --json` PASS.
+Jack Heart's hands-on review and paired native performance measurements remain.
 
-Repeat with a colored diff and a colorful terminal utility, dark and imported
-light palettes, difficult truecolor pairs, and Reduce Motion. Red and green text
-remain distinguishable while low-contrast text becomes readable. Set
-`minimum-contrast = 1` in the existing Ghostty configuration and reopen the dev
-app to compare original colors. No theme chooser is added.
+## Retained design
 
-Provide a new contained `terminal-feedback` scenario in the existing
-`scripts/desktop_performance.py` runner for repeatable fixture output and paired
-measurements; its mounted mode is optional demo evidence, never a headless gate
-prerequisite. Configured Codex/Claude interaction is a separate native review,
-not something a replayed transcript proves.
+Jack wants calm confirmation for Copy, Find, focus and context return, with
+legible program-selected colors and intact terminal text, input, drafts,
+selection, scrolling and retained surfaces. This establishes no external-project
+progress or sustained-use KR. October 7's retired numeric/soak acceptance stays
+retired; compare costs without inventing a latency threshold.
 
-## Evidence and boundaries resolved
+One renderer owns cell appearance. Screen owns selection, blocks, search and
+source colors; Ghostty composes shell fills before glyph contrast. Swift owns
+native focus, gutter/header chrome and the parent's existing Copy/Find UI.
+Program status retains its existing Rust/Swift owners; unknown activity never
+animates as Working. There is no new SQLite record, DTO, status inference,
+selection mirror, animation loop or theme system. iOS/external hosts are unchanged.
 
-- **Current checkout:** `c9bc78904b52fdceff46959ce011a394a28fb706`.
-  `GhosttyTerminalView.swift` retains one `GhosttyMetalView`/surface per terminal
-  in the window's pool. `Screen` owns mutually exclusive text/block selection
-  through `0001-command-blocks.patch`; Swift holds hover and derived block
-  geometry. Preserve these lifetimes and ownership.
-- **Parent dependency:** Jack Heart confirmed on October 15 that LOO-487 must stay stacked on LOO-462.
-  The Task records parent PR #1531 (`pr_48999a99e95141fd8ecb3cc7c7b5aa49`);
-  integrate subsequent parent changes through Loopflow's stack sync and land it first.
-  LOO-462 owns rounded panes, program headers, navigation, ordinary copy
-  confirmation and unobstructed Find. These are not all in this
-  checkout. A read-only inspection on October 15 found uncommitted parent work
-  over `52ee931af5`: `TerminalSearchBar` is a sibling of the terminal mount,
-  `TerminalSearchResults` handles pending/empty/selected results, and
-  `copySelection()` calls `showCopyConfirmation()` only after pasteboard success.
-  The notice currently sits over terminal cells. Integrate that parent's delivered
-  owner before the Swift slice; do not copy its working files or build parallel
-  UI. These observations are implementation evidence, not a stable API or proof
-  that the parent has landed. The inherited `scratch/workflow-loading.md` records
-  its unresolved landing hold; this Task does not operate that work.
-- **Pinned renderer:** `swift/Package.swift` selects Ghostty
-  `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0`, artifact `lf3`.
-  The downloaded source confirms `minimum-contrast` defaults to **1**, and both
-  Metal and GLSL `contrasted_color` choose pure black/white on failure. Turning
-  that setting up alone can turn two low-contrast semantic colors into one.
-- **Color is available before pixels:** `src/renderer/generic.zig` resolves
-  SGR/inverse, selection and search styles; text selection precedes search.
-  The text vertex shaders receive foreground and resolved background, before
-  glyph coverage. Source terminal colors remain separate from rendered colors.
-  `cell.zig:noMinContrast` exempts box/block/Powerline graphics; concealed text
-  skips glyph rendering. Preserve those rules and emoji/image behavior.
-- **Find already exists in the engine:** `Surface.zig` owns asynchronous search;
-  bindings `search:…`, `navigate_search:next/previous`, `end_search` and the four
-  search action callbacks are exported. Renderer messages already distinguish
-  ordinary and selected matches. No Swift scrollback extraction/search index is
-  needed. The parent implements the missing host UI.
-- **Custom postprocessing is the wrong interface:** the pinned
-  `shadertoy_prefix.glsl` exposes pixels, cursor/focus and palette uniforms, but
-  no selection ranges, match identity or successful-copy event. Recovering cells
-  from pixels would recreate the original problem. Its animation mode can keep
-  focused or all panes rendering. Do not install a whole-screen effect shader.
-- **Existing scheduling is sufficient:** `generic.zig:animationWake()` and
-  `renderer/Thread.zig` combine custom-shader and Kitty deadlines. Add bounded
-  feedback deadlines there, with visibility suppression. The Swift display link
-  already calls draw; do not add a second animation loop or increase its rate.
-- **Composition matters:** `renderCommandBlocks()` currently puts translucent
-  failure/selection/hover CALayer fills *over* terminal glyphs. Shader contrast
-  cannot account for that later tint. Move only those cell-area fills into the
-  existing Ghostty background pass, retaining Swift gutter/header/separator
-  chrome and the terminal's real exit status. Do not “fix” the source palette.
-- **Build boundary:** SwiftPM links GhosttyKit; Xcode currently compiles the
-  terminal-disabled path. A fallback build is not renderer proof. The existing
-  `ghostty-build` script applies local patches, runs Zig tests and builds the
-  dual-architecture framework. `GhosttyKitPatches/README.md` records Jack Heart's
-  October 6 authorization for future artifact updates through that workflow.
-  This design step neither publishes an artifact nor changes that authorization.
-
-Primary references (inspected October 15): [pinned renderer](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/renderer/generic.zig),
-[pinned Metal shader](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/renderer/shaders/shaders.metal),
-[pinned configuration](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/config/Config.zig),
-[Ghostty option reference](https://ghostty.org/docs/config/reference#minimum-contrast).
-The pinned source, not newer documentation, controls API availability.
-
-## Chosen approach
-
-### One renderer owns cell appearance
-
-Extend the maintained patches with terminal-feedback support; keep the upstream
-revision fixed for this change. The terminal remains the source of selection,
-search matches, SGR colors and command exit status. The renderer derives cell
-appearance, correction and temporary feedback. Swift owns native focus and the
-parent's copy/search UI. Existing Rust/Swift status observations remain the only
-source of Working, Waiting, Blocked and Error. No new SQLite record, DTO, status
-inference or CLI control API is needed; iOS and external terminal hosts are unchanged.
-
-Move block fill composition into `generic.zig` before text contrast. Feed existing
-shell hover intent through a small surface setter; resolve blocks from Screen's
-tracked pins, not Swift's row snapshots. Apply this styling only to shell surfaces.
-Keep neutral selection distinct from the red failure fill; header/gutter geometry
-continues to derive from the existing block query. Resolve neutral fill against
-the terminal's effective palette, including imported light configurations.
-
-Add presentation-only feedback state to the existing surface/render path: current
-selection revision, current match identity and bounded effect deadline. Never
-persist it or use it to control a Session. Bound storage to the viewport/existing
-selection, not copied text length or scrollback size.
-
-Copy uses the parent's successful-copy path. Extend the existing selection read
-with an opaque surface-local revision receipt captured under the same renderer
-lock as the bytes; after pasteboard success, confirm that receipt to the surface.
-Only a still-current receipt may illuminate its cells. A changed selection,
-screen reset, surface destruction, reflow or viewport change cancels the temporary
-cue instead of highlighting unrelated text. Do not retain raw surface pointers in
-asynchronous callbacks. No cue for failed/empty reads or failed pasteboard writes.
-Programmatic OSC clipboard writes and non-selection custom copy actions retain
-behavior but do not claim that visible cells were copied.
-
-The parent notice and accessibility announcement survive. Move its visual placement
-out of the cell rectangle using the existing mount/pane chrome, retaining one
-notice owner; no second toast, search bar or clipboard writer.
-
-### Feedback policy (defaults for the demo)
-
-| Action | Presentation | Reduced motion |
+| Action | Presentation | Reduce Motion |
 |---|---|---|
-| Select/drag | Immediate native selection; no delayed selection or animated scrolling | Same selection |
-| Successful Copy | Neutral edge on the copied cell range, one 160 ms ease-out; existing textual confirmation | Static edge until the same deadline, same notice/announcement |
-| Next/previous Find match | One 160 ms edge emphasis on the newly selected match; normal active-match styling remains | Immediate persistent active-match style |
-| Pane focus/context return | Reuse `DesignAnimation.standard` for the existing focus outline; no pixel motion or fade of terminal contents | Immediate outline |
-| Reported state change | Existing semantic label/color changes; at most the existing brief transition | Immediate label/color |
+| Select/drag | Immediate native selection | Same |
+| Successful Copy | Neutral cell edge, 160 ms ease-out; header notice and accessibility announcement | Static edge until the same deadline |
+| Next/previous Find | 160 ms edge on the newly selected match | Persistent active-match styling |
+| Focus/context return | Existing focus outline and `DesignAnimation.standard` | Immediate outline |
+| Reported state change | Existing semantic label/color | Immediate label/color |
 
-Copy is neutral, not green success or red failure. Edges never recolor glyphs or
-capture pointer events. Current text selection retains precedence over search;
-copy emphasis cannot conceal either. Repeated actions replace the current deadline,
-not queue pulses. Hidden panes cancel transient cues, retain semantic state and
-never replay old effects on return. Reduce Motion changes propagate to retained
-surfaces immediately, including an effect already running. Unknown activity stays
-unlabelled; selection/focus is not evidence of Working. Preserve the parent's
-native-responder test rather than treating pane selection as keyboard focus.
+Copy reads bytes and an opaque surface-local receipt under one renderer lock;
+only pasteboard success confirms it. Selection replacement, reset, reflow,
+viewport changes, hiding and destruction cancel stale cues. Repeated actions
+replace the deadline; hidden panes never replay it. Clear-on-copy cancels the
+cell cue but retains the textual confirmation. OSC/custom clipboard writes do
+not claim visible cells were copied. Selection precedes search; glyphs and copied
+bytes remain unchanged. Synchronized output cancels edges without thawing text.
+Reduce Motion changes reach retained surfaces immediately.
 
-### Contrast without erasing the palette
+Copy notices carry the existing surface-incarnation UUID. Each window checks
+its retained pool, rejecting another window's notice or late dismissal from a
+replaced surface. Find teardown closes only an existing bar, avoiding lazy UI
+construction during deallocation. Failure backgrounds remain red even when
+selected; the selected gutter remains neutral. Feedback wakeups recompute the
+absolute deadline after unrelated shader draws, so static cues still expire.
 
-Set `minimum-contrast = 3` in `GhosttyManager.loopflowConfig`, which loads
-**before user defaults**. Keep `1` as the exact correction bypass. Existing user
-values win; preserve their palette, search and selection colors. This is a
-rendering default, not an accessibility certification or a new theme definition.
-Configuration is presently initialized once: document reopening the app for an
-edited setting; do not recreate retained surfaces to apply it.
+`minimum-contrast = 3` loads before user defaults; `1` bypasses correction exactly.
+Reopen the app after configuration changes. Already-passing colors remain intact.
+For failing foregrounds, interpolate toward black or white and choose the
+feasible correction with the smallest linear-RGB displacement, preserving channel
+ordering and premultiplied alpha.
+Metal uses Display P3 luminance; GLSL uses sRGB. Unattainable ratios use the best
+endpoint without making faint text opaque. This promises neither exact hue nor
+separation of arbitrarily similar colors. Concealment, graphics exemptions,
+cursor overrides, emoji and images retain their existing behavior. Transparent
+backdrops, background images and custom postprocessing have no unconditional
+contrast guarantee. User palette, selection and search colors remain authoritative.
 
-Replace the existing black/white-only `contrasted_color` in Metal and GLSL in
-place. For an opaque glyph below the requested ratio R, compute the two feasible
-target luminances relative to the resolved background B:
+Configuration alone collapsed semantic colors under upstream's black/white-only
+correction. Swift cell overlays duplicated selection/geometry and tinted glyphs;
+postprocessing lacked semantic masks and success events. Native renderer feedback
+uses existing timer scheduling with viewport-bounded storage instead.
 
-- darker: `(L(B) + .05) / R - .05`;
-- lighter: `R * (L(B) + .05) - .05`.
+## Delete — do not maintain
 
-Interpolate the foreground toward black or white only far enough to reach each
-feasible target; choose the candidate with the smaller squared linear-RGB change.
-Keep already-passing colors exactly unchanged. This preserves channel ordering
-and more chromatic information than replacing the entire color, without promising
-perceptually constant hue or separation of arbitrarily similar input colors.
-If neither target is feasible at a user-selected high ratio, use the endpoint
-with the best attainable contrast and report that limit in the fixture results.
+Completed: Swift cell fills (`GhosttyCommandBlockStyle.fill` and its exclusive
+assertions), both black/white-only shader implementations, and `TerminalCopyNotice`.
+The remaining single-color `GhosttyCommandBlockStyle` wrapper is now a direct
+`ghosttyCommandBlockAccent` function. Clipboard decoding goes straight from
+Ghostty's bytes to String, without an intermediate Data copy or duplicate
+empty-text check. Preserve block selection/status, gutter/header geometry, hover,
+copy extraction, bounded reads, search counts and retained-surface tests.
+No remaining predecessor path or exclusive fixture needs deletion.
 
-Perform calculations in the shader's actual linear color space: Metal's converted
-Display P3 and OpenGL's sRGB need their respective luminance coefficients. Preserve
-premultiplied alpha; evaluate faint text over the actual background and solve within
-its original alpha's attainable range. Never make faint text opaque just to pass.
-Keep glyph coverage, concealment, cursor overrides, graphics exemptions and images
-unchanged. Transparency over unknown desktop content, background images and
-user-authored postprocessing cannot receive an unconditional contrast guarantee;
-show these as explicit limits, not passing opaque-text cases.
-
-A CPU numerical probe on October 15 supports the mechanism, not shader parity:
-against `#24211F`, dark red `#442222` moves from 1.141:1 to approximately
-`#746868`, and dark green `#224422` from 1.461:1 to approximately `#616F61`;
-both unquantized results reach 3:1. Upstream turns both white. Against `#FAF8F5`,
-matching foreground becomes approximately `#91908E`; `#888888` already passes and
-is unchanged. A mid-gray background also has a feasible darkening route. Allow
-quantization tolerance in pixel tests; the analytical calculation alone proves
-neither P3 correctness nor rendered legibility.
-
-## Alternatives and failure analysis
-
-- **Configuration only:** cheap and supported, but black/white collapse fails the
-  semantic-color requirement and cannot acknowledge successful Copy. Rejected.
-- **Swift overlays for every cell:** avoids a binary change but duplicates range,
-  wrapping and scroll ownership. The prior command-block selection duplication
-  already failed; color contrast would still see the wrong composited background.
-  Rejected for cell effects; retain Swift's pane and notice responsibilities.
-- **Custom GLSL postprocessing:** blocked by missing semantic masks/events and
-  affects glyph pixels globally. Adding those interfaces is as much work as the
-  native renderer route with less control. Rejected.
-- **Native cell rendering:** selected. One artifact update and paired Metal/GLSL
-  maintenance are the real cost. No new dependency or shader catalogue.
-
-Wild success is confidence without attention tax: Jack copies once, finds the
-right error, returns to the right draft and can still read what red/green means.
-Wild failure is a calm-looking screenshot that drops selection on resize, confirms
-an unsuccessful copy, brightens concealed text or keeps every retained pane busy.
-Those are behavioral tests below, not visual polish deferred indefinitely.
-
-## Delivery and internal slices
-
-One coherent implementation/PR; slices are construction order, not independent
-compatibility releases. Preserve the recorded stack on LOO-462/#1531 and integrate
-parent changes through Loopflow's stack sync. Jack Heart's October 15 confirmation
-is retained in `scratch/stack-direction.md`; it grants no parent landing approval.
-Land the stacked parent first. No live provider takeover,
-production installation, planning migration, theme catalogue, cursor trails,
-continuous glow, new notification policy or broader Workflow-loading repair.
-
-1. **This slice — correct composition and color.** Remove Swift's over-glyph
-   block fills while moving the same selected/failed/hover behavior into Ghostty.
-   Replace contrast in both shader backends and set the overrideable default.
-   Add headless `TerminalColorTests` and patch tests named `terminal contrast`;
-   preserve block reflow/selection and original-color bypass. Focused proof:
-   renderer color vectors plus composed block-background cases; build the patched
-   framework and changed Swift app. No requirement for a display.
-2. **Action feedback and parent cutover.** Integrate LOO-462's actual delivered
-   `TerminalSearchBar`/copy owner, add selection receipts and finite renderer
-   effects, and feed Reduce Motion to retained surfaces. Use existing match
-   messages and native focus events. Extend parent `TerminalPolishTests`; add
-   `TerminalFeedbackTests` for stale receipts, cancellation and lifetime. Preserve
-   exact clipboard bytes, notification text, keyboard routing and drafts.
-3. **Artifact, proof and demo.** Extend `ghostty-build` filters for new behavior
-   and shader verification; build a new immutable artifact version (next available
-   after lf3, not an overwritten lf3). Verify public download/checksum before
-   updating Package.swift. Keep build script, patch README and artifact pin in
-   agreement. Update `swift/README.md` with effects, override and limits. Run gate
-   once, then collect paired native measurements and review the demo.
-
-**Delete — do not maintain (completed):** removed `GhosttyCommandBlockStyle.fill`,
-`surfaceLayer.backgroundColor = style.fill.cgColor`, and their exclusive Swift
-fill assertions; renderer tests now cover composition and failure precedence.
-Replaced both old black/white-only shader implementations. Removed the parent's
-`TerminalCopyNotice` overlay; `showCopyConfirmation` now feeds the pane strip
-through surface-incarnation-scoped notices. Keep block selection/exit status,
-headers, gutter markers, hover, copy extraction, bounded reads, search counts and
-retained-surface tests. Do not maintain old/new rendering paths, a Swift selection
-mirror, duplicated search storage or test-only production interfaces.
-
-## Done when and gate contract
-
-The test/scenario names below now exist. Gate owns the complete affected-suite
-run; implementation ran focused behavior and build checks. The source-to-consumer scenario feeds ANSI/truecolor,
-inverse/faint/conceal, a failed shell block and repeated error text into the real
-terminal model; selects/copies, confirms the receipt, navigates search, advances
-the effect clock and resizes. Assert original text/style storage and copied bytes,
-resolved cell/background output, final shader pixels and the host's derived
-notice/count/focus behavior. Terminal engine and AppKit boundary proofs compose;
-headless host tests do not pretend to mount a native provider.
-
-| Gate command | Required result |
-|---|---|
-| `uv run python scripts/loopflow-dev.py ghostty-build` | Existing patch/parser/ABI tests plus `terminal contrast` and `terminal feedback` pass; both shader backends compile; both framework architectures export the new receipt/feedback API |
-| `scripts/test_desktop.sh --filter 'TerminalColorTests|TerminalFeedbackTests|TerminalPolishTests|GhosttyShellBlockTests|WorkPaletteTests|WorktreeWorkspaceTests|DesktopHeadlessTests' -Xswiftc -gnone` | Real color fixtures, parent UI models/views, retained state and shell output pass without WindowServer; build current fixture `lf` first where required by the suite |
-| `uv run python scripts/test.py --loopflow` | Xcode fallback app and test runners compile; no claim of Ghostty rendering |
-| `uv run python scripts/check_swift_multiplatform_boundaries.py` | Platform separation remains valid |
-
-Add a headless offscreen Metal check to `TerminalColorTests`, exercising the
-**production shader** into a texture for opaque, dim, selected, search, block-fill,
-sRGB/P3 and exempt-glyph fixtures. It must not require a window or permission
-prompt. A local `MTLCreateSystemDefaultDevice()` probe succeeded without opening
-a window; this establishes device availability, not shader execution or CI parity.
-If the host has no suitable device, record that check as unavailable and
-route it to a capable macOS CI runner; a CPU reimplementation is not shader proof.
-GLSL is compiled at pipeline creation, so a Zig/library build alone is not shader
-compilation proof. Extend `ghostty-build` with offline GLSL validation using the
-same include-expanded source and version prefix as `opengl/shaders.zig`, alongside
-the Metal production-shader test; fail on shader errors rather than silently
-skipping the second backend.
-
-Required observable assertions:
-
-- Copy succeeds exactly once with exact UTF-8/line endings, including wrapped and
-  wide/combining text and command blocks; empty/failure/stale receipt yields no
-  cell success cue. Repeated copy, clear-on-copy configuration and selection
-  replacement do not illuminate the wrong range.
-- Search pending, no matches, selected match and close remain distinct. Selection
-  wins overlap; closing Find restores input only when Find owned it. Resize,
-  switching, hidden output and reset preserve valid semantic state without stale
-  match/copy flashes, duplicated surfaces or stolen focus.
-- Color vectors cover 16/256-color and truecolor, imported dark/light palettes,
-  OSC palette changes, inverse/selection/search and faint/concealed text. Passing
-  colors and `minimum-contrast=1` are unchanged; chosen red/green fixtures remain
-  distinguishable; unattainable and exempt cases are explicitly classified.
-- Effects terminate at their deadline and request no further feedback redraws.
-  No additional polling, full scrollback copy, subprocess or GPU synchronization
-  is introduced on the typing path. Hidden/reduced-motion cases do not animate.
-  Existing cursor/Kitty/user-shader schedules are measured separately.
-
-The new `terminal-feedback` benchmark records baseline/candidate source and
-artifact hashes, configuration, scale/viewport, font, fixture input and visible
-pane count. Use identical optimized builds and scenarios: idle, sustained typing,
-copy bursts, Find navigation and repeated retained-Task switching. Compare
-input-to-visible-character, effect onset/expiry, frame/GPU time, process CPU and
-RSS; include first-use and warm samples and failed attempts. Existing
-`terminal_key_to_draw` ends at a draw call, **not** presented pixels or provider
-readiness. Retain it as a separate diagnostic; native capture must establish the
-visible endpoint. Do not claim measured improvement before these runs.
-
-Native demo/review judges whether the cues are helpful and calm on representative
-Codex/Claude screens, diffs and a colorful utility, with original-color mode and
-Reduce Motion. Missing display access defers that judgment, not the headless
-implementation checks. Delivery evidence must state measured costs and remaining
-limits rather than inventing a latency threshold or reviving a soak requirement.
+Compression also removed accidental eight-component foreground test colors:
+only `CellBg` grew; `CellText.color` remains RGBA. `ghostty-build` now includes
+`renderer.cell` tests. Metal cases produce corrected/reference rows from one
+input each; the harness no longer labels its own bypass as a production graphics
+exemption. The red/green assertion selects colors by value instead of magic
+array offsets. Benchmark baselines link their existing manifest instead of
+recursively embedding all earlier manifests.
 
 ## Remaining delivery evidence
 
-- Final artifact is published and pinned: `GhosttyKit-a60e9e2-lf5.xcframework.zip`,
-  public download SHA-256 `032f84a23d685cb87be75d06222d2bb07d3b8a847e4631e27beb8799bcb8be62`.
-  The earlier `lf4` upload completed before cancellation; it is not selected by
-  the final manifest and is never overwritten.
-- Gate: run the affected suites and automated acceptance commands above once.
-  The focused checks cover receipt lifetimes, geometry/reset invalidation,
-  exact wrapped/wide/combining text, selected-failure appearance, surface-local
-  notice routing, finite deadline scheduling, production color functions and
-  background-edge fragments. The Metal harness does not claim full glyph or
-  source-to-presented-pixel proof; the mounted fixture remains a separate check.
-- Demo/review: collect paired optimized native observations and presented-pixel,
-  GPU/CPU/RSS evidence; judge cues on configured Codex/Claude, diffs, imported
-  palettes, original-color mode and Reduce Motion. No latency improvement or
-  visual acceptance is claimed. The inherited parent landing hold remains.
+One implementation/PR. No production installation, provider takeover, planning
+migration, broader Workflow repair, cursor trails or notification redesign.
+Ghostty stays pinned to `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0`.
+The repaired patch is published and pinned as `GhosttyKit-a60e9e2-lf6.xcframework.zip`;
+public download SHA-256 is `28cb9cb1c0e7f195087b3a59f2023ba08e68b83237ccfd90e07f1a120a4c049b`.
+Earlier lf4/lf5 uploads remain immutable. Jack Heart's October 6 authorization
+covers future artifacts through the patch README workflow.
 
-Review repairs are in `scratch/terminal-review.md`: both queued findings plus
-absolute expiry under custom-shader redraws and safe unopened-Find teardown.
-No parallel clipboard writer, search store, selection owner or animation loop
-was added. No Wave memory change is selected.
+Gate owns affected suites and acceptance once; reuse identical content/commands:
 
-Check: `zig build test -Dtest-filter='terminal contrast' -Dtest-filter='terminal feedback'` and `zig build -Doptimize=ReleaseFast -Demit-macos-app=false` PASS; `scripts/test_desktop.sh --filter 'TerminalColorTests|TerminalFeedbackTests|TerminalPolishTests|GhosttyShellBlockTests' -Xswiftc -gnone --jobs 4` with `LOOPFLOW_GHOSTTY_SOURCE` PASS against the public lf5 artifact (12 tests, one native diagnostic skipped; 324 production Metal cases and background fragments). Offline GLSL, Python artifact test, Ruff and platform-boundary checks PASS. Gate owns broader suites; demo/review owns native appearance and paired performance evidence.
+| Command | Evidence |
+|---|---|
+| `uv run python scripts/loopflow-dev.py ghostty-build` | Patch/parser/ABI and renderer-cell tests, both shader backends, universal ReleaseFast framework |
+| `scripts/test_desktop.sh --filter 'TerminalColorTests\|TerminalFeedbackTests\|TerminalPolishTests\|GhosttyShellBlockTests\|WorkPaletteTests\|WorktreeWorkspaceTests\|DesktopHeadlessTests' -Xswiftc -gnone` | Color, host models, retained state and shell output without WindowServer; build current fixture lf where needed |
+| `uv run python scripts/test.py --loopflow` | Xcode fallback app/tests compile; no renderer claim |
+| `uv run python scripts/check_swift_multiplatform_boundaries.py` | Platform separation |
+
+Production Metal functions and background fragments run offscreen; GLSL has
+compile validation using the renderer's include-expanded sources, not rendered
+color parity evidence. A missing Metal device defers the shader check to capable
+macOS CI; the build script fails rather than automatically dispatching that work.
+These checks do not prove full glyph composition, graphics-exemption routing or
+source-to-presented-pixel behavior. The existing Zig cases prove receipt
+invalidation, wrapped/wide/combining text preservation, finite deadlines and block
+style precedence; Swift proves copy-message/count models and incarnation routing.
+Failed pasteboard writes, the composed search lifecycle, imported palettes and
+mounted draft/focus/scroll retention still need behavioral evidence.
+Gate must distinguish covered assertions from still-unproved acceptance:
+
+- Exact UTF-8/line endings, wrapped/wide/combining text and blocks; no cue on
+  failed/empty/stale reads or failed pasteboard writes; repeated/clear-on-copy.
+- Find pending/empty/selected/closed states, selection precedence, focus restored
+  only when Find owned it; resize/reset/hidden output and switching preserve
+  state without stale flashes, duplicate surfaces or stolen input.
+- ANSI 16/256 and truecolor, imported light/dark palettes, OSC changes,
+  inverse/selection/search, faint/concealed and exempt glyphs. Bypass/passing
+  colors unchanged, red/green distinct, unattainable cases classified.
+- Feedback stops at its deadline with no further cue redraws. No typing-path
+  polling, scrollback copy, subprocess or GPU synchronization. Measure existing
+  cursor/Kitty/custom-shader scheduling separately.
+
+Demo/review: use two retained panes with configured Codex/Claude, a shell, diffs
+and a colorful utility. Copy a multiline error, Find and navigate it, return to
+waiting work, resize/switch and confirm unsent drafts, selection and scrolling.
+Repeat with difficult colors, imported light palettes, original-color mode and
+Reduce Motion; Jack judges whether cues are helpful and calm.
+
+`scripts/desktop_performance.py terminal-feedback` prepares the contained fixture;
+`--mounted` collects optional first/warm draw-call diagnostics and CPU/RSS logs.
+Compare identical optimized baseline/candidate scenarios: idle, typing, copy
+bursts, Find and retained returns, recording source/artifact/input/configuration,
+scale/viewport, font and pane count. Preserve failed attempts. Native capture
+must separately establish input-to-visible-character, onset/expiry and GPU/frame
+cost. Draw-call diagnostics and replayed output prove neither presented pixels
+nor provider readiness. No measured improvement or visual acceptance is claimed.
+
+Check: reconciliation `git diff --check` and `git diff --cached --check` PASS; `lf context` PASS (memory and scratch within both limits; no child Product memories present); no implementation changes or test reruns. Retained pre-sync evidence: `uv run python scripts/loopflow-dev.py ghostty-build` with Zig 0.16 on PATH PASS (283 Zig tests, 4 skipped; 324 Metal cases; GLSL; universal ReleaseFast; lf6 public checksum verified); `scripts/test_desktop.sh --filter 'TerminalColorTests|TerminalFeedbackTests|TerminalPolishTests|GhosttyShellBlockTests' -Xswiftc -gnone --jobs 4` PASS against public lf6 (10 passed, native diagnostic and already-run Metal subprocess skipped); artifact pytest, paired fixture preparation, Ruff and diff check PASS. Initial build selected installed Zig 0.15.2 and failed; rerunning with the existing 0.16 toolchain resolved it. Gate owns broader acceptance; demo/review owns native judgment and paired performance. Logs: `/tmp/loo487-compress-{ghostty,lf6}.log`.

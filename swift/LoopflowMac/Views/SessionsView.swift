@@ -1480,6 +1480,7 @@ private struct SessionPaneView: View {
     let hover: PaneHover
     @State private var bellRinging = false
     @State private var terminalTitle: String?
+    @State private var copyConfirmation: String?
 
     private var hovering: Bool { hover.paneId == pane.id }
 
@@ -1534,12 +1535,18 @@ private struct SessionPaneView: View {
                   update.terminal == _terminalIdentity else { return }
             terminalTitle = sessions.surfaces.title(for: update.terminal)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyCopyConfirmation)) { notification in
+            guard let terminal = _terminalIdentity,
+                  sessions.surfaces.ownsCopyConfirmation(notification, terminal: terminal) else { return }
+            copyConfirmation = notification.userInfo?["message"] as? String
+        }
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
         }
         .onChange(of: _terminalIdentity) { _, _ in
             bellRinging = false
             terminalTitle = nil
+            copyConfirmation = nil
         }
     }
 
@@ -1570,6 +1577,14 @@ private struct SessionPaneView: View {
                     .help(error).accessibilityLabel(error)
             }
             Spacer(minLength: 8)
+            if let copyConfirmation {
+                Text(copyConfirmation)
+                    .font(Typography.body(11))
+                    .foregroundStyle(TerminalPalette.foreground)
+                    .lineLimit(1)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("terminal-copy-confirmation")
+            }
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))

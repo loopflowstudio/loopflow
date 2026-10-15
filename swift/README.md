@@ -264,6 +264,23 @@ the focused header reveals split right, split down and close; its context menu
 and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
 
+Copy selected text with **⌘C**: its cells briefly gain a neutral edge and the
+pane header confirms the line count. Find navigation briefly emphasizes the
+current match. Both cues end after 160 ms; hiding a pane cancels them. Reduce
+Motion keeps Copy's edge static and uses Find's persistent match styling.
+
+```ini
+# In your Ghostty configuration; reopen Loopflow after editing.
+minimum-contrast = 1
+```
+
+The default is `3`. Set `1` to preserve original colors. Correction moves only
+low-contrast text toward black or white while retaining its alpha and channel
+ordering. It preserves more color than replacing text with black or white, but
+cannot guarantee exact hue or separation of nearly identical colors. Faint text
+may not reach the requested ratio. Graphics, images, transparent backdrops and
+custom postprocessing are outside the opaque-text contrast guarantee.
+
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 

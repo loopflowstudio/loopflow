@@ -2,16 +2,10 @@
 
 ## LOO-487 assumptions — 2026-10-15
 
-- Jack Heart accepted implementation for hands-on review on October 15: use an
-  overrideable `minimum-contrast = 3` and finite 160 ms cell emphasis using the
-  existing motion token. Original-color mode remains `1`; final visual judgment
-  awaits the demo.
-- LOO-462's delivered copy/Find work was integrated through `lf sync --manual`
-  at merge `213136cd79`, preserving its UI owners. Its separate Workflow-loading
-  landing hold remains live; no parent repair is selected.
-- Contrast preserves channel ordering, not exact hue or arbitrary color separation.
-  Faint alpha, graphics, images and unknown transparent backdrops retain explicit
-  limits. Review the fixture results before accepting the default.
+The [consolidated terminal design](terminal-polish.md) retains Jack Heart's
+accepted policy, contrast limits, lf6 artifact/check evidence and remaining
+demo judgment. The parent Workflow-loading landing hold remains live.
+
 ## LOO-462 parent design context — 2026-10-15
 
 - Jack Heart redirected this design conversation to sidebar exploration. The
@@ -19,9 +13,9 @@
   loading proposals remain separate, unaccepted drafts.
 - The completion investigation records a roughly 1.2-second command; historical
   confirmation and UI delay remain unmeasured. No cause or latency target is accepted.
-- Proposed two-phase progress wording in
-  [the current design](make-loopflow-a-work-first.md), including a ten-second
-  confirmation deadline independent of heartbeats, is unreviewed.
+- Proposed two-phase progress wording, including a ten-second confirmation
+  deadline independent of heartbeats, is unreviewed. The
+  [Workflow-loading note](workflow-loading.md) preserves the historical source.
 - Existing feedback leaves Fantasia → manabot ambiguous between folder rename
   and display naming. Studio/Silencio portfolio removal was an interpretation,
   not authorization for deleting repository directories.

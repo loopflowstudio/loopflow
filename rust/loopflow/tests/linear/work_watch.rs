@@ -479,6 +479,63 @@ fn a_flow_graph_write_does_not_requery_work_history() {
 }
 
 #[test]
+fn diagnostic_history_is_read_only_when_requested() {
+    let home = Machine::new();
+    home.plan(1);
+    home.conversation();
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    let conn = home.raw();
+    // This test decodes mechanical history, unlike the lightweight Session fixture.
+    conn.execute("UPDATE processes SET trace_id=id", [])
+        .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='conversation'",
+        [task.id.as_str(), home.wave.id().as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+        SELECT 'conversation','observed','diagnostic-process',1,'{}',id FROM processes LIMIT 1",
+        [],
+    )
+    .unwrap();
+    let mut watch = home.watch();
+    watch.request(serde_json::json!({"action":"scope", "id":1, "repo":null,
+        "headless":false, "task":"FIX-1", "wave":null, "activity":null}));
+    let frames = watch.checkpoint(2, &[]);
+    let overview = frames
+        .iter()
+        .find_map(|frame| match &frame.content {
+            WorkContent::Task(Some(part)) => Some(part),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!overview.work.sessions.is_empty());
+    assert!(serde_json::to_value(&overview.work)
+        .unwrap()
+        .get("processes")
+        .is_none());
+    assert!(!watch.heartbeat().contains_key("task_history"));
+    watch.request(serde_json::json!({"action":"task_history", "id":3, "task":"FIX-1"}));
+    let frames = watch.checkpoint(4, &[]);
+    let history = frames
+        .iter()
+        .find_map(|frame| match &frame.content {
+            WorkContent::TaskHistory(Some(part)) => Some(part),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing diagnostic history: {frames:?}"));
+    assert!(!history.work.processes.is_empty());
+    watch.request(serde_json::json!({"action":"task_history", "id":5, "task":null}));
+    watch.checkpoint(6, &[]);
+    let before = watch.heartbeat()["task_history"];
+    conn.execute("UPDATE processes SET command='changed'", [])
+        .unwrap();
+    watch.checkpoint(7, &[]);
+    assert_eq!(watch.heartbeat()["task_history"], before);
+}
+
+#[test]
 fn selected_task_arrives_before_portfolio_and_confirmation() {
     let home = Machine::new();
     home.plan(1);

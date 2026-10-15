@@ -542,6 +542,10 @@ lf monitor work --watch --json    # what a window shows, as it changes
 Each window keeps one such reader open through `RegistryQuery.watchWork()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
 with its Workflow and every Flow process, the shown Wave's detail and activity.
+Mechanical Process history is a separate `task_history` subscription, enabled
+only while the Task's Debug disclosure is open. Closing it stops those queries;
+retained history and cached readings are not deleted. The ordinary header never
+waits for the diagnostic history scan.
 After Task actions and Workflow changes, the window waits for a checkpoint:
 the reader delivers changed subscriptions before confirming the committed state.
 Unchanged subscriptions do not query again. A part arrives again only when a commit

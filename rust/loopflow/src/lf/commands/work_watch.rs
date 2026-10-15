@@ -28,7 +28,7 @@ use crate::repository::CanonicalRepo;
 use crate::store::changes::StoreChanges;
 use crate::store::sqlite::StoreRevisions;
 use crate::store::{SharedStore, StorageConfig};
-use crate::task_work::TaskWork;
+use crate::task_work::{TaskOverview, TaskWork};
 
 /// A burst is projected once it has been quiet this long…
 const QUIET: Duration = Duration::from_millis(100);
@@ -75,6 +75,7 @@ pub enum WorkContent {
     PeerPlanning(Option<PeerPlanningPart>),
     Sessions(Option<SessionsPart>),
     Task(Option<Box<TaskPart>>),
+    TaskHistory(Option<Box<TaskHistoryPart>>),
     Wave(Option<Box<WavePart>>),
     WorkActivity(Option<WorkActivityPart>),
     Activity(Option<ActivitySnapshot>),
@@ -106,14 +107,20 @@ pub struct SessionsPart {
     pub entries: Vec<SessionRecord>,
 }
 
-/// `lf task status` work and `lf flow show --processes` for each of its Flows,
+/// Selected workspace facts and `lf flow show --processes` for each of its Flows,
 /// in the same order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPart {
     pub task: String,
-    pub work: TaskWork,
+    pub work: TaskOverview,
     pub flow_processes: Vec<FlowProcessDetail>,
     pub comments: crate::work::task::comment::TaskComments,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskHistoryPart {
+    pub task: String,
+    pub work: TaskWork,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,9 +163,18 @@ enum Request {
         activity: Option<WorkActivityScope>,
     },
     /// Explicit retry or recovery after a gap in observation.
-    Refresh { id: u64 },
+    Refresh {
+        id: u64,
+    },
     /// Confirm committed writes without forcing unchanged subscriptions to read.
-    Checkpoint { id: u64, replay: Vec<Part> },
+    Checkpoint {
+        id: u64,
+        replay: Vec<Part>,
+    },
+    TaskHistory {
+        id: u64,
+        task: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -168,11 +184,13 @@ struct Scope {
     task: Option<String>,
     wave: Option<String>,
     activity: Option<WorkActivityScope>,
+    history: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Part {
+    TaskHistory,
     Sessions,
     Planning,
     PeerPlanning,
@@ -185,13 +203,14 @@ enum Part {
 impl Part {
     // Deliver the selected Work before the portfolio; every part still reads
     // the same snapshot, and a checkpoint follows the complete pass.
-    const ALL: [Part; 7] = [
+    const ALL: [Part; 8] = [
         Part::Task,
         Part::Wave,
         Part::Sessions,
         Part::Planning,
         Part::PeerPlanning,
         Part::WorkActivity,
+        Part::TaskHistory,
         Part::Activity,
     ];
     const SCOPED: [Part; 5] = [
@@ -208,6 +227,7 @@ impl Part {
             Part::Planning => "planning",
             Part::PeerPlanning => "peer_planning",
             Part::Task => "task",
+            Part::TaskHistory => "task_history",
             Part::Wave => "wave",
             Part::WorkActivity => "work_activity",
             Part::Activity => "activity",
@@ -250,7 +270,11 @@ impl Part {
             Part::Planning | Part::Wave => PLANNING_CLOCK,
             // Transport selection lives in config, so it can change without a store write.
             Part::PeerPlanning => Duration::from_secs(5),
-            Part::Activity | Part::Sessions | Part::Task | Part::WorkActivity => ACTIVITY_CLOCK,
+            Part::Activity
+            | Part::Sessions
+            | Part::Task
+            | Part::TaskHistory
+            | Part::WorkActivity => ACTIVITY_CLOCK,
         }
     }
 
@@ -258,6 +282,7 @@ impl Part {
         match self {
             Part::Sessions | Part::PeerPlanning => scope.repo.is_some(),
             Part::Task => scope.task.is_some(),
+            Part::TaskHistory => scope.history.is_some(),
             Part::Wave => scope.wave.is_some(),
             Part::WorkActivity => scope.activity.is_some(),
             Part::Planning | Part::Activity => true,
@@ -537,9 +562,14 @@ impl Reader {
                 let next = Scope {
                     repo,
                     headless,
-                    task,
+                    task: task.clone(),
                     wave,
                     activity,
+                    history: if self.scope.task == task {
+                        self.scope.history.clone()
+                    } else {
+                        None
+                    },
                 };
                 for part in Part::SCOPED {
                     let changed = match part {
@@ -562,6 +592,11 @@ impl Reader {
                     }
                 }
                 self.scope = next;
+                id
+            }
+            Request::TaskHistory { id, task } => {
+                self.scope.history = task;
+                self.parts.entry(Part::TaskHistory).or_default().force = true;
                 id
             }
             Request::Refresh { id } => {
@@ -674,7 +709,7 @@ impl Reader {
                         .sqlite
                         .resolve_task_id(&selector, None)?
                         .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
-                    let work = store.sqlite.task_work(&task)?;
+                    let work = store.sqlite.task_overview(&task)?;
                     let mut flow_processes = Vec::with_capacity(work.flow_processes.len());
                     for flow in &work.flow_processes {
                         let id = flow.summary.id.as_str();
@@ -690,6 +725,21 @@ impl Reader {
                         task: selector,
                         work,
                         flow_processes,
+                    })))
+                }
+                Part::TaskHistory => {
+                    let selector = self
+                        .scope
+                        .history
+                        .clone()
+                        .context("no diagnostic Task in scope")?;
+                    let task = store
+                        .sqlite
+                        .resolve_task_id(&selector, None)?
+                        .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
+                    WorkContent::TaskHistory(Some(Box::new(TaskHistoryPart {
+                        task: selector,
+                        work: store.sqlite.task_work(&task)?,
                     })))
                 }
                 Part::Wave => {
@@ -745,7 +795,7 @@ impl Reader {
                 entries: Vec::new(),
             })),
             Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
-            Part::Task | Part::Wave | Part::WorkActivity => {
+            Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
                 anyhow::bail!("no Loopflow store exists in this Machine yet")
             }
         })
@@ -758,6 +808,7 @@ fn unavailable(part: Part) -> WorkContent {
         Part::PeerPlanning => WorkContent::PeerPlanning(None),
         Part::Sessions => WorkContent::Sessions(None),
         Part::Task => WorkContent::Task(None),
+        Part::TaskHistory => WorkContent::TaskHistory(None),
         Part::Wave => WorkContent::Wave(None),
         Part::WorkActivity => WorkContent::WorkActivity(None),
         Part::Activity => WorkContent::Activity(None),
@@ -976,6 +1027,11 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     Ok(content) => (None, content),
                     Err(error) => (Some(format!("{error:#}")), unavailable(part)),
                 };
+                tracing::debug!(
+                    part = part.name(),
+                    elapsed_us = now.elapsed().as_micros(),
+                    "projected Work"
+                );
                 let identity = fingerprint(&reason, &content)?;
                 let state = reader.parts.entry(part).or_default();
                 let send = state.force || state.sent != Some(identity);

@@ -417,7 +417,6 @@ fn members(
     Vec<TaskSession>,
     Vec<crate::durable::FlowProcessInventoryEntry>,
 )> {
-    let timing = std::time::Instant::now();
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
@@ -435,13 +434,10 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    eprintln!("members sessions {:?}", timing.elapsed());
-    let timing = std::time::Instant::now();
     let flows = flows_of_task(tx, task)?
         .iter()
         .map(|flow| super::flow_inventory::entry_in(tx, flow))
         .collect::<StoreResult<Vec<_>>>()?;
-    eprintln!("members flows {:?}", timing.elapsed());
     Ok((sessions, flows))
 }
 
@@ -474,14 +470,27 @@ impl SqliteStore {
         .collect()
     }
 
+    /// Current workspace facts, without enumerating mechanical Process history.
+    pub fn task_overview(&self, task: &TaskId) -> StoreResult<crate::task_work::TaskOverview> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
+        let (sessions, flow_processes) = members(&tx, task)?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
+        tx.commit()?;
+        drop(conn);
+        Ok(crate::task_work::TaskOverview {
+            sessions,
+            flow_processes,
+            workflow: workflow.map(|row| self.read_workflow(row, history)),
+        })
+    }
+
     /// Read all three owners in one SQLite snapshot, including closed history.
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let timing = std::time::Instant::now();
         let (sessions, flows) = members(&tx, task)?;
-        eprintln!("task_work members {:?}", timing.elapsed());
-        let timing = std::time::Instant::now();
         let processes = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -490,14 +499,11 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::processes::read_process)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        eprintln!("task_work processes {:?}", timing.elapsed());
-        let timing = std::time::Instant::now();
         let workflow = workflow_row(&tx, task)?;
         let history = workflow_moves(&tx, task)?;
         tx.commit()?;
         drop(conn);
         let workflow = workflow.map(|row| self.read_workflow(row, history));
-        eprintln!("task_work workflow {:?}", timing.elapsed());
         Ok(TaskWork {
             sessions,
             flow_processes: flows,
@@ -538,10 +544,7 @@ impl SqliteStore {
     ) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let timing = std::time::Instant::now();
         let (sessions, flows) = members(&tx, task)?;
-        eprintln!("task_work members {:?}", timing.elapsed());
-        let timing = std::time::Instant::now();
         let workflow = workflow_row(&tx, task)?;
         let history = workflow_moves(&tx, task)?;
         tx.commit()?;

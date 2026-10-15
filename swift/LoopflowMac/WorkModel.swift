@@ -766,7 +766,9 @@ final class WorkModel {
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
-    private(set) var taskWork = TaskReadings<TaskWork>()
+    private(set) var taskWork = TaskReadings<TaskOverview>()
+    private(set) var taskDiagnostics = TaskReadings<TaskWork>()
+    @ObservationIgnored private var diagnosticTask: String?
     /// That Task's Flow processes keyed by Flow process, from the same part.
     private(set) var flowProcesses: [String: FlowProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
@@ -1035,9 +1037,12 @@ final class WorkModel {
                 workflowCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
+                if let diagnosticTask { _ = send { .taskHistory(id: $0, task: diagnosticTask) } }
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
+                    Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     await apply(frame)
+                    Perf.end(Perf.workFrameApply, id: String(frame.sequence))
                     if frame.content.part != "heartbeat" { delay = .seconds(1) }
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
@@ -1054,6 +1059,15 @@ final class WorkModel {
             do { try await Task.sleep(for: delay) } catch { return }
             delay = min(delay * 2, .seconds(30))
         }
+    }
+
+    func observeTaskDiagnostics(_ task: RoadmapTask, visible: Bool) {
+        if visible { diagnosticTask = task.task.identifier }
+        else {
+            guard diagnosticTask == task.task.identifier else { return }
+            diagnosticTask = nil
+        }
+        _ = send { .taskHistory(id: $0, task: diagnosticTask) }
     }
 
     var workScope: WorkScope {
@@ -1137,6 +1151,7 @@ final class WorkModel {
         }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
+        taskDiagnostics.values = taskDiagnostics.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         taskWork.values = taskWork.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         if let selection, selection.kind == .task {
             taskWork.values[selection.id] = .unavailable(lastGood: taskWork[selection.id].value, reason: reason)
@@ -1211,6 +1226,15 @@ final class WorkModel {
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.flowProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
             if flowProcesses != runs { flowProcesses = runs }
+        case .taskHistory(let body):
+            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
+                  let task = task(id: shown.id)?.task else { return }
+            guard let body else {
+                taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
+                break
+            }
+            guard body.task == task.task.identifier else { return }
+            taskDiagnostics.values[task.id] = .available(body.work)
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -1295,7 +1319,9 @@ final class WorkModel {
         peerPlanningGeneration &+= 1
         savedSessionRepos = []
         waveDetail = nil
-        taskWork = TaskReadings<TaskWork>()
+        taskWork = TaskReadings<TaskOverview>()
+        taskDiagnostics = TaskReadings<TaskWork>()
+        diagnosticTask = nil
         flowProcesses = [:]
     }
 
@@ -1471,6 +1497,9 @@ final class WorkModel {
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
+        if let requested, requested.kind == .task {
+            Perf.begin(Perf.workflowReady, "task", id: requested.id)
+        }
         if let requested, requested.kind != .project {
             Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id)
         }

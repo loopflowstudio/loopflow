@@ -118,6 +118,9 @@ while it records — the intervals are named after what you did.
 | `workspace_current` | `LoopflowApp.init` | every part of the workspace was read by this launch, none shown from the saved workspace |
 | `hierarchy_interaction` | fold, presentation, filter keystroke, repository switch | next main-queue callback after changed rows are observed |
 | `task_workspace_ready` | `scenario=wave` / `task`: selection; `scenario=session`: Session opened | next main-queue callback after detail/focus is observed |
+| `workflow_ready` | Task selection | next main-queue callback after the header observes cached or fresh Workflow data |
+| `work_frame_decode` | one Work frame received (message = bytes) | typed frame decoded, off the main actor |
+| `work_frame_apply` | decoded Work frame (message = part) | model application completes |
 | `retained_workspace_action` | collapse, expand, focus or restore of a retained pane | next main-queue callback after the workspace observes the layout change |
 | `lf` | one `lf` subprocess read (message = verb) | stdout decoded |
 | `markdown_parse` | one Description/Comment parse | blocks built |

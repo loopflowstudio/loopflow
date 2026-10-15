@@ -8,7 +8,7 @@ struct TaskWorkflowHeader: View {
     let task: RoadmapTask
     let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
-    let work: WorkReading<TaskWork>
+    let work: WorkReading<TaskOverview>
     @Environment(\.palette) private var palette
 
     @State private var expandedTasks: Set<String> = []
@@ -156,6 +156,12 @@ struct TaskWorkflowHeader: View {
         }
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
+        .onChange(of: work, initial: true) { _, reading in
+            if reading.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: task.id) }
+        }
+        .onChange(of: task.id) { _, id in
+            if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
+        }
     }
 
     private func positionLabel(_ workflow: Workflow) -> String {
@@ -279,6 +285,21 @@ struct FlowProcessLog: View {
     }
 }
 
+/// Diagnostic history is observed only while explicitly expanded.
+struct TaskDiagnosticsView: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Debug", isExpanded: $expanded) {
+            if expanded { TaskWorkView(model: model, task: task) }
+        }
+        .onChange(of: expanded) { _, visible in model.observeTaskDiagnostics(task, visible: visible) }
+        .onDisappear { model.observeTaskDiagnostics(task, visible: false) }
+    }
+}
+
 /// The Task's conversations and mechanical Processes, including headless work and
 /// conversations without turns: raw records, shown under Debug. Its Flow
 /// processes are listed by `FlowProcessLog`.
@@ -290,9 +311,9 @@ struct TaskWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { Task { await model.refresh() } }
+                Button("Refresh") { model.observeTaskDiagnostics(task, visible: true) }
             }
-            if let work = model.taskWork[task.id].value {
+            if let work = model.taskDiagnostics[task.id].value {
                 ForEach(work.sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
@@ -305,9 +326,9 @@ struct TaskWorkView: View {
                     Text("No recorded work.")
                 }
             }
-            if let error = model.taskWork[task.id].errorMessage {
+            if let error = model.taskDiagnostics[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
-                Button("Retry") { Task { await model.refresh() } }
+                Button("Retry") { model.observeTaskDiagnostics(task, visible: true) }
             }
         }
         .font(Typography.body(12))

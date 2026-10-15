@@ -30,7 +30,15 @@ Work selection. A task-count control could fold a branch without chevrons or
 navigation. Jack authorized prototyping this interaction on October 15; native
 implementation remains unapproved. [Study 06](sidebar-prototypes/06-stationary-waves.html)
 implements stationary Wave rows, independent branch folding through Task counts,
-retained drafts and mirrored Needs you selection. The alternative
+and retained drafts. Jack subsequently selected full-size Available Task rows
+above the Waves, omitting those Tasks from Wave lists; each Task appears once.
+Available contains Tasks only, never Wave conversations. The term Available
+replaces Needs you and shared Session Waiting through Swift, Rust, JSON
+(`attention: "available"`) and `lf session list --available`. Detection rules and
+unrelated Task/Flow waiting states remain unchanged; the old Session spelling and
+flag are removed, with no stored schema change. Native terminology and Task-only
+queue are authorized; native in-place layout remains a prototype decision.
+The alternative
 is Figma's stacked sections: a persistent Wave index above the scoped Task list.
 Tradeoff: inline branches consume vertical space; stacked sections separate
 Tasks spatially from their Wave. No return to adjacent sidebar columns is proposed.
@@ -126,4 +134,4 @@ shows neutral page context and blue layer selection. Ink on Paper is Loopflow's
 chosen adaptation, not a claim about either product. The top-rule experiment was
 rejected; its history remains in commit `5359c2d77a`.
 
-Check: `uv run --with playwright python /tmp/loo462-check-stationary.py` PASS — unchanged Wave click geometry, independent branches, queue mirroring, retained draft and search; screenshot inspected. Native baseline app build and 75 focused tests passed at 7d10108eaf; native acceptance remains separate.
+Check: `uv run --with playwright python /tmp/loo462-check-available.py` and prior selection study PASS; `scripts/test_desktop.sh --filter 'WorkNavigationTests|TaskRowMetadataTests|SessionsStoreTests|DTOFixtureTests|DesktopHeadlessTests/taskSessions' -Xswiftc -gnone` PASS (116); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, focused Session attention/report/DTO library tests and two `session_cli_tests` availability proofs PASS (27 Rust tests; `/tmp/loo462-available-rust.log`). Native layout adoption/review remains separate.

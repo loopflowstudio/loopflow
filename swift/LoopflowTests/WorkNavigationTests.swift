@@ -802,23 +802,23 @@ struct WorkNavigationTests {
         #expect(owner.startingTaskSessions.isEmpty)
     }
 
-    @Test("Task inspection retains Waiting links without a Session inventory")
-    func inspectorKeepsExactWaitingConversation() async throws {
+    @Test("Task inspection retains Available links without a Session inventory")
+    func inspectorKeepsExactAvailableConversation() async throws {
         var records = try JSONSerialization.jsonObject(with: Data(sessionsJSON().utf8)) as! [[String: Any]]
-        records[0]["attention"] = "waiting"
+        records[0]["attention"] = "available"
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: String(decoding: JSONSerialization.data(withJSONObject: records), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "issue-review"))
         var opened: String?
         let view = WorkSurfaceView(model: model, onOpenSession: { opened = $0.id })
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-waiting-human").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human").button().tap()
         #expect(opened == "human")
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-sessions-working") }
         #expect(throws: (any Error).self) { try view.inspect().find(text: "No open Sessions.") }
         await source.fail()
         await model.refresh()
-        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-waiting-human") }
+        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human") }
     }
 
     @Test("Work outside the plan remains explained in Wave details")
@@ -1104,7 +1104,7 @@ struct WorkNavigationTests {
     func attentionNavigation(alreadyRetained: Bool) async throws {
         let record = try session("needs-answer", work: .task(id: "ts_review00000000000000000000000000"))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-        wire["attention"] = "waiting"
+        wire["attention"] = "available"
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(),
             sessions: String(decoding: JSONSerialization.data(withJSONObject: [wire]), as: UTF8.self))
         let query = RegistryQuery { args, _ in try await source.read(args) }

@@ -805,7 +805,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
          SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
-    watch.session(|record| record["attention"] == "waiting");
+    watch.session(|record| record["attention"] == "available");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
     watch.session(|record| record["attention"].is_null());
 

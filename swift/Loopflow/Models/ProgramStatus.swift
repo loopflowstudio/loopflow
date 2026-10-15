@@ -95,7 +95,7 @@ public enum ProgramStatusEvent: Sendable, Equatable {
     case prompt, reset, exit, interaction
 }
 
-/// A terminal endpoint reducer; Session Waiting is always supplied by Rust.
+/// A terminal endpoint reducer; Session availability is always supplied by Rust.
 public struct ProgramStatusReducer: Sendable {
     public private(set) var snapshot = ProgramStatusRecords(seen: false, records: [])
 

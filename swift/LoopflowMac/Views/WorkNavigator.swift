@@ -238,7 +238,7 @@ struct WorkNavigator: View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Label("NEEDS YOU · \(items.count)", systemImage: "tray")
+                    Label("AVAILABLE · \(items.count)", systemImage: "tray")
                         .font(Typography.code(10)).foregroundStyle(palette.waiting)
                     Spacer()
                     if items.count > 3 {

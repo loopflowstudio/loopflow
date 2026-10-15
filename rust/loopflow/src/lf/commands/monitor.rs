@@ -132,8 +132,8 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     "lf monitor active --json".to_string(),
                 ),
                 _ if session.attention.is_some() => (
-                    "waiting",
-                    "Its provider is waiting on a person".into(),
+                    "available",
+                    "Its conversation is available for your input".into(),
                     format!("lf session connect {}", session.id),
                 ),
                 _ => (

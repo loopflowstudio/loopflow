@@ -85,7 +85,7 @@ struct TaskHistoryProofTests {
         // Task A overview: Session rows carry only their recorded facts,
         // and showing the Task reads no input history.
         model.select(.task(id: "issue-review"))
-        try await waitFor { (try? find("task-waiting-design")) != nil }
+        try await waitFor { (try? find("task-available-design")) != nil }
         try await settle(window)
         #expect((try? find("task-session-notes")) == nil)
         #expect((try? find("task-sessions-working")) == nil)

@@ -42,6 +42,12 @@ by this design discussion. Jack subsequently requested the in-place branch
 prototype: [Study 06](sidebar-prototypes/06-stationary-waves.html). It is available
 for interaction review; no Swift replacement has been requested yet.
 
+Jack Heart subsequently selected Available as the shared Session term, including
+the lf CLI; full-size Tasks appear only in Available or under their Wave. Available
+is Task-only. Wave conversation availability does not move Waves or their children.
+This supersedes mirrored duplicate Task rows in the new prototype; native layout
+adoption remains separate from the authorized terminology cutover.
+
 Dashboard exploration is separate [LOO-489](https://linear.app/loopflow/issue/LOO-489),
 stacked on LOO-462 at 7d10108eaf. Jack Heart clarified that a Wave dashboard is
 strictly query-derived (Wave conversation plus open Tasks), offered on Wave click

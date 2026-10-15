@@ -245,8 +245,8 @@ extension WorkProjection {
         var includedSessions: Set<String> = []
         let tasks = waves.flatMap(\.tasks)
         for wave in waves {
-            let subjects = [(wave.id.work, wave.roadmap.wave.displayName, wave.sessions)]
-                + wave.tasks.filter { !$0.task.task.isTerminal }.map { ($0.id.work, $0.task.task.name, $0.sessions) }
+            let subjects = wave.tasks.filter { !$0.task.task.isTerminal }
+                .map { ($0.id.work, $0.task.task.name, $0.sessions) }
             for (work, title, sessions) in subjects {
                 // Inspect each Session: another Session's busy report cannot
                 // hide a question, and process liveness is never attention.
@@ -257,7 +257,7 @@ extension WorkProjection {
                     let status = SessionProgramStatus(sessions: [session], unavailable: nil)
                     let reason: String
                     switch status {
-                    case .waiting: reason = "Waiting"
+                    case .available: reason = "Available"
                     case .reported(_, let report) where report.state == .blocked:
                         reason = report.kind.map { $0.rawValue.capitalized } ?? "Blocked"
                     default: continue

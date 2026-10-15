@@ -40,8 +40,9 @@ the Machine. Durations and command names only; the files stay on this machine.
 Open a Wave to enter its conversation and fill the sidebar with its Tasks.
 The **Repo / Wave** path returns to either conversation. Each Wave keeps its
 Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
-including **Needs you**. The queue opens the exact waiting conversation, using
-shared Waiting or reported Blocked evidence.
+including **Available**. This section contains Tasks only and opens their exact
+available conversation, using shared availability or reported Blocked evidence.
+The CLI exposes Session availability through `lf session list --available --json`.
 
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
@@ -58,7 +59,7 @@ Task rows show a title above reported program status, stored Task/PR links and t
 recorded remote Machine. Local Machine names stay hidden. The title opens the
 conversation; links open separately and underline on hover or keyboard focus.
 Unknown activity and live clients without program reports show no activity label
-or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
+or dot. Shared availability is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 

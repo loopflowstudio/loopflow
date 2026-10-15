@@ -277,7 +277,7 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// Waiting on a person, judged from current stream or terminal reports; absent when it is
+    /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
@@ -310,7 +310,7 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAttention {
-    Waiting,
+    Available,
 }
 
 fn session_state(session: &crate::session::SessionSummary) -> SessionState {
@@ -322,7 +322,7 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
 }
 
 fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    session.waiting.then_some(SessionAttention::Waiting)
+    session.available.then_some(SessionAttention::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -1871,6 +1871,11 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(session.state, super::SessionState::Unknown);
+        assert_eq!(session.attention, Some(super::SessionAttention::Available));
+        assert_eq!(
+            serde_json::to_value(&session).unwrap()["attention"],
+            "available"
+        );
         assert!(matches!(
             session.flow_membership,
             super::SessionFlowMembership::Step {
@@ -1897,7 +1902,7 @@ mod tests {
             agent_process_id: None,
             primary_scope: None,
             agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
-            waiting: false,
+            available: false,
             terminal_id: None,
             task_terminal: false,
             task_primary: false,

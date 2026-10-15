@@ -117,8 +117,8 @@ pub struct SessionBind {
 }
 
 /// Quiet time after which a conversation with no unresolved tool call waits
-/// on a person. A long silent provider step can read as Waiting.
-pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
+/// on a person. A long silent provider step can read as Available.
+pub(crate) const AVAILABILITY_QUIET_SECONDS: i64 = 120;
 
 /// What a Session's attached LfProcess last read from its provider's own stream. One row
 /// per Session, replaced by whichever attachment currently owns that stream.
@@ -177,8 +177,8 @@ pub struct SessionFilter {
     pub task: Option<String>,
     pub search: Option<String>,
     pub interactive: Option<bool>,
-    /// Only conversations waiting on a person, chosen before paging.
-    pub waiting: bool,
+    /// Only conversations available for a person, chosen before paging.
+    pub available: bool,
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
@@ -194,7 +194,7 @@ impl Default for SessionFilter {
             task: None,
             search: None,
             interactive: Some(true),
-            waiting: false,
+            available: false,
             history: false,
             limit: 100,
             offset: 0,
@@ -210,8 +210,8 @@ pub(crate) struct SessionSummary {
     pub terminal_id: Option<String>,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,
-    /// Waiting on a person, as of the read's clock.
-    pub waiting: bool,
+    /// Available for a person, as of the read's clock.
+    pub available: bool,
     pub program_status: Option<crate::program_status::Records>,
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<crate::id::LfProcessId>,

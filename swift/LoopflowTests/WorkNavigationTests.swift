@@ -1178,7 +1178,8 @@ struct WorkNavigationTests {
         model.goForward()
         #expect(model.selection == nil)
         model.goBack()
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
+        let collapse = try navigator.inspect().find(WorkGlyphButton.self).actualView()
+        try collapse.inspect().find(ViewType.Button.self).tap()
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true
         #expect(model.navigation.sidebarWidth == 460)

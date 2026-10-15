@@ -50,7 +50,7 @@ struct ThemeWorkflowTests {
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first)
         var wire = try #require(fixture["task_primary"] as? [String: Any])
-        wire["attention"] = "waiting"
+        wire["attention"] = "available"
         // Retain a provider conversation without executing the capture's historical argv.
         wire["open_argv"] = ["must-not-launch"]
         let recordData = try JSONSerialization.data(withJSONObject: wire)
@@ -105,7 +105,7 @@ struct ThemeWorkflowTests {
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
             #expect(model.navigation.showsNavigator)
             #expect(model.navigation.sidebarWidth == 460)
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-\(wave.wave.id)").button().tap()
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-\(wave.wave.id)").button().tap()
             #expect(model.selection == .wave(id: wave.wave.id))
             #expect(registry.retained(waveKey) === waveWork)
             model.select(nil)
@@ -119,7 +119,7 @@ struct ThemeWorkflowTests {
             model.goBack()
             #expect(model.selection == nil)
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-\(wave.wave.id)").button().tap()
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(task.id)").button().tap()
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-\(task.id)").button().tap()
             work.multiplexer.setFocusedPane(shell.id)
             #expect(registry.selectedWork == key)
             #expect(registry.retained(key) === work)

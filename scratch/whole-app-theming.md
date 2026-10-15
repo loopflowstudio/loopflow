@@ -235,6 +235,31 @@ The explicit stack-parent repair replaces refusal to change a Task parent with
 CAS against the observed parent; Task/PR/checkout/history survive, cycles and stale
 writes remain rejected. Its focused Rust regression/build/Clippy passed.
 
+## Next: approved catalogue and 12 Light / 12 Dark pickers
+
+Jack approved this on October 15 during demo review. Build it in this Task.
+
+- **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
+  Flexoki Light, Noctis Lilac, Manila, Clay, Pewter, Frost, Vellum, Celadon. Dark:
+  Loopflow Dark, Hearth, Catppuccin Mocha, Gruvbox Dark, Solarized Dark, Flexoki
+  Dark, Night Owl, Onyx, Rosewood, Aubergine, Moss, Phosphor. Upstream sources and
+  reasons are in `scratch/theme-catalogue/index.html` (`build_page.py` table).
+  Each new theme gets a complete hand-curated app palette that passes WorkPaletteTests.
+- **Sources.** Take Night Owl and Noctis Lilac terminal colors from their MIT
+  upstreams (sdras/night-owl-vscode-theme, liviuschera/noctis), not catalogue
+  ports. Solarized Dark uses the original colors without the iTerm2 name. Update
+  `Sources.md`/`Licenses/`: author license per theme, Badolato themes cite their
+  terminalthemes.com MIT page, Neovim is Apache-2.0; delete notices for removed themes.
+- **Appearance split.** Every slot is Light or Dark. Each assignment picker shows
+  only its own 12; Edit/Import/Reset keep the slot's appearance. Import of the
+  wrong appearance previews an explanation naming the other picker and leaves
+  Apply disabled. Delete "either assignment accepts any palette" from code and README.
+- **Migration.** Assigned retired themes keep the existing one-time conversion.
+  Customized (edited or imported) slots survive; untouched retired slots become
+  the new companions. Never add visible slots beyond 24.
+- **Not in scope:** Liquid Glass, keyboard browsing/search and theme export
+  (Ghostty comparison ideas, undecided).
+
 ## This slice and Done when
 
 Deliver the combined parent integration, 24-slot library, palette redesign and

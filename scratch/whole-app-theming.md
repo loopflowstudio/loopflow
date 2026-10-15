@@ -48,8 +48,13 @@ October 15 decisions, in order:
   Hearth + 10) so each assignment picker lists only its own appearance. This
   supersedes "either assignment accepts any palette". Draft companion set and
   bench: `scratch/theme-catalogue/index.html`. Open: whether Import over a slot
-  must match the slot's appearance, and the license checks flagged on the page
-  (Modus GPL-3.0, Monokai, Manila/Aubergine provenance).
+  must match the slot's appearance.
+- Jack: bias toward excluding anything not 100% clearly licensed. The
+  iTerm2-Color-Schemes MIT covers the collection only; each theme keeps its
+  author's license. Excluded: Modus (GPL-3.0), Monokai (no license), Man Page
+  (Apple), Ubuntu (Canonical), Solarized Higher Contrast (unlicensed gist).
+  Ship Night Owl and Noctis from their MIT upstream colors, not catalogue ports.
+  Mark Badolato's own themes are MIT on their terminalthemes.com pages.
 - **Edit + Reset**, no separate Duplicate. Any slot can be renamed, recolored or
   replaced by importing a theme. Reset restores its original bundled name and
   colors. All these changes participate in the chooser's existing Apply/Cancel

@@ -335,3 +335,15 @@ No planning repair or duplicate Task was attempted.
 Review: reuse the existing golden-ratio constant and Files page default. The
 initial-layout guard still preserves resized and deliberately closed panes.
 Check: `scripts/test_desktop.sh --filter 'DesktopPaneControlTests|TaskFilesTests|PaneResizeTests' -Xswiftc -gnone --jobs 4` PASS (48 tests reported, three optional native cases skipped); `git diff --check` PASS. `/tmp/loo487-files-default-tests.log`. Native review remains pending.
+
+### File navigation revision — implementation authorized
+
+Jack Heart requested the same default-closed dropdown/pin treatment inside Files.
+The chooser shows only scratch and changed files relative to the Task branch's
+recorded parent commit, including committed, staged, unstaged and untracked work.
+Remove whole-repository browsing and the HEAD selector. Reuse the existing Task
+changes snapshot: it already contains scratch paths and net changes at an exact
+base commit. Filter both sections by path. Clicking a file closes the temporary
+chooser; a pinned list stays open. Escape/outside click dismiss, with file drafts
+and selected content retained. Cmd-P opens the chooser in the focused file pane;
+Control-Command-B pins or closes it. The top control displays the selected path.

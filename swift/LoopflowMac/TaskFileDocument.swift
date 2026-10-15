@@ -270,7 +270,41 @@ final class TaskFilesStore {
         case files = "Files"
     }
     var page = Page.files
-    var showsNavigator = true
+    enum Navigator { case closed, dropdown, pinned }
+    var navigator = Navigator.closed
+    var search = ""
+    var showsScratch = true
+
+    func toggleNavigator() {
+        navigator = navigator == .closed ? .dropdown : .closed
+    }
+
+    func togglePinnedNavigator() {
+        navigator = navigator == .pinned ? .closed : .pinned
+    }
+
+    func dismissNavigator() {
+        if navigator == .dropdown { navigator = .closed }
+    }
+
+    func selectFile(_ path: String, mode: Mode) {
+        page = .files
+        selection = path
+        self.mode = mode
+        dismissNavigator()
+    }
+
+    var scratchPaths: [String] {
+        (changes?.scratch ?? []).filter(matchesSearch)
+    }
+
+    var changedPaths: [String] {
+        (changes?.files ?? []).map(\.path).filter(matchesSearch)
+    }
+
+    private func matchesSearch(_ path: String) -> Bool {
+        search.isEmpty || path.localizedCaseInsensitiveContains(search)
+    }
     enum Mode: String, CaseIterable {
         case diff = "Diff"
         case file = "File"
@@ -281,19 +315,10 @@ final class TaskFilesStore {
     let query: RegistryQuery
     var selection: String?
     var mode = Mode.file
-    var base = "parent" {
-        didSet { if base != oldValue { changes = nil; diff = nil } }
-    }
     private(set) var changes: TaskChangesSnapshot?
-    private(set) var directories: [String: TaskDirectory] = [:]
-    private(set) var directoryErrors: [String: String] = [:]
     private(set) var isRefreshingChanges = false
     private(set) var changesError: String?
-    var expandedDirectories: Set<String> = []
-    var showIgnored = false
-    var showsChanges = false
-    var needsComparison: Bool { showsChanges || mode == .diff }
-    private var directoryGenerations: [String: Int] = [:]
+    var showsChanges = true
     private(set) var documents: [String: TaskFileDocument] = [:]
     private(set) var diff: TaskDiffSnapshot?
     private(set) var patchLines: [TaskPatchLine] = []
@@ -307,7 +332,7 @@ final class TaskFilesStore {
     @ObservationIgnored private var remoteObservation: Task<Void, Never>?
 
     private var invalidation: Task<Void, Never>?
-    private var changedPaths: Set<String> = []
+    private var pendingPaths: Set<String> = []
     private var autosaves: [String: Task<Void, Never>] = [:]
     var autosave = true {
         didSet { for document in documents.values { scheduleSave(document) } }
@@ -369,16 +394,16 @@ final class TaskFilesStore {
                 }
                 continue
             }
-            changedPaths.insert(path)
+            pendingPaths.insert(path)
         }
-        guard !changedPaths.isEmpty || comparisonChanged else { return }
+        guard !pendingPaths.isEmpty || comparisonChanged else { return }
         invalidation?.cancel()
         invalidation = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self else { return }
-            let changed = self.changedPaths
-            self.changedPaths.removeAll()
-            defer { if Task.isCancelled { self.changedPaths.formUnion(changed) } }
+            let changed = self.pendingPaths
+            self.pendingPaths.removeAll()
+            defer { if Task.isCancelled { self.pendingPaths.formUnion(changed) } }
             // Re-read retained documents even when another file or terminal is visible.
             for (path, document) in self.documents where changed.contains(where: {
                 $0.isEmpty || $0 == path || path.hasPrefix($0 + "/")
@@ -395,17 +420,7 @@ final class TaskFilesStore {
                 } catch { self.error = error.localizedDescription }
             }
             guard !Task.isCancelled else { return }
-            for directory in Array(self.directories.keys) where changed.contains(where: {
-                let parent = ($0 as NSString).deletingLastPathComponent
-                if ($0 as NSString).lastPathComponent == ".gitignore" {
-                    return parent.isEmpty || directory == parent || directory.hasPrefix(parent + "/")
-                }
-                return $0.isEmpty || $0 == directory || directory.hasPrefix($0 + "/")
-                    || parent == directory
-            }) {
-                await self.loadDirectory(directory)
-            }
-            if self.needsComparison { await self.refreshChanges() }
+            await self.refreshChanges()
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
         }
     }
@@ -457,32 +472,7 @@ final class TaskFilesStore {
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
         if query.remoteMachine != nil { observeFiles() }
-        await loadDirectory("")
-        if needsComparison { await refreshChanges() }
-    }
-
-    func loadDirectory(_ path: String, more: Bool = false) async {
-        let previous = directories[path]
-        guard !more || previous?.nextCursor != nil else { return }
-        let generation = (directoryGenerations[path] ?? 0) + 1
-        directoryGenerations[path] = generation
-        let ignored = showIgnored
-        do {
-            let page = try await query.taskFiles(issue: issue, directory: path,
-                cursor: more ? previous?.nextCursor : nil, showIgnored: ignored, cwd: cwd)
-            guard !Task.isCancelled, generation == directoryGenerations[path], ignored == showIgnored else { return }
-            directories[path] = TaskDirectory(path: page.path,
-                entries: (more ? previous?.entries ?? [] : []) + page.entries, nextCursor: page.nextCursor)
-            directoryErrors[path] = nil
-            if selection == nil { selection = page.entries.first(where: { $0.kind == .file })?.path }
-        } catch {
-            guard !Task.isCancelled, generation == directoryGenerations[path], ignored == showIgnored else { return }
-            directoryErrors[path] = error.localizedDescription
-        }
-    }
-
-    func refreshDirectories() async {
-        for path in Set(directories.keys).union([""]) { await loadDirectory(path) }
+        await refreshChanges()
     }
 
     func refreshChanges() async {
@@ -490,10 +480,9 @@ final class TaskFilesStore {
         let generation = refreshGeneration
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
-        let base = base
         do {
-            let changes = try await query.taskChanges(issue: issue, base: base, cwd: cwd)
-            guard !Task.isCancelled, generation == refreshGeneration, self.base == base else { return }
+            let changes = try await query.taskChanges(issue: issue, base: "parent", cwd: cwd)
+            guard !Task.isCancelled, generation == refreshGeneration else { return }
             self.changes = changes
             if selection == nil { selection = changes.scratch.first ?? changes.files.first?.path }
             changesError = nil

@@ -101,7 +101,11 @@ Find reserves its own row above the terminal, so it never covers a match.
 Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
 **Shell**, and **lf process**. Hidden shells keep running and file drafts stay
-retained. The file tree can be collapsed. Sidebar selection switches the whole
+retained. Files starts with its chooser closed. Click the selected path or press
+Command-P in the file pane to search **scratch** and files changed from the
+branch's recorded parent commit. Selection closes the dropdown; pin it to keep
+the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
+Sidebar selection switches the whole
 Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.

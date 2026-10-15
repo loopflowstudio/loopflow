@@ -2013,7 +2013,7 @@ private struct SessionPaneView: View {
             switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
             case .success(let files):
                 TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                    checkoutBase: task?.reference.workspace?.baseCommit, task: task)
+                    checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
                     .environment(\.colorScheme, .light)
                     .simultaneousGesture(TapGesture().onEnded { focusPane() })
             case .failure(let error):

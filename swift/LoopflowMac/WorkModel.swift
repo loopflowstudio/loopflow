@@ -873,16 +873,10 @@ final class WorkModel {
         return showsSavedWork ? .updating : .current
     }
 
-    /// Current planning is only an entry candidate. Acquisition checks the full
-    /// historical Wave inventory before treating this repository as empty.
+    /// Start the repository conversation once current workspace data is available.
     var repositoryEntryReady: Bool {
         guard repoPath != nil, workStatus == .current, case .available = waves else { return false }
         return true
-    }
-
-    var isEmptyRepositoryCandidate: Bool {
-        guard repositoryEntryReady, visibleWaves.isEmpty, visibleRoadmaps.isEmpty else { return false }
-        return !(sessions.value ?? []).contains { $0.work != nil || !$0.taskIds.isEmpty || $0.workspace?.taskId != nil }
     }
 
     /// Whether any part shown is saved text instead of a read from this launch.
@@ -906,16 +900,8 @@ final class WorkModel {
                 sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
                 savedSessionRepos.insert(RepositoryReadingKey(machineId: saved.machineId, repository: repo))
             }
-            guard let selection = entry.selection, let waves = roadmap.value?.waves else { continue }
-            let evidence = waves.lazy.compactMap { wave in
-                wave.tasks.items.first { $0.id == selection.id }.map { (wave, $0) }
-            }.first
-            guard selection.kind == .task ? evidence != nil : waves.contains(where: { $0.wave.id == selection.id }) else { continue }
-            let navigation = navigationByRepo[repo] ?? WorkNavigation()
-            navigationByRepo[repo] = navigation
-            navigation.selection = selection
-            navigation.selectedTaskEvidence = evidence
-            navigation.content = .details
+            // Restore readings, not the previous launch's destination. Ordinary
+            // launches start at the repository; explicit links select their Work.
         }
     }
 

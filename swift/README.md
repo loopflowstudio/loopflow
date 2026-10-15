@@ -163,8 +163,9 @@ readable without granting completion authority. Failed provider starts offer rec
 
 The outline compresses single-Wave structure automatically. Search Work names and
 identifiers. Click the repository name to return to its retained,
-configured conversation. An empty repository opens that conversation directly:
-begin with what to work on, without creating a Wave or Task first.
+configured conversation. Normal repository launches start there, whether or not
+Waves and Tasks exist; explicit Task links still open the addressed Task.
+Begin with what to work on, without creating a Wave or Task first.
 Unscoped Sessions remain available through `lf session list --orphan`, not a
 sidebar group or search inventory. Missing planning never deletes retained workspaces.
 **Task details** opens the description, comments and Run history.

@@ -60,3 +60,13 @@ Check: TaskFilesTests 22 PASS (optional native diagnostic skipped), WorkNavigati
 Review: removed the legacy Session-driven selection branch rather than introducing
 loading-specific selection state. Current demo has not yet been restarted for these
 latest two visual repairs; native confirmation remains.
+
+October 15 repo entry direction: Jack Heart requested clicking the repo name open
+its repo conversation and normal launch start there. Removed the empty-repository
+restriction and historical-Wave preflight; cached readings survive but last-launch
+Task/Wave selection is no longer restored. Explicit destinations and retained
+in-window navigation keep their owners. The existing repo-name action reuses the
+configured conversation. Headless coverage exercises both populated and empty
+repo entry, retained panes, and cached-data restoration without stale selection.
+Check: WorkNavigationTests|WorkModelTests — build and 69 tests PASS;
+/tmp/loo462-repo-entry-tests.log. Native repo-entry review remains after relaunch.

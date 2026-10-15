@@ -39,17 +39,13 @@ final class SessionsWorkspace {
     var didConsiderRepositoryEntry = false
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
-    func openRepositoryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry, onlyIfEmpty: Bool = false) async {
+    func openRepositoryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
         guard !openingConversation else { return }
         let request = UUID()
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
         do {
-            if onlyIfEmpty {
-                guard try await store.query.repositoryWaves(cwd: store.repoPath).isEmpty,
-                      registry.selectedWork == key else { return }
-            }
             let record = try await store.query.ensureRepositorySession(cwd: store.repoPath)
             store.reconcile([record])
             registry.revealSession(record, in: self)
@@ -944,8 +940,8 @@ struct SessionsContentView: View {
             let root = workspaces.workspace(for: key(for: nil), title: title(for: key(for: nil)), location: rootIdentity)
             guard ready, !root.didConsiderRepositoryEntry else { return }
             root.didConsiderRepositoryEntry = true
-            guard model.isEmptyRepositoryCandidate, workspaces.selectedWork == root.key, model.selection == nil else { return }
-            Task { await root.openRepositoryConversation(store: store, registry: workspaces, onlyIfEmpty: true) }
+            guard workspaces.selectedWork == root.key, model.selection == nil else { return }
+            Task { await root.openRepositoryConversation(store: store, registry: workspaces) }
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,

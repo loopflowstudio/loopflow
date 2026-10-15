@@ -475,6 +475,8 @@ struct WorkModelStreamTests {
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
         model.bindWorkspaces(registry, repository: "/src/loopflow")
         let key = WorkNodeKey(repo: "/src/loopflow", work: .task(id: "issue-review"))
+        #expect(model.selection == nil) // Saved data does not restore last launch's Task.
+        model.select(key.work)
         let workspaceKey = model.workspaceKey(for: key.work, repository: "/src/loopflow")
         let workspace = try #require(registry.retained(workspaceKey))
         workspace.multiplexer.load(sessionId: "retained")

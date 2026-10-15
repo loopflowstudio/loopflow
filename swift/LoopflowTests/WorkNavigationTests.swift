@@ -29,8 +29,8 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test("Persisted repo entry survives partial reads, hide-all and Work navigation")
-    func composedWorkFirstEntry() async throws {
+    @Test("Repo conversation starts with or without Waves and retains panes", arguments: [false, true])
+    func composedWorkFirstEntry(populatedAtLaunch: Bool) async throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/work_first_entry.json")
@@ -65,7 +65,7 @@ struct WorkNavigationTests {
             #expect(!root.didConsiderRepositoryEntry)
             #expect(root.multiplexer.layout == originalLayout)
         }
-        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        model.applyFixture(roadmap: .available(populatedAtLaunch ? populated : empty), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         try view.body.inspect().callOnChange(oldValue: false, newValue: model.repositoryEntryReady)
         let deadline = ContinuousClock.now + .seconds(5)
         while root.presentation.selectedSessionId == nil && ContinuousClock.now < deadline { await Task.yield() }
@@ -115,39 +115,6 @@ struct WorkNavigationTests {
         #expect(rows.contains { $0.id.work == .task(id: task.id) })
         #expect(rows.allSatisfy { $0.id.work.kind == .wave || $0.id.work.kind == .task })
         #expect(!rows.flatMap(\.inlineSessions).contains { $0.id == primary.id })
-    }
-
-    @Test("Only fresh empty current planning permits a first-use check")
-    func emptyRepositoryEntry() throws {
-        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data("{\"generated_at\":\"2026-10-10T00:00:00Z\",\"waves\":[]}".utf8))
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No acquisition during reads") }, repoPath: "/src/loopflow")
-        #expect(!model.isEmptyRepositoryCandidate)
-        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        #expect(model.isEmptyRepositoryCandidate)
-        model.applyFixture(roadmap: .unavailable(lastGood: empty, reason: "Offline"), waves: .available([]), workActivity: .loading, repos: [])
-        #expect(!model.isEmptyRepositoryCandidate)
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
-        #expect(!model.isEmptyRepositoryCandidate)
-    }
-
-    @Test("Historical or unavailable planning never acquires an empty-repo conversation", arguments: [false, true])
-    func historicalRepositoryEntry(unavailable: Bool) async throws {
-        let snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
-        let waves = try #require(snapshot["waves"] as? [[String: Any]])
-        let history = try JSONSerialization.data(withJSONObject: waves.compactMap { $0["wave"] })
-        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
-        let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
-        let entry = registry.open(key, title: "Repository", location: nil)
-        let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            guard args == ["wave", "list", "--json"] else { throw RegistryQueryError("Unexpected acquisition") }
-            if unavailable { throw RegistryQueryError("History unavailable") }
-            return String(decoding: history, as: UTF8.self)
-        })
-        let layout = entry.multiplexer.layout
-        await entry.openRepositoryConversation(store: store, registry: registry, onlyIfEmpty: true)
-        #expect(entry.multiplexer.layout == layout)
-        #expect(entry.presentation.selectedSessionId == nil)
-        #expect(entry.conversationError == (unavailable ? "History unavailable" : nil))
     }
 
     @Test("Repository conversation reuses its exact pane without selecting another Work")

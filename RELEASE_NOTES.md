@@ -1,48 +1,40 @@
-# v0.13.15
+# v0.13.16
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.15 makes it easier to return to the right conversation and carry it forward with current settings or a different provider. Session launch settings now apply consistently across CLI, Desktop and headless work, while native prompt delivery handles large requests through terminal wrappers more reliably. Readable Task labels make work easier to recognize, and disposable offline data clones let contributors explore retained planning and history without modifying the source installation.
+v0.13.16 removes setup and cleanup steps that interrupt ongoing work. Publish follow-up changes from the same Task checkout after a merge, create a repository's first release without a seed tag, and keep new worktree names consistent after renaming the primary checkout.
 
-## Return to the conversation and keep going
+## Keep delivering from the same Task
 
-Resuming work now follows its Task and checkout context. Stopped Sessions pick up current launch settings, and an explicit provider switch carries earlier conversation text into a fresh native conversation while preserving the Loopflow Session.
+A merged PR no longer requires another Task or manual branch cleanup before publishing the next change. Publication preserves earlier PR history and carries follow-up work past squash merges, including when the remote branch was pruned.
 
-- `lf resume` prefers the active Task's conversation, then interactive recency within the worktree. From the main checkout, recency spans the repository's worktrees. Explicit `--task` and `--wave` selectors override discovery.
-- `lf connect` selects a Session ID, Task or Wave and prepares a primary conversation when needed. Desktop uses the same preparation. Add `--prepare` to return connection data, including remote SSH commands, without launching a provider.
-- Stopped Sessions reload settings from their saved checkout, including permissions and Chrome integration. Same-provider continuation retains native history and account; live connections keep their existing settings, and historical replay retains captured inputs.
-- Use `lf resume -a <agent>` or `lf connect <session> -a <agent>` to change providers. The Session keeps its identity, name, Work and feedback. The new provider receives a conversation log and opening/latest excerpts, without reusing the earlier provider's native token or account.
-- If the new provider fails to start, retry `lf connect <session>` without `-a`; the saved continuation still targets the selected provider. Earlier native conversation selections remain in Session history.
-- Native Codex receives instructions, hooks and the exact first request through its provider protocol; Claude receives its first request through stdin. Preparation feedback and retained failed-start input improve recovery, and normal disconnects no longer report a broken pipe or replay the first turn. Codex retains terminal-owned approvals, native tools, workspace roots and wrapper hooks.
+- Run `lf pr publish` from the existing checkout to create the next PR. Repeated publication updates that PR rather than creating another.
+- Local edits and already-pushed follow-up commits survive branch continuation. Remote history is replaced with a lease only when the exact delivered head is still present; divergent or concurrent remote work remains intact.
+- Creating the successor PR reopens a completed Task and clears its earlier completion intent. An earlier landing cannot complete the new delivery.
+- `lf pr submit` creates a missing PR without `--create-pr`. Repeating `lf land` prepares another PR when new work exists and does nothing for an unchanged merged delivery.
 
-## Recognize work across Sessions and checkouts
+## Make the first release directly
 
-Tasks now share a readable label across CLI and Desktop views, Session history, automation and reports. Generated names follow that label without changing durable Task identity or moving existing work.
+An explicit initial version now uses repository history when no preceding release exists. There is no need to manufacture a seed tag or roll back an existing manifest version to start the release lifecycle.
 
-- Known Linear identifiers remain usable offline. Local-only Tasks use short hexadecimal codes that start at six characters and extend when needed to distinguish collisions, including completed Tasks.
-- New branches combine the author, Task identifier and a short title, such as `<author>/eng-123-fix-login`. Explicit workspace names remain supported; an unrelated existing branch produces an actionable error.
-- Generated Session names begin with the Task label. Identifier updates, binding and attachment repair outdated labels while preserving manually assigned names; passive reads do not rename Sessions.
-- Label changes leave recorded branches and checkout paths intact. This naming change requires no schema migration.
+- Use `lf release notes 0.1.0 --preview` in a configured repository without release tags for the selected target. The baseline is repository start.
+- Initial notes and previews include the root commit and follow first-parent history with target-area filtering. An explicit `--prev-tag` still takes precedence.
+- First releases use the existing single-candidate lifecycle, preserving candidate and tag identity across retries. Relative versions still require a baseline; subsequent minor-cycle behavior is unchanged.
 
-## Explore real history in a disposable offline Machine
+## Keep checkout names predictable after a rename
 
-A raw database copy can retain credentials, provider paths and live-client claims. `lf clone create`, `run`, `show` and `dispose` provide an isolated development path that preserves useful planning and history while removing copied connections to the live installation.
+New sibling worktrees now take their prefix from the primary checkout's current directory name. Older siblings with different prefixes no longer cause Loopflow to drop the repository name from new paths.
 
-- Clone creation backs up SQLite under source write protection and applies canonical migrations and this build's drafts only to the destination. Ordinary database opens remain validation-only; draft SQL gains no published migration provenance.
-- Clones retain planning identities, Session history and Task-primary selection, while removing copied credentials, routes, PIDs, endpoints and attachment tokens. Codex and Claude JSONL archives can be supplied explicitly.
-- An inherited macOS sandbox confines descendant writes, networking, Unix sockets and process control. Source repositories remain read-only, and Desktop helpers and embedded-terminal environments stay pinned to the clone.
-- Browse retained history or supply offline stand-in executables for fresh disposable conversations. Copied provider continuation is unavailable.
+- Renaming `etude` to `fantasia` makes future siblings use names such as `fantasia.managym-cpu-research`, including when creation starts from an older linked checkout.
+- Existing worktrees stay in place. Dedicated host-directory inference and reuse of an existing branch checkout remain supported, without rename-history configuration.
 
 ## Operational notes
 
-- **Update Session callers.** Replace `resume ID` with `connect ID`; use `--message TEXT` for headless continuation. Add `--prepare` wherever `connect --json` previously meant preparation only: `--json` now controls output format only. Primary-conversation replacement is `session new`; takeover of the same conversation is `connect --takeover`. The old spellings have no compatibility aliases.
-- Provider import supplies a transcript, not a summary. Long conversations are excerpted in the first turn, so the new agent must read the log for the middle. OpenCode import requires `opencode` installed and runnable from the Session's working directory. Directly opening a saved native session with a mismatched provider still fails; use the Loopflow Session continuation commands instead.
-- **Offline clones were verified on macOS 26; macOS 15 is unsupported.** Creation probes sandbox capability before reading source data and refuses without an unsandboxed fallback. Refusal can leave an incomplete disposable directory. Native window/PTY draft switching and real-account continuation are not established by this release's clone evidence.
-- Required execution boundaries remain independent of YOLO settings. OpenCode still cannot satisfy managed Task execution requirements; its prompt transport is unchanged. Claude background/attach reconnect remains excluded from the verified native paths.
-- Real Codex plain and wrapped terminal launch/reconnect and Claude large-message stdin delivery were exercised. Settings propagation and provider switching use stand-ins and simulated SSH; installed-app and visual Desktop acceptance remain unverified. Linux planning reconnect and shutdown acceptance remain CI-owned, and the supplied record does not establish a full hosted matrix pass for the combined release.
+- Publication can reopen a completed Task; launching completed Tasks is unchanged. Integrating unrelated upstream changes still requires sync.
+- Delivery continuation and first-release recovery were checked with real Git repositories and simulated hosting. Live GitHub publication and installed acceptance remain unverified in the supplied record. The worktree rename regression exercised real CLI creation across successive renames while retaining dirty work.
+- Focused tests, formatting and Clippy passed for the included changes. The supplied record does not establish a completed hosted full-matrix pass for the release.
 
 ## Small changes
 
-- macOS process observation uses the SDK kernel reader instead of privileged `ps`, retaining process birth and zombie evidence. Linux keeps its existing reader.
-- Provider and relay sockets use the caller's temporary root so isolated clones can launch safely.
-- Claimed Session inputs record the provider and model actually launched.
+- Task checkout names now use the same normalization as `lf wt create`.
+- Task checkout creation or restoration precedes explicit agent selection. Reconciliation skips deleted directories while retaining the Task, PR and landing intent.

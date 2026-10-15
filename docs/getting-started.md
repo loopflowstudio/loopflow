@@ -90,12 +90,15 @@ lf wt create fix-login
 lf wt switch fix-login
 ```
 
-If at least two live, branch-bearing worktrees share a parent directory, lf
-creates new worktrees there. Directory names can differ from branch names, as
-with city-named workspaces or branches renamed after checkout creation. No lf
-configuration is needed. New branches remain `<author>/fix-login`; lf uses
-`fix-login` as the directory name. Existing repo-prefixed siblings keep their
-`<repo>.fix-login` naming.
+New sibling worktrees use `../<repo>.fix-login`, with the primary checkout's
+current directory name as `<repo>`. Renaming that checkout changes the prefix
+for new siblings; existing worktrees keep their paths.
+
+If at least two live, branch-bearing worktrees share a parent directory other
+than the primary checkout's parent, lf creates new worktrees there as
+`fix-login`. Directory names can differ from branch names, as with city-named
+workspaces or branches renamed after checkout creation. No lf configuration is
+needed. New branches remain `<author>/fix-login`.
 
 With fewer examples or conflicting parent directories, lf uses its default
 sibling path, `../<repo>.fix-login`. Detached and missing checkouts do not

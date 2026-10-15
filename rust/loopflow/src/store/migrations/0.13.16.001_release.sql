@@ -1,3 +1,4 @@
+-- draft: task_pr_continuation
 -- Retain one current PR while allowing continued work in the same Task.
 DROP TRIGGER task_pr_history_no_mark;
 CREATE TRIGGER task_pr_history_no_mark BEFORE UPDATE OF historical ON task_prs

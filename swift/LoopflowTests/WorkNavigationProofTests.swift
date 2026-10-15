@@ -61,6 +61,8 @@ struct WorkNavigationProofTests {
         host.frame = window.contentLayoutRect
         defer { window.contentView = nil }
         try await settle(window)
+        model.select(.wave(id: "wave-1"))
+        try await settle(window)
         let scroll = try #require(_scrollView(in: host))
         scroll.contentView.scroll(to: CGPoint(x: 0, y: 1200))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -91,7 +93,7 @@ struct WorkNavigationProofTests {
         #expect(abs(restored.contentView.bounds.minY - offset) < 1)
     }
 
-    @Test("At density the sidebar lists started Tasks under sans Wave heads and orphans in one bottom section")
+    @Test("At density drill-in lists the selected Wave’s started Tasks and keeps orphan Sessions out")
     func sidebarDensityWithOrphans() async throws {
         _ = NSApplication.shared
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -189,13 +191,14 @@ struct WorkNavigationProofTests {
             let suffix = "\(Int(size.width))x\(Int(size.height))"
             let navigator = try view.inspect().find(WorkNavigator.self).actualView()
             let outline = try navigator.inspect()
-            // Stable Wave column beside the selected Wave's started Tasks.
+            // Full-width Task list under the selected Wave breadcrumb.
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
             }.count == 8)
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-wave-wave-")) == true
-            }.count == 3)
+            }.count == 0)
+            _ = try outline.find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-0")
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
             // Conversations do not add numeric controls to Work navigation.
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0") }
@@ -203,7 +206,7 @@ struct WorkNavigationProofTests {
             // Diagnostic Sessions do not consume main navigation space.
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-orphans-open") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
-            _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo") }
             try capture(window, "density-debug-orphans-\(suffix)")
         }
         // Zero orphans hides the section.

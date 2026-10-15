@@ -26,11 +26,10 @@ feature design edge is launched, with theme architecture/import choices still
 draft. These scopes do not extend the current pane/navigation implementation.
 
 Native review continued into [Work multiplexer / Task workspaces](task-workspaces.md).
-Jack accepted two hierarchy levels, one Work selection, keyboard-only history,
-sidebar-owned collapse and drag resizing. Prototype 04 explores Wave breadcrumbs
-and conditional workspace headers. Add/replace gestures, mixed Work layouts and
-cross-launch restoration remain draft; no outer-multiplexer implementation launched.
-
-Selection: Jack rejected the top-rule experiment. Study 05 compares Notion-inspired
-neutral fill, Figma-inspired blue fill and solid burgundy fill. Choice and smaller
-header typography remain open; the native selection treatment is unchanged.
+Jack Heart selected Ink on Paper and authorized Swift implementation of the full
+prototype, including mirrored selection in Needs you. Command-click adds adjacent
+Work; ordinary click replaces the focused slot; close hides while retaining panes.
+These prototype gestures carry into implementation. Cross-launch outer layout
+restoration remains outside this change. The existing reader watches focused Task
+Workflow detail; inactive workspaces retain live panes and offer focus for actions.
+Native demo judgment and landing remain distinct from implementation authorization.

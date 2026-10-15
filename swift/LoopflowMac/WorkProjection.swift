@@ -360,25 +360,22 @@ final class WorkNavigation {
     var selection: WorkReference?
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [WorkReference?] = []
+    var forwardStack: [WorkReference?] = []
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
     var showsNavigator = true
-    var navigatorWaveID: String?
-    var waveDestinations: [String: WorkReference] = [:]
+    var sidebarWidth: CGFloat = 380
     var taskListScrollOffsets: [String: CGFloat] = [:]
 
-    /// The scope is remembered when the repository itself is selected.
-    func remember(_ destination: WorkReference, in waveID: String) {
-        navigatorWaveID = waveID
-        waveDestinations[waveID] = destination
+    func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
+        sidebarWidth = min(600, max(260, min(width, availableWidth - 360)))
     }
 
     /// Selections and visits from another Machine name no Work on this one.
     func clearSelection() {
         selection = nil
         backStack = []
-        navigatorWaveID = nil
-        waveDestinations = [:]
+        forwardStack = []
         taskListScrollOffsets = [:]
         selectedTaskEvidence = nil
         content = .overview

@@ -39,6 +39,17 @@ October 15 decisions, in order:
   appended imports. Keep the four themes above plus 20 companion palettes. Remove
   the near-duplicate Catppuccin Frappe/Macchiato catalogue entries; preserve selected
   old entries through one-time migration, not additional visible slots.
+- Jack asked for a wider, more diverse companion search (draft proposal under
+  review; 24 slots unchanged). Naming: keep a popular upstream theme's name where
+  reuse is clearly permitted; otherwise use one consistent scheme and prefer
+  simple, short names. No product/trademark names (GitHub, iTerm2, Atom, Ubuntu).
+  Renamed themes take one-word material names like Linen and Hearth.
+- Jack proposed **12 Light + 12 Dark** (Loopflow Light, Linen + 10; Loopflow Dark,
+  Hearth + 10) so each assignment picker lists only its own appearance. This
+  supersedes "either assignment accepts any palette". Draft companion set and
+  bench: `scratch/theme-catalogue/index.html`. Open: whether Import over a slot
+  must match the slot's appearance, and the license checks flagged on the page
+  (Modus GPL-3.0, Monokai, Manila/Aubergine provenance).
 - **Edit + Reset**, no separate Duplicate. Any slot can be renamed, recolored or
   replaced by importing a theme. Reset restores its original bundled name and
   colors. All these changes participate in the chooser's existing Apply/Cancel

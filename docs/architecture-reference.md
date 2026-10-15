@@ -893,11 +893,12 @@ process-control authority.
 
 ## Task delivery algorithm
 
-A Task binds planning to one managed checkout and zero or one PR. Placement owns
+A Task binds planning to one managed checkout and one current PR, when published. Placement owns
 its branch and base independently of publication; a research Task needs no PR.
 A checkout on that branch identifies the Task regardless of its upstream; the
-stored path supplies placement for explicit Task selection. Old multi-PR rows
-remain read-only history; new delivery never appends a successor.
+stored path supplies placement for explicit Task selection. Publishing continued work after a PR settles retains the previous PR as read-only
+history and selects the new PR. Recommend a follow-up Task for a distinct outcome;
+continuing in the same Task remains supported.
 
 ```text
 Linear Issue

@@ -29,6 +29,7 @@ mod release_lock;
 mod run;
 pub mod scratch;
 mod sync;
+pub(crate) use sync::landed_at;
 pub mod task;
 pub mod task_actions;
 pub mod task_admission;

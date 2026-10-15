@@ -48,7 +48,7 @@ use crate::git::worktrees::{
 use crate::git::{
     current_branch, fetch, get_default_branch, is_clean, merge_base, ref_exists, rev_parse,
 };
-use crate::naming::{git_user, sanitize_for_branch};
+use crate::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
@@ -102,7 +102,7 @@ impl TaskProcessOptions {
 
     fn validate_workspace_name(&self, task: &Task) -> OpsResult<()> {
         if let Some(name) = &self.name {
-            let requested = parse_workspace_slug(name)?;
+            let requested = WorktreeSegment::parse(name).map_err(task_error)?;
             if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
                 return Err(task_error(format!(
                     "Task {} already uses workspace name {:?}",
@@ -1161,8 +1161,9 @@ fn plan_task_placement(
     let explicit_segment = options
         .name
         .as_deref()
-        .map(parse_workspace_slug)
-        .transpose()?;
+        .map(WorktreeSegment::parse)
+        .transpose()
+        .map_err(task_error)?;
     let title = match &explicit_segment {
         Some(segment) => segment.as_str().to_string(),
         None => task
@@ -1350,8 +1351,8 @@ async fn place_prepared_task(
         )));
     }
     if task.worktree.is_some() {
-        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
         restore_task_checkout(store, &task, None).await?;
+        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
         return Ok(task);
     }
     let now = time::OffsetDateTime::now_utc();
@@ -1390,7 +1391,6 @@ async fn place_prepared_task(
         )
         .await
         .map_err(task_error)?;
-    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
     if let Some(direction) = directive.as_deref() {
         append_task_comment(store, &task, direction, true)?;
     }
@@ -1411,6 +1411,7 @@ async fn place_prepared_task(
         }
         return Err(error);
     }
+    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
     Ok(task)
 }
 
@@ -1675,20 +1676,6 @@ fn load_task_flow(repo: &Path, requested: &str) -> OpsResult<(String, Vec<Concre
     Ok((definition.name, steps))
 }
 
-fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
-    let value = value.trim();
-    let words = value.split('-').filter(|word| !word.is_empty()).count();
-    if sanitize_for_branch(value) != value
-        || value.contains(['.', '_', '/'])
-        || !(2..=5).contains(&words)
-    {
-        return Err(task_error(
-            "workspace name must be 2-5 lowercase kebab-case words",
-        ));
-    }
-    WorktreeSegment::parse(value).map_err(task_error)
-}
-
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
     // Branch names are not checkout identity: another clone can use the same
     // branch. Never probe a remote Machine's recorded path on this Machine.
@@ -1846,6 +1833,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
         let context = _task_pr_context_from_store(&store, &task).await?;
         _validate_task_pr_copy(&context, body)?;
         let existing = store.active_task_pr(&task.id).await.map_err(task_error)?;
+        let existing = existing.filter(|pr| !pr.is_settled());
         let creating = existing.is_none();
         let mut pr = existing.unwrap_or_else(|| task_pr_for_publication(&task));
         if creating {
@@ -1956,6 +1944,50 @@ fn _markdown_link_text(value: &str) -> String {
         .replace(']', "\\]")
 }
 
+/// Publication observes a previous PR's settlement itself; callers never need
+/// to run reconciliation before continuing work in a checkout.
+pub(crate) fn refresh_task_pr_for_publication(repo: &Path) -> OpsResult<()> {
+    block_on_task(async {
+        let ManagedTask::Managed { store, mut task } = resolve_managed_task(repo).await? else {
+            return Ok(());
+        };
+        let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
+            return Ok(());
+        };
+        if let Some(known) = pr.github().filter(|_| pr.phase() != PrPhase::Merged) {
+            let open = crate::ops::pr::current_pr(repo)?;
+            if pr.phase() == PrPhase::Abandoned
+                || open.is_none_or(|open| open.number != u64::from(known.number))
+            {
+                pr = reconcile_task_pr_observation(
+                    &store,
+                    &mut task,
+                    crate::ops::pr::PrReadFreshness::Fresh,
+                )
+                .await?
+                .ok_or_else(|| task_error("publication PR disappeared"))?;
+                if let Observation::Degraded { reason, .. } = task.observation {
+                    return Err(task_error(reason));
+                }
+            }
+        }
+        if pr.phase() == PrPhase::Merged && task.parent_pr_id.is_some() {
+            // Its own merge delivered the dependency too. The old PR retains
+            // that stack; the next delivery compares with the default branch.
+            store
+                .sync_task_placement(
+                    &task.id,
+                    &task.base_commit,
+                    true,
+                    time::OffsetDateTime::now_utc(),
+                )
+                .await
+                .map_err(task_error)?;
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
     block_on_task(async move {
         let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
@@ -1980,17 +2012,11 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         None
     };
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
-    if let Some(pr) = pr.as_ref().filter(|pr| pr.is_settled()) {
-        return Err(task_error(format!(
-            "Task {} already delivered its pull request ({}). Reopen a closed pull request to reuse it; new delivery belongs to another Task",
-            task.identifier, pr.phase().as_str(),
-        )));
-    }
     Ok(TaskPrContext {
         title: task.title.clone(),
         identifier: task.identifier.clone(),
         url,
-        merge_request: pr.as_ref().and_then(|pr| {
+        merge_request: pr.as_ref().filter(|pr| !pr.is_settled()).and_then(|pr| {
             pr.merge_request()
                 .filter(|request| {
                     pr.github().and_then(|github| github.head_sha.as_deref())
@@ -2053,7 +2079,7 @@ pub(crate) fn matching_task_pr_merge_request(
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
             .ok_or_else(|| task_error(format!("Task {} has no active PR", task.identifier)))?;
-        if branch.as_deref() != Some(pr.branch.as_str()) {
+        if pr.is_settled() || branch.as_deref() != Some(pr.branch.as_str()) {
             return Ok(None);
         }
         let Some(github) = pr.github() else {
@@ -2126,6 +2152,9 @@ async fn clear_task_pr_merge(
     else {
         return Ok(false);
     };
+    if pr.is_settled() {
+        return Ok(false);
+    }
     let Some(request) = pr
         .publication
         .as_ref()
@@ -3390,6 +3419,12 @@ pub(crate) async fn reconcile_delivered_task(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
+    // Local checkout cleanup is not evidence of delivery or Task completion.
+    if let Some(worktree) = &task.worktree {
+        if !worktree.try_exists()? {
+            return Ok(());
+        }
+    }
     match task_work_status(store, task).await? {
         WorkStatus::Abandoned => return Ok(()),
         WorkStatus::Done => return reconcile_task_completion(store, task).await,
@@ -5791,6 +5826,33 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+
+        let current = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
+        let mut next = super::task_pr_for_publication(&task);
+        next.sequence = current.sequence + 1;
+        next.branch = "wrong-placement".into();
+        assert!(store.insert_task_pr(&next).await.is_err());
+        assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(current));
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+
+        next.branch = task.branch.clone();
+        store.insert_task_pr(&next).await.unwrap();
+        store
+            .sqlite
+            .request_task_completion(&task.id, Some("New delivery"))
+            .unwrap();
+        super::settle_task_landing(&store, &landing).await.unwrap();
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        assert_eq!(
+            store.active_task_pr(&task.id).await.unwrap().unwrap().id,
+            next.id
+        );
+        assert!(store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -6050,6 +6112,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_placement_accepts_shared_worktree_names() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
+        for (name, expected) in [
+            ("fix", "fix"),
+            ("Fix Workspace", "fix-workspace"),
+            ("one-two-three-four-five-six", "one-two-three-four-five-six"),
+        ] {
+            let (plan, slug) = super::plan_task_placement(
+                repo.path(),
+                &fixture.task,
+                None,
+                &super::TaskProcessOptions {
+                    name: Some(name.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(slug, expected);
+            assert!(plan.worktree_path.ends_with(format!(
+                "{}.{}",
+                repo.path().file_name().unwrap().to_str().unwrap(),
+                expected
+            )));
+            assert!(!plan.worktree_path.exists());
+        }
+    }
+
+    #[tokio::test]
     async fn task_preparation_rejects_invalid_inputs_before_allocating_placement() {
         let repo = loopflow_test_support::TestRepo::new();
         let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
@@ -6059,7 +6150,7 @@ mod tests {
                     name: Some("bad.name".into()),
                     ..Default::default()
                 },
-                "kebab-case",
+                "flat worktree name",
             ),
             (
                 super::TaskProcessOptions {

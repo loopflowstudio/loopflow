@@ -89,8 +89,8 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    before retrying, and retry with `--reason "<what changed>"` only on new
    evidence or a repaired cause. Stop when status confirms Task completion, or a concrete blocker remains. Report publication,
    review, merge and completion as separate facts. Arming a merge the Flow did not remains the
-   person's choice. Each Task has zero or one PR; further implementation needing
-   another PR belongs in another Task, stacked if dependent. Repeated calls must
+   person's choice. Recommend a follow-up Task for a distinct outcome. Continued
+   work in the same Task can publish another PR, retaining earlier PR history. Repeated calls must
    preserve existing work without duplicating Flows or conversations.
 
 5. **Finish merged delivery.** A verified merge leaves an open Task available for

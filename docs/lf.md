@@ -153,6 +153,9 @@ not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow process for a Task is equally its work.
 
+`lf task run EXP-12 --name fix` selects its first checkout name. Names use the
+same normalization as `lf wt create`; single words and longer names are accepted.
+
 Flow output shows each step's position and name followed by the agent's messages.
 Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
 diagnostics. Codex Sessions start through the provider protocol and attach the
@@ -301,6 +304,10 @@ merge, optional new work uses ordinary Task creation;
 `lf task complete <task-id>` completes the source. A repository without a code
 remote supports local work and refuses hosted landing. If it has no `main` branch,
 new checkouts use its current branch. Local planning does not require Linear.
+
+Delivery reconciliation skips deleted checkouts and retains their Task, PR and
+merge intent. It continues checking available work without recreating directories
+or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
@@ -524,13 +531,16 @@ its check link. Local test success never substitutes for remote checks or review
 Auto-merge follows [repository merge policy](config.md#merge-policy) and leaves
 protection and queue enforcement to GitHub. Manual review is a normal endpoint.
 
-A Task has zero or one PR. Choose one delivery operation for the desired
+A Task shows its current PR and retains earlier PRs in history. Choose a delivery operation for the desired
 endpoint. Submit, arm and land own preparation and integration; publish does not
-sync. PR operations also work on ordinary branches without creating a Task.
+sync unrelated upstream changes. Continued publication automatically carries work
+past already-merged history, including squash merges. PR operations also work on
+ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
 its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
 timeout or interruption leaves the intent intact. Repeating land for a merged
-Task PR succeeds and reports whether Task completion remains.
+Task PR with no new work succeeds and reports whether Task completion remains.
+With new work, the same command prepares its next PR.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
 recover an existing PR whose GitHub identity is missing, without publishing.
 Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
@@ -543,8 +553,10 @@ lf task complete EXP-12
 ```
 
 Verified merge leaves an open Task available for optional follow-up work. New
-work uses ordinary Task creation; no filing, disposition or “none needed” record
-is required. Preserve useful findings in the PR before cleanup of added scratch files.
+outcomes are best captured as follow-up Tasks. Continuing in this checkout also
+works: publish again to select a new PR while retaining the previous delivery.
+A completed Task reopens when the new publication begins. No filing, disposition
+or “none needed” record is required. Preserve useful findings in the PR before cleanup of added scratch files.
 
 `ship` runs gate and waited landing. Reaching its Workflow endpoint requests
 completion. Bare landing or a manual GitHub merge alone does not complete the
@@ -564,7 +576,7 @@ Task can finish with research files or commits; they do not create a PR
 requirement. Old Session turns and unknown process exits cannot veto completion.
 Live controls and execution history remain intact; unsafe or occupied checkouts
 are retained. An open or closed-unmerged PR still requires delivery or explicit
-abandonment. A different PR needs another Task, stacked if dependent:
+abandonment. Use another Task for simultaneously open dependent work:
 
 ```bash
 lf checkout EXP-13 --stack-on EXP-12 --design scratch/child-design.md
@@ -1005,8 +1017,8 @@ the original and keeps the resolver's file beside it as `<name>.lf-sync-1` (or t
 next unused number). Read both notes and reconcile them locally. Tracked conflicts
 retain the recovery stash and report its identity; resolve them before restoring it.
 
-Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and after a
-merged document PR. Network failures leave local work usable; conflicts stay visible
+Run `lf sync --plan` and `lf sync` to integrate upstream changes at a deliberate
+maintenance boundary. Continued publication handles already-merged history. Network failures leave local work usable; conflicts stay visible
 and use `lf sync --continue` or `lf sync --abort`. Persistent branches remain reusable
 and survive automatic pruning. Memory updates do not require PRs or a schedule.
 

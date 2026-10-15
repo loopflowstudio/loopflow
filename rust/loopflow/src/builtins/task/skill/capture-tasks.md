@@ -15,9 +15,9 @@ real uncertainty. Preserve ambition; a technical design is not a filing requirem
 Favor larger, cohesive Tasks with clear behavioral promises and benefits. Choose
 boundaries thoughtfully: useful pipelining or parallelism can justify a split,
 but neither is a fragmentation rule. Keep speculative implementation steps inside
-the Task or its design. A Task delivers zero or one PR. A recommendation may
-need no PR; independently deliverable PRs need separate Tasks, stacked where
-dependent. Several Tasks are supported, never a quota. Later proof of an accepted
+the Task or its design. A recommendation may need no PR. Prefer separate Tasks
+for independently deliverable outcomes, stacked where dependent; continued work
+in one Task may publish several PRs in sequence. Several Tasks are supported, never a quota. Later proof of an accepted
 outcome can use another ordinary Task, with its source and expected evidence in
 the brief.
 

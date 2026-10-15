@@ -58,8 +58,22 @@ Done never completes its Task. Saved readings wait for fresh status.
 Selection uses a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
 Blue means reported work, amber means supported Waiting/blocked, red means failure.
-The same roles apply in light and dark appearances without changing terminal ANSI
-colors or replacing retained panes and drafts.
+Choose **Appearance → Choose Theme…** to preview the whole workspace. **Apply**
+saves the choice for every window and the next launch; **Cancel**, Escape or closing
+the chooser restores the applied theme. Quick **System**, **Light** and **Dark**
+choices return to the built-ins. Light includes a cream terminal; Dark uses slate.
+Existing panes, clients, file drafts and layouts stay in place.
+
+**Import Ghostty Theme…** copies colors from a local UTF-8 file (up to 256 KiB).
+Use six-digit RGB for background, foreground, cursor and selection, and
+`palette = 0=#RRGGBB` through index 255. Background and foreground are required.
+The preview lists missing defaults, repeated entries and omitted non-color
+settings. Fonts, commands, keybindings, includes and theme references are never
+imported. Application status colors derive independently from terminal ANSI.
+Unreadable default/selection text blocks Apply; ANSI shortfalls are reported with
+the original colors retained. Truecolor output and custom prompts keep their own
+colors. Personal non-color Ghostty settings still load at startup; Loopflow owns
+terminal appearance. Imported files can move or disappear after Apply.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks

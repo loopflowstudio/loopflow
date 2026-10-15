@@ -4,7 +4,9 @@ import Foundation
 import SwiftUI
 import Testing
 import ViewInspector
+#if canImport(GhosttyKit)
 import GhosttyKit
+#endif
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -39,7 +41,7 @@ struct ThemeTests {
     @Test func snapshotImportAndFailedPublicationPreservePreferences() throws {
         let defaults = defaults()
         var reject = false
-        let store = AppearanceStore(defaults: defaults, systemDark: false, publish: { _ in
+        let store = AppearanceStore(defaults: defaults, systemDark: false, publish: { _, _ in
             if reject { throw ThemeError("Allocation failed") }
         })
         store.apply("dark")
@@ -106,11 +108,13 @@ struct ThemeTests {
         #expect(try imported("background=000000\nforeground=ffffff\nselection-background=888888\nselection-foreground=999999").terminal.readabilityErrors.first?.contains("Selection text") == true)
     }
 
+    #if canImport(GhosttyKit)
     @Test func compiledOverlayOverridesPersonalColors() throws {
         try #require(GhosttyManager.libraryReady)
         let baseline = try #require(ghostty_config_new())
         defer { ghostty_config_free(baseline) }
-        try GhosttyThemeConfiguration.load("background=112233\nforeground=445566\nfont-size=19\npalette=8=123456\n", into: baseline)
+        try GhosttyThemeConfiguration.load("background=112233\nforeground=445566\nfont-size=19\npalette=8=123456\ntheme=light:/unread-light,dark:/unread-dark\n", into: baseline)
+        try GhosttyThemeConfiguration.load("theme=\n", into: baseline)
         ghostty_config_finalize(baseline)
         for theme in ThemeDefinition.builtins + [try imported().definition] {
             let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
@@ -122,5 +126,6 @@ struct ThemeTests {
             #expect(ghostty_config_diagnostics_count(candidate) == 0)
         }
     }
+    #endif
 }
 #endif

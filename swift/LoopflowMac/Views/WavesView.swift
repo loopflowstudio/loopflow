@@ -206,7 +206,7 @@ struct WavesView: View {
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.loopflowBurgundy)
+        .background(palette.surfaceMuted)
     }
 
     /// Repository scope as a dropdown above the Wave list, plus New. The rail is
@@ -218,7 +218,7 @@ struct WavesView: View {
             Spacer(minLength: 0)
 
             Circle()
-                .fill(isAnyConnected ? palette.success : Color.white.opacity(0.3))
+                .fill(isAnyConnected ? palette.success : palette.textTertiary)
                 .frame(width: 6, height: 6)
                 .help(isAnyConnected ? "Connected" : "Connecting…")
 
@@ -227,7 +227,7 @@ struct WavesView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(repos.isEmpty ? .white.opacity(0.35) : .white)
+                    .foregroundStyle(repos.isEmpty ? palette.textTertiary : palette.text)
             }
             .buttonStyle(.plain)
             .disabled(repos.isEmpty)
@@ -294,7 +294,7 @@ struct WavesView: View {
                 if portfolioService.isPending { ProgressView().controlSize(.small) }
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(palette.text)
         .padding(.horizontal, Spacing.lg)
         .padding(.bottom, Spacing.md)
         .disabled(portfolioService.isPending)
@@ -328,12 +328,12 @@ struct WavesView: View {
             HStack(spacing: Spacing.xs) {
                 Text(headerTitle)
                     .font(Typography.sectionTitle(16))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(palette.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -348,7 +348,7 @@ struct WavesView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(repos.isEmpty ? "No repositories found." : "No waves yet.")
                 .font(Typography.caption())
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(palette.textSecondary)
             if !repos.isEmpty {
                 Button {
                     isShowingCreate = true

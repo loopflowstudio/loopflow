@@ -5,6 +5,12 @@ import SwiftUI
 public struct ThemeRGB: Codable, Equatable, Hashable, Sendable {
     public let hex: UInt32
     public init(_ hex: UInt32) { self.hex = hex & 0xFFFFFF }
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let value = try container.decode(UInt32.self, forKey: .hex)
+        guard value <= 0xFFFFFF else { throw ThemeError("Saved RGB color exceeds six digits.") }
+        hex = value
+    }
     public var color: Color { Color(hex: UInt(hex)) }
     public var css: String { String(format: "#%06X", hex) }
     public var channels: [Double] {

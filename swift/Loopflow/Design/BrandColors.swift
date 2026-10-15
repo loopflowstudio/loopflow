@@ -7,34 +7,48 @@ public extension Color {
 }
 
 public struct ThemeTone: Sendable {
-    public let ink: Color
-    public let fill: Color
-    public let stroke: Color
-    public let text: Color
+    let inkRGB: ThemeRGB
+    let fillRGB: ThemeRGB
+    public var ink: Color { inkRGB.color }
+    public var fill: Color { fillRGB.color }
+    public var stroke: Color { ink }
+    public var text: Color { ink }
 }
 
 /// The sole semantic mapping for application and native pane chrome.
 public struct LoopflowPalette: Sendable {
     public let isDark: Bool
-    private let values: [ThemeRGB]
-    public var background: Color { values[0].color }
-    public var surface: Color { values[1].color }
-    public var surfaceMuted: Color { values[2].color }
-    public var surfaceElement: Color { values[3].color }
-    public var border: Color { values[4].color }
-    public var borderStrong: Color { values[5].color }
-    public var borderActive: Color { values[6].color }
-    public var text: Color { values[7].color }
-    public var textSecondary: Color { values[8].color }
-    public var textTertiary: Color { values[9].color }
-    public var accent: Color { values[10].color }
-    public var accentHover: Color { values[11].color }
+    private let backgroundRGB: ThemeRGB
+    public var background: Color { backgroundRGB.color }
+    private let surfaceRGB: ThemeRGB
+    public var surface: Color { surfaceRGB.color }
+    private let surfaceMutedRGB: ThemeRGB
+    public var surfaceMuted: Color { surfaceMutedRGB.color }
+    private let surfaceElementRGB: ThemeRGB
+    public var surfaceElement: Color { surfaceElementRGB.color }
+    private let borderRGB: ThemeRGB
+    public var border: Color { borderRGB.color }
+    private let borderStrongRGB: ThemeRGB
+    public var borderStrong: Color { borderStrongRGB.color }
+    private let borderActiveRGB: ThemeRGB
+    public var borderActive: Color { borderActiveRGB.color }
+    private let textRGB: ThemeRGB
+    public var text: Color { textRGB.color }
+    private let textSecondaryRGB: ThemeRGB
+    public var textSecondary: Color { textSecondaryRGB.color }
+    private let textTertiaryRGB: ThemeRGB
+    public var textTertiary: Color { textTertiaryRGB.color }
+    private let accentRGB: ThemeRGB
+    public var accent: Color { accentRGB.color }
+    private let accentHoverRGB: ThemeRGB
+    public var accentHover: Color { accentHoverRGB.color }
     public let workingTone: ThemeTone
     public let waitingTone: ThemeTone
     public let failureTone: ThemeTone
     public let successTone: ThemeTone
     public let stoppedTone: ThemeTone
-    public let emphasisInk: Color
+    private let emphasisRGB: ThemeRGB
+    public var emphasisInk: Color { emphasisRGB.color }
     public var working: Color { workingTone.ink }
     public var waiting: Color { waitingTone.ink }
     public var failure: Color { failureTone.ink }
@@ -46,26 +60,70 @@ public struct LoopflowPalette: Sendable {
     public var linkHover: Color { text }
     public var actionInk: Color { textSecondary }
     public var actionHover: Color { surfaceElement }
-    public var terminalHover: Color { text.opacity(0.03) }
-    public var terminalSelection: Color { text.opacity(0.06) }
-    public var terminalFailure: Color { failure.opacity(0.06) }
+    public let terminalHover: Color
+    public let terminalSelection: Color
+    public let terminalFailure: Color
 
-    private init(values: [ThemeRGB], dark: Bool) {
-        self.values = values
+    private init(
+        background: ThemeRGB,
+        surface: ThemeRGB,
+        surfaceMuted: ThemeRGB,
+        surfaceElement: ThemeRGB,
+        border: ThemeRGB,
+        borderStrong: ThemeRGB,
+        borderActive: ThemeRGB,
+        text: ThemeRGB,
+        textSecondary: ThemeRGB,
+        textTertiary: ThemeRGB,
+        accent: ThemeRGB,
+        accentHover: ThemeRGB,
+        dark: Bool, terminalForeground: ThemeRGB? = nil
+    ) {
+        backgroundRGB = background
+        surfaceRGB = surface
+        surfaceMutedRGB = surfaceMuted
+        surfaceElementRGB = surfaceElement
+        borderRGB = border
+        borderStrongRGB = borderStrong
+        borderActiveRGB = borderActive
+        textRGB = text
+        textSecondaryRGB = textSecondary
+        textTertiaryRGB = textTertiary
+        accentRGB = accent
+        accentHoverRGB = accentHover
+
         isDark = dark
-        let surfaces = Array(values.prefix(4))
+        let surfaces = [background, surface, surfaceMuted, surfaceElement]
         func tone(_ hex: UInt32) -> ThemeTone {
             let seed = ThemeRGB(hex)
-            let fill = values[0].mixed(with: seed, amount: 0.08)
+            let endpoint = ThemeRGB(dark ? 0xFFFFFF : 0)
+            var fill = background
+            for step in stride(from: 8, through: 0, by: -1) {
+                let candidate = background.mixed(with: seed, amount: Double(step) / 100)
+                if endpoint.contrast(candidate) >= 4.52 { fill = candidate; break }
+            }
             let ink = seed.readable(on: surfaces + [fill], dark: dark)
-            return ThemeTone(ink: ink.color, fill: fill.color, stroke: ink.color, text: ink.color)
+            return ThemeTone(inkRGB: ink, fillRGB: fill)
         }
         workingTone = tone(0x3774BC)
         waitingTone = tone(0xA97922)
         failureTone = tone(0xBC493F)
         successTone = tone(0x438356)
-        stoppedTone = tone(values[8].hex)
-        emphasisInk = ThemeRGB(dark ? 0xEDB8BF : 0x722F37).readable(on: surfaces, dark: dark).color
+        stoppedTone = tone(textSecondary.hex)
+        emphasisRGB = ThemeRGB(dark ? 0xEDB8BF : 0x722F37).readable(on: surfaces, dark: dark)
+        func overlay(_ ink: ThemeRGB, opacity: Double) -> Color {
+            let foreground = terminalForeground ?? text
+            for step in stride(from: Int(opacity * 1000), through: 0, by: -1) {
+                let alpha = Double(step) / 1000
+                if foreground.contrast(background.mixed(with: ink, amount: alpha)) >= 4.52 {
+                    return ink.color.opacity(alpha)
+                }
+            }
+            return .clear
+        }
+        terminalHover = overlay(text, opacity: 0.03)
+        terminalSelection = overlay(text, opacity: 0.06)
+        terminalFailure = overlay(failureTone.inkRGB, opacity: 0.06)
     }
 
     public static func derived(background: ThemeRGB, foreground: ThemeRGB) -> Self {
@@ -76,10 +134,42 @@ public struct LoopflowPalette: Sendable {
         let text = foreground.readable(on: surfaces, dark: dark)
         let secondary = foreground.mixed(with: background, amount: 0.28).readable(on: surfaces, dark: dark)
         let accent = ThemeRGB(dark ? 0xEDB8BF : 0x722F37).readable(on: surfaces, dark: dark)
-        return Self(values: surfaces + [secondary, secondary, accent, text, secondary, secondary, accent, accent], dark: dark)
+        return Self(background: surfaces[0], surface: surfaces[1], surfaceMuted: surfaces[2], surfaceElement: surfaces[3],
+                    border: background.mixed(with: secondary, amount: 0.3),
+                    borderStrong: background.mixed(with: secondary, amount: 0.5), borderActive: accent,
+                    text: text, textSecondary: secondary, textTertiary: secondary, accent: accent, accentHover: accent,
+                    dark: dark, terminalForeground: foreground)
     }
-    public static let light = Self(values: [0xFAF8F5, 0xFFFDF9, 0xF3EEE7, 0xECE6DD, 0xE6DFD6, 0xD6CCC0, 0xC2B5A6, 0x2A2624, 0x5F5752, 0x685F58, 0x722F37, 0x5E2630].map(ThemeRGB.init), dark: false)
-    public static let dark = Self(values: [0x2B3036, 0x343B44, 0x3C4550, 0x444E59, 0x46505B, 0x56606B, 0x6B7683, 0xF5F1EA, 0xC8C1B8, 0xC7BFB7, 0x722F37, 0x5E2630].map(ThemeRGB.init), dark: true)
+    public static let light = Self(
+        background: ThemeRGB(0xFAF8F5),
+        surface: ThemeRGB(0xFFFDF9),
+        surfaceMuted: ThemeRGB(0xF3EEE7),
+        surfaceElement: ThemeRGB(0xECE6DD),
+        border: ThemeRGB(0xE6DFD6),
+        borderStrong: ThemeRGB(0xD6CCC0),
+        borderActive: ThemeRGB(0xC2B5A6),
+        text: ThemeRGB(0x2A2624),
+        textSecondary: ThemeRGB(0x5F5752),
+        textTertiary: ThemeRGB(0x685F58),
+        accent: ThemeRGB(0x722F37),
+        accentHover: ThemeRGB(0x5E2630),
+        dark: false
+    )
+    public static let dark = Self(
+        background: ThemeRGB(0x2B3036),
+        surface: ThemeRGB(0x343B44),
+        surfaceMuted: ThemeRGB(0x3C4550),
+        surfaceElement: ThemeRGB(0x444E59),
+        border: ThemeRGB(0x46505B),
+        borderStrong: ThemeRGB(0x56606B),
+        borderActive: ThemeRGB(0x6B7683),
+        text: ThemeRGB(0xF5F1EA),
+        textSecondary: ThemeRGB(0xC8C1B8),
+        textTertiary: ThemeRGB(0xC7BFB7),
+        accent: ThemeRGB(0x722F37),
+        accentHover: ThemeRGB(0x5E2630),
+        dark: true
+    )
 }
 
 public struct PaletteKey: EnvironmentKey {

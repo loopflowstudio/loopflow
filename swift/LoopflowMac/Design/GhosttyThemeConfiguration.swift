@@ -27,6 +27,8 @@ extension ThemeDefinition {
         background-opacity = 1
         background-image =
         cursor-opacity = 1
+        bold-color =
+        window-colorspace = srgb
         \(t.indexed.enumerated().map { "palette = \($0.offset)=\($0.element.css)" }.joined(separator: "\n"))
 
         """

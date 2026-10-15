@@ -23,12 +23,17 @@ secondary ink and underline on hover/focus in navigation and control chrome.
 Unknown and client-liveness-only observations have no activity label or dot. Shared
 Waiting remains explicitly inferred; reported Blocked is not renamed Waiting.
 Program Done is not Task completion. Workflow position uses neutral marking; a
-stopped edge alone is not a red error. Read failures remain inspectable. Terminal
-ANSI colors retain their existing owner; surrounding pane chrome uses the same
-semantic roles with the dark palette.
+stopped edge alone is not a red error. Read failures remain inspectable.
 
-Both Desktop appearances have explicit roles. `WorkPaletteTests` resolves actual
-SwiftUI colors and composites selection fills over each surface: ordinary text
+`ThemeDefinition` owns explicit sRGB terminal colors and the semantic
+`LoopflowPalette` used by app and pane chrome. Ghostty receives a normalized color
+overlay after personal non-color configuration. Retained surfaces update in place.
+Imports preserve terminal ANSI; they never map ANSI indices to activity. Application
+surfaces derive from background polarity, with independently readable semantic ink.
+Optional block fills diminish when they would hide default text.
+
+Built-ins and imported Desktop appearances have explicit roles. `WorkPaletteTests`
+resolves actual SwiftUI colors and composites selection fills over each surface: ordinary text
 must reach 4.5:1, meaningful indicators 3:1. Static marketing hex examples below
 are not Desktop status colors or contrast evidence.
 

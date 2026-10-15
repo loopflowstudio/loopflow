@@ -99,18 +99,29 @@ final class GhosttyManager: ObservableObject {
     static let shared = GhosttyManager()
 
     private nonisolated(unsafe) var baseline: ghostty_config_t?
+    // Current preview plus applied candidate; cancel reuses validated config.
+    private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
     static let loopflowConfig = "font-size = 13\n"
 
-    func applyTheme(_ theme: ThemeDefinition) throws {
+    func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws {
         if let baseline {
-            let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
+            let candidate: ghostty_config_t
+            if let cached = themeConfigs[theme.id], cached.0 == theme.terminal {
+                candidate = cached.1
+            } else {
+                candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
+                if let previous = themeConfigs[theme.id] { ghostty_config_free(previous.1) }
+                themeConfigs[theme.id] = (theme.terminal, candidate)
+            }
             if let app {
                 ghostty_app_update_config(app, candidate)
                 ghostty_app_set_color_scheme(app, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
             }
-            if let config { ghostty_config_free(config) }
             config = candidate
+            for id in Array(themeConfigs.keys) where id != theme.id && id != appliedID {
+                if let discarded = themeConfigs.removeValue(forKey: id) { ghostty_config_free(discarded.1) }
+            }
         } else {
             guard Self.libraryReady, let empty = ghostty_config_new() else {
                 throw ThemeError("Could not initialize terminal appearance.")
@@ -174,29 +185,31 @@ final class GhosttyManager: ObservableObject {
         }
 
         do {
-        try GhosttyThemeConfiguration.load(Self.loopflowConfig, into: cfg)
-        ghostty_config_load_default_files(cfg)
-        var embeddedConfig = Self.embeddedConfig
-        // Ghostty treats a failed CoreVideo display link as an allocation error
-        // and refuses every surface. Its timer renderer works without that link.
-        var displayLink: CVDisplayLink?
-        let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
-        if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
-            embeddedConfig += "\nwindow-vsync = false\n"
-            print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
-        }
-        displayLink = nil
-        try GhosttyThemeConfiguration.load(embeddedConfig, into: cfg)
-        ghostty_config_finalize(cfg)
-        self.baseline = cfg
-        self.config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
+            try GhosttyThemeConfiguration.load(Self.loopflowConfig, into: cfg)
+            ghostty_config_load_default_files(cfg)
+            var embeddedConfig = Self.embeddedConfig
+            // Ghostty treats a failed CoreVideo display link as an allocation error
+            // and refuses every surface. Its timer renderer works without that link.
+            var displayLink: CVDisplayLink?
+            let displayLinkStatus = CVDisplayLinkCreateWithActiveCGDisplays(&displayLink)
+            if displayLinkStatus != kCVReturnSuccess || displayLink == nil {
+                embeddedConfig += "\nwindow-vsync = false\n"
+                print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
+            }
+            displayLink = nil
+            // Independent theme files never participate in the base configuration.
+            // Clearing before finalize also removes their conditional replay path.
+            try GhosttyThemeConfiguration.load(embeddedConfig + "\ntheme =\n", into: cfg)
+            ghostty_config_finalize(cfg)
+            self.baseline = cfg
+            self.config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
+            if let config { themeConfigs[theme.id] = (theme.terminal, config) }
         } catch {
             if baseline == nil { ghostty_config_free(cfg) }
             state = .failed(error.localizedDescription)
             return
         }
         guard let config else { return }
-
 
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
@@ -382,7 +395,7 @@ final class GhosttyManager: ObservableObject {
         if let app {
             ghostty_app_free(app)
         }
-        if let config { ghostty_config_free(config) }
+        for (_, config) in themeConfigs.values { ghostty_config_free(config) }
         if let baseline { ghostty_config_free(baseline) }
     }
 }
@@ -404,7 +417,7 @@ final class GhosttyManager: ObservableObject {
     static let shared = GhosttyManager()
 
     private(set) var theme = ThemeDefinition.light
-    func applyTheme(_ theme: ThemeDefinition) throws { self.theme = theme }
+    func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws { self.theme = theme }
 
     private init() {}
 

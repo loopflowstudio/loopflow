@@ -7,15 +7,30 @@ import ViewInspector
 
 @Suite("Desktop semantic colors")
 struct WorkPaletteTests {
-    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: [false, true])
-    func contrast(dark: Bool) {
-        let palette: LoopflowPalette = dark ? .dark : .light
+    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: ["light", "dark", "171924/CAD2EF", "FFF4DF/34291F", "330909/FFEEDD", "747474/FFFFFF", "888888/000000"])
+    func contrast(theme: String) throws {
+        let definition: ThemeDefinition
+        if let builtin = ThemeDefinition.builtins.first(where: { $0.id == theme }) { definition = builtin }
+        else {
+            let pair = theme.split(separator: "/")
+            definition = try GhosttyThemeImport.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).definition
+        }
+        let dark = definition.isDark
+        let palette = definition.palette
         var environment = EnvironmentValues()
         environment.colorScheme = dark ? .dark : .light
         let surfaces = [palette.background, palette.surface, palette.surfaceMuted, palette.surfaceElement]
         let text = [palette.text, palette.textSecondary, palette.textTertiary, palette.linkInk,
                     palette.linkHover, palette.actionInk, palette.emphasisInk, palette.working,
                     palette.waiting, palette.failure, palette.success]
+        for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
+            #expect(ratio(rgb(tone.text(in: palette), environment), rgb(tone.fill(in: palette), environment)) >= 4.5)
+        }
+        let terminalBase = rgb(definition.terminal.background.color, environment)
+        for fill in [palette.terminalHover, palette.terminalSelection, palette.terminalFailure] {
+            #expect(ratio(rgb(definition.terminal.foreground.color, environment), composite(rgb(fill, environment), over: terminalBase)) >= 4.5)
+        }
+        #expect(definition.terminal.readabilityErrors.isEmpty)
         for surface in surfaces {
             let base = rgb(surface, environment)
             let selected = composite(rgb(palette.selectionFill, environment), over: base)

@@ -278,6 +278,8 @@ struct AppAppearance: ViewModifier {
             .environment(\.palette, theme.palette)
             .environment(\.theme, theme)
             .tint(theme.palette.emphasisInk)
+            .foregroundStyle(theme.palette.text)
+            .background(theme.palette.background)
             .safeAreaInset(edge: .top) {
                 if let notice = appearance.notice, !appearance.chooserOpen {
                     HStack {

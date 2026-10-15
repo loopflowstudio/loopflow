@@ -1795,7 +1795,7 @@ private struct SessionPaneView: View {
                     .accessibilityIdentifier("session-move-here-\(item.id)")
                     Text("Moving stops the other client. Unsent text typed there is lost.")
                         .font(Typography.caption(9))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
             }
         }

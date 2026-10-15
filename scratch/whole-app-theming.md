@@ -306,29 +306,40 @@ new Work authority, client restart or renderer correction implementation.
 No layout redesign, downloader, shader/material system, color editor, font
 preferences, execution migration, installation or release. Keep the inherited
 `scratch/workflow-loading.md` parent hold intact; this Task does not supersede it.
-Reconcile with LOO-462's delivered owners before coding; its concurrent changes
-are not fully present in this baseline.
+LOO-462's delivered pane/search/navigation owners were integrated from `5359c2d77`
+using `lf sync --manual` on October 15; its later draft outer Work layout remains
+outside this Task.
 
-## Internal implementation sequence
+## Implementation and remaining review
 
-One integrated delivery; these are internal cuts, not separate shipping units.
+Implemented October 15 on LOO-462 `5359c2d77`: shared sRGB theme/palette,
+versioned preference migration, app-wide preview with Apply/Cancel, bounded local
+RGB imports, coherent Light/Dark terminals, and live Ghostty configuration updates.
+Native backing layers, shell blocks, search and copy feedback observe the same
+selection while hidden. The existing registry still owns native views. Default
+zsh prompts use indexed slot 5; custom prompts remain unchanged.
 
-1. **This slice — collapse color ownership.** Introduce resolved theme data, fold
-   static terminal colors and tone literals into it, and cut every app/native
-   consumer over while preserving current palettes initially. Remove `deepWine`
-   and obsolete constants. Focused check:
-   `scripts/test_desktop.sh --filter 'WorkPaletteTests|GhosttyShellBlockTests' -Xswiftc -gnone`.
-   Preserve semantic contrast and shell behavior through the new owner.
-2. Implement preference/preview lifecycle, migration and chooser, then live Ghostty
-   publication and retained decoration updates. Replace default-prompt RGB. Add
-   the accepted coherent Light/Dark terminal values; delete the old resolver/writer.
-3. Add import, role derivation, diagnostics and the composed headless scenario below.
-   Cover partial/invalid/low-contrast inputs and personal Ghostty overrides.
-   Integrate LOO-462's final consumers, update docs and inspect native coherence.
+The deletion cut is complete: no static terminal color owner, forced dark pane
+palette, fixed status literals, deepWine, old Desktop preference writer or old
+appearance resolver remains. Portfolio rows and telemetry also consume the theme.
+Personal theme selectors clear before Ghostty finalization; non-color settings
+remain in the frozen baseline. The current and applied compiled candidates are
+retained so Cancel can reuse the validated configuration.
+
+Review fixes: mid-gray imports exposed unreadable chip fills, so optional chip and
+shell-block tints reduce when they would break text contrast. Corrupt saved bytes
+remain intact with a recoverable notice. Invalid imports cannot publish or persist;
+non-color input never reaches Ghostty. Selection keeps a separate neutral edge,
+including Portfolio rows. The parent sync retained its pane islands and search.
+
+Remaining: gate's affected suites, iOS boundary and Xcode fallback build; native
+demo of actual provider input, focus, scrollback and visual coherence. Headless
+native-view identity/backing-layer evidence is not Metal rendering or PTY proof.
+No installation, running-app restart, publication or landing was performed here.
 
 ## Done when and unattended gate
 
-The planned `ThemeWorkflowTests` uses disposable preferences and the production owner:
+`ThemeWorkflowTests` uses disposable preferences and the production owner:
 restore old Dark preference; load retained Repo/Wave/Task fixtures with file draft
 and split layout; preview a light import; navigate/collapse/focus; cancel; apply a
 dark import; construct a fresh owner to simulate relaunch. Assert selection, layout,
@@ -362,4 +373,4 @@ coherence across the navigation/pane matrix. Success means Jack can apply/revert
 his chosen environment and continue the same work. Palette tests alone establish
 neither that experience nor subjective approval.
 
-Check (2026-10-15): `uv run python` RGB/import/contrast probe on the two linked theme files — PASS for the subset and default/selection text; TokyoNight ANSI 8 fails 3:1 as recorded above. Design contract/link/whitespace checks pass; `lf context` is within token/byte targets. Source/API inspection only; app builds and native rendering remain implementation/gate/demo checks.
+Check (2026-10-15): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|GhosttyShellBlockTests' -Xswiftc -gnone` — app/test build and 18 tests PASS, including seven built-in/import contrast cases; full affected suites and fallback/iOS builds belong to gate, native rendering/input judgment to demo.

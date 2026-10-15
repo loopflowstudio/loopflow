@@ -341,9 +341,8 @@ func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> C
     )
 }
 
-/// Block chrome. A resting block has none; hover is faint; selection is a
-/// cream tint and bar; a reported failure is red, selected or not. Every fill keeps
-/// the dimmest palette color (8) at 3:1 or better, which caps red near 0.18.
+/// Block selection and reported failure use independent theme roles. Optional
+/// fills preserve default terminal text contrast; ANSI colors remain untouched.
 struct GhosttyCommandBlockStyle {
     let fill: NSColor
     let accent: NSColor
@@ -468,6 +467,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func applyTheme(_ theme: ThemeDefinition) {
         self.theme = theme
+        appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
+        searchBar.applyTheme(theme)
+        copyConfirmation?.textColor = theme.terminal.foreground.nsColor
+        copyConfirmation?.backgroundColor = theme.terminal.background.nsColor
         layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         dropHighlight?.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
         dropHighlight?.layer?.backgroundColor = NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
@@ -1252,8 +1255,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         copyConfirmation?.removeFromSuperview()
         let notice = TerminalCopyNotice(labelWithString: message)
         notice.font = .systemFont(ofSize: 11, weight: .medium)
-        notice.textColor = NSColor(TerminalPalette.foreground)
-        notice.backgroundColor = TerminalPalette.nsBackground
+        notice.textColor = theme.terminal.foreground.nsColor
+        notice.backgroundColor = theme.terminal.background.nsColor
         notice.drawsBackground = true
         notice.isSelectable = false
         notice.setAccessibilityIdentifier("terminal-copy-confirmation")

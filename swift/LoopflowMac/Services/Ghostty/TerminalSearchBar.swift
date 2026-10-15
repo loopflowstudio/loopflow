@@ -35,16 +35,13 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
         self.terminal = terminal
         super.init(frame: .zero)
         isHidden = true
-        appearance = NSAppearance(named: .darkAqua)
         wantsLayer = true
-        layer?.backgroundColor = TerminalPalette.nsBackground.cgColor
         field.placeholderString = "Find in terminal"
         field.setAccessibilityLabel("Find in terminal")
         field.setAccessibilityIdentifier("terminal-find-field")
         field.delegate = self
         field.sendsSearchStringImmediately = true
         count.font = .systemFont(ofSize: 11)
-        count.textColor = NSColor(TerminalPalette.dim)
         count.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let previous = button("chevron.up", label: "Previous match", action: #selector(previousMatch))
         let next = button("chevron.down", label: "Next match", action: #selector(nextMatch))
@@ -60,6 +57,15 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        applyTheme(GhosttyManager.shared.theme)
+    }
+
+    func applyTheme(_ theme: ThemeDefinition) {
+        appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
+        layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
+        field.textColor = NSColor(theme.palette.text)
+        field.backgroundColor = NSColor(theme.palette.surface)
+        count.textColor = NSColor(theme.palette.textSecondary)
     }
 
     required init?(coder: NSCoder) { nil }

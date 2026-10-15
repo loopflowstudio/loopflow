@@ -11,7 +11,7 @@ private struct AppearancePreferences: Codable {
 /// All windows share one selection and one reversible preview transaction.
 @MainActor @Observable
 final class AppearanceStore {
-    static let shared = AppearanceStore(publish: { try GhosttyManager.shared.applyTheme($0) })
+    static let shared = AppearanceStore(publish: { try GhosttyManager.shared.applyTheme($0, retaining: $1) })
     private(set) var selection = "system"
     private(set) var previewSelection: String?
     private(set) var imports: [ImportedTheme] = []
@@ -21,11 +21,11 @@ final class AppearanceStore {
     var notice: String?
     var chooserOpen = false
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private let publish: (ThemeDefinition) throws -> Void
+    @ObservationIgnored private let publish: (ThemeDefinition, String) throws -> Void
     @ObservationIgnored private var observation: NSKeyValueObservation?
 
     init(defaults: UserDefaults = .standard, systemDark: Bool? = nil,
-         publish: @escaping (ThemeDefinition) throws -> Void = { _ in }) {
+         publish: @escaping (ThemeDefinition, String) throws -> Void = { _, _ in }) {
         self.defaults = defaults
         self.publish = publish
         self.systemDark = systemDark ?? (NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
@@ -39,6 +39,8 @@ final class AppearanceStore {
                 selection = preferences.selection; imports = preferences.imports
                 guard resolve(selection) != nil else { throw ThemeError("Saved theme is unavailable. Choose System, Light, Dark or import it again.") }
             } catch { notice = "\(error.localizedDescription) Saved preferences were retained; using System until a valid theme is applied." }
+        } else if defaults.object(forKey: "appearancePreferences") != nil {
+            notice = "Unreadable appearance preferences were retained. Choose a theme to replace them."
         } else if let old = defaults.string(forKey: "appearanceMode") {
             selection = ["system", "light", "dark"].contains(old) ? old : "system"
             persist()
@@ -46,7 +48,7 @@ final class AppearanceStore {
         }
         effectiveTheme = resolve(selection) ?? systemTheme
         if AppTestMode.forcesLightAppearance { effectiveTheme = .light }
-        do { try publish(effectiveTheme) } catch { notice = error.localizedDescription }
+        do { try publish(effectiveTheme, effectiveTheme.id) } catch { notice = error.localizedDescription }
         if systemDark == nil {
             observation = NSApplication.shared.observe(\.effectiveAppearance) { [weak self] _, _ in
                 Task { @MainActor [weak self] in
@@ -96,7 +98,7 @@ final class AppearanceStore {
         do {
             guard theme.terminal.readabilityErrors.isEmpty else { throw ThemeError(theme.terminal.readabilityErrors.joined(separator: "\n")) }
             let theme = AppTestMode.forcesLightAppearance ? ThemeDefinition.light : theme
-            if effectiveTheme.id != theme.id || effectiveTheme.terminal != theme.terminal { try publish(theme) }
+            if effectiveTheme.id != theme.id || effectiveTheme.terminal != theme.terminal { try publish(theme, (resolve(selection) ?? systemTheme).id) }
             effectiveTheme = theme; notice = nil
             return true
         } catch { notice = error.localizedDescription; return false }

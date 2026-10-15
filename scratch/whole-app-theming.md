@@ -55,6 +55,8 @@ October 15 decisions, in order:
   (Apple), Ubuntu (Canonical), Solarized Higher Contrast (unlicensed gist).
   Ship Night Owl and Noctis from their MIT upstream colors, not catalogue ports.
   Mark Badolato's own themes are MIT on their terminalthemes.com pages.
+- Jack approved the license-clean 12 Light / 12 Dark choices in
+  `scratch/theme-catalogue/index.html` (October 15).
 - **Edit + Reset**, no separate Duplicate. Any slot can be renamed, recolored or
   replaced by importing a theme. Reset restores its original bundled name and
   colors. All these changes participate in the chooser's existing Apply/Cancel

@@ -30,3 +30,7 @@ Jack accepted two hierarchy levels, one Work selection, keyboard-only history,
 sidebar-owned collapse and drag resizing. Prototype 04 explores Wave breadcrumbs
 and conditional workspace headers. Add/replace gestures, mixed Work layouts and
 cross-launch restoration remain draft; no outer-multiplexer implementation launched.
+
+Selection: Jack rejected the top-rule experiment. Study 05 compares Notion-inspired
+neutral fill, Figma-inspired blue fill and solid burgundy fill. Choice and smaller
+header typography remain open; the native selection treatment is unchanged.

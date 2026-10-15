@@ -64,8 +64,9 @@ remain. System changes choose Light/Dark assignments, not a palette's brightness
 Live provider output and visual comfort belong to review; truecolor output can
 retain its own colors. No test substitutes for that judgment.
 
-**Current preview:** `/tmp/Loopflow Palette Library Preview.app` was built,
-signature-verified and launched at Jack's request. It starts in restored Loopflow
+**Current preview:** `/tmp/Loopflow Palette Library Preview.app` was rebuilt
+after syncing main v0.13.17 (#1559 landed; the 0.13.15 `lf` could not open the
+0.13.16-migrated database), signature-verified and relaunched at Jack's request. It starts in restored Loopflow
 Dark and contains the 24-slot editor. Its separate preview preferences assign Linen
 to Light and Loopflow Dark to Dark. Source copies were hash-verified before signing
 (`/tmp/loo488-library-package-proof.json`); process liveness was observed. No native

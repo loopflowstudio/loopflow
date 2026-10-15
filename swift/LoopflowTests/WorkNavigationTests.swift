@@ -649,7 +649,7 @@ struct WorkNavigationTests {
         let navigation = model.navigation
         navigation.selectedSessionId = "human"
         #expect(navigation.selection == .task(id: "issue-review"))
-        navigation.taskListScrollOffsets["wave-1"] = 160
+        navigation.listScrollOffset = 160
         navigation.showsNavigator = false
         navigation.search = "upcoming"
         navigation.content = .terminals
@@ -661,7 +661,7 @@ struct WorkNavigationTests {
         #expect(model.navigation === navigation)
         #expect(model.navigation.content == .terminals)
         #expect(model.navigation.selectedSessionId == "human")
-        #expect(model.navigation.taskListScrollOffsets["wave-1"] == 160)
+        #expect(model.navigation.listScrollOffset == 160)
         #expect(!model.navigation.showsNavigator)
         #expect(model.navigation.search == "upcoming")
         #expect(fixtureWork(registry, fixtureWorkspace("/src/loopflow")) === workspace)
@@ -1077,13 +1077,12 @@ struct WorkNavigationTests {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
         }
         model.navigation.search = " "
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2") }
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-2")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2")
         #expect(model.selection == .wave(id: "wave-2"))
     }
 
-    @Test("Repository lists Waves; entering one shows its Tasks and breadcrumb")
+    @Test("Wave selection reveals Tasks without moving the Wave or changing other branches")
     func singleWaveNavigator() throws {
         var value = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var wave = try #require((value["waves"] as? [[String: Any]])?.first)
@@ -1096,8 +1095,13 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review") }
         try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-1")
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-fold-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review") }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-fold-wave-1").button().tap()
+        model.select(nil)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
     }
 
     @Test("Attention opens the exact retained conversation and Back returns to interrupted Work", arguments: [false, true])
@@ -1125,15 +1129,26 @@ struct WorkNavigationTests {
         if alreadyRetained {
             #expect(root.multiplexer.pane(forSessionId: record.id)?.id == existingPane?.id)
         }
+        let projected = model.visibleWork.navigator(search: "", planningReadable: true,
+            selection: model.selection, unavailable: nil)
+        #expect(projected.available.map(\.row.id.work) == [.task(id: "issue-review")])
+        #expect(!projected.waves.flatMap(\.tasks).contains { $0.id.work == .task(id: "issue-review") })
+        model.navigation.search = "W2-131"
+        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-issue-review")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
+        model.navigation.search = "no such work"
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-issue-review") }
+        model.navigation.search = ""
         let attention = try #require(model.visibleWork.attention(unavailable: nil).first)
         #expect(model.isSelected(attention))
+        #expect(model.navigatorSelection == attention.work)
         if !alreadyRetained { #expect(model.isSelected(attention.work)) }
         model.goBack()
         #expect(!model.isSelected(attention))
         #expect(model.selection == .wave(id: "wave-2"))
     }
 
-    @Test("Drill-in, resizing, collapse and history preserve Work and drafts")
+    @Test("In-place navigation, resizing, collapse and history preserve Work and drafts")
     func navigatorContextReturn() async throws {
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(), sessions: sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -1148,12 +1163,14 @@ struct WorkNavigationTests {
         draft.editor.string = "keep this thought"
         retained.multiplexer.newShell(location: WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
         let pane = retained.multiplexer.focusedPane
-        model.navigation.taskListScrollOffsets["wave-1"] = 168
+        model.navigation.listScrollOffset = 168
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository").button().tap()
         try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2").button().tap()
         #expect(model.selection == .wave(id: "wave-2"))
+        #expect(model.navigation.expandedWaves.count == 2)
+        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
         model.goBack()
         #expect(model.selection == nil)
         model.goBack()
@@ -1165,12 +1182,12 @@ struct WorkNavigationTests {
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true
         #expect(model.navigation.sidebarWidth == 460)
-        #expect(model.navigation.taskListScrollOffsets["wave-1"] == 168)
+        #expect(model.navigation.listScrollOffset == 168)
         #expect(registry.retained(key) === retained)
         #expect(retained.multiplexer.focusedPane == pane)
         #expect(files.document("notes.md") === draft)
         #expect(draft.editor.string == "keep this thought")
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-1").button().tap()
+        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
         #expect(model.selection == .wave(id: "wave-1"))
         #expect(model.navigation.forwardStack.isEmpty)
     }

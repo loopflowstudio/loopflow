@@ -1,58 +1,11 @@
-# Open design questions
+# Remaining scope and evidence
 
-October 15, 2026 — LOO-462
+October 15, 2026 — LOO-462. Jack Heart accepted Study 06 and requested building and shipping the final scope. Product iteration is closed; only implementation completion, polish, bugs, performance and validation remain.
 
-- Jack Heart redirected this design conversation to sidebar exploration. The
-  [sidebar design](sidebar-exploration.md) owns the current request; Workflow
-  loading proposals remain separate, unaccepted drafts.
-- The completion investigation records a roughly 1.2-second command; historical
-  confirmation and UI delay remain unmeasured. No cause or latency target is accepted.
-- Proposed two-phase progress wording in
-  [the current design](make-loopflow-a-work-first.md), including a ten-second
-  confirmation deadline independent of heartbeats, is unreviewed.
-- Existing feedback leaves Fantasia → manabot ambiguous between folder rename
-  and display naming. Studio/Silencio portfolio removal was an interpretation,
-  not authorization for deleting repository directories.
+Accepted: stationary Wave rows and inline Tasks; independent folding; full-size Task-only Available section; no duplicate Task appearances; Ink on Paper; one selected destination; retained nested Work/pane layouts; sidebar resize/collapse; keyboard-only history. `task-workspaces.md` owns the final design and shipping checks. The obsolete drill-in and adjacent-column alternatives are rejected.
 
-Sidebar: Jack Heart approved implementing prototype 03 in the app, with program
-headers, a collapsible sidebar without Machine grouping, and a compact attention
-queue above the Wave / Task columns. Context switching remains the priority.
-Native visual review still needs to judge width, metadata density and focus
-restoration. Implementation is authorized; landing and native acceptance are not.
+The completion investigation measured a roughly 1.2-second command and reproduced indefinite post-command confirmation despite heartbeats. It did not establish the cause or duration of the historical UI stall. The final implementation bounds confirmation and distinguishes its failure from command failure; no native timing target is invented. Diagnostic history stays off the normal Task-frame path.
 
-Separate work: LOO-487 captures animation/shader/color polish, including cell-level
-effects and automatic terminal contrast. LOO-488 owns whole-app theming; its
-feature design edge is launched, with theme architecture/import choices still
-draft. These scopes do not extend the current pane/navigation implementation.
+Separate Tasks retain their scopes: LOO-487 terminal shader/contrast polish, LOO-488 theming, LOO-489 dashboards. For dashboards, Jack clarified a Wave view is strictly query-derived from its conversation and open Tasks; only the pinned repo dashboard is customizable. Default Wave dashboard versus conversation-only remains the child's design question. Tasks have no dashboards. LOO-489 was started in its own checkout/session, stacked at `7d10108eaf`.
 
-Native review continued into [Work multiplexer / Task workspaces](task-workspaces.md).
-Jack Heart selected Ink on Paper and authorized Swift implementation of the full
-prototype, including mirrored selection in Needs you. Command-click adds adjacent
-Work; ordinary click replaces the focused slot; close hides while retaining panes.
-These prototype gestures carry into implementation. Cross-launch outer layout
-restoration remains outside this change. The existing reader watches focused Task
-Workflow detail; inactive workspaces retain live panes and offer focus for actions.
-Native demo judgment and landing remain distinct from implementation authorization.
-
-October 15 native feedback: Jack Heart rejected selection jumping from a Wave
-row to the header. Replacement is unresolved: stable Wave rows with inline Tasks,
-or a persistent Wave index above a scoped Task section. Preserve Ink on Paper,
-one Work selection and Needs you mirroring. Neither replacement is authorized
-by this design discussion. Jack subsequently requested the in-place branch
-prototype: [Study 06](sidebar-prototypes/06-stationary-waves.html). It is available
-for interaction review; no Swift replacement has been requested yet.
-
-Jack Heart subsequently selected Available as the shared Session term, including
-the lf CLI; full-size Tasks appear only in Available or under their Wave. Available
-is Task-only. Wave conversation availability does not move Waves or their children.
-This supersedes mirrored duplicate Task rows in the new prototype; native layout
-adoption remains separate from the authorized terminology cutover.
-
-Dashboard exploration is separate [LOO-489](https://linear.app/loopflow/issue/LOO-489),
-stacked on LOO-462 at 7d10108eaf. Jack Heart clarified that a Wave dashboard is
-strictly query-derived (Wave conversation plus open Tasks), offered on Wave click
-by default or alongside conversation-only. Expandable sections remain a proposal.
-Only the pinned repo dashboard is customizable; it initially contains the repo
-session. Tasks have no dashboards. The child owns `scratch/dashboard-design.md`
-in its checkout. Feature's task-design/kickoff edge is running; its primary
-Session is open in the existing cmux window as LOO-489 Dashboards.
+Unrelated feedback remains unresolved: Fantasia → manabot could mean folder or display naming; Studio/Silencio portfolio removal did not authorize deleting repository directories. Etude hook failure cause is unknown. These are not silently completed or added to the shipping scope.

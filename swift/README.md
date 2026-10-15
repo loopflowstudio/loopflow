@@ -37,12 +37,16 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Open a Wave to enter its conversation and fill the sidebar with its Tasks.
-The **Repo / Wave** path returns to either conversation. Each Wave keeps its
-Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
-including **Available**. This section contains Tasks only and opens their exact
-available conversation, using shared availability or reported Blocked evidence.
-The CLI exposes Session availability through `lf session list --available --json`.
+Open a Wave conversation without moving its row. Its Tasks appear underneath;
+other expanded Waves stay open. Click the Task count to fold a branch without
+navigating. The repository stays at the top. Search filters both sections without
+changing selection. Burgundy fill marks one selected destination.
+
+**Available** shows full-size Tasks with their Wave context and opens the exact
+available conversation. Those Tasks are omitted from the Wave branches, so each
+appears once. Wave conversations stay in the hierarchy. Availability comes from
+shared Session evidence or a reported Blocked state; the CLI exposes it through
+`lf session list --available --json`.
 
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
@@ -63,9 +67,9 @@ or dot. Shared availability is labeled as inferred; report Blocked and Error rem
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Selection uses a neutral fill and edge; keyboard focus has a separate outline.
+Work selection uses burgundy fill and cream text; keyboard focus has a separate outline.
 Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
-Blue means reported work, amber means supported Waiting/blocked, red means failure.
+Blue means reported work, amber means Available/blocked, red means failure.
 The same roles apply in light and dark appearances without changing terminal ANSI
 colors or replacing retained panes and drafts.
 
@@ -592,6 +596,11 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+
+Task actions distinguish the running command from confirmation of its updated
+reading. Confirmation expires after ten seconds even while heartbeats arrive;
+an accepted command is never automatically repeated. Refresh readings requests
+fresh observation without repeating the Task action.
 
 The reader's pipes drain off the main actor. Ten seconds without a frame ends
 the reading; cancellation closes stdin, then terminates and reaps only the

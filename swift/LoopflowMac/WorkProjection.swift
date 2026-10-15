@@ -274,6 +274,51 @@ extension WorkProjection {
     }
 }
 
+/// One partition of the navigation: available Tasks occur only above the Waves.
+struct WorkNavigatorProjection {
+    struct AvailableTask: Identifiable {
+        let row: WorkOutlineRow
+        let attention: WorkAttentionItem
+        var id: WorkNodeKey { row.id }
+    }
+    struct Branch: Identifiable {
+        let wave: WaveProjection
+        let tasks: [WorkOutlineRow]
+        var id: WorkNodeKey { wave.id }
+    }
+    let available: [AvailableTask]
+    let waves: [Branch]
+}
+
+extension WorkProjection {
+    func navigator(search: String, planningReadable: Bool, selection: WorkReference?,
+                   unavailable: String?) -> WorkNavigatorProjection {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attention = attention(unavailable: unavailable)
+        let availableWork = Set(attention.map(\.work))
+        let rows = outline(collapsed: [], search: search, planningReadable: planningReadable,
+                           selection: selection).filter { $0.task != nil && !availableWork.contains($0.id.work) }
+        let available = attention.compactMap { item -> WorkNavigatorProjection.AvailableTask? in
+            guard let wave = waves.first(where: { $0.roadmap.wave.id == item.waveID }),
+                  let task = wave.tasks.first(where: { $0.id.work == item.work }),
+                  query.isEmpty || [item.title, item.waveName, task.task.task.identifier]
+                    .contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
+            let parent = WorkOutlineSubject(key: wave.id, title: item.waveName)
+            let row = WorkOutlineRow(subject: WorkOutlineSubject(key: task.id, title: item.title),
+                hasChildren: false, inlineSessions: task.sessions, depth: 0,
+                ancestors: [parent], task: task.task)
+            return .init(row: row, attention: item)
+        }
+        let branches = waves.compactMap { wave -> WorkNavigatorProjection.Branch? in
+            let tasks = rows.filter { $0.ancestors.contains { $0.key == wave.id } }
+            guard query.isEmpty || !tasks.isEmpty || wave.roadmap.wave.displayName.localizedCaseInsensitiveContains(query)
+            else { return nil }
+            return .init(wave: wave, tasks: tasks)
+        }
+        return WorkNavigatorProjection(available: available, waves: branches)
+    }
+}
+
 /// One exact Session's assignment confirmation, retained through a failed commit.
 struct SessionBindingDraft: Equatable {
     let id = UUID()
@@ -297,7 +342,12 @@ struct SessionRenameDraft: Equatable {
 
 /// One Task's in-flight `lf task run` or `lf task move` and its refusal.
 struct TaskRunDraft: Equatable {
-    var acting = false
+    enum Phase { case runningCommand, awaitingObservation }
+    var phase: Phase?
+    var acting: Bool { phase != nil }
+    var progress: String {
+        phase == .awaitingObservation ? "Task updated; refreshing…" : "Updating Task…"
+    }
     var error: String?
 }
 
@@ -365,7 +415,7 @@ final class WorkNavigation {
     var listScrollOffset: CGFloat = 0
     var showsNavigator = true
     var sidebarWidth: CGFloat = 380
-    var taskListScrollOffsets: [String: CGFloat] = [:]
+    var expandedWaves: Set<WorkNodeKey> = []
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
         sidebarWidth = min(600, max(260, min(width, availableWidth - 360)))
@@ -376,7 +426,7 @@ final class WorkNavigation {
         selection = nil
         backStack = []
         forwardStack = []
-        taskListScrollOffsets = [:]
+        expandedWaves = []
         selectedTaskEvidence = nil
         content = .overview
     }

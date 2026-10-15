@@ -1,137 +1,52 @@
 # Work multiplexer and Task workspaces
 
-October 15, 2026 — Jack Heart accepted Ink on Paper, requested selection in
-Needs you, and authorized building the complete prototype into Swift. This
-continues LOO-462's [native navigation](native-wave-task-navigator.md).
+Accepted October 15, 2026 — Jack Heart accepted [Study 06](sidebar-prototypes/06-stationary-waves.html): “yeah this looks good,” then requested “lets build this and ship it.” LOO-462 / Product, PR #1531. Scope is frozen: one final implementation pass, then only polish, bug fixing, performance, testing and validation. Dashboards (LOO-489), theming (LOO-488) and terminal shader/contrast work (LOO-487) retain their separate ownership.
 
 ## What to build
 
-A resizable drill-in sidebar and an outer Work multiplexer containing retained
-workspaces, each with its own inner pane multiplexer.
+A stationary Wave hierarchy with full-size Available Tasks above it, and retained Work workspaces with independent inner pane multiplexers.
 
-Jack: “there needs to be one selection state”; “two distinct levels of hierarchy”;
-“the wave jumps into a bread crumb in the top row when you select a specific task”;
-“forward/back nav was keyboard only”; “sidebar should also be draggable to resize”.
-Final styling: “Ink on Paper”; “selection also highlights in needs youwhen necessary”.
+Jack: “there needs to be one selection state”; “two distinct levels of hierarchy”; “forward/back nav was keyboard only”; “sidebar should also be draggable to resize”. Ink on Paper remains accepted. The rejected header-relocation design is preserved in git at `6a2622bc71:scratch/task-workspaces.md`, not maintained as another navigation mode.
 
-## Accepted behavior / The demo
+## The demo
 
-October 15 native review — Jack Heart rejected the Wave selection relocating
-into the header: “having the selection jump to the header when you click on a
-wave is super jarring.” The drill-in replacement described below is the current
-implementation, no longer an accepted navigation outcome. Ink on Paper, one Work
-selection, Needs you mirroring and retained workspaces remain accepted.
+The repository stays in the header. Click a Wave: its existing row selects, its conversation opens, and Tasks appear directly beneath it. Other expanded branches stay open. Click a Task: only that destination selects. Fold through the Task-count button without navigating or changing selection. Search filters both sections, hides nonmatching Waves, and never changes selection.
 
-Replacement under discussion: keep Wave rows in the sidebar and reveal Tasks
-below their Wave, preserving the clicked row and existing expanded branches.
-Wave selection opens its conversation; Task selection highlights only the Task
-(and its Needs you appearance). Expansion is presentation state, independent of
-Work selection. A task-count control could fold a branch without chevrons or
-navigation. Jack authorized prototyping this interaction on October 15; native
-implementation remains unapproved. [Study 06](sidebar-prototypes/06-stationary-waves.html)
-implements stationary Wave rows, independent branch folding through Task counts,
-and retained drafts. Jack subsequently selected full-size Available Task rows
-above the Waves, omitting those Tasks from Wave lists; each Task appears once.
-Available contains Tasks only, never Wave conversations. The term Available
-replaces Needs you and shared Session Waiting through Swift, Rust, JSON
-(`attention: "available"`) and `lf session list --available`. Detection rules and
-unrelated Task/Flow waiting states remain unchanged; the old Session spelling and
-flag are removed, with no stored schema change. Native terminology and Task-only
-queue are authorized; native in-place layout remains a prototype decision.
-The alternative
-is Figma's stacked sections: a persistent Wave index above the scoped Task list.
-Tradeoff: inline branches consume vertical space; stacked sections separate
-Tasks spatially from their Wave. No return to adjacent sidebar columns is proposed.
+Available contains Tasks only, with the same row size/details as ordinary Tasks plus Wave context. Each Task appears once: Available Tasks are excluded from Wave branches and their counts. Available opens the exact conversation. A retained Session in another Work's pane layout still highlights one sidebar destination, not both its workspace owner and Task. Availability changes use current shared evidence; Wave conversations never move into Available.
 
-Repository entry shows Needs you and a single Wave list. A Wave opens its
-conversation and replaces that list with Tasks. Repo / Wave breadcrumbs return
-to their conversations; selecting a Task keeps its siblings visible. Search hides
-nonmatches without navigating. Each Wave retains its Task-list scroll position.
+Command-click opens Work beside the focused workspace. Ordinary click replaces the focused slot, or focuses Work already visible. Close hides a workspace while retaining panes, surfaces and file drafts. Each inner split stays within its Work. Narrow outer layouts reflow vertically. Context headers appear only with multiple workspaces or a collapsed sidebar. Primary single-workspace views have no middle breadcrumb. Secondary Sessions retain rename/bind actions.
 
-Burgundy fill and cream text mark selected Work, with no edge stripe. Ancestors
-are context. Needs you mirrors the same selection; it also recognizes the exact
-Session retained in a different workspace. A selected overflow entry remains
-visible in the three-row queue. These are multiple representations of one
-selection, not independent selected values.
+Drag the sidebar within 260–600pt while reserving content space; collapse/restore retains width. Command-[ / ] traverse history with no visible history buttons. Type a draft, open another Task beside it, split one workspace, switch focus, resize/collapse, hide/reopen and return through history: identity and drafts survive.
 
-Command-click opens Work beside the focused workspace. Ordinary click replaces
-the focused slot, or focuses Work already visible. Close hides a workspace while
-retaining its panes, surfaces and file drafts. Each inner split stays within its
-Work. Narrow outer layouts reflow vertically. Context headers appear only with
-multiple workspaces or a collapsed sidebar. Primary single-workspace views have
-no middle breadcrumb. Secondary Sessions retain rename/bind actions.
+Task lifecycle feedback distinguishes command execution from confirmation. A successful command says “Task updated; refreshing…”. Confirmation expires after ten seconds independent of heartbeats; failure says the update was accepted but refresh is unconfirmed. Explicit Refresh readings never repeats the mutation. This repairs the indefinite busy state documented in the completion investigation, without claiming its historical latency cause is known.
 
-Sidebar collapse belongs to the sidebar; the edge control restores it at its
-remembered width. Drag adjusts width within 260–600pt while reserving content
-space. Command-[ / ] traverse history without visible Back/Forward buttons.
+## Data structures / Key functions
 
-Demo: open Product → Task, type a draft, Command-click another Task, split a pane
-in one workspace, switch focus, resize/collapse, hide/reopen a workspace, and use
-keyboard history. Needs you and the Task list highlight the same selected Work.
-[Prototype 04](sidebar-prototypes/04-task-workspaces.html) mirrors this direction;
-[study 05](sidebar-prototypes/05-selection-comps.html) retains the alternatives.
-
-## Data structures and key functions
-
-`WorkWorkspaceKey` identifies whole Work. `WorkLayout` is a binary split tree
-whose leaves hold these keys. `SessionsWorkspaceRegistry.layout` replaces flat
-placement; its `openWork` is derived. Existing `selectedWork` and WorkNavigation
-remain connected through WorkModel's selection path, not another selection owner.
-
-Each `SessionsWorkspace` retains its `MultiplexerStore`, pane focus, presentation,
-documents and pooled surfaces. `SplitDivider` shares only divider geometry and
-an update closure; it cannot exchange Work keys and pane IDs.
-
-- `select(reference, besideFocused:)` changes placement and one Work selection.
-- `hideWorkspace(key)` removes placement, retains clients, and focuses surviving Work.
-- `WorkLayout.replacing/removing/resizing` changes only outer geometry.
-- `split(pane, axis:)` remains inside its owning workspace.
-- `resizeSidebar(width, availableWidth:)` changes navigation geometry only.
-- `isSelected(reference/attention)` reconciles planning/runtime aliases and exact Sessions.
+- `WorkWorkspaceKey` identifies whole Work; `WorkLayout` is the outer binary split tree. `SessionsWorkspaceRegistry.layout` owns placement; `openWork` is derived.
+- Each `SessionsWorkspace` retains its `MultiplexerStore`, pane focus, presentation, documents and surfaces. `SplitDivider` shares geometry only.
+- `WorkProjection.navigator(...)` derives one partition into Available Tasks and Wave branches from existing readings. It stores no inventory or availability state.
+- `WorkNavigation.expandedWaves` and `listScrollOffset` own presentation, independently of Work selection. `WorkModel.navigatorSelection` projects that selection through an exact retained available Session without storing another selected value.
+- `select(reference, besideFocused:)`, `hideWorkspace(key)` and `WorkLayout.replacing/removing/resizing` own outer navigation. `split(pane, axis:)` remains inside its workspace.
+- `TaskRunDraft.phase` distinguishes running command/awaiting observation; `acting` is derived. Existing checkpoint waiters own deadlines and settle once, including late replies and reader loss.
 
 ## Current system / Delete — do not maintain
 
-Removed persistent adjacent Wave/Task columns, remembered Wave-click destinations,
-`selectWaveContext`, `navigatorWaveID`, `waveDestinations`, and their exclusive
-column/restore expectations. Wave clicks now open Wave conversations.
+Remove the native drill-in branch, Wave breadcrumb header, bounded compact attention queue, overflow menu, `WorkTaskList`, and `taskListScrollOffsets`, with their exclusive drill-in tests. Replace them in the same diff with the single scrollable partition and independent Wave folding. Preserve metadata links, errors, selected terminal Tasks, exact Session opening, retained identities, history and sidebar resizing.
 
-Removed `WorkBreadcrumbBar`, its visible Back/collapse controls, and always-on
-ancestor presentation. `WorkSessionToolbar` preserves secondary Session actions;
-Task Details, Files, Flow logs, shell creation and zoom restoration belong to the
-workspace. Fixed 430pt width is replaced by the resizable sidebar.
+Earlier cuts removed adjacent Wave/Task columns, remembered Wave destinations, `WorkBreadcrumbBar` and flat stored `openWork`. Do not restore them. Available replaces shared Session Waiting through Swift, Rust, JSON and `lf session list --available`; unrelated Task/Flow waiting remains. No new schema migration.
 
-The registry's stored flat `openWork` is replaced by `WorkLayout`; terminal pool,
-location ownership, retained documents, inspection and exact Session opening
-survive. Desktop text inspection distinguishes visible unfocused Work from hidden
-Work. No database migration or compatibility path. Review caught and fixed stale inactive Workflow controls, missing selection on attention entries, and prepared-checkout location precedence.
+Replace stored `TaskRunDraft.acting` and unbounded checkpoint continuations, preserving authoritative confirmation and originating-Task ownership. Diagnostic history remains an explicit Debug subscription; do not restore its cost to normal Task frames.
 
 ## Constraints / Forbidden outcomes
 
-One Work selection, even when mirrored in the queue. No ancestor highlighting,
-duplicate surface mounts, terminal panes shared between Work layouts, draft loss
-on hide, navigation launching a Flow, or search changing selection.
+No ancestor selection, duplicate Task rows, duplicate surface mounts, shared inner panes across Work, draft loss on hide, navigation launching a Flow, or search changing selection. No optimistic completion, automatic command retry, or broad automatic refresh after writes. Explicit Refresh remains permitted.
 
-The existing Work reader watches Workflow detail for the focused Task. Inactive
-workspaces keep live panes and expose a focus action for Workflow controls rather
-than presenting stale actions. Task controls can scroll horizontally in narrow
-workspaces. Outer layout and sidebar width persist within the window, not across
-app launches. Mixed Repo/Wave/Task placement uses the same layout; no extra mode.
+Inactive workspaces keep live panes and offer focus for Workflow actions; the existing reader watches the focused Task. Width and outer placement persist within the window only. Native compositor/input timing remains distinct from headless identity and layout tests. Scope is closed; unrelated repository renaming and hook investigation are not inferred additions.
 
 ## Internal slices / Done when
 
-Indivisible presentation change, one PR. **This slice:** implemented and headless-verified; native visual/focus review remains. Headless acceptance:
-`scripts/test_desktop.sh --filter 'WorkNavigationTests|DesktopPaneControlTests|TaskRowMetadataTests' -Xswiftc -gnone`.
-Expect app/test build and all focused cases passing: drill-in and filtering,
-attention selection, independent layouts, retained identity/drafts, history and
-resize/collapse. Native mounted PTY/focus/geometry judgment remains demo/CI work.
-Landing is not authorized by implementation.
+Indivisible presentation change, one PR. **This slice:** finish native stationary navigation, deduplication and lifecycle confirmation repair; then gate and land. Remaining work is verification, defects found by it, and delivery only.
 
-## Selection references
+Headless gate: `scripts/test_desktop.sh -Xswiftc -gnone` builds the app and passes the desktop suite, including stationary navigation, availability partition, exact selection, retained nested layouts, cache, history and confirmation expiry. Rust availability/Work-stream checks and clippy retain their existing evidence unless integrated source changes invalidate it; full platform matrix belongs to CI. Native visual judgment does not replace these tests.
 
-Official screenshots inspected October 15: [Notion's workspace guide](https://www.notion.com/en-gb/help/intro-to-workspaces)
-shows neutral page fill; [Figma's sidebar guide](https://help.figma.com/hc/en-us/articles/360039831974-Explore-the-navigation-bar-and-left-sidebar)
-shows neutral page context and blue layer selection. Ink on Paper is Loopflow's
-chosen adaptation, not a claim about either product. The top-rule experiment was
-rejected; its history remains in commit `5359c2d77a`.
-
-Check: `uv run --with playwright python /tmp/loo462-check-available.py` and prior selection study PASS; `scripts/test_desktop.sh --filter 'WorkNavigationTests|TaskRowMetadataTests|SessionsStoreTests|DTOFixtureTests|DesktopHeadlessTests/taskSessions' -Xswiftc -gnone` PASS (116); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, focused Session attention/report/DTO library tests and two `session_cli_tests` availability proofs PASS (27 Rust tests; `/tmp/loo462-available-rust.log`). Native layout adoption/review remains separate.
+Check: first native focused pass, `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkModelTests|WorkCacheTests' -Xswiftc -gnone`, PASS (88); final regression/gate pending.

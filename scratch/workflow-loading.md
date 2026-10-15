@@ -1,6 +1,8 @@
-# Workflow loading — landing held
+# Workflow loading — evidence
 
-Jack Heart requires explaining and repairing the remaining delay before landing.
+October 15 final scope: Jack Heart authorized building and shipping LOO-462 after the accepted sidebar refinement. The earlier landing hold below is historical; the bounded confirmation repair and final checks are owned by `task-workspaces.md`.
+
+Earlier review: Jack Heart required explaining and repairing the remaining delay before landing.
 The 0.8-second stream measurement is not an accepted latency target or native
 rendering proof. Trace query, transport, and Swift application/rendering separately;
 verify the running demo binary. Cached Workflow must remain immediately usable.

@@ -38,7 +38,9 @@ October 15 native feedback: Jack Heart rejected selection jumping from a Wave
 row to the header. Replacement is unresolved: stable Wave rows with inline Tasks,
 or a persistent Wave index above a scoped Task section. Preserve Ink on Paper,
 one Work selection and Needs you mirroring. Neither replacement is authorized
-by this design discussion.
+by this design discussion. Jack subsequently requested the in-place branch
+prototype: [Study 06](sidebar-prototypes/06-stationary-waves.html). It is available
+for interaction review; no Swift replacement has been requested yet.
 
 Dashboard exploration is separate [LOO-489](https://linear.app/loopflow/issue/LOO-489),
 stacked on LOO-462 at 7d10108eaf. Jack Heart clarified that a Wave dashboard is

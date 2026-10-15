@@ -27,7 +27,10 @@ below their Wave, preserving the clicked row and existing expanded branches.
 Wave selection opens its conversation; Task selection highlights only the Task
 (and its Needs you appearance). Expansion is presentation state, independent of
 Work selection. A task-count control could fold a branch without chevrons or
-navigation. This proposal is not approved for implementation. The alternative
+navigation. Jack authorized prototyping this interaction on October 15; native
+implementation remains unapproved. [Study 06](sidebar-prototypes/06-stationary-waves.html)
+implements stationary Wave rows, independent branch folding through Task counts,
+retained drafts and mirrored Needs you selection. The alternative
 is Figma's stacked sections: a persistent Wave index above the scoped Task list.
 Tradeoff: inline branches consume vertical space; stacked sections separate
 Tasks spatially from their Wave. No return to adjacent sidebar columns is proposed.
@@ -123,4 +126,4 @@ shows neutral page context and blue layer selection. Ink on Paper is Loopflow's
 chosen adaptation, not a claim about either product. The top-rule experiment was
 rejected; its history remains in commit `5359c2d77a`.
 
-Check: `scripts/test_desktop.sh --filter 'WorkNavigationTests|DesktopPaneControlTests|TaskRowMetadataTests' -Xswiftc -gnone` PASS — app build and 75 tests (`/tmp/loo462-ink-swift-tests.log`); native capture failed when its temporary window closed, so mounted visual/focus acceptance stays with demo/CI. Separate Loopflow Ink Demo launched from this checkout.
+Check: `uv run --with playwright python /tmp/loo462-check-stationary.py` PASS — unchanged Wave click geometry, independent branches, queue mirroring, retained draft and search; screenshot inspected. Native baseline app build and 75 focused tests passed at 7d10108eaf; native acceptance remains separate.

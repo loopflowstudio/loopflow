@@ -347,3 +347,16 @@ base commit. Filter both sections by path. Clicking a file closes the temporary
 chooser; a pinned list stays open. Escape/outside click dismiss, with file drafts
 and selected content retained. Cmd-P opens the chooser in the focused file pane;
 Control-Command-B pins or closes it. The top control displays the selected path.
+
+### Compact GitHub PR viewer — implementation authorized
+
+Jack Heart requested a dedicated PR page inside the companion, like GitHub's PR
+page in a compact mobile layout: status/checks, waiting reviewers, description,
+additions/deletions/file count and an expandable diff list. Read the published PR
+URL through GitHub CLI authentication on the display Machine; this view does not
+merge, request reviews or change execution. Keep read failures visible and cached
+readings identified. GitHub owns published diff contents; local uncommitted changes
+remain in Files. Request file patches when the list expands, handle pagination,
+and disclose unavailable/truncated patches instead of manufacturing a diff.
+Reference: https://cli.github.com/manual/gh_pr_view and
+https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files.

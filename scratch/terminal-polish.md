@@ -376,3 +376,14 @@ introduced by reading PR data. The previous Demo 7 app inspection confirmed this
 Task's Session and Files in a vertical split with ratio 0.618.
 
 Checks: combined pane/navigation/Files/PR suites PASS (155 tests reported, optional native cases skipped); final PR/Files PASS (25); merged terminal/input/Files PASS (47); app and bundled `lf` builds PASS; platform boundaries and diff check PASS. Logs: `/tmp/loo487-pr-files-tests.log`, `/tmp/loo487-pr-final-tests.log`, `/tmp/loo487-merged-terminal-tests.log`, `/tmp/loo487-synced-helper-build.log`. Earlier failures were stale breadcrumb and removed-directory fixture references, corrected to the accepted hierarchy and parent-change list. Native visual review remains pending.
+
+Demo 8 launch failed at repository opening: its source-built 0.13.16 helper requires
+`0.13.16.001_release`, while the live installation/database remains at 0.13.15.
+Jack Heart reported the same frontier error. No migration or live-data reset was
+performed. The installed helper also emits `waiting`, incompatible with the
+merged UI's `available`, so simply swapping helpers is not a valid fix. Published
+release v0.13.16 exists; approval to install it is pending in this conversation,
+with an isolated offline snapshot as the alternative. GitHub reads respect the
+existing offline-clone boundary. Demo 8's app build/signature passed, but its
+empty window inventory establishes no successful native demonstration.
+Check: launcher/PR suites PASS (10 tests), app build and diff check PASS after preserving offline-clone GitHub behavior; `/tmp/loo487-pr-helper-tests.log`.

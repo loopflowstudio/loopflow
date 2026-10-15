@@ -133,7 +133,10 @@ enum LocalWaveAgentLauncher {
     }
 
     static func queryGitHub(_ args: [String]) throws -> String {
-        try runCheckedOutput(["gh"] + args, cwd: nil)
+        guard ProcessInfo.processInfo.environment["LF_CLONE_ROOT"] == nil else {
+            throw LocalLfError(errorDescription: "GitHub is unavailable in an offline data clone.")
+        }
+        return try runCheckedOutput(["gh"] + args, cwd: nil)
     }
 
     private static func runCheckedOutput(_ args: [String], cwd: String?) throws -> String {

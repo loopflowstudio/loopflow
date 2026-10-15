@@ -55,6 +55,8 @@ October 15 decisions, in order:
   (Apple), Ubuntu (Canonical), Solarized Higher Contrast (unlicensed gist).
   Ship Night Owl and Noctis from their MIT upstream colors, not catalogue ports.
   Mark Badolato's own themes are MIT on their terminalthemes.com pages.
+- Jack: Loopflow can target macOS 26 (October 15). Liquid Glass (a Solid/Glass
+  material axis tinted by the theme, chrome only) is separate work, not LOO-488.
 - Jack approved the license-clean 12 Light / 12 Dark choices in
   `scratch/theme-catalogue/index.html` (October 15).
 - **Edit + Reset**, no separate Duplicate. Any slot can be renamed, recolored or

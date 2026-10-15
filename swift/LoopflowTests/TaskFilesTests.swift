@@ -408,34 +408,28 @@ struct TaskFilesTests {
         #expect(retained == nil)
     }
 
-    @Test func taskHeaderUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() async throws {
+    @Test func taskBrowserSwitchesViewsWithoutLosingItsFileSelection() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
-        let query = RegistryQuery { args, _ in
-            switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmap
-            case "ls", "session": return "[]"
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            default: throw RegistryQueryError("Unexpected file/launch request")
-            }
-        }
-        let model = WorkModel(query: query, repoPath: "/src/loopflow")
-        await model.refresh()
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, repository: "fixture-repository", query: query)
-        for (task, location) in [("issue-now", "loopflow.make-lf-work-the-machine"),
-                                 ("issue-review", "loopflow.all-wave-roadmap"),
-                                 ("issue-now", "loopflow.make-lf-work-the-machine")] {
-            model.select(.task(id: task))
-            model.navigation.content = .terminals
-            let toolbar = try view.inspect().find(viewWithAccessibilityIdentifier: "work-toolbar")
-            let text = try toolbar.find(viewWithAccessibilityIdentifier: "task-worktree-location").text().string()
-            #expect(text == location)
-            #expect(throws: (any Error).self) {
-                try toolbar.find(viewWithAccessibilityIdentifier: "worktree-chip")
-            }
-        }
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from:
+            Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
+        let task = try #require(roadmap.waves.first?.tasks.items.first)
+        let store = TaskFilesStore(issue: task.task.identifier, cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        store.selection = "draft.txt"
+        store.page = .task
+        let view = TaskFilesView(store: store, prURL: nil, checkoutBase: nil, task: task)
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
+            .find(text: task.task.name).string() == task.task.name)
+        store.page = .pullRequest
+        #expect(try view.inspect().find(text: "No pull request published yet.").string() == "No pull request published yet.")
+        store.page = .files
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(!store.showsNavigator)
+        #expect(store.selection == "draft.txt")
+        store.page = .task
+        store.page = .files
+        #expect(!store.showsNavigator)
+        #expect(store.selection == "draft.txt")
     }
 
     @Test func wirePreservesExactBaseAndLosslessText() throws {

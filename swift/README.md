@@ -92,9 +92,15 @@ The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
 
-Click a pane's program name to add a **Shell**, the Task's **Files**, or its
-**lf process** view. New companions alternate right/down and keep the main
-conversation in place. The main Session's menu also switches between **Claude**,
+Task workspaces start with the Session on the left and a browser on the right,
+at 70/30. Click the companion's name to switch between **Task**, **PR**, **Files**,
+**Shell**, and **lf process**. Hidden shells keep running and file drafts stay
+retained. The file tree can be collapsed. Sidebar selection switches the whole
+Task workspace; selections inside a Task can focus its companion.
+
+Hover over or click **Task** in the compact workspace header to reveal Complete,
+Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
+alternate right/down. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains

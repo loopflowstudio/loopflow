@@ -189,10 +189,11 @@ public final class MultiplexerStore {
     }
 
     /// Change this slot's content without disturbing its companions or split ratios.
-    public func replace(_ paneId: String, with content: PaneContent) {
+    public func replace(_ paneId: String, with content: PaneContent, shellCommand: [String]? = nil) {
         guard layout.pane(for: paneId) != nil else { return }
         layout = layout.replacingContent(of: paneId, with: content)
         shellCommands.removeValue(forKey: paneId)
+        if case .shell = content { shellCommands[paneId] = shellCommand }
         collapsedPaneIds.remove(paneId)
         setFocusedPane(paneId)
         closedState = nil

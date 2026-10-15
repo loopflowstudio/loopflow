@@ -264,6 +264,13 @@ struct TaskPatchLine: Sendable {
 @MainActor
 @Observable
 final class TaskFilesStore {
+    enum Page: String, CaseIterable {
+        case task = "Task"
+        case pullRequest = "PR"
+        case files = "Files"
+    }
+    var page = Page.files
+    var showsNavigator = true
     enum Mode: String, CaseIterable {
         case diff = "Diff"
         case file = "File"

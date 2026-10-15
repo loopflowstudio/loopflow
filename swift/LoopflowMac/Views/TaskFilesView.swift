@@ -3,9 +3,9 @@ import AppKit
 import Loopflow
 import SwiftUI
 
-/// The breadcrumb, PR row and document toolbar share one baseline.
+/// Compact document controls leave room for the file itself.
 enum TaskFileChrome {
-    static let headerHeight: CGFloat = 40
+    static let headerHeight: CGFloat = 30
 }
 
 struct TaskFilesView: View {
@@ -13,6 +13,7 @@ struct TaskFilesView: View {
     let prURL: URL?
     /// The recorded base moves with a store commit, not a file.
     let checkoutBase: String?
+    var task: RoadmapTask? = nil
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
 
@@ -21,9 +22,40 @@ struct TaskFilesView: View {
     }
 
     var body: some View {
-        HSplitView {
-            navigator
-            documentPane
+        Group {
+            if let task, store.page == .task {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(task.task.identifier).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                        Text(task.task.name).font(Typography.strong(16))
+                        TaskDueDateView(task: task)
+                        MarkdownBlocks(source: task.task.description).equatable()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14).textSelection(.enabled)
+                }
+                .accessibilityIdentifier("browser-task-overview")
+            } else if task != nil, store.page == .pullRequest {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Pull request").font(Typography.strong(16))
+                    if let prURL {
+                        Link(prURL.absoluteString, destination: prURL).buttonStyle(WorkLinkStyle())
+                        Text("Open the pull request to review discussion and checks.")
+                            .foregroundStyle(palette.textSecondary)
+                        Button("Browse changes") { store.showsChanges = true; store.page = .files }
+                    } else {
+                        Text("No pull request published yet.").foregroundStyle(palette.textSecondary)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).padding(14)
+                .accessibilityIdentifier("browser-pull-request")
+            } else {
+                HSplitView {
+                    if store.showsNavigator { navigator }
+                    documentPane
+                }
+            }
         }
         .background(palette.background)
         .tint(palette.actionInk)
@@ -31,7 +63,8 @@ struct TaskFilesView: View {
             // Later readings follow the checkout and its Git metadata changing.
             if store.needsComparison { await store.refreshChanges() }
         }
-        .task(id: store.showIgnored) {
+        .task(id: "\(store.showIgnored)|\(store.page)") {
+            guard task == nil || store.page == .files else { return }
             store.observeFiles()
             await store.refreshDirectories()
         }
@@ -43,20 +76,6 @@ struct TaskFilesView: View {
 
     private var navigator: some View {
         VStack(spacing: 0) {
-            if let prURL {
-                HStack {
-                    Link("Pull request ↗", destination: prURL).buttonStyle(WorkLinkStyle())
-                    Spacer()
-                }
-                .font(Typography.caption(11))
-                .padding(.horizontal, 10)
-                .frame(height: TaskFileChrome.headerHeight)
-                .background(palette.surfaceMuted)
-                Divider()
-            } else {
-                // Preserve the document/terminal baseline without an empty PR strip.
-                Color.clear.frame(height: TaskFileChrome.headerHeight)
-            }
             ScrollViewReader { reader in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -94,6 +113,7 @@ struct TaskFilesView: View {
                     guard !rows.isEmpty, direction == .up || direction == .down else { return }
                     let current = rows.firstIndex { $0.0 == store.selection && $0.1 == store.mode }
                     let index = min(max((current ?? -1) + (direction == .down ? 1 : -1), 0), rows.count - 1)
+                    store.page = .files
                     store.selection = rows[index].0
                     store.mode = rows[index].1
                     reader.scrollTo("\(rows[index].1.rawValue):\(rows[index].0)")
@@ -106,7 +126,7 @@ struct TaskFilesView: View {
             }
         }
         .background(palette.surfaceMuted)
-        .frame(minWidth: 190, idealWidth: 230, maxWidth: 320)
+        .frame(minWidth: 120, idealWidth: 150, maxWidth: 200)
     }
 
     // The navigator owns keyboard focus; rows show selection, not inherited focus rings.
@@ -128,7 +148,8 @@ struct TaskFilesView: View {
                         Label((entry.path as NSString).lastPathComponent,
                               systemImage: store.expandedDirectories.contains(entry.path) ? "folder.fill" : "folder")
                             .font(.system(size: 11, design: .monospaced))
-                            .padding(.vertical, 5)
+                            .lineLimit(1).truncationMode(.middle)
+                            .padding(.vertical, 2)
                     }.buttonStyle(.plain)
                     if store.expandedDirectories.contains(entry.path) {
                         directoryRows(entry.path).padding(.leading, 12)
@@ -156,16 +177,25 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                Button { store.showsNavigator.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .buttonStyle(.plain)
+                    .help(store.showsNavigator ? "Hide file tree" : "Show file tree")
+                    .accessibilityLabel(store.showsNavigator ? "Hide file tree" : "Show file tree")
+                    .accessibilityIdentifier("files-toggle-navigator")
                 Text(store.selection ?? "Files").lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
                 if let document = store.selectedDocument, document.snapshot?.state == .text {
-                    Button(document.saving ? "Saving…" : "Save") {
+                    Button {
                         Task {
                             await document.save(issue: store.issue, cwd: store.cwd, query: store.query)
                             await store.refresh()
                         }
+                    } label: {
+                        Image(systemName: document.saving ? "arrow.triangle.2.circlepath" : "square.and.arrow.down")
                     }
-                    .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                    .buttonStyle(.plain)
+                    .help(document.saving ? "Saving…" : "Save")
+                    .accessibilityLabel("Save")
                     .disabled(!document.canSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .fixedSize()
@@ -174,8 +204,8 @@ struct TaskFilesView: View {
                     Text("File").tag(TaskFilesStore.Mode.file)
                     Text("Diff").tag(TaskFilesStore.Mode.diff)
                         .disabled(store.changesError != nil)
-                }.pickerStyle(.segmented).labelsHidden()
-                    .accessibilityLabel("View").frame(width: 110).fixedSize()
+                }.pickerStyle(.menu).labelsHidden()
+                    .accessibilityLabel("View").frame(width: 65).fixedSize()
             }
             .font(Typography.caption(11)).padding(.horizontal, 10)
             .frame(height: TaskFileChrome.headerHeight)
@@ -214,7 +244,7 @@ struct TaskFilesView: View {
                 }
             }
         }
-        .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 160, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func sectionHeader(_ title: String, expanded: Binding<Bool>) -> some View {
@@ -224,7 +254,7 @@ struct TaskFilesView: View {
                     .font(.system(size: 9, weight: .semibold)).frame(width: 10)
                 Text(title).font(Typography.caption(11))
                 Spacer(minLength: 0)
-            }.padding(.vertical, 5).contentShape(Rectangle())
+            }.padding(.vertical, 2).contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(title)
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
@@ -232,6 +262,7 @@ struct TaskFilesView: View {
 
     private func row(_ path: String, label: String, mode: TaskFilesStore.Mode) -> some View {
         Button {
+            store.page = .files
             store.selection = path
             store.mode = mode
             navigatorFocused = true
@@ -242,7 +273,7 @@ struct TaskFilesView: View {
                 if store.documents[path]?.dirty == true { Text("•") }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4).padding(.vertical, 5)
+            .padding(.horizontal, 4).padding(.vertical, 2)
             .workSelection(store.selection == path && store.mode == mode)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)

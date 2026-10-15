@@ -29,14 +29,25 @@ evidence are preserved at `8486ff005d:scratch/terminal-polish.md` and
 Jack Heart's demo revisions: Command-T opens and focuses a new terminal in a
 vertical split first, alternating horizontal/vertical as panes are added. The
 Codex/Shell header becomes a content menu. The main Session offers Claude,
-Codex and OpenCode provider switching; Shell, Files and lf process open as
-companion splits using the same rule, keeping the conversation in place. Reset
+Codex and OpenCode provider switching. The later pane-switcher direction below
+supersedes adding a companion on every header selection. Reset
 starts a fresh primary conversation/process with current Work instructions and
 less conversation context; retain the previous conversation's history. Existing
 Loopflow session controls own switching and reset. Copy's cell underlining is
 too much: keep the header confirmation and remove that visual cue. Jack also
 requested a subagent to investigate and improve copy/hotkey/action interoperability
 with those TUIs; findings live in `scratch/tui-actions.md`.
+
+Jack Heart's next demo revision: new Task workspaces start Session/browser at
+70/30, side by side. Header choices switch retained Task, PR, Files, Shell and
+lf-process views in the companion; new shells/splits remain explicit. Hidden
+shells keep running, and file drafts survive switching. Sidebar Task selection
+still switches whole workspaces; selections within a Task may focus its companion.
+No tab strip or permanent Task/PR navigation column. Task and PR lead the header
+choices; Task overview starts selected. Remove Workflow chrome and Details from
+the workspace. One Task lifecycle control reveals Complete/Pause/Abandon on
+hover or click. Compact file rows, a narrower collapsible tree and no reserved
+empty PR strip recover reading space. Existing layouts must not be reset.
 
 The interactive pursue runner completed implementation, compression, sync and
 realignment, then failed before launching its routing agent: response schemas
@@ -207,3 +218,13 @@ cost. Draw-call diagnostics and replayed output prove neither presented pixels
 nor provider readiness. No measured improvement or visual acceptance is claimed.
 
 Check: reconciliation `git diff --check` and `git diff --cached --check` PASS; `lf context` PASS (memory and scratch within both limits; no child Product memories present); no implementation changes or test reruns. Retained pre-sync evidence: `uv run python scripts/loopflow-dev.py ghostty-build` with Zig 0.16 on PATH PASS (283 Zig tests, 4 skipped; 324 Metal cases; GLSL; universal ReleaseFast; lf6 public checksum verified); `scripts/test_desktop.sh --filter 'TerminalColorTests|TerminalFeedbackTests|TerminalPolishTests|GhosttyShellBlockTests' -Xswiftc -gnone --jobs 4` PASS against public lf6 (10 passed, native diagnostic and already-run Metal subprocess skipped); artifact pytest, paired fixture preparation, Ruff and diff check PASS. Initial build selected installed Zig 0.15.2 and failed; rerunning with the existing 0.16 toolchain resolved it. Gate owns broader acceptance; demo/review owns native judgment and paired performance. Logs: `/tmp/loo487-compress-{ghostty,lf6}.log`.
+
+Review: retained shell commands/surfaces now outlive companion switches; closing
+the pane retires a hidden shell. Session selections focus a companion instead
+of replacing the main conversation. Reuse an already-visible document view to
+avoid mounting its native editor twice. Initial Task overview and explicit Files
+entry remain distinct. Removed obsolete Details-sheet diagnostics; Workflow APIs
+remain available outside the compact workspace. Native geometry, hover and live
+provider behavior remain demo judgment.
+
+Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests|TaskFilesTests|WorkNavigationTests|TaskFlowProofTests' -Xswiftc -gnone --jobs 4` PASS (128 tests reported; five optional native cases skipped); Swift multiplatform boundary and diff checks PASS. `/tmp/loo487-pane-switch-tests-final.log`. Initial compilation found obsolete Details-sheet benchmark references; the next run exposed an obsolete removed-toolbar fixture, and the following run an accessibility-tree assertion; all were corrected without disabling current behavior checks.

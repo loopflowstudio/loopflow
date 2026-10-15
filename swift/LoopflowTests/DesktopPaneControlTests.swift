@@ -16,6 +16,62 @@ struct DesktopPaneControlTests {
 
     private var workKey: WorkWorkspaceKey { WorkWorkspaceKey(repository: repository, kind: .task, id: "task") }
 
+    @Test("A Task starts at 70/30; choosing content uses its companion and preserves resized layouts")
+    func taskStartsWithRetainedCompanion() throws {
+        let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
+        let store = workspace.multiplexer
+        store.load(sessionId: "main", location: identity)
+        let main = store.focusedPane
+        workspace.prepareTaskPanes()
+        let browser = try #require(store.layout.allPanes.last)
+        #expect(browser.content == .files(taskId: "task", location: identity))
+        #expect(workspace.browserPage(for: "task") == .task)
+        workspace.selectFilesPage(taskId: "task")
+        #expect(workspace.browserPage(for: "task") == .files)
+        #expect(store.focusedPane == main)
+        guard case .split(.vertical, _, _, let ratio) = store.layout else { Issue.record("Missing vertical split"); return }
+        #expect(ratio == 0.7)
+        store.updateRatio(between: main.id, and: browser.id, ratio: 0.6)
+        try workspace.selectContent(.flowLog(taskId: "task", location: identity), in: main)
+        #expect(store.focusedPaneId == browser.id)
+        #expect(store.layout.allPanes.count == 2)
+        #expect(store.layout.pane(for: main.id) == main)
+        let retained = store.layout
+        workspace.prepareTaskPanes()
+        #expect(store.layout == retained)
+        workspace.closePane(browser.id)
+        workspace.prepareTaskPanes()
+        #expect(store.layout.allPanes == [main])
+    }
+
+    @Test("Companion switches retain the shell and file draft; close retires the hidden shell")
+    func companionSwitchRetainsViews() throws {
+        let workspace = SessionsWorkspace(key: workKey, title: "Task", location: identity, localMachineId: identity.machineId)
+        let store = workspace.multiplexer
+        store.load(sessionId: "main", location: identity)
+        let main = store.focusedPane
+        let shell = try #require(store.newShell(command: ["retained-shell"], location: identity))
+        let terminal = try #require(shell.terminal)
+        let view = workspace.surfaces.view(for: terminal)
+        let content = PaneContent.files(taskId: "task", location: identity)
+        let files = try workspace.files(for: content, task: nil, query: RegistryQuery { _, _ in "{}" })
+        files.selection = "draft.txt"
+        files.document("draft.txt").editor.string = "retained draft"
+        try workspace.selectContent(content, in: shell)
+        #expect(store.focusedPaneId == shell.id)
+        #expect(store.layout.allPanes.count == 2)
+        #expect(workspace.surfaces.view(for: terminal) === view)
+        try workspace.selectContent(.shell(location: identity), in: store.focusedPane)
+        #expect(store.shellCommands[shell.id] == ["retained-shell"])
+        #expect(workspace.surfaces.view(for: terminal) === view)
+        try workspace.selectContent(content, in: store.focusedPane)
+        #expect(files.selection == "draft.txt")
+        #expect(files.document("draft.txt").editor.string == "retained draft")
+        #expect(store.layout.pane(for: main.id) == main)
+        workspace.closePane(shell.id)
+        #expect(workspace.surfaces.view(for: terminal) !== view)
+    }
+
     private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in
         throw RegistryQueryError("Pane controls must not launch Work")
     })) {

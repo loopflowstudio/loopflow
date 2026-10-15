@@ -459,6 +459,9 @@ final class WorkModel {
                 store.surfaces.focus(.session(record.id, machineId: machine))
             }
         }
+        workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity,
+            execution: store.executionLocation(for: record.id))
+        workspace.prepareTaskPanes(query: store.query)
         workspace.presentation.selectedSessionId = record.id
         workspace.presentation.content = .terminals
         store.beginPaneLoad(record.id)

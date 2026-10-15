@@ -229,7 +229,8 @@ final class SessionsWorkspaceRegistry {
         catch { machineError = error.localizedDescription }
     }
 
-    private(set) var openWork: [WorkWorkspaceKey] = []
+    private(set) var layout: WorkLayout?
+    var openWork: [WorkWorkspaceKey] { layout?.keys ?? [] }
     private(set) var selectedWork: WorkWorkspaceKey?
 
     var keys: [WorkWorkspaceKey] { Array(workspaces.keys) }
@@ -237,21 +238,30 @@ final class SessionsWorkspaceRegistry {
     func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
 
     @discardableResult
-    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, besideFocused: Bool = false) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
         if selectedWork != key { surfaces.clearFocus() }
-        if !openWork.contains(key) { openWork.append(key) }
+        if !openWork.contains(key) {
+            if let layout, let focused = selectedWork, layout.keys.contains(focused), focused.repository == key.repository {
+                self.layout = layout.replacing(focused, with: besideFocused
+                    ? .split(.vertical, .workspace(focused), .workspace(key), 0.5) : .workspace(key))
+            } else { layout = .workspace(key) }
+        }
         selectedWork = key
         return workspace
     }
 
     func hide(_ key: WorkWorkspaceKey) {
         guard let index = openWork.firstIndex(of: key) else { return }
-        openWork.remove(at: index)
+        layout = layout?.removing(key)
         if selectedWork == key {
             surfaces.clearFocus()
             selectedWork = openWork.isEmpty ? nil : openWork[max(0, index - 1)]
         }
+    }
+
+    func resize(between first: WorkWorkspaceKey, and second: WorkWorkspaceKey, ratio: Double) {
+        layout = layout?.resizing(between: first, and: second, ratio: ratio)
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -290,7 +300,7 @@ final class SessionsWorkspaceRegistry {
             result = .unavailable(reason: .notTerminal)
         }
         return DesktopTextReading(request: request, observedAt: Int64(Date().timeIntervalSince1970),
-            hidden: selectedWork != workspace.key || !store.isVisible(pane),
+            hidden: !openWork.contains(workspace.key) || !store.isVisible(pane),
             result: result)
     }
 
@@ -423,7 +433,7 @@ final class SessionsWorkspaceRegistry {
         guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
         workspace.key = key
         workspaces[key] = workspace
-        openWork = openWork.map { $0 == previous ? key : $0 }
+        layout = layout?.replacing(previous, with: .workspace(key))
         if selectedWork == previous { selectedWork = key }
     }
 
@@ -803,117 +813,50 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
-        let taskPage = model.linkedTaskPage
-        VStack(spacing: 0) {
+        GeometryReader { geometry in
             HStack(spacing: 0) {
-                WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
-                    model.select(work)
-                    startConversation()
-                }, onNewShell: {
-                    newShell(in: workspace)
-                    navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
-                    .frame(width: 430)
-                    .frame(width: navigation.showsNavigator ? 430 : 0, alignment: .leading)
-                    .clipped()
-                    .opacity(navigation.showsNavigator ? 1 : 0)
-                    .allowsHitTesting(navigation.showsNavigator)
-                    .accessibilityHidden(!navigation.showsNavigator)
-                Rectangle().fill(palette.border).frame(width: navigation.showsNavigator ? 1 : 0)
-                HSplitView {
-                    VStack(spacing: 0) {
-                        if workspaces.selectedWork == nil {
-                            ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                                description: Text("Open a repository, Wave or Task from the sidebar."))
-                                .overlay(alignment: .topLeading) {
-                                    WorkGlyphButton("sidebar.left", label: navigation.showsNavigator ? "Hide sidebar" : "Show sidebar",
-                                                    identifier: "work-toggle-sidebar") { navigation.showsNavigator.toggle() }
-                                        .keyboardShortcut("s", modifiers: [.command, .control])
-                                        .padding(6)
-                                }
-                        } else {
-                        WorkBreadcrumbBar(
-                            model: model,
-                            crumb: model.breadcrumb,
-                            onOpenSession: openSession,
-                            onTaskDetails: { workspace.showsDetails = true },
-                            programStatus: focusedProgramStatus,
-                            programStatusError: focusedProgramStatusSurface?.observationError
-                        ) {
-                            if taskPath != nil { workspaceCreation }
-                            if terminalsVisible {
-                                if let taskPath {
-                                    Text(URL(fileURLWithPath: taskPath).lastPathComponent)
-                                        .font(Typography.code(11)).lineLimit(1)
-                                        .frame(maxWidth: 180).layoutPriority(-3)
-                                        .foregroundStyle(palette.textSecondary).help(taskPath)
-                                        .accessibilityLabel("Task worktree")
-                                        .accessibilityIdentifier("task-worktree-location")
-                                }
-                                if multiplexer.zoomedPaneId != nil {
-                                    Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
-                                        .accessibilityIdentifier("work-restore")
-                                }
-                            }
+                if navigation.showsNavigator {
+                    WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
+                        model.select(work)
+                        startConversation()
+                    }, onNewShell: {
+                        newShell(in: workspace)
+                        navigation.content = .terminals
+                    }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask,
+                        onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+                        .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
+                    SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
+                } else {
+                    VStack {
+                        WorkGlyphButton("sidebar.left", label: "Show sidebar", identifier: "work-toggle-sidebar") {
+                            navigation.showsNavigator = true
                         }
-                        if terminalsVisible, let task = fileTask,
-                           let wave = model.task(id: task.task.id)?.wave.wave {
-                            TaskWorkflowHeader(model: model, task: task.task, wave: wave, work: model.taskWork[task.task.id])
-                                .task(id: taskPage) {
-                                    if let request = taskPage,
-                                       request.taskID == task.task.id, request.repo == store.repoPath.normalizedFilePath {
-                                        model.finishTaskPage(request)
-                                    }
-                                }
-                            if taskPath != nil { missingCheckout }
-                        }
-                        ZStack {
-                            WorkspacePanesView(workspace: workspace,
-                                isFocused: terminalsVisible, sessions: store)
-                                .id(currentKey)
-                                .overlay(alignment: .top) {
-                                    if let error = workspace.conversationError {
-                                        HStack {
-                                            Text(error).textSelection(.enabled)
-                                            Button("Retry") {
-                                                if let work = workspace.key.reference, work.kind == .task { openTask(work) }
-                                                else if let work = workspace.key.reference { openWaveConversation(work) }
-                                                else { openRepositoryConversation() }
-                                            }
-                                        }
-                                        .foregroundStyle(TerminalPalette.foreground)
-                                        .padding(8).background(TerminalPalette.background)
-                                    }
-                                }
-                            .opacity(terminalsVisible ? 1 : 0)
-                            .disabled(!terminalsVisible)
-                            .allowsHitTesting(terminalsVisible)
-                            .accessibilityHidden(!terminalsVisible)
-                            // Mounted only when shown: its readers ask `lf` and each
-                            // `lf` process records a process.
-                            if !terminalsVisible {
-                                HSplitView {
-                                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
-                                                    onNewSession: newTaskSession)
-                                        .frame(minWidth: 300, maxWidth: .infinity)
-                                    if navigation.showsActivity {
-                                        WorkActivityView(model: model)
-                                            .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
-                                    }
-                                }
-                                .background(palette.background)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                        }
+                        Spacer()
+                    }.padding(.top, 8).frame(width: 32).background(palette.surfaceMuted)
+                }
+                if let layout = workspaces.layout {
+                    WorkLayoutView(layout: layout, registry: workspaces) { key in
+                        workspacePanel(key).id(key)
                     }
+                } else {
+                    ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                        description: Text("Open a repository, Wave or Task from the sidebar."))
                 }
             }
         }
         .background(palette.background)
         .tint(palette.actionInk)
         .environment(model)
+        .background {
+            HStack {
+                Button("Back") { model.goBack() }.keyboardShortcut("[", modifiers: .command)
+                    .disabled(navigation.backStack.isEmpty)
+                Button("Forward") { model.goForward() }.keyboardShortcut("]", modifiers: .command)
+                    .disabled(navigation.forwardStack.isEmpty)
+                Button("Toggle sidebar") { navigation.showsNavigator.toggle() }
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+            }.hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+        }
         .overlay {
             if terminalsVisible, navigation.palette == nil {
                 SessionsShortcutMonitor { _handle($0) }
@@ -976,8 +919,16 @@ struct SessionsContentView: View {
         }
         .sheet(isPresented: Binding(get: { workspace.showsDetails }, set: { workspace.showsDetails = $0 })) {
             VStack {
-                HStack { Spacer(); Button("Done") { workspace.showsDetails = false } }.padding()
-                WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask, onNewSession: newTaskSession)
+                HStack {
+                    Button(navigation.showsActivity ? "Hide Activity" : "Show Activity") { navigation.showsActivity.toggle() }
+                        .accessibilityIdentifier("work-toggle-activity")
+                    Spacer()
+                    Button("Done") { workspace.showsDetails = false }
+                }.padding()
+                HSplitView {
+                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask, onNewSession: newTaskSession)
+                    if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
+                }
             }.frame(minWidth: 680, minHeight: 560)
         }
         .alert(launchErrorTitle, isPresented: Binding(
@@ -989,6 +940,99 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private func workspacePanel(_ key: WorkWorkspaceKey) -> some View {
+        let task = key.kind == .task ? model.task(id: key.id) : nil
+        let location = task.flatMap { navigation.preparedTaskWorktrees[$0.task.id] ?? $0.task.reference.workspace?.identity }
+        let entry = workspaces.workspace(for: key, title: title(for: key),
+            location: key.kind == .task ? location : rootIdentity)
+        let active = currentKey == key
+        let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
+            selection: key.reference, sessionId: entry.presentation.selectedSessionId)
+        let terminals = key.kind == .task || entry.presentation.content == .terminals
+        let context = workspaces.openWork.count > 1 || !navigation.showsNavigator
+        return VStack(spacing: 0) {
+            if context {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let wave = crumb?.wave {
+                            Text(wave.roadmap.wave.displayName).font(Typography.body(10))
+                                .foregroundStyle(palette.emphasisInk)
+                        }
+                        Text(entry.title).font(Typography.strong(12)).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if workspaces.openWork.count > 1 {
+                        Button { model.hideWorkspace(key) } label: { Image(systemName: "xmark") }
+                            .buttonStyle(WorkPlainButtonStyle()).help("Hide workspace; keep its panes and drafts")
+                            .accessibilityIdentifier("work-hide-\(key.id)")
+                    }
+                }
+                .padding(10).contentShape(Rectangle()).onTapGesture { model.select(key.reference) }
+                .background(palette.surfaceMuted)
+                .accessibilityIdentifier("work-context-\(key.id)")
+            }
+            if active {
+                WorkSessionToolbar(model: model, crumb: crumb, onOpenSession: openSession)
+            }
+            if terminals, let task, active {
+                TaskWorkflowHeader(model: model, task: task.task, wave: task.wave.wave,
+                    work: model.taskWork[task.task.id], workspaceActions: AnyView(
+                        HStack(spacing: 6) {
+                            Button("Details") { model.select(key.reference); entry.showsDetails = true }
+                                .accessibilityIdentifier("work-task-details")
+                            workspaceCreation(for: entry, task: task.task)
+                            if entry.multiplexer.zoomedPaneId != nil {
+                                Button("Restore") { entry.toggleFocus(entry.multiplexer.focusedPaneId) }
+                            }
+                        }
+                    ))
+                    .task(id: model.linkedTaskPage) {
+                        if active, let request = model.linkedTaskPage,
+                           request.taskID == task.task.id, request.repo == store.repoPath.normalizedFilePath {
+                            model.finishTaskPage(request)
+                        }
+                    }
+                missingCheckout
+            } else if terminals, task != nil {
+                Button("Workflow and Task actions") { model.select(key.reference) }
+                    .buttonStyle(WorkPlainButtonStyle()).font(Typography.body(11))
+                    .foregroundStyle(palette.textSecondary).padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if terminals {
+                WorkspacePanesView(workspace: entry, isFocused: active, sessions: store)
+                    .overlay(alignment: .top) {
+                        if let error = entry.conversationError {
+                            HStack {
+                                Text(error).textSelection(.enabled)
+                                Button("Retry") {
+                                    if key.kind == .task, let work = key.reference { openTask(work) }
+                                    else if let work = key.reference { openWaveConversation(work) }
+                                    else { openRepositoryConversation() }
+                                }
+                            }.foregroundStyle(TerminalPalette.foreground)
+                                .padding(8).background(TerminalPalette.background)
+                        }
+                    }
+            } else if active {
+                HSplitView {
+                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
+                                    onNewSession: newTaskSession)
+                    if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
+                }
+            } else {
+                Button("Open \(entry.title)") { model.select(key.reference) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .overlay {
+            if context { RoundedRectangle(cornerRadius: 8).strokeBorder(active ? palette.borderActive : palette.border, lineWidth: 1).allowsHitTesting(false) }
+        }
+        .accessibilityIdentifier("work-workspace-\(key.id)")
+    }
+
     private func newShell(in workspace: SessionsWorkspace) {
         do { try workspace.newShell() }
         catch { launchErrorTitle = "Could not open shell"; launchError = error.localizedDescription }
@@ -996,16 +1040,17 @@ struct SessionsContentView: View {
 
     /// One menu changes what the multiplexer shows: a shell, the Task's files
     /// or its Flow process log.
-    private var workspaceCreation: some View {
+    private func workspaceCreation(for workspace: SessionsWorkspace, task: RoadmapTask) -> some View {
         Menu {
             Button("New shell", systemImage: "terminal") { newShell(in: workspace) }
                 .accessibilityIdentifier("work-add-shell")
-            if let task = fileTask?.task.id {
-                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
-                    .accessibilityIdentifier("work-add-files")
-                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation)) }
-                    .accessibilityIdentifier("work-add-flow-log")
-            }
+            let multiplexer = workspace.multiplexer
+            let location = workspace.location
+            let execution = multiplexer.focusedPane.executionLocation
+            Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task.id, location: location, execution: execution)) }
+                .accessibilityIdentifier("work-add-files")
+            Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task.id, location: location, execution: execution)) }
+                .accessibilityIdentifier("work-add-flow-log")
         } label: { Image(systemName: "plus") }
         .menuStyle(.borderlessButton).fixedSize()
         .help("Add a shell, files or the Flow process log")
@@ -1081,10 +1126,11 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord) {
-        model.openSession(record, store: store)
+        model.openSession(record, store: store, besideFocused: NSEvent.modifierFlags.contains(.command))
     }
 
     private func openTask(_ work: WorkReference) {
+        if NSEvent.modifierFlags.contains(.command) { model.select(work, besideFocused: true) }
         let trace = UUID().uuidString
         Perf.$inputTrace.withValue(trace) {
             Perf.agentInput("task_click", task: work.id)
@@ -1094,7 +1140,7 @@ struct SessionsContentView: View {
 
     private func openRepositoryConversation() {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        model.select(nil)
+        model.select(nil, besideFocused: NSEvent.modifierFlags.contains(.command))
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
@@ -1102,7 +1148,7 @@ struct SessionsContentView: View {
 
     private func openWaveConversation(_ work: WorkReference) {
         guard let wave = model.wave(id: work.id)?.wave else { return }
-        model.select(work)
+        model.select(work, besideFocused: NSEvent.modifierFlags.contains(.command))
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
@@ -1152,21 +1198,6 @@ struct SessionsContentView: View {
         try launch(.task(repo: checkout.worktree, id: issue), in: entry, identity: checkout)
     }
 
-    private var focusedProgramStatusSurface: ProgramStatusSurface? {
-        multiplexer.focusedPane.terminal.flatMap { store.surfaces.programStatus(for: $0) }
-    }
-
-    private var focusedProgramStatus: ProgramStatusRecords? {
-        guard terminalsVisible else { return nil }
-        if case .session(let id, _, _) = multiplexer.focusedPane.content {
-            return store.sessions.first { $0.id == id }?.record.programStatus
-        }
-        if let id = focusedProgramStatusSurface?.sessionId {
-            return store.sessions.first { $0.id == id }?.record.programStatus
-        }
-        return focusedProgramStatusSurface?.snapshot
-    }
-
     /// Sessions attached to the focused pane: a Session pane's own record, or
     /// every conversation running inside a shell pane.
     private var focusedPaneSessions: [SessionItem] {
@@ -1213,6 +1244,62 @@ struct SessionsContentView: View {
             workspace.toggleFocus(multiplexer.focusedPaneId)
         case .focus(let direction):
             multiplexer.focus(direction)
+        }
+    }
+}
+
+private struct SidebarDivider: View {
+    let navigation: WorkNavigation
+    let availableWidth: CGFloat
+    @Environment(\.palette) private var palette
+    @State private var start: CGFloat?
+
+    var body: some View {
+        Rectangle().fill(palette.border).frame(width: 5)
+            .contentShape(Rectangle())
+            .onHover { if $0 { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if start == nil { start = navigation.sidebarWidth }
+                navigation.resizeSidebar((start ?? navigation.sidebarWidth) + value.translation.width,
+                                         availableWidth: availableWidth)
+            }.onEnded { _ in start = nil })
+            .accessibilityLabel("Sidebar width")
+            .accessibilityValue("\(Int(navigation.sidebarWidth)) points")
+            .accessibilityAdjustableAction { direction in
+                navigation.resizeSidebar(navigation.sidebarWidth + (direction == .increment ? 20 : -20),
+                                         availableWidth: availableWidth)
+            }
+            .accessibilityIdentifier("work-sidebar-divider")
+    }
+}
+
+private struct WorkLayoutView<Content: View>: View {
+    let layout: WorkLayout
+    let registry: SessionsWorkspaceRegistry
+    @ViewBuilder let content: (WorkWorkspaceKey) -> Content
+
+    var body: some View {
+        switch layout {
+        case .workspace(let key): content(key)
+        case .split(let axis, let first, let second, let ratio):
+            GeometryReader { geometry in
+                // Reflow whole workspaces vertically when side-by-side panes would be too narrow.
+                let vertical = axis == .vertical && geometry.size.width >= 720
+                let extent = vertical ? geometry.size.width : geometry.size.height
+                let effectiveAxis: SplitAxis = vertical ? .vertical : .horizontal
+                let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                stack {
+                    WorkLayoutView(layout: first, registry: registry, content: content)
+                        .frame(width: vertical ? max(0, extent * ratio - 3) : nil,
+                               height: vertical ? nil : max(0, extent * ratio - 3))
+                    SplitDivider(axis: effectiveAxis, ratio: ratio, extent: extent, update: { value in
+                        if let firstKey = first.keys.first, let secondKey = second.keys.first {
+                            registry.resize(between: firstKey, and: secondKey, ratio: value)
+                        }
+                    })
+                    WorkLayoutView(layout: second, registry: registry, content: content)
+                }
+            }
         }
     }
 }
@@ -1316,9 +1403,7 @@ private struct MultiplexerNodeView: View {
                                 axis: axis,
                                 ratio: ratio,
                                 extent: geometry.size.width,
-                                firstPaneId: first.firstPane.id,
-                                secondPaneId: second.firstPane.id,
-                                store: store
+                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
                             )
                             _child(second)
                         }
@@ -1330,9 +1415,7 @@ private struct MultiplexerNodeView: View {
                                 axis: axis,
                                 ratio: ratio,
                                 extent: geometry.size.height,
-                                firstPaneId: first.firstPane.id,
-                                secondPaneId: second.firstPane.id,
-                                store: store
+                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
                             )
                             _child(second)
                         }
@@ -1357,9 +1440,7 @@ private struct SplitDivider: View {
     let axis: SplitAxis
     let ratio: Double
     let extent: CGFloat
-    let firstPaneId: String
-    let secondPaneId: String
-    let store: MultiplexerStore
+    let update: (Double) -> Void
 
     @State private var dragStart: Double?
 
@@ -1380,11 +1461,7 @@ private struct SplitDivider: View {
                             ? value.translation.width
                             : value.translation.height
                         guard extent > 0 else { return }
-                        store.updateRatio(
-                            between: firstPaneId,
-                            and: secondPaneId,
-                            ratio: start + Double(delta / extent)
-                        )
+                        update(start + Double(delta / extent))
                     }
                     .onEnded { _ in dragStart = nil }
             )
@@ -1589,6 +1666,9 @@ private struct SessionPaneView: View {
     }
 
     private func focusPane() {
+        if model.workspaceKey(for: model.selection, repository: workspace.key.repository) != workspace.key {
+            model.select(workspace.key.reference)
+        }
         store.setFocusedPane(pane.id)
         // Only an exact, unambiguous Session attachment changes conversation
         // context. Companion shells retain the current breadcrumb.
@@ -1638,7 +1718,7 @@ private struct SessionPaneView: View {
                 query: sessions.query)
                 .id(pane.incarnation)
                 .background(PaneFocusTarget(isFocused: isFocused))
-                .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+                .simultaneousGesture(TapGesture().onEnded { focusPane() })
         case .files(let taskId, _, _):
             let task = model.task(id: taskId)?.task
             switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
@@ -1646,7 +1726,7 @@ private struct SessionPaneView: View {
                 TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
                     checkoutBase: task?.reference.workspace?.baseCommit)
                     .environment(\.colorScheme, .light)
-                    .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+                    .simultaneousGesture(TapGesture().onEnded { focusPane() })
             case .failure(let error):
                 Text(error.localizedDescription).textSelection(.enabled)
             }

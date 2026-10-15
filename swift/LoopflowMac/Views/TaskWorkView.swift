@@ -9,16 +9,13 @@ struct TaskWorkflowHeader: View {
     let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
     let work: WorkReading<TaskOverview>
+    var workspaceActions: AnyView? = nil
     @Environment(\.palette) private var palette
 
     @State private var confirmingAbandon = false
     @State private var expandedTasks: Set<String> = []
 
-    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
-    private var acting: Bool { draft?.acting == true }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var controls: some View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 if let label = task.task.terminalLabel {
                     Text(label)
@@ -92,6 +89,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
                 }
+                workspaceActions
                 if acting {
                     ProgressView().controlSize(.small)
                     Text("Updating Task…").foregroundStyle(palette.textSecondary)
@@ -99,6 +97,15 @@ struct TaskWorkflowHeader: View {
             }
             .lineLimit(1)
             .frame(minHeight: 28)
+    }
+
+    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
+    private var acting: Bool { draft?.acting == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal) { controls }
+                .scrollIndicators(.visible)
             if work.value?.workflow != nil, let error = work.errorMessage {
                 Text("Workflow refresh failed: \(error)")
                     .foregroundStyle(palette.failure)

@@ -106,8 +106,7 @@ struct WorkCLISubscriptionTests {
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(!rows(model).contains { $0.task?.id == id })
         #expect(registry.retained(workspace.key) === workspace)
-        let toolbar = WorkBreadcrumbBar(model: model, crumb: model.breadcrumb, onOpenSession: { _ in })
-        try toolbar.inspect().find(viewWithAccessibilityIdentifier: "work-back").button().tap()
+        model.goBack()
         #expect(model.selection == .task(id: id))
         #expect(rows(model).filter { $0.task?.id == id }.count == 1)
         let returned = TaskWorkflowHeader(model: model, task: try #require(model.task(id: id)?.task),

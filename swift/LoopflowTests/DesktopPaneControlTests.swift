@@ -49,8 +49,10 @@ struct DesktopPaneControlTests {
         store.load(sessionId: "main", location: identity)
         let main = store.focusedPane
         let shell = try #require(store.newShell(command: ["retained-shell"], location: identity))
+        #if canImport(GhosttyKit)
         let terminal = try #require(shell.terminal)
         let view = workspace.surfaces.view(for: terminal)
+        #endif
         let content = PaneContent.files(taskId: "task", location: identity)
         let files = try workspace.files(for: content, task: nil, query: RegistryQuery { _, _ in "{}" })
         files.selection = "draft.txt"
@@ -58,16 +60,23 @@ struct DesktopPaneControlTests {
         try workspace.selectContent(content, in: shell)
         #expect(store.focusedPaneId == shell.id)
         #expect(store.layout.allPanes.count == 2)
+        #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) === view)
+        #endif
         try workspace.selectContent(.shell(location: identity), in: store.focusedPane)
         #expect(store.shellCommands[shell.id] == ["retained-shell"])
+        #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) === view)
+        #endif
         try workspace.selectContent(content, in: store.focusedPane)
         #expect(files.selection == "draft.txt")
         #expect(files.document("draft.txt").editor.string == "retained draft")
         #expect(store.layout.pane(for: main.id) == main)
         workspace.closePane(shell.id)
+        #expect(store.shellCommands[shell.id] == nil)
+        #if canImport(GhosttyKit)
         #expect(workspace.surfaces.view(for: terminal) !== view)
+        #endif
     }
 
     private func register(_ router: WorkLinkRouter, window: UUID, registry: SessionsWorkspaceRegistry, model: WorkModel = WorkModel(query: RegistryQuery { _, _ in

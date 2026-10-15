@@ -62,14 +62,20 @@ or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Selected Work uses a burgundy/rose fill with contrasting text, mirrored in Needs you.
+Selected Work uses the theme’s selection fill and contrasting text, mirrored in Needs you.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
-Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
-Blue means reported work, amber means supported Waiting/blocked, red means failure.
+Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
+Status labels and shapes retain their meaning across palettes.
 Choose **Appearance → Choose Theme…** to preview the whole workspace. **Apply**
 saves the choice for every window and the next launch; **Cancel**, Escape or closing
 the chooser restores the applied theme. Quick **System**, **Light** and **Dark**
-choices return to the built-ins. Light includes a cream terminal; Dark uses slate.
+choices select your assigned themes. Set **Light theme** and **Dark theme** to any
+of the 24 bundled palettes or an import; **System** follows macOS using those two
+assignments. Either slot can use any palette. The defaults are Loopflow's cream
+Light and slate Dark. Choosing a slot previews it; Apply returns to your selected
+mode. The bundled catalogue works offline and includes Catppuccin, Tokyo Night,
+Rosé Pine, Gruvbox, Nord, Dracula and others. Its source/license notices and marked
+cursor/selection readability adaptations ship with the app.
 Existing panes, clients, file drafts and layouts stay in place.
 
 **Import Ghostty Theme…** copies colors from a local UTF-8 file (up to 256 KiB).
@@ -77,7 +83,10 @@ Use six-digit RGB for background, foreground, cursor and selection, and
 `palette = 0=#RRGGBB` through index 255. Background and foreground are required.
 The preview lists missing defaults, repeated entries and omitted non-color
 settings. Fonts, commands, keybindings, includes and theme references are never
-imported. Application status colors derive independently from terminal ANSI.
+imported. One conversion fills every Loopflow palette role from the imported colors:
+ANSI blue supplies accent/Working, yellow Waiting, red failure and green success.
+Selection colors supply selected Work; app text and fills adjust for readability.
+State determines which role applies; terminal colors never imply activity.
 Unreadable default/selection/cursor text blocks Apply. ANSI shortfalls and dim-text
 estimates at Ghostty’s default 50% opacity are reported with original colors retained.
 Personal faint-opacity settings and cell backgrounds can change dim contrast.

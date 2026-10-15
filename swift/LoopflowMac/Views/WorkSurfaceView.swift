@@ -284,7 +284,7 @@ struct WorkSurfaceView: View {
                     if task.task.acquisition.state != .available {
                         Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
                             .font(Typography.caption())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.textSecondary)
                     }
                     PlanningSyncView(sync: task.task.sync)
                 }

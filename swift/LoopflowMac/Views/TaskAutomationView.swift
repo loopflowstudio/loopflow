@@ -22,13 +22,13 @@ struct TaskAutomationView: View {
                     }
                 }
                 Text("Checks deliveries every minute while this Machine is available. Flow recovery belongs to its caller.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(palette.textSecondary)
                 if let checked = status.lastSuccessAt {
                     Text("Last successful check: \(Date(timeIntervalSince1970: Double(checked)), style: .relative) ago")
                         .font(.caption)
                 }
                 if let lastError = status.lastError {
-                    Text("Last failed check: \(lastError)").font(.caption).foregroundStyle(.secondary)
+                    Text("Last failed check: \(lastError)").font(.caption).foregroundStyle(palette.textSecondary)
                 }
                 ForEach(status.tasks) { task in
                     VStack(alignment: .leading, spacing: 4) {

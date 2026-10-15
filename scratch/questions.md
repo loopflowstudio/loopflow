@@ -6,10 +6,11 @@ landing, release, installation and running-app restart remain unauthorized.
 
 Accepted:
 - LOO-462's PR #1531 is the recorded parent and lands first.
-- Two built-ins plus local RGB Ghostty imports; cream Light terminal and slate
-  Dark terminal, preserving recognizable app identity. No Classic preset.
-- Snapshot imports, explicit omitted-setting diagnostics and independently derived
-  app semantic roles. Preserve low-contrast ANSI with a notice; renderer correction
+- October 15 refinement from Jack Heart: approximately 12–48 bundled themes; any
+  bundled/imported theme assigned to Light or Dark, plus Light/Dark/System Mode.
+  Implement 24 offline choices, retaining cream/slate Loopflow defaults. No Classic preset.
+- Snapshot imports, explicit omitted-setting diagnostics and complete required
+  app palettes converted once from Ghostty colors. Preserve low-contrast ANSI with a notice; renderer correction
   remains separate work.
 - App-wide live preview with Apply/Cancel through Appearance; Desktop-local
   persistence and LOO-462's existing pane/navigation owners.
@@ -37,7 +38,14 @@ Implementation follow-up, 2026-10-15: extend Ghostty's existing C getter for fix
 RGB TerminalColor values; unresolved cell-relative values remain unavailable.
 Dim warnings estimate 50% opacity; personal settings and cell backgrounds can differ.
 
-Parent integration assumption, 2026-10-15: preserve Jack Heart’s Ink on Paper
-selection shape. Derive its burgundy/rose fill and primary/secondary text centrally
-so dark and imported appearances meet the accepted contrast thresholds. Exact
-colors remain demo judgment; fixed burgundy on dark surfaces did not meet 3:1.
+October 15 correction from Jack Heart supersedes fixed burgundy/rose: every view
+uses LoopflowPalette and every theme supplies every role. Explicit aliases are
+allowed. Preserve Ink on Paper selection geometry, with theme-owned fill/text.
+Ghostty imports convert once to complete records; they do not remain a parallel
+source. Jack Heart clarified that Loopflow Light stays the regular design. Light stays unchanged. Jack subsequently rejected Dark and requested less
+highlighted other themes; the palette review records remaining changes.
+
+October 15 reversible implementation choice: curate 24 embedded palettes; retain
+source foreground/background/ANSI, with marked cursor/selection text adaptations
+for readability. Either assignment accepts any palette; choosing a target previews
+it without changing Mode. Apply restores the appearance selected by Mode.

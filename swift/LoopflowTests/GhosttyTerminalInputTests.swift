@@ -275,7 +275,8 @@ struct GhosttyShellBlockTests {
                     ).fill.usingColorSpace(.sRGB))
                     let rgb = ThemeRGB(UInt32(fill.redComponent * 255) << 16 | UInt32(fill.greenComponent * 255) << 8 | UInt32(fill.blueComponent * 255))
                     let shown = theme.terminal.background.mixed(with: rgb, amount: fill.alphaComponent)
-                    #expect(theme.terminal.foreground.contrast(shown) >= 4.5)
+                    #expect(theme.terminal.foreground.contrast(shown) >= 4.5,
+                            "\(theme.name): exit=\(exit), selected=\(selected), hovered=\(hovered)")
                 }
             }
         }

@@ -22,7 +22,7 @@ struct LoopflowApp: App {
     @State private var taskChoices: [[TaskWindowChoice]] = []
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
-    @State private var appearance = AppearanceStore.shared
+    @State private var appearance: AppearanceStore
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -35,6 +35,9 @@ struct LoopflowApp: App {
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
+        // Ghostty borrows the process environment when appearance initializes it.
+        // Finish environment changes before publishing the initial theme.
+        _appearance = State(initialValue: AppearanceStore.shared)
     }
 
     var body: some Scene {
@@ -77,8 +80,8 @@ struct LoopflowApp: App {
                 Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
                 Menu("Appearance") {
                     ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                        Button { appearance.apply(mode.rawValue) } label: {
-                            if appearance.selection == mode.rawValue {
+                        Button { appearance.applyMode(mode) } label: {
+                            if appearance.selection.mode == mode {
                                 Label(mode.menuTitle, systemImage: "checkmark")
                             } else { Text(mode.menuTitle) }
                         }

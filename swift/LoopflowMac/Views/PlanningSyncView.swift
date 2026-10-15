@@ -4,12 +4,14 @@ import SwiftUI
 struct PlanningSyncView: View {
     let sync: PlanningSyncStatus
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             ForEach(sync.changes) { change in
                 Text(change.text)
                     .font(Typography.body(12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("planning-sync-\(change.id)")
             }

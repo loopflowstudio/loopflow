@@ -7,7 +7,7 @@ import ViewInspector
 
 @Suite("Desktop semantic colors")
 struct WorkPaletteTests {
-    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: ["light", "dark", "171924/CAD2EF", "FFF4DF/34291F", "330909/FFEEDD", "747474/FFFFFF", "888888/000000"])
+    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: ThemeDefinition.builtins.map(\.id) + ["171924/CAD2EF", "FFF4DF/34291F", "330909/FFEEDD", "747474/FFFFFF", "888888/000000"])
     func contrast(theme: String) throws {
         let definition: ThemeDefinition
         if let builtin = ThemeDefinition.builtins.first(where: { $0.id == theme }) { definition = builtin }

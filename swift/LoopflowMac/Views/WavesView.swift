@@ -176,7 +176,7 @@ struct WavesView: View {
         }
     }
 
-    // MARK: - Wave list (burgundy)
+    // MARK: - Wave list
 
     private var waveListColumn: some View {
         VStack(alignment: .leading, spacing: 0) {

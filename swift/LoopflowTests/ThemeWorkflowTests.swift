@@ -128,7 +128,7 @@ struct ThemeWorkflowTests {
         #expect(work.multiplexer.focusedPaneId == shell.id)
         #expect(work.multiplexer.layout == layout)
         let candidate = appearance.effectiveTheme
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).selection == appliedID)
+        #expect(AppearanceStore(defaults: defaults, systemDark: false).selection.mode.rawValue == appliedID)
         model.select(.task(id: task.id))
         try exerciseNavigation()
         let focusBeforeCancel = work.multiplexer.focusedPaneId
@@ -161,6 +161,33 @@ struct ThemeWorkflowTests {
 
     #endif
 
+    @Test func chooserAssignsBothSlotsWithoutChangingMode() throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let appearance = AppearanceStore(defaults: defaults, systemDark: false)
+        appearance.beginPreview()
+        let view = ThemeChooser(appearance: appearance)
+        let mode = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-mode").picker()
+        for choice in [AppearanceMode.light, .dark, .system] {
+            try mode.select(value: choice)
+            for slot in [AppearanceMode.light, .dark] {
+                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-slot-\(slot.rawValue)").button()
+                #expect(button.isDisabled() == (choice != .system && choice != slot))
+            }
+            #expect(appearance.editingSlot == (choice == .dark ? .dark : .light))
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-bundled:TokyoNight").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-slot-dark").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-bundled:Gruvbox Light").button().tap()
+        #expect(appearance.current.mode == .system)
+        try view.inspect().find(button: "Apply").tap()
+        #expect(appearance.effectiveTheme.id == "bundled:TokyoNight")
+        appearance.setSystemDark(true)
+        #expect(appearance.effectiveTheme.id == "bundled:Gruvbox Light")
+        let restored = AppearanceStore(defaults: defaults, systemDark: false)
+        #expect(restored.selection == appearance.selection)
+        #expect(restored.effectiveTheme.id == "bundled:TokyoNight")
+    }
+
     @Test func chooserUsesPreviewAndKeepsApplyDisabledForUnreadableText() throws {
         let appearance = AppearanceStore(defaults: UserDefaults(suiteName: UUID().uuidString)!, systemDark: false)
         appearance.beginPreview()
@@ -171,9 +198,9 @@ struct ThemeWorkflowTests {
         try view.inspect().find(button: "Cancel").tap()
         #expect(!appearance.chooserOpen)
         #expect(appearance.effectiveTheme.id == "light")
-        appearance.beginPreview(); appearance.preview("dark")
+        appearance.beginPreview(); appearance.previewMode(.dark)
         try view.inspect().find(button: "Apply").tap()
-        #expect(appearance.selection == "dark")
+        #expect(appearance.selection.mode == .dark)
         let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: source) }
         try Data("background=777777\nforeground=888888".utf8).write(to: source)
@@ -181,18 +208,27 @@ struct ThemeWorkflowTests {
         #expect(try view.inspect().find(button: "Apply").isDisabled())
         #expect(appearance.effectiveTheme.id == "dark")
         #expect(appearance.notice?.contains("Default text") == true)
+        appearance.editSlot(.light)
+        #expect(try view.inspect().find(button: "Apply").isDisabled())
+        let error = try #require(appearance.assignmentErrors.first)
+        #expect(error.hasPrefix("Dark theme:"))
+        #expect(try view.inspect().find(text: error).string() == error)
     }
 }
 /// The accepted appearances, exercised through the same preview transaction as the chooser.
 @MainActor
 enum ThemeFixture: String, CaseIterable {
-    case light, dark, lightImport, darkImport
+    case light, dark, lightImport, darkImport, bundled
 
     func preview(in appearance: AppearanceStore) throws {
         appearance.beginPreview()
         switch self {
-        case .light, .dark: appearance.preview(rawValue)
+        case .light, .dark: appearance.previewMode(AppearanceMode(rawValue: rawValue)!)
+        case .bundled:
+            appearance.previewMode(.dark)
+            appearance.previewTheme("bundled:TokyoNight")
         case .lightImport, .darkImport:
+            appearance.previewMode(self == .lightImport ? .light : .dark)
             let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             defer { try? FileManager.default.removeItem(at: source) }
             let colors = self == .lightImport ? "background=fff4df\nforeground=34291f" : "background=171924\nforeground=CAD2EF"

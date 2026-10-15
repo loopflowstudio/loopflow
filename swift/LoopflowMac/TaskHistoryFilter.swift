@@ -42,7 +42,7 @@ struct TaskHistoryControls: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            TaskHistoryInlineControl(filter: $filter, color: NSColor(palette.actionInk))
+            TaskHistoryInlineControl(filter: $filter, palette: palette)
                 .frame(width: 112, height: 26)
                 .background(hovered ? palette.surfaceMuted : .clear, in: RoundedRectangle(cornerRadius: 4))
                 .onHover { hovered = $0 }
@@ -58,15 +58,15 @@ struct TaskHistoryControls: View {
 
 struct TaskHistoryInlineControl: NSViewRepresentable {
     @Binding var filter: TaskHistoryFilter
-    let color: NSColor
+    let palette: LoopflowPalette
 
     func makeNSView(context: Context) -> TaskHistoryInlineView {
-        TaskHistoryInlineView(filter: filter, onChange: { filter = $0 })
+        TaskHistoryInlineView(filter: filter, palette: palette, onChange: { filter = $0 })
     }
 
     func updateNSView(_ view: TaskHistoryInlineView, context: Context) {
         view.onChange = { filter = $0 }
-        view.update(filter, color: color)
+        view.update(filter, palette: palette)
     }
 }
 
@@ -78,10 +78,12 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
     let numberViewport = NSScrollView()
     private(set) var filter: TaskHistoryFilter
     private(set) var editing = false
+    private var palette: LoopflowPalette
     var onChange: (TaskHistoryFilter) -> Void
 
-    init(filter: TaskHistoryFilter, onChange: @escaping (TaskHistoryFilter) -> Void) {
+    init(filter: TaskHistoryFilter, palette: LoopflowPalette, onChange: @escaping (TaskHistoryFilter) -> Void) {
         self.filter = filter
+        self.palette = palette
         self.onChange = onChange
         super.init(frame: NSRect(x: 0, y: 0, width: 112, height: 26))
         checkbox.setAccessibilityLabel("Include completed Tasks")
@@ -116,12 +118,15 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
         addSubview(checkbox)
         addSubview(numberViewport)
         addSubview(suffix)
-        update(filter, color: .secondaryLabelColor)
+        update(filter, palette: palette)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(_ filter: TaskHistoryFilter, color: NSColor) {
+    func update(_ filter: TaskHistoryFilter, palette: LoopflowPalette) {
+        self.palette = palette
+        let color = NSColor(palette.actionInk)
+        for text in [number, suffix] { text.applyPalette(palette) }
         self.filter = filter
         checkbox.state = filter.showCompleted ? .on : .off
         checkbox.contentTintColor = color
@@ -143,7 +148,7 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if editing {
-            (number.textColor ?? .labelColor).setFill()
+            NSColor(palette.actionInk).setFill()
             NSRect(x: numberViewport.frame.minX, y: numberViewport.frame.minY, width: numberViewport.frame.width, height: 1).fill()
         }
     }
@@ -192,7 +197,7 @@ final class TaskHistoryInlineView: NSView, NSTextViewDelegate {
     }
 
     private func publish() {
-        update(filter, color: number.textColor ?? .labelColor)
+        update(filter, palette: palette)
         onChange(filter)
     }
 

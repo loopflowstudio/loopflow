@@ -11,16 +11,45 @@ struct ThemeChooser: View {
         let terminal = appearance.selectedTheme.terminal
         VStack(alignment: .leading, spacing: 16) {
             Text("Choose Theme").font(Typography.sectionTitle())
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Mode").font(.caption).foregroundStyle(palette.textSecondary)
+                    Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { mode in Text(mode.menuTitle).tag(mode) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(height: 36)
+                    .accessibilityIdentifier("appearance-mode")
+                }
+                .frame(width: 180)
+                ForEach([AppearanceMode.light, .dark], id: \.self) { slot in
+                    let enabled = appearance.current.mode == .system || appearance.current.mode == slot
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(slot.menuTitle) theme").font(.caption).foregroundStyle(palette.textSecondary)
+                        Button { appearance.editSlot(slot) } label: {
+                            Text(appearance.themeName(for: slot))
+                                .lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                        }
+                        .buttonStyle(WorkOutlineButtonStyle())
+                        .workSelection(enabled && appearance.editingSlot == slot)
+                        .disabled(!enabled)
+                        .accessibilityLabel("\(slot.menuTitle) theme")
+                        .accessibilityValue(appearance.themeName(for: slot))
+                        .accessibilityIdentifier("appearance-slot-\(slot.rawValue)")
+                        .help(enabled ? "Choose your \(slot.menuTitle.lowercased()) theme" : "Used in \(slot.menuTitle) or System mode")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(enabled ? 1 : 0.45)
+                }
+            }
+            Text("Choose your \(appearance.editingSlot.menuTitle.lowercased()) theme · previewing \(appearance.selectedTheme.name)")
+                .font(.caption).foregroundStyle(palette.textSecondary)
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
-                    Button { appearance.preview("system") } label: {
-                        Label("System", systemImage: "desktopcomputer")
-                            .frame(maxWidth: .infinity, minHeight: 84)
-                    }
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .workSelection(appearance.selectedID == "system")
                     ForEach(appearance.themes) { theme in
-                        Button { appearance.preview(theme.id) } label: {
+                        Button { appearance.previewTheme(theme.id) } label: {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(theme.name).foregroundStyle(theme.palette.text)
                                 HStack(spacing: 3) {
@@ -36,6 +65,7 @@ struct ThemeChooser: View {
                         .buttonStyle(.plain)
                         .workSelection(appearance.selectedID == theme.id)
                         .workFocusRing()
+                        .accessibilityIdentifier("appearance-theme-\(theme.id)")
                     }
                 }
                 HStack(spacing: 12) {
@@ -47,9 +77,11 @@ struct ThemeChooser: View {
                 }.padding(.vertical, 14)
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
-                    ForEach(terminal.readabilityErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
-                    ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
-                    ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
+                    ForEach(appearance.assignmentErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
+                    DisclosureGroup("Terminal contrast details") {
+                        ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
+                        ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
+                    }
                     Text("Explicit colors printed by terminal applications may retain their own appearance.")
                         .foregroundStyle(palette.textSecondary)
                 }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
@@ -60,10 +92,10 @@ struct ThemeChooser: View {
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
                 Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
-                    .disabled(!terminal.readabilityErrors.isEmpty)
+                    .disabled(!appearance.canApply)
             }.buttonStyle(WorkOutlineButtonStyle())
         }
-        .padding(20).frame(minWidth: 560, minHeight: 450)
+        .padding(20).frame(minWidth: 620, minHeight: 560)
         .foregroundStyle(palette.text).background(palette.background)
         .onAppear { appearance.beginPreview() }
         .onChange(of: appearance.chooserOpen) { _, open in if !open { dismiss() } }

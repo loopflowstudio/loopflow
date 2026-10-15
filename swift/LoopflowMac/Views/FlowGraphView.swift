@@ -523,12 +523,13 @@ enum FlowLoopGeometry {
 /// A 2 s highlight sweeping across the running chip: the one thing that moves
 /// at rest. Callers skip it under reduce-motion, leaving the running tone still.
 private struct RunningShimmer: View {
+    @Environment(\.palette) private var palette
     let width: CGFloat
     @State private var sweeping = false
 
     var body: some View {
         LinearGradient(
-            colors: [.clear, .white.opacity(0.45), .clear],
+            colors: [.clear, palette.text.opacity(0.45), .clear],
             startPoint: .leading, endPoint: .trailing
         )
         .frame(width: width * 0.7)

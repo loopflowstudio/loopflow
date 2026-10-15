@@ -1,15 +1,15 @@
 # Loopflow Visual Design System
 
-Desktop uses the semantic roles in `LoopflowPalette`. The website shares the
-palette and typography, with separate marketing conventions below.
+Desktop uses the semantic roles in `LoopflowPalette`. The website shares
+typography, with separate fixed marketing colors below.
 
 ## Desktop semantics
 
-Select Work: a solid burgundy/rose fill and contrasting text mark the destination,
+Select Work: the theme’s solid selection fill and contrasting text mark the destination,
 including its Needs you entry. File selection keeps its neutral tint and edge.
-Tab to a control: a separate burgundy/rose outline marks keyboard focus, including
+Tab to a control: the theme’s separate focus outline marks keyboard focus, including
 on a selected row with an error. Ordinary controls use neutral ink; only an explicitly
-emphasized action uses burgundy. Repo identity may retain burgundy. Links use
+emphasized action uses the theme’s accent. Repo identity uses emphasis ink. Links use
 secondary ink and underline on hover/focus in navigation and control chrome.
 
 | Role | Source / behavior |
@@ -20,7 +20,7 @@ secondary ink and underline on hover/focus in navigation and control chrome.
 | Keyboard focus | `keyboardFocus`; visible with selection |
 | Links | `linkInk`, `linkHover`; separate from status |
 | Actions | `actionInk`, `actionHover`; `emphasisInk` for deliberate emphasis |
-| Program activity | `working` blue, `waiting` amber, `failure` red, `success` green |
+| Program activity | `working`, `waiting`, `failure`, `success`; labels and shapes retain state meaning |
 
 Unknown and client-liveness-only observations have no activity label or dot. Shared
 Waiting remains explicitly inferred; reported Blocked is not renamed Waiting.
@@ -30,8 +30,12 @@ stopped edge alone is not a red error. Read failures remain inspectable.
 `ThemeDefinition` owns explicit sRGB terminal colors and the semantic
 `LoopflowPalette` used by app and pane chrome. Ghostty receives a normalized color
 overlay after personal non-color configuration. Retained surfaces update in place.
-Imports preserve terminal ANSI; they never map ANSI indices to activity. Application
-surfaces derive from background polarity, with independently readable semantic ink.
+Each bundled/imported record supplies every palette role; missing roles fail decoding.
+`GhosttyThemeMapping` converts imports once: ANSI 4/3/1/2 supply accent/Working,
+Waiting, failure and success colors, and terminal selection supplies selected Work.
+Application text/surfaces adjust for readability without altering terminal ANSI.
+State selects the role; color never invents activity. Focus aliases emphasis,
+links/actions alias text roles, and status stroke/text alias status ink.
 Optional block fills diminish when they would hide default text.
 
 Built-ins and imported Desktop appearances have explicit roles. `WorkPaletteTests`

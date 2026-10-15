@@ -1514,7 +1514,7 @@ private struct SessionPaneView: View {
                               lineWidth: isFocused ? 1.5 : 1)
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
+        .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")

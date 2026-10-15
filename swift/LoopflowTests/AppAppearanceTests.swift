@@ -16,7 +16,7 @@ struct AppAppearanceTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         let appearance = AppearanceStore(defaults: defaults, systemDark: false)
         let appliedID = theme == .dark ? "light" : "dark"
-        appearance.apply(appliedID)
+        appearance.applyMode(AppearanceMode(rawValue: appliedID)!)
         let root = Text("Work").modifier(AppAppearance(appearance: appearance))
         func inspectAppearance() throws {
             let view = try root.inspect()
@@ -62,7 +62,7 @@ struct NativeAppAppearanceTests {
         var observed: (ColorScheme, Color)?
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let appearance = AppearanceStore(defaults: defaults, systemDark: system == .dark)
-        appearance.apply(mode)
+        appearance.applyMode(AppearanceMode(rawValue: mode)!)
         let view = AppearanceProbe { observed = ($0, $1) }
             .modifier(AppAppearance(appearance: appearance))
             .environment(\.colorScheme, system)

@@ -1,6 +1,18 @@
 import Foundation
 import SwiftUI
 
+public extension Color {
+    init(hex: UInt, alpha: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xff) / 255,
+            green: Double((hex >> 08) & 0xff) / 255,
+            blue: Double((hex >> 00) & 0xff) / 255,
+            opacity: alpha
+        )
+    }
+}
+
 /// Opaque sRGB shared by native, SwiftUI and terminal consumers.
 public struct ThemeRGB: Codable, Equatable, Hashable, Sendable {
     public let hex: UInt32
@@ -52,23 +64,11 @@ public struct TerminalPalette: Codable, Equatable, Sendable {
     public var indexed: [ThemeRGB]
 
     public static func standard(dark: Bool) -> Self {
-        let background = ThemeRGB(dark ? 0x2B3036 : 0xFAF8F5)
-        let foreground = ThemeRGB(dark ? 0xF5F1EA : 0x2A2624)
-        let ansi: [UInt32] = dark
-            ? [0x1A1816, 0xD4756A, 0x8B9A6B, 0xD4A574, 0x7B8FA8, 0xA67B93, 0x7FAFAF, 0xC8C1B8,
-               0x7F766F, 0xE89888, 0xABB97B, 0xE8C594, 0x9BAFC8, 0xC69BB3, 0x9FCFCF, 0xF5F1EA]
-            : [0x2A2624, 0xA02E25, 0x31633E, 0x79520D, 0x24579E, 0x722F37, 0x246568, 0xB5ADA3,
-               0x685F58, 0xA02E25, 0x31633E, 0x79520D, 0x24579E, 0x722F37, 0x246568, 0xFFFDF9]
-        var indexed = ansi.map(ThemeRGB.init)
-        let levels: [UInt32] = [0, 95, 135, 175, 215, 255]
-        for r in levels { for g in levels { for b in levels { indexed.append(ThemeRGB(r << 16 | g << 8 | b)) } } }
-        for n in 0..<24 { let v = UInt32(8 + n * 10); indexed.append(ThemeRGB(v * 0x010101)) }
-        return Self(background: background, foreground: foreground,
-                    cursor: foreground, cursorText: background,
-                    selectionBackground: foreground, selectionForeground: background, indexed: indexed)
+        (dark ? ThemeDefinition.dark : ThemeDefinition.light).terminal
     }
 
     public var readabilityErrors: [String] {
+        (indexed.count == 256 ? [] : ["Terminal palette requires 256 indexed colors."]) +
         [("Default text", foreground, background), ("Selection text", selectionForeground, selectionBackground),
          ("Cursor text", cursorText, cursor)].compactMap { name, ink, base in
             let ratio = ink.contrast(base)
@@ -93,16 +93,40 @@ public struct TerminalPalette: Codable, Equatable, Sendable {
     }
 }
 
-public struct ThemeDefinition: Identifiable, Sendable {
+public struct ThemeDefinition: Codable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let palette: LoopflowPalette
     public let terminal: TerminalPalette
     public var isDark: Bool { palette.isDark }
     public var colorScheme: ColorScheme { isDark ? .dark : .light }
-    public static let light = Self(id: "light", name: "Light", palette: .light, terminal: .standard(dark: false))
-    public static let dark = Self(id: "dark", name: "Dark", palette: .dark, terminal: .standard(dark: true))
-    public static let builtins = [light, dark]
+    public static let light = builtin("light")
+    public static let dark = builtin("dark")
+    public static let builtins: [Self] = {
+        guard let directory = Bundle.loopflowResources.url(forResource: "Themes", withExtension: nil) else {
+            preconditionFailure("Bundled themes are missing")
+        }
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" }
+            let themes = try files.map { url in
+                let theme = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
+                guard theme.readabilityErrors.isEmpty else { throw ThemeError("\(theme.name): \(theme.readabilityErrors.joined(separator: "; "))") }
+                return theme
+            }
+            precondition(!themes.isEmpty, "Bundled theme catalogue is empty")
+            return themes.sorted { first, second in
+                let order = ["light": 0, "dark": 1]
+                if order[first.id] != order[second.id] { return (order[first.id] ?? 2) < (order[second.id] ?? 2) }
+                return first.name < second.name
+            }
+        } catch { preconditionFailure("Invalid bundled theme: \(error)") }
+    }()
+    private static func builtin(_ id: String) -> Self {
+        guard let theme = builtins.first(where: { $0.id == id }) else { preconditionFailure("Missing bundled theme \(id)") }
+        return theme
+    }
+    public var readabilityErrors: [String] { terminal.readabilityErrors + palette.definition.readabilityErrors }
     public init(id: String, name: String, palette: LoopflowPalette, terminal: TerminalPalette) {
         self.id = id; self.name = name; self.palette = palette; self.terminal = terminal
     }

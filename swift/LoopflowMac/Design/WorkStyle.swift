@@ -119,7 +119,7 @@ private struct WorkPanel: ViewModifier {
     }
 }
 
-/// Ordinary actions stay neutral; only a deliberately emphasized action uses burgundy.
+/// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
 struct WorkOutlineButtonStyle: ButtonStyle {
     var emphasized = false
     @Environment(\.palette) private var palette

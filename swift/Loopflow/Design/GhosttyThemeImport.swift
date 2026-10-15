@@ -5,9 +5,13 @@ public struct ImportedTheme: Codable, Identifiable, Equatable, Sendable {
     public let name: String
     public let terminal: TerminalPalette
     public let diagnostics: [String]
+    public let palette: PaletteDefinition
+    public init(id: String, name: String, terminal: TerminalPalette, diagnostics: [String], palette: PaletteDefinition) {
+        self.id = id; self.name = name; self.terminal = terminal; self.diagnostics = diagnostics; self.palette = palette
+    }
     public var definition: ThemeDefinition {
         ThemeDefinition(id: id, name: name,
-                        palette: .derived(background: terminal.background, foreground: terminal.foreground),
+                        palette: LoopflowPalette(palette),
                         terminal: terminal)
     }
 }
@@ -79,6 +83,6 @@ public enum GhosttyThemeImport {
         for (index, value) in indexed { terminal.indexed[index] = value }
         diagnostics.append("Supplied: \(colors.keys.sorted().joined(separator: ", ")); \(indexed.count) indexed colors.")
         diagnostics.append("Derived: \(keys.filter { colors[$0] == nil }.joined(separator: ", ")); \(256 - indexed.count) default indexed colors; application semantic roles.")
-        return ImportedTheme(id: UUID().uuidString, name: name, terminal: terminal, diagnostics: diagnostics)
+        return ImportedTheme(id: UUID().uuidString, name: name, terminal: terminal, diagnostics: diagnostics, palette: GhosttyThemeMapping.palette(terminal))
     }
 }

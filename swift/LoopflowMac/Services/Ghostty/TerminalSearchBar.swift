@@ -29,6 +29,8 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
     private let field = NSSearchField()
     private let count = NSTextField(labelWithString: "")
     private var navigationButtons: [NSButton] = []
+    private var buttons: [NSButton] = []
+    private var palette = LoopflowPalette.light
     private var results = TerminalSearchResults()
 
     init(terminal: GhosttyMetalView) {
@@ -47,6 +49,7 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
         let next = button("chevron.down", label: "Next match", action: #selector(nextMatch))
         navigationButtons = [previous, next]
         let close = button("xmark", label: "Close Find", action: #selector(closeSearch))
+        buttons = [previous, next, close]
         let stack = NSStackView(views: [field, count, previous, next, close])
         stack.orientation = .horizontal
         stack.spacing = 6
@@ -60,11 +63,17 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
     }
 
     func applyTheme(_ theme: ThemeDefinition) {
+        palette = theme.palette
         appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
         layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         field.textColor = NSColor(theme.palette.text)
         field.backgroundColor = NSColor(theme.palette.surface)
         count.textColor = NSColor(theme.palette.textSecondary)
+        field.placeholderAttributedString = NSAttributedString(string: "Find in terminal", attributes: [
+            .foregroundColor: NSColor(palette.textTertiary),
+        ])
+        for button in buttons { button.contentTintColor = NSColor(palette.actionInk) }
+        applyEditorPalette()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -139,6 +148,14 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
     }
 
     func controlTextDidChange(_ notification: Notification) { updateQuery() }
+
+    func controlTextDidBeginEditing(_ notification: Notification) { applyEditorPalette() }
+
+    private func applyEditorPalette() {
+        guard let editor = field.currentEditor() as? NSTextView else { return }
+        editor.applyPalette(palette)
+        editor.backgroundColor = NSColor(palette.surface)
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {

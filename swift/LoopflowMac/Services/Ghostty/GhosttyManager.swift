@@ -153,7 +153,11 @@ final class GhosttyManager: ObservableObject {
     """
 
     /// Ghostty's process-wide state is set up once, however many callers ask.
-    static let libraryReady = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS
+    static let libraryReady: Bool = {
+        guard let resources = GhosttyRuntimeResources.directoryURL,
+              setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1) == 0 else { return false }
+        return ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS
+    }()
 
     private init() {}
 
@@ -161,18 +165,9 @@ final class GhosttyManager: ObservableObject {
         guard state == .uninitialized else { return }
         state = .initializing
 
-        guard let resources = GhosttyRuntimeResources.directoryURL else {
-            state = .failed("Bundled Ghostty shell resources are missing or mismatched")
-            return
-        }
-        guard setenv("GHOSTTY_RESOURCES_DIR", resources.path, 1) == 0 else {
-            state = .failed("Failed to configure bundled Ghostty shell resources")
-            return
-        }
-
         // Initialize Ghostty library
         guard Self.libraryReady else {
-            state = .failed("ghostty_init failed")
+            state = .failed("Could not initialize Ghostty with its bundled shell resources")
             return
         }
 

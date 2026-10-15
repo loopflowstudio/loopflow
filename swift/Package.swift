@@ -23,7 +23,8 @@ let package = Package(
             path: "Loopflow",
             exclude: ["Info.plist"],
             resources: [
-                .copy("Fonts")
+                .copy("Fonts"),
+                .copy("Themes")
             ]
         ),
         .binaryTarget(

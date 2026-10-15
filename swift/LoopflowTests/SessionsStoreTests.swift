@@ -12,7 +12,7 @@ struct SessionsStoreTests {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "main", state: "closed", replacing: true)
         })
-        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "waiting")]))
+        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
         let previous = try #require(item(store, "main"))
         try await store.switchProvider("main", to: agent)
         let prepared = try #require(item(store, "main"))
@@ -38,9 +38,9 @@ struct SessionsStoreTests {
     @Test("Reset prepares the successor and keeps the old conversation accessible")
     func resetPreparesSuccessor() async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
-            session(id: "fresh", state: "waiting")
+            session(id: "fresh", state: "available")
         })
-        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "waiting")]))
+        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
         let successor = try await store.reset("main")
         #expect(successor.id == "fresh")
         #expect(item(store, "fresh")?.state == .prepared)

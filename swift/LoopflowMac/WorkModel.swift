@@ -1474,6 +1474,21 @@ final class WorkModel {
         select(requested, preservingOpening: false)
     }
 
+    /// Switching Waves restores their last destination through the same Work owner.
+    func selectWaveContext(_ wave: WaveProjection) {
+        let remembered = navigation.waveDestinations[wave.roadmap.wave.id]
+        let destination = remembered.flatMap { work in
+            let belongs = work == wave.id.work || wave.tasks.contains {
+                $0.id.work == work || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == work
+            }
+            let retained = workspaceRepository.flatMap { repository in
+                workspaceRegistry?.retained(workspaceKey(for: work, repository: repository))
+            } != nil
+            return belongs || retained ? work : nil
+        } ?? wave.id.work
+        select(destination)
+    }
+
     func goBack() {
         guard let previous = navigation.backStack.popLast() else { return }
         select(previous, preservingOpening: false, recordingHistory: false)
@@ -2043,9 +2058,16 @@ final class WorkModel {
 
     private func setSelection(_ selection: WorkReference?) {
         guard self.selection != selection else { return }
+        if let previous = self.selection,
+           let wave = visibleWork.breadcrumb(selection: previous, sessionId: nil)?.wave {
+            navigation.remember(previous, in: wave.roadmap.wave.id)
+        }
         workActivityGeneration &+= 1
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
+        if let selection, let wave = visibleWork.breadcrumb(selection: selection, sessionId: nil)?.wave {
+            navigation.remember(selection, in: wave.roadmap.wave.id)
+        }
         cache?.saveSelection(selection, repo: repoPath ?? "")
         if !usesFixedFixture { workActivity = .loading }
     }

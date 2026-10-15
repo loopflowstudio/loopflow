@@ -37,6 +37,16 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
+Select a Wave in the left column to return to its last Task and retained workspace.
+The adjacent column keeps its own scroll position for each Wave. **Wave conversation**
+opens that Wave's ongoing conversation; the repository heading opens the repository's.
+The compact **Needs you** queue opens the exact waiting conversation and reveals its
+Work. Back returns to the interrupted context. The queue uses current shared Waiting
+or reported Blocked evidence and never rearranges the organizational columns.
+Use the sidebar button or **⌃⌘S** to hide or restore navigation without closing panes.
+Pane headers name the known provider, conversation and directory; arbitrary terminal
+titles remain context under **Shell**, without guessing which program is running.
+
 Task rows show a title above reported program status, stored Task/PR links and the
 recorded remote Machine. Local Machine names stay hidden. The title opens the
 conversation; links open separately and underline on hover or keyboard focus.
@@ -66,7 +76,15 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
 ⌘W / ⌘Z     close / restore a pane
+⌘F          find in the focused terminal
 ```
+
+Panes sit in rounded islands with small gutters; drag a gutter to resize.
+The focused pane has a quiet raised edge. Copying selected text or a command
+block briefly confirms the number of copied lines without moving focus.
+Find reserves its own row above the terminal, so it never covers a match.
+Return / Shift-Return select the next / previous match; Escape closes Find.
+Search and terminal state stay with their retained pane when switching Work.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red
@@ -223,7 +241,7 @@ of date** with **Retry**; comments are never split out of the Description.
 Use **Inspect** or the row's context menu for details. Presentation changes never
 start a provider or resolve a Session.
 
-The toolbar above the workspace is its only chrome. On the left it drills
+The toolbar above the workspace shows its Work ancestry. On the left it drills
 Wave → Task → Session: Wave and Task crumbs return to their details; the Task's
 issue ID links to Linear. The Task crumb keeps the exact conversation name
 without a sibling picker. Repository/Wave crumbs can choose among their Sessions. The pencil renames the Session in place through `lf session
@@ -233,11 +251,11 @@ renamed here. Outside Task navigation, the Session shows its Flow membership
 beside the name. Task navigation keeps that provenance in inspection. On the right sit
 the Task's read-only worktree location and the Activity glyph.
 
-A single pane has no header. With two or more, each pane carries a 24pt strip:
-a state dot and the conversation's name (or the shell's title). Hovering the
-focused pane's strip reveals split right, split down and close; the strip's
-context menu and the keybinds above offer the same plus zoom. Unfocused panes
-dim slightly; nothing draws a focus border.
+Each nonempty pane has a compact program header with its known provider,
+conversation or terminal title, directory and current reported status. Hovering
+the focused header reveals split right, split down and close; its context menu
+and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
+distinguish the selected pane without recoloring its reported activity.
 
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.

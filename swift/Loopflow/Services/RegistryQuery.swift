@@ -423,9 +423,11 @@ public struct RegistryQuery: Sendable {
         try Self.decode([WaveSnapshot].self, from: await run(["wave", "list", "--json"], cwd))
     }
 
-    /// The repository's configured, retained conversation; explicit opening only.
-    public func ensureRepositorySession(cwd: String) async throws -> SessionRecord {
-        try Self.decode(SessionRecord.self, from: await run(["session", "ensure", "--json"], cwd))
+    /// The repository or Wave's retained conversation; explicit opening only.
+    public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
+        var args = ["session", "ensure", "--json"]
+        if let wave { args += ["--wave", wave] }
+        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
 
     /// The Task's one ongoing conversation: the one already chosen, else its

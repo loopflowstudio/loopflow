@@ -39,14 +39,14 @@ final class SessionsWorkspace {
     var didConsiderRepositoryEntry = false
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
-    func openRepositoryConversation(store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
         guard !openingConversation else { return }
         let request = UUID()
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
         do {
-            let record = try await store.query.ensureRepositorySession(cwd: store.repoPath)
+            let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
             registry.revealSession(record, in: self)
             presentation.content = .terminals
@@ -812,14 +812,25 @@ struct SessionsContentView: View {
                 }, onNewShell: {
                     newShell(in: workspace)
                     navigation.content = .terminals
-                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onOpenRepository: openRepositoryConversation)
-                    .frame(width: 320)
-                Rectangle().fill(palette.border).frame(width: 1)
+                }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask, onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+                    .frame(width: 430)
+                    .frame(width: navigation.showsNavigator ? 430 : 0, alignment: .leading)
+                    .clipped()
+                    .opacity(navigation.showsNavigator ? 1 : 0)
+                    .allowsHitTesting(navigation.showsNavigator)
+                    .accessibilityHidden(!navigation.showsNavigator)
+                Rectangle().fill(palette.border).frame(width: navigation.showsNavigator ? 1 : 0)
                 HSplitView {
                     VStack(spacing: 0) {
                         if workspaces.selectedWork == nil {
                             ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
                                 description: Text("Open a repository, Wave or Task from the sidebar."))
+                                .overlay(alignment: .topLeading) {
+                                    WorkGlyphButton("sidebar.left", label: navigation.showsNavigator ? "Hide sidebar" : "Show sidebar",
+                                                    identifier: "work-toggle-sidebar") { navigation.showsNavigator.toggle() }
+                                        .keyboardShortcut("s", modifiers: [.command, .control])
+                                        .padding(6)
+                                }
                         } else {
                         WorkBreadcrumbBar(
                             model: model,
@@ -866,6 +877,7 @@ struct SessionsContentView: View {
                                             Text(error).textSelection(.enabled)
                                             Button("Retry") {
                                                 if let work = workspace.key.reference, work.kind == .task { openTask(work) }
+                                                else if let work = workspace.key.reference { openWaveConversation(work) }
                                                 else { openRepositoryConversation() }
                                             }
                                         }
@@ -941,7 +953,12 @@ struct SessionsContentView: View {
             guard ready, !root.didConsiderRepositoryEntry else { return }
             root.didConsiderRepositoryEntry = true
             guard workspaces.selectedWork == root.key, model.selection == nil else { return }
-            Task { await root.openRepositoryConversation(store: store, registry: workspaces) }
+            Task { await root.openPrimaryConversation(store: store, registry: workspaces) }
+        }
+        .onChange(of: navigation.showsNavigator) { _, shown in
+            if !shown, terminalsVisible, let terminal = multiplexer.focusedPane.terminal {
+                workspaces.surfaces.focus(terminal)
+            }
         }
         .onChange(of: model.sessions.value, initial: true) { _, records in
             guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath,
@@ -1080,7 +1097,15 @@ struct SessionsContentView: View {
         model.select(nil)
         navigation.content = .terminals
         let entry = workspace
-        Task { await entry.openRepositoryConversation(store: store, registry: workspaces) }
+        Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
+    }
+
+    private func openWaveConversation(_ work: WorkReference) {
+        guard let wave = model.wave(id: work.id)?.wave else { return }
+        model.select(work)
+        navigation.content = .terminals
+        let entry = workspace
+        Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
     }
 
     private func startConversation() {
@@ -1223,6 +1248,7 @@ private struct WorkspacePanesView: View {
 }
 
 private struct MultiplexerView: View {
+    @Environment(\.palette) private var palette
     let layout: LayoutNode
     let focusedPaneId: String
     let zoomedPaneId: String?
@@ -1250,7 +1276,8 @@ private struct MultiplexerView: View {
                 )
             }
         }
-        .background(TerminalPalette.background)
+        .padding(6)
+        .background(palette.surfaceMuted)
         .environment(\.colorScheme, .dark)
         .accessibilityIdentifier("sessions-multiplexer")
     }
@@ -1343,11 +1370,6 @@ private struct SplitDivider: View {
                 width: axis == .vertical ? 6 : nil,
                 height: axis == .horizontal ? 6 : nil
             )
-            .overlay {
-                Rectangle()
-                    .fill(TerminalPalette.divider)
-                    .frame(width: axis == .vertical ? 1 : nil, height: axis == .horizontal ? 1 : nil)
-            }
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -1389,8 +1411,11 @@ private struct SessionPaneView: View {
         return sessions.sessions.first { $0.id == id }
     }
 
-    /// One pane needs no chrome; with two or more, a 24pt strip names each.
-    private var showsStrip: Bool { store.layout.allPanes.count > 1 }
+    /// Program identity stays visible even when only one terminal is open.
+    private var showsStrip: Bool {
+        if case .empty = pane.content { return store.layout.allPanes.count > 1 }
+        return true
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1403,14 +1428,16 @@ private struct SessionPaneView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TerminalPalette.background)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         .environment(\.colorScheme, .dark)
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
-            if isFocused && showsStrip {
-                Rectangle().strokeBorder(LoopflowPalette.dark.selectionEdge, lineWidth: 2)
-                    .allowsHitTesting(false)
-            }
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .strokeBorder(isFocused ? LoopflowPalette.dark.selectionEdge : TerminalPalette.divider,
+                              lineWidth: isFocused ? 1.5 : 1)
+                .allowsHitTesting(false)
         }
+        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -1447,10 +1474,16 @@ private struct SessionPaneView: View {
                 Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
             }
-            Text(_title)
-                .font(Typography.code(11))
-                .foregroundStyle(TerminalPalette.dim)
-                .lineLimit(1)
+            Label(programHeading.name, systemImage: programHeading.symbol)
+                .font(Typography.body(11)).fontWeight(.semibold)
+                .foregroundStyle(TerminalPalette.foreground)
+                .fixedSize()
+                .accessibilityIdentifier("pane-program-\(pane.id)")
+            Text(programHeading.context)
+                .font(Typography.code(11)).foregroundStyle(TerminalPalette.dim)
+                .lineLimit(1).truncationMode(.middle)
+                .help(programHeading.detail)
+                .accessibilityIdentifier("pane-context-\(pane.id)")
             if let status = _programStatus, status.summary != nil {
                 ProgramStatusLabel(status: status)
                     .environment(\.palette, LoopflowPalette.dark)
@@ -1484,7 +1517,7 @@ private struct SessionPaneView: View {
         }
         .padding(.leading, 12)
         .padding(.trailing, 4)
-        .frame(height: 24)
+        .frame(height: 32)
         .contentShape(Rectangle())
         .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { inside in
             if inside { hover.paneId = pane.id } else if hover.paneId == pane.id { hover.paneId = nil }
@@ -1805,6 +1838,19 @@ private struct SessionPaneView: View {
         case .flowLog: "Flow processes"
         case .files: "Files"
         }
+    }
+
+    private var programHeading: PaneProgramHeading {
+        let fallback: String = switch pane.content {
+        case .empty: "Workspace"
+        case .session: "Session"
+        case .shell: "Shell"
+        case .flowLog: "Flow processes"
+        case .files: "Files"
+        }
+        return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.record.provider : nil,
+            title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,
+            directory: pane.content.location?.worktree, fallback: fallback)
     }
 
     private var _programStatusSurface: ProgramStatusSurface? {

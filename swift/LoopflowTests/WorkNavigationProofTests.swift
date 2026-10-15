@@ -189,12 +189,12 @@ struct WorkNavigationProofTests {
             let suffix = "\(Int(size.width))x\(Int(size.height))"
             let navigator = try view.inspect().find(WorkNavigator.self).actualView()
             let outline = try navigator.inspect()
-            // 20 started Tasks under three sans Wave heads; no lens, no Wave count.
+            // Stable Wave column beside the selected Wave's started Tasks.
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
-            }.count == 20)
+            }.count == 8)
             #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("work-disclose-wave-")) == true
+                (try? $0.accessibilityIdentifier().hasPrefix("work-wave-wave-")) == true
             }.count == 3)
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
             // Conversations do not add numeric controls to Work navigation.
@@ -225,7 +225,9 @@ struct WorkNavigationProofTests {
 
     private func _scrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
-        return view.subviews.lazy.compactMap { _scrollView(in: $0) }.first
+        // The tall Task list is independent of the Wave list beside it.
+        return view.subviews.compactMap { _scrollView(in: $0) }
+            .max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }
     }
 
     private func settle(_ window: NSWindow) async throws {

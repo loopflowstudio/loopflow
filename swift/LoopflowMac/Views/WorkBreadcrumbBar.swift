@@ -15,6 +15,9 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            WorkGlyphButton("sidebar.left", label: model.navigation.showsNavigator ? "Hide sidebar" : "Show sidebar",
+                            identifier: "work-toggle-sidebar") { model.navigation.showsNavigator.toggle() }
+                .keyboardShortcut("s", modifiers: [.command, .control])
             WorkGlyphButton("chevron.left", label: "Back", identifier: "work-back") { model.goBack() }
                 .disabled(model.navigation.backStack.isEmpty)
                 .keyboardShortcut("[", modifiers: .command)

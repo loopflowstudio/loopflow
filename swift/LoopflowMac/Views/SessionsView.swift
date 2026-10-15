@@ -862,7 +862,9 @@ struct SessionsView: View {
                                     machineId: home, repository: repository, query: query)
             } else {
                 HStack {
-                    WorkNavigator(model: model, onOpenSession: { _ in })
+                    if model.navigation.showsNavigator {
+                        WorkNavigator(model: model, onOpenSession: { _ in })
+                    }
                     if let error = workspaces.machineError ?? repositoryError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                             .task(id: taskPage) {
@@ -943,34 +945,30 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                if navigation.showsNavigator {
-                    WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
-                        model.select(work)
-                        startConversation()
-                    }, onNewShell: {
-                        newShell(in: workspace)
-                        navigation.content = .terminals
-                    }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask,
-                        onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
-                        .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
-                    SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
-                } else {
-                    VStack {
-                        WorkGlyphButton("sidebar.left", label: "Show sidebar", identifier: "work-toggle-sidebar") {
-                            navigation.showsNavigator = true
-                        }
-                        Spacer()
-                    }.padding(.top, 8).frame(width: 32).background(palette.surfaceMuted)
-                }
-                if let layout = workspaces.layout {
-                    WorkLayoutView(layout: layout, registry: workspaces) { key in
-                        workspacePanel(key).id(key)
+        VStack(spacing: 0) {
+            navigationBar
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    if navigation.showsNavigator {
+                        WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
+                            model.select(work)
+                            startConversation()
+                        }, onNewShell: {
+                            newShell(in: workspace)
+                            navigation.content = .terminals
+                        }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask,
+                            onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+                            .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
+                        SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                     }
-                } else {
-                    ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                        description: Text("Open a repository, Wave or Task from the sidebar."))
+                    if let layout = workspaces.layout {
+                        WorkLayoutView(layout: layout, registry: workspaces) { key in
+                            workspacePanel(key).id(key)
+                        }
+                    } else {
+                        ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                            description: Text("Open a repository, Wave or Task from the sidebar."))
+                    }
                 }
             }
         }
@@ -983,8 +981,6 @@ struct SessionsContentView: View {
                     .disabled(navigation.backStack.isEmpty)
                 Button("Forward") { model.goForward() }.keyboardShortcut("]", modifiers: .command)
                     .disabled(navigation.forwardStack.isEmpty)
-                Button("Toggle sidebar") { navigation.showsNavigator.toggle() }
-                    .keyboardShortcut("s", modifiers: [.command, .control])
             }.hidden().accessibilityHidden(true).frame(width: 0, height: 0)
         }
         .overlay {
@@ -994,23 +990,22 @@ struct SessionsContentView: View {
             }
         }
         .background {
-            WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
+            WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus,
+                toggleSidebar: { navigation.toggleNavigator() }) {
                 restorePaletteFocus = true
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
         }
         .sheet(isPresented: Binding(
-            get: { navigation.palette != nil },
-            set: { if !$0 { navigation.palette = nil } }
+            get: { navigation.palette != nil && navigation.palette != .search },
+            set: { if !$0, navigation.palette != .search { navigation.palette = nil } }
         )) {
             switch navigation.palette {
             case .workflow(let name):
                 WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
             case .flow(let name):
                 FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
-            case .search:
-                WorkPalette(model: model, activate: navigate)
-            case nil:
+            case .search, nil:
                 EmptyView()
             }
         }
@@ -1056,6 +1051,43 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private var navigationBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                restorePaletteFocus = true
+                navigation.palette = .search
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
+                    Text(title(for: currentKey)).lineLimit(1).truncationMode(.middle)
+                    Image(systemName: "chevron.down").font(.system(size: 9))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain).font(Typography.body(12))
+            .help("Choose Work (⌘K)").accessibilityIdentifier("work-location-picker")
+            .accessibilityValue(title(for: currentKey))
+            .popover(isPresented: Binding(
+                get: { navigation.palette == .search },
+                set: { if !$0, navigation.palette == .search { navigation.palette = nil } }
+            ), arrowEdge: .bottom) {
+                WorkPalette(model: model, activate: navigate)
+            }
+            Spacer(minLength: 0)
+            if let task = fileTask, let wave = model.breadcrumb?.wave?.roadmap.wave {
+                TaskLifecycleActions(model: model, task: task.task, wave: wave,
+                    work: model.taskWork[task.task.id])
+                workspaceCreation(for: workspace, task: task.task)
+                if multiplexer.zoomedPaneId != nil {
+                    Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(palette.surfaceMuted)
+    }
+
     private func workspacePanel(_ key: WorkWorkspaceKey) -> some View {
         let task = key.kind == .task ? model.task(id: key.id) : nil
         let location = task.flatMap { navigation.preparedTaskWorktrees[$0.task.id] ?? $0.task.reference.workspace?.identity }
@@ -1065,7 +1097,7 @@ struct SessionsContentView: View {
         let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
             selection: key.reference, sessionId: entry.presentation.selectedSessionId)
         let terminals = key.kind == .task || entry.presentation.content == .terminals
-        let context = key.kind == .task || workspaces.openWork.count > 1 || !navigation.showsNavigator
+        let context = workspaces.openWork.count > 1
         return VStack(spacing: 0) {
             if context {
                 HStack(spacing: 8) {
@@ -1077,14 +1109,6 @@ struct SessionsContentView: View {
                         Text(entry.title).font(Typography.strong(12)).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    if let task, active {
-                        TaskLifecycleActions(model: model, task: task.task, wave: task.wave.wave,
-                            work: model.taskWork[task.task.id])
-                        workspaceCreation(for: entry, task: task.task)
-                        if entry.multiplexer.zoomedPaneId != nil {
-                            Button("Restore") { entry.toggleFocus(entry.multiplexer.focusedPaneId) }
-                        }
-                    }
                     if workspaces.openWork.count > 1 {
                         Button { model.hideWorkspace(key) } label: { Image(systemName: "xmark") }
                             .buttonStyle(WorkPlainButtonStyle()).help("Hide workspace; keep its panes and drafts")
@@ -1211,7 +1235,8 @@ struct SessionsContentView: View {
         restorePaletteFocus = false
         navigation.palette = nil
         switch destination {
-        case .wave(let id): model.select(.wave(id: id))
+        case .repository: openRepositoryConversation()
+        case .wave(let id): openWaveConversation(.wave(id: id))
         case .task(let id):
             let trace = UUID().uuidString
             Perf.$inputTrace.withValue(trace) {
@@ -1219,8 +1244,12 @@ struct SessionsContentView: View {
                 Task { await model.openPaletteTask(id) }
             }
             return
-        case .flow(let name): navigation.palette = .flow(name)
-        case .workflow(let name): navigation.palette = .workflow(name)
+        case .flow(let name):
+            restorePaletteFocus = true
+            navigation.palette = .flow(name)
+        case .workflow(let name):
+            restorePaletteFocus = true
+            navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)

@@ -17,6 +17,10 @@ extension WorkModel {
 
     var paletteRows: [WorkPaletteRow] {
         var rows: [WorkPaletteRow] = []
+        if let repoPath {
+            let name = URL(fileURLWithPath: repoIdentity(repoPath)).lastPathComponent
+            rows.append(.init(id: .repository, title: name, detail: "Repository", key: name))
+        }
         for wave in visibleRoadmaps {
             rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave", key: wave.wave.name))
             for task in wave.tasks.items {
@@ -91,7 +95,12 @@ struct WorkPalette: View {
     private var rows: [WorkPaletteRow] { model.searchDestinations(search) }
 
     private var effectiveSelection: WorkDestination? {
-        rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
+        let current: WorkDestination
+        if let work = model.selection {
+            current = work.kind == .task ? .task(work.id) : .wave(work.id)
+        } else { current = .repository }
+        let selected = highlighted ?? (search.isEmpty ? current : nil)
+        return rows.first(where: { $0.id == selected })?.id ?? rows.first?.id
     }
 
     var body: some View {
@@ -117,13 +126,20 @@ struct WorkPalette: View {
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(8)
                                 .background(effectiveSelection == row.id ? palette.surfaceMuted : .clear)
                             }.buttonStyle(.plain).id(row.id)
+                                .accessibilityValue(effectiveSelection == row.id ? "Selected" : "")
                         }
                         if rows.isEmpty { Text("No matching destinations").font(Typography.caption()).padding() }
                     }
                 }
-                .onChange(of: effectiveSelection) { _, id in if let id { proxy.scrollTo(id) } }
+                .onChange(of: effectiveSelection, initial: true) { _, id in if let id { proxy.scrollTo(id) } }
             }
-            Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.caption()).foregroundStyle(palette.textSecondary)
+            HStack {
+                Text("↑↓ Select    ↩ Open    Esc Close").font(Typography.caption()).foregroundStyle(palette.textSecondary)
+                Spacer()
+                Button("Keep sidebar open ⌃⌘S") { model.navigation.pinNavigator() }
+                    .buttonStyle(.plain).font(Typography.caption())
+                    .accessibilityIdentifier("work-pin-sidebar")
+            }
         }
         .padding(20).frame(width: 560, height: 420).background(palette.background)
         .onChange(of: search) { _, _ in highlighted = rows.first?.id }
@@ -175,30 +191,53 @@ struct TaskLinkView: View {
     }
 }
 
-/// Cmd-K is intercepted before a retained terminal can consume it.
+enum WorkNavigationShortcut {
+    case search
+    case toggleSidebar
+
+    init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
+        let keys = modifiers.intersection([.command, .shift, .control, .option])
+        switch (characters?.lowercased(), keys) {
+        case ("k", [.command]): self = .search
+        case ("s", [.command, .control]): self = .toggleSidebar
+        default: return nil
+        }
+    }
+}
+
+/// Navigation shortcuts are intercepted before a retained terminal can consume them.
 struct WorkPaletteShortcut: NSViewRepresentable {
     let presented: Bool
     let restoreFocus: Bool
+    let toggleSidebar: () -> Void
     let open: () -> Void
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         context.coordinator.view = view
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak coordinator = context.coordinator] event in
-            guard let coordinator, let window = coordinator.view?.window, event.window === window,
-                  event.modifierFlags.intersection([.command, .shift, .control, .option]) == [.command],
-                  event.charactersIgnoringModifiers?.lowercased() == "k" else { return event }
-            if !coordinator.presented {
-                coordinator.previous = window.firstResponder
-                coordinator.open()
+            guard let coordinator, let window = coordinator.view?.window,
+                  event.window === window || window.childWindows?.contains(where: { $0 === event.window }) == true
+            else { return event }
+            guard let shortcut = WorkNavigationShortcut(characters: event.charactersIgnoringModifiers,
+                modifiers: event.modifierFlags) else { return event }
+            switch shortcut {
+            case .toggleSidebar: coordinator.toggleSidebar()
+            case .search:
+                if !coordinator.presented {
+                    coordinator.previous = window.firstResponder
+                    coordinator.open()
+                }
             }
             return nil
         }
         return view
     }
-    func makeCoordinator() -> Coordinator { Coordinator(open: open) }
+    func makeCoordinator() -> Coordinator { Coordinator(open: open, toggleSidebar: toggleSidebar) }
     func updateNSView(_ view: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.open = open
+        coordinator.toggleSidebar = toggleSidebar
+        if !coordinator.presented && presented { coordinator.previous = view.window?.firstResponder }
         if coordinator.presented && !presented && restoreFocus,
            let previous = coordinator.previous as? NSView, previous.window === view.window {
             view.window?.makeFirstResponder(previous)
@@ -214,7 +253,11 @@ struct WorkPaletteShortcut: NSViewRepresentable {
         var monitor: Any?
         var presented = false
         var open: () -> Void
-        init(open: @escaping () -> Void) { self.open = open }
+        var toggleSidebar: () -> Void
+        init(open: @escaping () -> Void, toggleSidebar: @escaping () -> Void) {
+            self.open = open
+            self.toggleSidebar = toggleSidebar
+        }
     }
 }
 
@@ -300,7 +343,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
-        field.placeholderString = "Go to a Wave, Task or Flow"
+        field.placeholderString = "Find a repository, Wave, Task or action"
         field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator
         return field

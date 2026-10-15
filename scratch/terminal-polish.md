@@ -228,3 +228,43 @@ remain available outside the compact workspace. Native geometry, hover and live
 provider behavior remain demo judgment.
 
 Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|DesktopPaneControlTests|TaskFilesTests|WorkNavigationTests|TaskFlowProofTests' -Xswiftc -gnone --jobs 4` PASS (128 tests reported; five optional native cases skipped); Swift multiplatform boundary and diff checks PASS. `/tmp/loo487-pane-switch-tests-final.log`. Initial compilation found obsolete Details-sheet benchmark references; the next run exposed an obsolete removed-toolbar fixture, and the following run an accessibility-tree assertion; all were corrected without disabling current behavior checks.
+
+## Navigation revision — implementation authorized
+
+Jack Heart requested default-closed navigation, opened when needed. Its compact
+control starts filled with the repository name as the selected item. Keyboard
+controls must still open and keep today's full sidebar visible, or close it.
+Jack subsequently requested building and opening this demo. This supersedes
+default-open navigation; native usability remains review evidence.
+
+Usage: click the selected-location control or press Command-K to open
+a searchable chooser. Browse Repo → Wave → Task or filter the existing Work
+results; selection changes the retained workspace and closes the chooser.
+Escape dismisses it only while navigation owns focus, restoring the prior
+responder. Control-Command-S toggles the existing resizable sidebar between
+pinned-open and closed; pinned navigation survives selections. No hover opening
+or pointer-exit closing. The closed control reflects the current destination,
+starting at the repository. Reuse current search, selection and history owners.
+
+The existing palette owns the transient chooser; the existing sidebar flag now
+starts false and retains explicit pinned visibility. Together they represent
+closed / choosing / pinned without another selection or search owner. The
+chooser is a popover over unchanged pane geometry; pinned navigation reserves
+sidebar width as today. Preserve per-Wave scroll, filter, remembered width,
+Command-click adjacent Work, drafts and terminal identity. Empty results or a
+failed read keep the chooser open without changing selection; Escape recovers.
+Next proof: keyboard-only open/search/select/dismiss/pin/close, repo-first launch,
+retained focus and drafts, and whether the compact control reads clearly.
+
+Review: removed the startup sidebar flash and limited navigation shortcuts to
+the owning window and its chooser. Extra modifiers and terminal Escape remain
+provider input. Existing destination tests now explicitly replace their addressed
+pane; selecting Changes intentionally focuses the companion. Removed a stale
+assertion for the deleted worktree toolbar.
+Check: navigation/destination/pane suites PASS (133 tests reported, six optional
+native cases skipped), semantic palette suite PASS (4), platform boundary and
+diff checks PASS. Logs: `/tmp/loo487-nav-tests-4.log`,
+`/tmp/loo487-nav-palette-tests.log`. Native popover/focus checks remain unrun.
+Demo 4 was signature-verified and opened (PID 97144); source/copy hashes live in
+`.lf/tmp/terminal-feedback/demo4-package-proof.json`. Jack Heart's visual and
+keyboard review remains at demo; earlier demos and their Sessions remain running.

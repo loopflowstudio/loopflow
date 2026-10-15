@@ -37,6 +37,11 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
+Navigation starts closed, with the repository selected in the compact location
+control. Click it or press **⌘K** to choose Work without resizing your panes.
+Selection closes the chooser; Escape dismisses it and restores your previous focus.
+
+Press **⌃⌘S** or choose **Keep sidebar open** to pin the full navigator.
 Open a Wave to enter its conversation and fill the sidebar with its Tasks.
 The **Repo / Wave** path returns to either conversation. Each Wave keeps its
 Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
@@ -46,11 +51,11 @@ shared Waiting or reported Blocked evidence.
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
 keeps its own panes, drafts and focus. Close its context header to hide it without
-closing its panes. Context headers appear when multiple workspaces are visible or
-the sidebar is hidden. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
+closing its panes. Context headers appear when multiple workspaces are visible. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
 
-Drag the sidebar edge to resize it. Its own collapse button or **⌃⌘S** hides it;
-the edge button restores it at the remembered width.
+Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
+it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
+across selections.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -300,8 +305,9 @@ custom postprocessing are outside the opaque-text contrast guarantee.
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
-Press **⌘K** to search Waves, all planned Tasks, Workflows and Flows in the
-selected repository. Empty search shows recent destinations first; arrows select,
+Press **⌘K** to search the repository, Waves, all planned Tasks, Workflows and Flows.
+The chooser initially selects your current destination. Empty search shows recent
+destinations first; arrows select,
 Return opens and Escape returns focus to the previous terminal. Flow entries
 inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
 The sidebar search remains a filter. Each repository retains up to 20 recent

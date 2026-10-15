@@ -299,7 +299,8 @@ struct SessionChromeProofTests {
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
         #expect(model.navigation.palette == .search)
-        let sheet = try #require(window.attachedSheet)
+        let sheet = try #require(NSApp.keyWindow)
+        #expect(sheet !== window)
         try await settle(sheet)
         for char in "never-pty" { try press(String(char), keyCode: 0, modifiers: [], in: sheet) }
         try await settle(sheet)
@@ -313,7 +314,21 @@ struct SessionChromeProofTests {
 
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
-        let taskSheet = try #require(window.attachedSheet)
+        let pinChooser = try #require(NSApp.keyWindow)
+        #expect(pinChooser !== window)
+        try press("s", keyCode: 1, modifiers: [.command, .control], in: pinChooser)
+        try await settle(window)
+        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.showsNavigator)
+        try press("s", keyCode: 1, modifiers: [.command, .control], in: window)
+        try await settle(window)
+        #expect(!model.navigation.showsNavigator)
+        #expect(window.firstResponder === terminals[1])
+
+        try press("k", keyCode: 40, modifiers: [.command], in: window)
+        try await settle(window)
+        let taskSheet = try #require(NSApp.keyWindow)
+        #expect(taskSheet !== window)
         try await settle(taskSheet)
         let issue = try #require(model.task(id: "issue-review")?.task.task.identifier)
         for char in issue { try press(String(char), keyCode: 0, modifiers: [], in: taskSheet) }
@@ -332,30 +347,33 @@ struct SessionChromeProofTests {
         let second = model.searchDestinations("")[1].id
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
-        let arrows = try #require(window.attachedSheet)
+        let arrows = try #require(NSApp.keyWindow)
+        #expect(arrows !== window)
         try await settle(arrows)
         try press("\u{f701}", keyCode: 125, modifiers: [], in: arrows)
         try press("\r", keyCode: 36, modifiers: [], in: arrows)
         try await Task.sleep(for: .milliseconds(400))
         if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
-        else { Issue.record("The fixture's second palette destination should be its Wave") }
+        else if case .repository = second { #expect(model.selection == nil) }
+        else { Issue.record("The second destination should be a repository or Wave") }
 
         // Session inventory is not a palette destination, even when retained.
         #expect(model.searchDestinations(record.title).isEmpty)
 
-        // Flow inspection replaces search in the same sheet and dismisses once.
+        // Flow inspection leaves the chooser for a sheet and dismisses once.
         model.navigation.content = .terminals
         try await settle(window)
         window.makeFirstResponder(terminals[1])
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
-        let flowSheet = try #require(window.attachedSheet)
-        try await settle(flowSheet)
-        for char in "feature" { try press(String(char), keyCode: 0, modifiers: [], in: flowSheet) }
-        try press("\r", keyCode: 36, modifiers: [], in: flowSheet)
-        try await settle(flowSheet)
+        let flowChooser = try #require(NSApp.keyWindow)
+        #expect(flowChooser !== window)
+        try await settle(flowChooser)
+        for char in "feature" { try press(String(char), keyCode: 0, modifiers: [], in: flowChooser) }
+        try press("\r", keyCode: 36, modifiers: [], in: flowChooser)
+        try await settle(window)
         #expect(model.navigation.palette == .flow("feature"))
-        #expect(window.attachedSheet === flowSheet)
+        let flowSheet = try #require(window.attachedSheet)
         try press("\u{1b}", keyCode: 53, modifiers: [], in: flowSheet)
         try await Task.sleep(for: .milliseconds(400))
         #expect(model.navigation.palette == nil)
@@ -374,7 +392,8 @@ struct SessionChromeProofTests {
         terminals[0].insertText(bindDraft, replacementRange: NSRange(location: NSNotFound, length: 0))
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
-        let bindSheet = try #require(window.attachedSheet)
+        let bindSheet = try #require(NSApp.keyWindow)
+        #expect(bindSheet !== window)
         try await settle(bindSheet)
         for char in "Bind" { try press(String(char), keyCode: 0, modifiers: [], in: bindSheet) }
         #expect(model.searchDestinations("Bind").map(\.id) == [.bind(record.id)])

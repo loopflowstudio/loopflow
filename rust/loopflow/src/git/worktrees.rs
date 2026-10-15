@@ -249,8 +249,6 @@ fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
     let worktrees = list_porcelain(repo).ok()?;
     let mut directory = None;
     let mut examples = 0;
-    let repo_prefix = format!("{}.", repo.file_name()?.to_str()?);
-    let mut prefixed_siblings = true;
     for (path, branch) in &worktrees {
         if path == repo || !path.is_dir() {
             continue;
@@ -261,21 +259,19 @@ fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
         // Directory names can outlive branch renames (for example, a host's
         // city names). Infer placement without guessing a branch transformation.
         let parent = path.parent()?;
+        // Siblings use the primary checkout's current name. Old prefixes after
+        // a rename do not establish a convention of dropping the repo name.
+        if Some(parent) == repo.parent() {
+            return None;
+        }
         if directory.is_some_and(|existing| existing != parent) {
             return None;
         }
         directory = Some(parent);
-        prefixed_siblings &=
-            Some(parent) == repo.parent() && path.file_name()?.to_str()?.starts_with(&repo_prefix);
         examples += 1;
     }
     let directory = directory.filter(|_| examples >= 2)?;
-    let name = if prefixed_siblings {
-        format!("{repo_prefix}{component}")
-    } else {
-        component.to_string()
-    };
-    Some(directory.join(name))
+    Some(directory.join(component))
 }
 
 /// The worktree directory for a branch or local name. Invalid flat names use a

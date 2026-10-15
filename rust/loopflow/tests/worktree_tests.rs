@@ -12,6 +12,90 @@ use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, Work
 use loopflow_test_support::TestRepo;
 
 #[test]
+fn placement_keeps_the_current_repo_prefix_after_renames() {
+    let source = TestRepo::new();
+    let directory = tempfile::tempdir().unwrap();
+    let directory = directory.path().canonicalize().unwrap();
+    let mut repo = directory.join("etude");
+    git_stdout(
+        source.path(),
+        &[
+            "clone",
+            source.path().to_str().unwrap(),
+            repo.to_str().unwrap(),
+        ],
+    );
+    git_stdout(&repo, &["config", "user.name", "Tester"]);
+    git_stdout(&repo, &["config", "user.email", "tester@example.com"]);
+    for name in ["first", "second"] {
+        worktree_add(
+            &repo,
+            &directory.join(format!("etude.{name}")),
+            &format!("teammate/{name}"),
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+    }
+    let existing = directory.join("etude.first");
+    fs::write(existing.join("unfinished.txt"), "keep this work").unwrap();
+    let home = tempfile::tempdir().unwrap();
+
+    for name in ["fantasia", "manabot"] {
+        let renamed = directory.join(name);
+        fs::rename(&repo, &renamed).unwrap();
+        repo = renamed;
+        git_stdout(&repo, &["worktree", "repair"]);
+        let segment = format!("next-{name}");
+        let expected = directory.join(format!("{name}.{segment}"));
+        for caller in [&repo, &existing] {
+            let plan = plan_placement(caller, WorktreeSegment::parse(&segment).unwrap()).unwrap();
+            assert_eq!(plan.worktree_path, expected);
+        }
+        let output = lf_command(home.path())
+            .current_dir(&existing)
+            .args(["wt", "create", &segment])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(expected.join(".git").is_file());
+
+        // Include bare siblings left by the bug as well as old and new prefixes.
+        let bare = directory.join(format!("research-{name}"));
+        let plan = plan_placement(
+            &repo,
+            WorktreeSegment::parse(&format!("research-{name}")).unwrap(),
+        )
+        .unwrap();
+        worktree_add(
+            &repo,
+            &bare,
+            &plan.branch,
+            WorktreeBranch::New {
+                start_point: "HEAD",
+            },
+        )
+        .unwrap();
+        let reused = plan_placement(
+            &repo,
+            WorktreeSegment::parse(&format!("research-{name}")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reused.strategy, PlacementStrategy::UseExistingWorktree);
+        assert_eq!(reused.worktree_path, bare);
+    }
+    assert_eq!(
+        fs::read_to_string(existing.join("unfinished.txt")).unwrap(),
+        "keep this work"
+    );
+}
+
+#[test]
 fn placement_follows_existing_layout_without_configuration() {
     for (prefix, nested) in [("", true), ("project-", false)] {
         let repo = TestRepo::new();

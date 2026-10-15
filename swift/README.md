@@ -37,11 +37,13 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Navigation starts closed, with the repository selected in the compact location
-control. Click it or press **⌘K** to choose Work without resizing your panes.
-Selection closes the chooser; Escape dismisses it and restores your previous focus.
+Navigation starts closed, with the repository selected in the Session workspace
+header. Click the location control or press **⌘K** to drop the full navigator over
+your panes. It keeps the same Needs you queue, Wave/Task rows and Find Work field
+as the sidebar. Repo and Wave selection drill in; choosing a Task or Session closes
+the dropdown. Escape or a click outside dismisses it and restores your previous focus.
 
-Press **⌃⌘S** or choose **Keep sidebar open** to pin the full navigator.
+Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
 Open a Wave to enter its conversation and fill the sidebar with its Tasks.
 The **Repo / Wave** path returns to either conversation. Each Wave keeps its
 Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
@@ -305,20 +307,14 @@ custom postprocessing are outside the opaque-text contrast guarantee.
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
-Press **⌘K** to search the repository, Waves, all planned Tasks, Workflows and Flows.
-The chooser initially selects your current destination. Empty search shows recent
-destinations first; arrows select,
-Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
-The sidebar search remains a filter. Each repository retains up to 20 recent
-destinations for the window. Visited historical Tasks remain in recents after
-leaving their pages; opening one reads its exact identity again. This does not
-search all historical Tasks. Failed reads preserve the workspace and offer Retry.
-If a highlighted row disappears, Return opens the first remaining visible result;
-with no results it does nothing.
+Press **⌘K** to open and focus Find Work in the navigator. Search filters the
+existing Wave/Task rows. Flow and Workflow definitions remain in the repository
+menu; selecting one opens its inspector. Session rename and binding remain in
+the conversation's own controls.
+Failed reads preserve the workspace and offer Retry.
 
-With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
-the Session name. Both open the same picker: review the named Task, then choose
+With an unassigned Session selected, choose **Bind to Task…** beside the Session
+name. Review the named Task, then choose
 **Bind permanently**. Opening the picker leaves the conversation and terminal intact.
 
 ```sh

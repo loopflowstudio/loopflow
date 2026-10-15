@@ -950,14 +950,7 @@ struct SessionsContentView: View {
             GeometryReader { geometry in
                 HStack(spacing: 0) {
                     if navigation.showsNavigator {
-                        WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
-                            model.select(work)
-                            startConversation()
-                        }, onNewShell: {
-                            newShell(in: workspace)
-                            navigation.content = .terminals
-                        }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask,
-                            onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+                        navigator
                             .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
                         SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                     }
@@ -968,6 +961,23 @@ struct SessionsContentView: View {
                     } else {
                         ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
                             description: Text("Open a repository, Wave or Task from the sidebar."))
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if navigation.palette == .search && !navigation.showsNavigator {
+                        ZStack(alignment: .topLeading) {
+                            Color.black.opacity(0.001)
+                                .contentShape(Rectangle())
+                                .onTapGesture { navigation.palette = nil }
+                                .accessibilityIdentifier("work-navigation-dismiss")
+                            navigator
+                                .frame(width: min(navigation.sidebarWidth, geometry.size.width),
+                                       height: max(0, geometry.size.height - 12))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border))
+                                .shadow(color: .black.opacity(0.2), radius: 16, x: 4, y: 8)
+                                .accessibilityIdentifier("work-navigation-dropdown")
+                        }
                     }
                 }
             }
@@ -1051,29 +1061,55 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
+    private var navigator: some View {
+        WorkNavigator(model: model, onOpenSession: { record in
+            dismissNavigationForSelection()
+            openSession(record)
+        }, onConversation: { work in
+            dismissNavigationForSelection()
+            model.select(work)
+            startConversation()
+        }, onNewShell: {
+            dismissNavigationForSelection()
+            newShell(in: workspace)
+            navigation.content = .terminals
+        }, onShowTerminals: {
+            dismissNavigationForSelection()
+            navigation.content = .terminals
+        }, onOpenTask: { work in
+            dismissNavigationForSelection()
+            openTask(work)
+        }, onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
+    }
+
+    private func dismissNavigationForSelection() {
+        restorePaletteFocus = false
+        if navigation.palette == .search { navigation.palette = nil }
+    }
+
     private var navigationBar: some View {
         HStack(spacing: 8) {
             Button {
                 restorePaletteFocus = true
-                navigation.palette = .search
+                navigation.palette = navigation.palette == .search ? nil : .search
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
-                    Text(title(for: currentKey)).lineLimit(1).truncationMode(.middle)
-                    Image(systemName: "chevron.down").font(.system(size: 9))
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(palette.emphasisInk)
+                    Text(title(for: currentKey)).font(Typography.strong(16))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 12)
+                    Text("⌘K").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                    Image(systemName: navigation.palette == .search ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(palette.surface, in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 14).frame(height: 44)
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(palette.border))
             }
-            .buttonStyle(.plain).font(Typography.body(12))
+            .frame(maxWidth: navigation.sidebarWidth)
+            .buttonStyle(.plain)
             .help("Choose Work (⌘K)").accessibilityIdentifier("work-location-picker")
             .accessibilityValue(title(for: currentKey))
-            .popover(isPresented: Binding(
-                get: { navigation.palette == .search },
-                set: { if !$0, navigation.palette == .search { navigation.palette = nil } }
-            ), arrowEdge: .bottom) {
-                WorkPalette(model: model, activate: navigate)
-            }
             Spacer(minLength: 0)
             if let task = fileTask, let wave = model.breadcrumb?.wave?.roadmap.wave {
                 TaskLifecycleActions(model: model, task: task.task, wave: wave,
@@ -1132,7 +1168,7 @@ struct SessionsContentView: View {
                     }
             }
             if terminals {
-                WorkspacePanesView(workspace: entry, isFocused: active, sessions: store)
+                WorkspacePanesView(workspace: entry, isFocused: active && navigation.palette == nil, sessions: store)
                     .overlay(alignment: .top) {
                         if let error = entry.conversationError {
                             HStack {
@@ -1227,42 +1263,6 @@ struct SessionsContentView: View {
                 launchError = error.localizedDescription
             }
         }
-    }
-
-    private func navigate(_ destination: WorkDestination) {
-        // Refreshes can remove an action while the palette is open.
-        guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
-        restorePaletteFocus = false
-        navigation.palette = nil
-        switch destination {
-        case .repository: openRepositoryConversation()
-        case .wave(let id): openWaveConversation(.wave(id: id))
-        case .task(let id):
-            let trace = UUID().uuidString
-            Perf.$inputTrace.withValue(trace) {
-                Perf.agentInput("task_click", task: id, detail: "source=palette")
-                Task { await model.openPaletteTask(id) }
-            }
-            return
-        case .flow(let name):
-            restorePaletteFocus = true
-            navigation.palette = .flow(name)
-        case .workflow(let name):
-            restorePaletteFocus = true
-            navigation.palette = .workflow(name)
-        case .rename(let id):
-            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
-            openSession(record)
-            model.beginSessionRename(record)
-        case .bind(let id):
-            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
-            model.beginSessionBinding(record)
-        case .flowLog(let id):
-            model.select(.task(id: id))
-            navigation.content = .terminals
-            multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
-        }
-        model.remember(destination)
     }
 
     private func openSession(_ record: SessionRecord) {

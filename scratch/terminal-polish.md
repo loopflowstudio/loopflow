@@ -268,3 +268,22 @@ diff checks PASS. Logs: `/tmp/loo487-nav-tests-4.log`,
 Demo 4 was signature-verified and opened (PID 97144); source/copy hashes live in
 `.lf/tmp/terminal-feedback/demo4-package-proof.json`. Jack Heart's visual and
 keyboard review remains at demo; earlier demos and their Sessions remain running.
+
+### Dropdown correction
+
+Jack Heart rejected the small plain control and flat search palette. The closed
+control belongs in the Session workspace header, and opening it must drop the
+previous navigator layout down from the top. Overlaying the workspace is accepted.
+Pinning/expanding restores the prior docked sidebar structure; temporary navigation
+does not resize panes. Both presentations use WorkNavigator, retaining Needs you,
+rich Wave/Task rows, filtering and scroll positions. Repo/Wave selection drills in;
+Task/Session selection closes the overlay. Escape/outside click dismisses it.
+The existing header control becomes wider and taller. The flat palette view and
+its separate text-field implementation are removed; definition inspectors remain
+in the existing repository menu. This supersedes Demo 4's popover design.
+
+Review: the dropdown and docked sidebar share one view and navigation state.
+Pinned Command-K focuses its existing search instead of mounting a second
+navigator. Pane focus is withheld while navigation owns input, and the shortcut
+monitor retains the original responder until dismissal. No terminal is released.
+Check: `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkDestinationTests|SessionChromeProofTests|DesktopHeadlessTests' -Xswiftc -gnone --jobs 4` PASS (115 tests reported; three native tests skipped); platform boundary and diff checks PASS. `/tmp/loo487-dropdown-tests-verified.log`. The prior run exposed a sidebar-hide fixture that had not opened the now-default-closed sidebar; it now explicitly pins before testing Hide. Native dropdown geometry/focus remains demo judgment.

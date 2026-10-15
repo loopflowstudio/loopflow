@@ -26,12 +26,15 @@ struct WorkNavigationTests {
         try picker.button().tap()
         #expect(model.navigation.palette == .search)
         #expect(root.multiplexer.layout == layout)
-        let chooser = WorkPalette(model: model, activate: { _ in })
-        let repo = try #require(try chooser.inspect().findAll(ViewType.Button.self).first {
-            (try? $0.labelView().find(text: "loopflow")) != nil
-        })
-        #expect(try repo.accessibilityValue().string() == "Selected")
-        try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-pin-sidebar").button().tap()
+        let chooser = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository")
+        }
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-search")
+        }
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar")
+            .find(ViewType.Button.self).tap()
         #expect(model.navigation.showsNavigator)
         #expect(model.navigation.palette == nil)
         model.navigation.resizeSidebar(460, availableWidth: 1200)
@@ -1209,6 +1212,7 @@ struct WorkNavigationTests {
         model.goForward()
         #expect(model.selection == nil)
         model.goBack()
+        model.navigation.showsNavigator = true
         try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true

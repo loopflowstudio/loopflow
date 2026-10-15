@@ -239,7 +239,7 @@ struct SessionChromeProofTests {
         try await expectEcho(draft, on: surface)
     }
 
-    @Test("Cmd-K isolates search from retained PTYs and opens Task details")
+    @Test("Cmd-K opens the old navigator over retained PTYs; pin restores the sidebar")
     func paletteRetainsTerminalInput() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -300,7 +300,7 @@ struct SessionChromeProofTests {
         try await settle(window)
         #expect(model.navigation.palette == .search)
         let sheet = try #require(NSApp.keyWindow)
-        #expect(sheet !== window)
+        #expect(sheet === window)
         try await settle(sheet)
         for char in "never-pty" { try press(String(char), keyCode: 0, modifiers: [], in: sheet) }
         try await settle(sheet)
@@ -315,7 +315,7 @@ struct SessionChromeProofTests {
         try press("k", keyCode: 40, modifiers: [.command], in: window)
         try await settle(window)
         let pinChooser = try #require(NSApp.keyWindow)
-        #expect(pinChooser !== window)
+        #expect(pinChooser === window)
         try press("s", keyCode: 1, modifiers: [.command, .control], in: pinChooser)
         try await settle(window)
         #expect(model.navigation.palette == nil)
@@ -325,91 +325,9 @@ struct SessionChromeProofTests {
         #expect(!model.navigation.showsNavigator)
         #expect(window.firstResponder === terminals[1])
 
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let taskSheet = try #require(NSApp.keyWindow)
-        #expect(taskSheet !== window)
-        try await settle(taskSheet)
-        let issue = try #require(model.task(id: "issue-review")?.task.task.identifier)
-        for char in issue { try press(String(char), keyCode: 0, modifiers: [], in: taskSheet) }
-        try press("\r", keyCode: 36, modifiers: [], in: taskSheet)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(model.selection == .task(id: "issue-review"))
-        #expect(model.navigation.content == .details)
-        #expect(model.navigation.selectedSessionId == nil)
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
-        #expect(throws: Never.self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-task")
-        }
-
-        // Arrow navigation operates on the visible ranked list, including recents.
-        let second = model.searchDestinations("")[1].id
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let arrows = try #require(NSApp.keyWindow)
-        #expect(arrows !== window)
-        try await settle(arrows)
-        try press("\u{f701}", keyCode: 125, modifiers: [], in: arrows)
-        try press("\r", keyCode: 36, modifiers: [], in: arrows)
-        try await Task.sleep(for: .milliseconds(400))
-        if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
-        else if case .repository = second { #expect(model.selection == nil) }
-        else { Issue.record("The second destination should be a repository or Wave") }
-
-        // Session inventory is not a palette destination, even when retained.
-        #expect(model.searchDestinations(record.title).isEmpty)
-
-        // Flow inspection leaves the chooser for a sheet and dismisses once.
-        model.navigation.content = .terminals
-        try await settle(window)
-        window.makeFirstResponder(terminals[1])
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let flowChooser = try #require(NSApp.keyWindow)
-        #expect(flowChooser !== window)
-        try await settle(flowChooser)
-        for char in "feature" { try press(String(char), keyCode: 0, modifiers: [], in: flowChooser) }
-        try press("\r", keyCode: 36, modifiers: [], in: flowChooser)
-        try await settle(window)
-        #expect(model.navigation.palette == .flow("feature"))
-        let flowSheet = try #require(window.attachedSheet)
-        try press("\u{1b}", keyCode: 53, modifiers: [], in: flowSheet)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(model.navigation.palette == nil)
-        #expect(window.attachedSheet == nil)
-        #expect(window.firstResponder === terminals[1])
-
-        // The palette opens the breadcrumb's existing permanent-bind picker.
-        var unassigned = records
-        unassigned[0]["work"] = NSNull()
-        await inventory.replace(String(decoding: try JSONSerialization.data(withJSONObject: unassigned), as: UTF8.self))
-        await model.refreshSessions()
-        model.navigation.selectedSessionId = record.id
-        try await settle(window)
-        window.makeFirstResponder(terminals[0])
-        let bindDraft = "binding-retained-draft"
-        terminals[0].insertText(bindDraft, replacementRange: NSRange(location: NSNotFound, length: 0))
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let bindSheet = try #require(NSApp.keyWindow)
-        #expect(bindSheet !== window)
-        try await settle(bindSheet)
-        for char in "Bind" { try press(String(char), keyCode: 0, modifiers: [], in: bindSheet) }
-        #expect(model.searchDestinations("Bind").map(\.id) == [.bind(record.id)])
-        try press("\r", keyCode: 36, modifiers: [], in: bindSheet)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(model.navigation.palette == nil)
-        #expect(window.attachedSheet == nil)
-        #expect(model.navigation.binding?.sessionId == record.id)
-        #expect(model.navigation.binding?.preview == nil)
-        #expect(model.navigation.selectedSessionId == record.id)
-        model.cancelSessionBinding()
-        #expect(model.navigation.binding == nil)
-        try await expectEcho(bindDraft, on: surfaces[0])
-        for surface in surfaces { #expect(!terminalText(surface).contains("Bind")) }
-        #expect(terminals[0].surface == surfaces[0])
-        #expect(terminals[1].surface == surfaces[1])
+        try await expectEcho(draft, on: surfaces[1])
     }
 
     // MARK: - helpers

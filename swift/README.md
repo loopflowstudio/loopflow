@@ -102,6 +102,8 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
+Return / Shift-Return select the next / previous match; Escape closes Find.
+Search and terminal state stay with their retained pane when switching Work.
 
 Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
@@ -128,8 +130,6 @@ alternate right/down. The main Session's menu switches between **Claude**,
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains
 available. Switching or resetting replaces the current provider process.
-Return / Shift-Return select the next / previous match; Escape closes Find.
-Search and terminal state stay with their retained pane when switching Work.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red

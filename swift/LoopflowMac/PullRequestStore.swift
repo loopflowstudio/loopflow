@@ -113,18 +113,25 @@ final class PullRequestStore {
     private var generation = 0
     private var fileGeneration = 0
 
-    func refresh(_ url: URL) async {
+    func refresh(_ url: URL?) async {
         generation += 1
         let generation = generation
-        if requestedURL != url {
+        if requestedURL != url || url == nil {
             pullRequest = nil
             files = nil
+            error = nil
+            filesError = nil
+            showsFiles = false
             expandedFiles.removeAll()
             updatedAt = nil
         }
         requestedURL = url
         fileGeneration += 1
         loadingFiles = false
+        guard let url else {
+            refreshing = false
+            return
+        }
         refreshing = true
         defer { if self.generation == generation { refreshing = false } }
         do {

@@ -3,8 +3,11 @@
 ## LOO-487 assumptions — 2026-10-15
 
 The [consolidated terminal design](terminal-polish.md) retains Jack Heart's
-accepted policy, contrast limits, lf6 artifact/check evidence and remaining
-demo judgment. The parent Workflow-loading landing hold remains live.
+accepted policy, contrast limits, published lf7 artifact and check evidence.
+Jack Heart's later “lg2m, ship it” supersedes this Task's demo/landing hold;
+the latest parent brief separately records shipping authorization. Parent-first
+landing remains required. Unperformed native scenarios and paired performance
+measurements remain evidence limits, not passing results.
 
 ## LOO-462 parent design context — 2026-10-15
 

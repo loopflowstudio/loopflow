@@ -5,6 +5,18 @@ import Testing
 
 @Suite("Compact GitHub pull request")
 struct PullRequestTests {
+    @Test @MainActor func removingPublicationClearsRetainedDiffPresentation() async {
+        let store = PullRequestStore()
+        store.showsFiles = true
+        store.expandedFiles = ["old.txt"]
+        await store.refresh(nil)
+        #expect(!store.showsFiles)
+        #expect(store.expandedFiles.isEmpty)
+        #expect(store.pullRequest == nil && store.files == nil)
+        #expect(store.error == nil && store.filesError == nil)
+        #expect(!store.refreshing && !store.loadingFiles)
+    }
+
     @Test func githubReadingDistinguishesPendingFailedAndUnavailableChecks() throws {
         let json = #"""
         {"number":12,"url":"https://github.com/example/repo/pull/12","title":"A change","body":"Details",

@@ -1,9 +1,35 @@
 # Terminal feedback and color — LOO-487
 
-Jack Heart accepted implementation for hands-on review on October 15: “seems
-fine. i think i need to try it to know”. Visual acceptance and landing remain
-pending. Preserve the stack on LOO-462/#1531 and land the parent first; its
-separate Workflow-loading hold remains live. Delivered parent owners were
+## Gate — October 15
+
+Review found that removing a Task's published PR URL left its old GitHub page
+and diff state visible. The retained PR store now accepts an absent URL, clears
+the reading/errors/expansion state and invalidates outstanding reads. A focused
+regression covers clearing retained diff presentation without network access;
+it is added but unrun. Same-URL refresh failure still preserves the last good
+reading. The README keeps Find's keyboard instructions beside Find.
+
+The review retained the existing ownership boundaries: Ghostty owns selection
+and cell appearance; the workspace owns retained panes/documents; GitHub reads
+remain lazy and read-only. No further renderer or pane repair was identified.
+The production performance signal proposed for Product remains input-to-visible
+character and Find onset/expiry, paired with renderer CPU/GPU cost in identical
+optimized baseline/candidate scenarios. Existing draw-call diagnostics cannot
+substitute for presented pixels; this headless gate adds no timing comparison.
+
+Check: `uv run python scripts/test.py --base 12fb73d8ff --loopflow --reuse-passing` STOPPED in resource preflight (16.0 GiB free, 32.0 GiB required); architecture/Python/Swift/Xcode phases did not run; affected tests, app/build-for-testing and Ghostty Zig/Metal/GLSL acceptance deferred to capable CI; log `/tmp/loo487-gate.log`.
+Check: `UV_LOCK_TIMEOUT=0 uv cache prune` FAILED on an existing cache lock; the runner's managed build cleanup also timed out after 120s with result unknown; no active/recent builds were manually removed; log `/tmp/loo487-gate-cache-prune.log`.
+Check: `uv run python scripts/check_architecture.py`, `uv run python scripts/check_swift_multiplatform_boundaries.py`, `uv run ruff check scripts/check_ghostty_shaders.py scripts/desktop_performance.py scripts/loopflow-dev.py`, and `git diff --check` PASS as independent static checks.
+
+## Accepted direction and prior evidence
+
+Jack Heart reviewed the revised demo on October 15 and said “lg2m, ship it”,
+superseding this Task's earlier demo/landing hold. Preserve the stack on
+LOO-462/#1531 and land the parent first; the latest parent brief separately
+records shipping authorization. Individual unperformed scenarios and paired
+native performance measurements remain unproved. Earlier implementation
+approval was for hands-on review: “seems fine. i think i need to try it to know”.
+Delivered parent owners were
 integrated with `lf sync --manual` at `213136cd79` (parent `dc402dc833`).
 The subsequent parent sync completed at `77ff8e8eb8` (parent `7d10108eaf`);
 its stash restoration conflicted only on `scratch/questions.md`. Recovery kept

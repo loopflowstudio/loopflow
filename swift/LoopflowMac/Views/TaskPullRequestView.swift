@@ -58,7 +58,7 @@ struct TaskPullRequestView: View {
         }
         .background(palette.background)
         .accessibilityIdentifier("browser-pull-request")
-        .task(id: url) { if let url { await refresh(url) } }
+        .task(id: url) { await store.refresh(url) }
         .task(id: "\(store.showsFiles)|\(store.updatedAt?.timeIntervalSince1970 ?? 0)") {
             if store.showsFiles { await store.loadFiles() }
         }

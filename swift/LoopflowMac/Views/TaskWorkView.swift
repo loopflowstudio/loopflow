@@ -21,6 +21,7 @@ struct TaskWorkflowHeader: View {
             HStack(alignment: .center, spacing: Spacing.md) {
                 if let label = task.task.terminalLabel {
                     Text(label)
+                        .fontWeight(.semibold)
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
@@ -140,7 +141,19 @@ struct TaskWorkflowHeader: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.background)
+        .background {
+            palette.background
+            if task.task.terminalLabel != nil {
+                (task.task.isSuccessful ? palette.success : palette.failure).opacity(0.14)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if task.task.terminalLabel != nil {
+                Rectangle()
+                    .fill(task.task.isSuccessful ? palette.success : palette.failure)
+                    .frame(width: 3)
+            }
+        }
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
         .accessibilityIdentifier("task-workflow")
     }

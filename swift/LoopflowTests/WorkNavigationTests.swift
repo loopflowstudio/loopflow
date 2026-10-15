@@ -569,7 +569,9 @@ struct WorkNavigationTests {
                 let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
                 let retained = try #require(projection.waves[0].tasks.first { $0.id.work.id == "issue-review" })
                 #expect(retained.sessions.map(\.id) == ["retained"])
-                #expect(retained.inWorkingSet == unresolved)
+                #expect(!retained.inWorkingSet)
+                #expect(projection.outline(collapsed: [], search: "", planningReadable: true).allSatisfy { $0.id != retained.id })
+                #expect(projection.outline(collapsed: [], search: "", planningReadable: true, selection: retained.id.work).contains { $0.id == retained.id })
             }
         }
     }

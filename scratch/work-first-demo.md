@@ -26,15 +26,16 @@ preserve history, active clients and drafts, never restore a database over live 
 Bundled lf authority excludes installation/migration. Prior evidence:
 `79bf4a18ce:scratch/work-first-demo.md`, **Bundled runtime**. Running providers retain their environment.
 
-## Every-sidebar-Task audit — October 12, in progress
+## Every-sidebar-Task audit — October 12, historical
 
 Jack Heart requested inspecting every visible Task as a concrete state case,
 repairing the resulting opening failures before another demo. Jack still wants
 LOO-312; the value of its prior implementation is unknown. Keep its identity and
 purpose active, investigate recoverable history, and do not conflate missing
 checkout/Session with abandoned Work. No approval to discard old implementation.
-The captured roster has 12 Tasks; current reads and per-Task evidence are in
-`/tmp/loo462-sidebar-audit/`. No new demo launch until this pass finishes.
+The initial roster had 12 Tasks; dated reads and per-Task evidence are in
+`/tmp/loo462-sidebar-audit/`. The later 13-Task opening pass below supersedes this
+initial audit's launch hold; provider acceptance remains incomplete.
 
 ### Captured roster and reachable cases
 
@@ -233,3 +234,22 @@ explicit non-primary Sessions retain identity. Removed the unhelpful presentatio
 menu. Repository resolution no longer replaces selected paths with the demo's
 LOOPFLOW_DEV_WAVE_REPO override, which made different windows display Loopflow.
 Check: navigation/workspace/portfolio/metadata suites PASS (63), `/tmp/loo462-demo-polish-tests3.log`. Native review remains.
+
+## Reactivity demo relaunch — October 14
+
+Jack Heart requested the demo. Built current working-tree Swift and validation-only
+bundled lf (HEAD bc2ff2c603 plus retained local changes), replaced the owned demo
+bundle after ordinary quit, signed and launched against the real Loopflow repo/Home.
+CUA confirms PID 68899, populated Wave/Task sidebar, and restored selected LOO-472
+with green Completed text. Its pane currently says No Task conversation open;
+no provider was acquired by this inspection. Click/Back behavior and native input
+remain for Jack's review. Publication recovery exited on provider network failure.
+Check: CLI and Swift app builds PASS; bundle signature verification PASS; live
+AX/screenshot inspection confirms rendered Work, not provider readiness.
+
+Jack Heart's latest screenshot rejected the tiny colored Completed label as “no
+header.” Revised the existing full-width Task header with a green/red lifecycle
+tint, matching leading accent and semibold text; no new banner or buttons.
+Check: focused TaskFlow build/tests PASS (9; native diagnostics skipped),
+`/tmp/loo462-header-tests.log`. Replaced and relaunched the owned demo for review;
+color/contrast and native acceptance are not inferred from headless tests.

@@ -195,11 +195,12 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert_eq!(config["config"]["native-setting"], true);
     let hooks = &config["config"]["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
-    assert_eq!(hooks["state"]["host-trust"]["trusted_hash"], "unchanged");
+    assert_eq!(
+        hooks["state"],
+        serde_json::json!({"host-trust": {"trusted_hash": "unchanged"}}),
+        "Loopflow preserves provider trust without approving its own hooks"
+    );
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
-    assert!(hooks["state"]
-        .get("/<session-flags>/config.toml:session_start:1:0")
-        .is_some());
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let session: String = database
         .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {

@@ -198,11 +198,8 @@ against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart confirmed cmux/herdr trials and authorized landing; native resume
-repeated the guide once. No fresh-Task adoption, configured continuation, publication
-or Continue/Stop proof follows. LOO-421 remains open. Decisions, failed attempts and
-limits: `87f275c282:.lf/wave/product/MEMORY.md`, this heading, and
-[findings](../../../docs/reviews/terminal-host-trial.md). No host code was lifted.
+Jack Heart authorized landing after cmux/herdr trials, without full adoption proof.
+LOO-421's failures and limits: `27613222eb:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Live Home reconciliation
 
@@ -404,10 +401,14 @@ October 14 rendering: Jack Heart approved the ownership cut with cmux research.
 Model-owned pane installation now precedes ending preparation; exact links share
 placement. Request identity prevents an old opening clearing a newer one; superseded
 results cannot redirect navigation. Compact Workflow actions plus Overview's
-graph await native review. Rust/lf alone reads the internal schema;
-coarse subscriptions and caller refreshes need separate query-boundary work, not a
-Swift datastore replacement. Headless transition checks establish neither native
-geometry nor provider readiness.
+graph await native review. Jack Heart then authorized subscription-owned updates,
+implemented against Rust/lf as sole schema reader. Post-command checkpoints sample
+one SQLite snapshot and acknowledge after dependent frames, including unchanged
+content; failed readings cannot confirm saves. Cached replay fences stale delivery
+without querying again. Ordinary post-write broad refreshes are removed; explicit
+recovery and file/process observations remain. Stored Workflow definitions move
+planning revisions even on unchanged-body heartbeats; file catalogues remain outside
+the snapshot. Headless checks establish neither native geometry nor provider readiness.
 
 Jack renewed measured optimization for Codex and Claude separately: cached switch,
 resume and fresh launch end at visibly responsive unsent agent input. October 7's
@@ -451,9 +452,13 @@ may fill a genuinely absent completion-date key, but cannot change an observed
 null or date. Snapshot acquisition and unrelated updates cannot establish recency.
 
 Jack relayed that removed checkouts alone must not keep settled Tasks current.
-Started and unresolved execution now own ordinary sidebar membership (LOO-462);
-history filters never evict retained conversations. Earlier predicates remain in
-the archive below.
+Started and unresolved execution own ordinary sidebar membership (LOO-462).
+October 14: Jack Heart selected an exception for the selected completed/canceled
+Task, with green Completed/red Canceled header text. Navigation away removes the
+exception; Back restores the same workspace and row without reopening execution.
+History/filter changes never evict native surfaces, files or drafts. Real CLI
+create/start/complete/abandon reaches the open subscription and production outline;
+retained native-view identity is synthetic/unmounted, not native acceptance.
 
 Jack Heart approved inline checkbox/number editing: remembered range starts at
 seven days; zero means All Tasks. Enter/blur applies, Escape cancels, invalid
@@ -721,14 +726,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
   ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
   within the 1 MB bound; previews never authorize Save. No arbitrary-writer
   exclusion, extended-attribute or power-loss guarantee follows from this design.
-- **Measure first selection without pre-reading the target.** Corrected review
-  measured 54/54 selections at 60–97 ms after real startup reads, checking exact
-  bytes after capture. These AppKit endpoints had warm caches: no physical-click,
-  compositor or p95 proof. Earlier 2,652 ms and failing populations remain
-  unexplained; later passes do not erase them. ARM SHA acceleration reduced
-  hashing cost while retaining install authority; priority/load changes did not
-  explain the interval. Sizes, widths and failed receipts survive at
-  `35e759aaf:wave/product/MEMORY.md`, this heading.
+- Historical warm-cache file timings, unexplained failures and optimization limits:
+  `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure first selection
+  without pre-reading; these AppKit endpoints prove no physical-click/compositor p95.
 - **Native primitives and overall approval have separate evidence.** TextKit
   proved useful selection, Find, Undo and retained-terminal behavior; pathological
   million-byte lines remained slow. CodeEditTextView's comparison failed endpoint

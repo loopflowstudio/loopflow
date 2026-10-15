@@ -938,10 +938,7 @@ final class WorkModel {
                 showsSavedPlanning = false
                 // Work chosen from the other Machine's rows names nothing here.
                 for navigation in navigationByRepo.values {
-                    navigation.selection = nil
-                    navigation.backStack = []
-                    navigation.selectedTaskEvidence = nil
-                    navigation.content = .overview
+                    navigation.clearSelection()
                 }
             }
             for repo in savedSessionRepos { sessionReadings[repo] = nil }
@@ -1291,10 +1288,7 @@ final class WorkModel {
         waves = .loading
         showsSavedPlanning = false
         for navigation in navigationByRepo.values {
-            navigation.selection = nil
-            navigation.backStack = []
-            navigation.selectedTaskEvidence = nil
-            navigation.content = .overview
+            navigation.clearSelection()
         }
         sessionReadings = [:]
         peerPlanningReadings = [:]
@@ -1473,7 +1467,7 @@ final class WorkModel {
         select(previous, preservingOpening: false, recordingHistory: false)
     }
 
-    func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
+    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil

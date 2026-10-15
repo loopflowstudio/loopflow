@@ -8,10 +8,12 @@ trust approval, conversation input, live-store mutation or installation occurred
 ## Observed path and repair
 
 Retained switching uses the existing workspace/surface without acquiring another
-Session. Reconnect/resume and fresh launch acquire the primary through `ensure`,
-refresh the exact Task, prepare `connect --json`, then run foreground connect in
-Ghostty. Rust owns the fresh-versus-resume choice, attachment lock and provider
-launch; Swift does not duplicate that decision.
+Session. Following main integration `b10cc7ce10`, Task opening consumes the shared
+primary preparation returned by Rust, refreshes the exact Task and adopts its
+connection data without preparing twice. Exact Session preparation uses
+`connect --prepare --json`; `--json` alone no longer means preparation. Foreground
+connect runs in Ghostty. Rust owns fresh-versus-resume, attachment and provider
+launch; ended terminals can explicitly prepare again (`4aff5370f7`).
 
 "Opening conversation" originally covered primary acquisition; "Opening session"
 covered connect/terminal preparation. Both now say "Opening conversation". The
@@ -57,7 +59,7 @@ Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|SessionsStoreTest
 
 The recorder and six-case acceptance contract are maintained in
 `scripts/benchmarks/desktop-performance/agent-input.md` and the design's
-**Profiling and optimization** section. Implementation: `5b62453be7`; reduction:
+**Earlier accepted cuts and native proof** section. Implementation: `5b62453be7`; reduction:
 `ae691073c9`. Exact-Session ordered captures are required; failed or incomplete
 trials never supply elapsed comparison values. CPU samples cannot explain waits.
 

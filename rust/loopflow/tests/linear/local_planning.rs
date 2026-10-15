@@ -3137,7 +3137,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
 }
 
 #[test]
-fn ordinary_task_creation_returns_saved_identity_without_a_public_retry_token() {
+fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_token() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let help = command(repo.path(), home.path(), &["task", "create", "--help"])
@@ -3181,9 +3181,16 @@ fn ordinary_task_creation_returns_saved_identity_without_a_public_retry_token() 
         String::from_utf8_lossy(&output.stderr)
     );
     let output = String::from_utf8(output.stdout).unwrap();
-    let id = output.split_whitespace().next().unwrap();
+    let identifier = output.split_whitespace().next().unwrap();
+    let status = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", identifier, "--json"],
+    );
+    assert_eq!(status["task"]["identifier"], identifier);
+    assert_eq!(status["task"]["title"], "Saved task");
+    let id = status["task"]["id"].as_str().unwrap();
     loopflow::durable::TaskId::parse(id).unwrap();
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["execution"]["worktree"].is_null());
     assert!(status["execution"]["pr"].is_null());

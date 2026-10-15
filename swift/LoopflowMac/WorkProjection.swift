@@ -13,14 +13,10 @@ struct TaskProjection: Identifiable {
     let task: RoadmapTask
     let sessions: [SessionRecord]
 
-    /// Shared durable evidence that work began. Inspection, a prepared
-    /// checkout, or a live process in the checkout never supplies it.
-    var started: Bool { task.runtime?.started == true }
-
     /// Sessions remain available inside Work, but their presence cannot establish
     /// that a Task started. Shared execution evidence keeps unsettled work visible.
     var inWorkingSet: Bool {
-        return task.runtime?.status != .paused && started && task.condition.unresolvedExecution
+        !task.task.isTerminal && task.runtime?.status != .paused && task.runtime?.started == true && task.condition.unresolvedExecution
     }
 }
 
@@ -178,6 +174,8 @@ extension WorkProjection {
         selection: WorkReference? = nil
     ) -> [WorkOutlineRow] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Resolve planning/runtime identity through the same trail as the header.
+        let selectedTask = breadcrumb(selection: selection, sessionId: nil)?.task?.id
         func matches(_ text: String) -> Bool {
             query.isEmpty || text.localizedCaseInsensitiveContains(query)
         }
@@ -201,9 +199,7 @@ extension WorkProjection {
                 complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
             } else { complete = false }
             let workingSet = wave.tasks.filter { task in
-                if task.inWorkingSet { return true }
-                guard task.task.task.isTerminal, let selection else { return false }
-                return selection == task.id.work || selection == task.task.runtime.map { .task(id: $0.workId) }
+                task.inWorkingSet || (task.task.task.isTerminal && task.id == selectedTask)
             }
             let waveHasChildren = !workingSet.isEmpty
             let omitWave = waves.count == 1 && complete
@@ -320,6 +316,14 @@ final class WorkNavigation {
     var backStack: [WorkReference?] = []
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
+
+    /// Selections and visits from another Machine name no Work on this one.
+    func clearSelection() {
+        selection = nil
+        backStack = []
+        selectedTaskEvidence = nil
+        content = .overview
+    }
 
     func isExpanded(_ key: WorkNodeKey) -> Bool {
         !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !collapsed.contains(key)

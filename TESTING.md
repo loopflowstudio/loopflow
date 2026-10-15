@@ -311,7 +311,7 @@ prune policy. Repeated calls drain an eligible backlog. Python inventories capac
 and consumes Rust cleanup receipts; an unavailable capable `lf` retains builds and
 reports the missing owner. A timed-out or invalid cleanup receipt reports an unknown
 result and triggers fresh inventory, since deletion may already have occurred.
-Each inventory `du` has a five-second deadline;
+Each inventory `du` has a 15-second deadline;
 failures appear as measurement issues. Total inventory time still scales with the
 number of roots. Inventory timeouts grant no deletion authority; Rust independently
 retains candidates whose ownership, activity or content inspection is unknown.

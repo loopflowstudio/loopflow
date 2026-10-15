@@ -7,11 +7,16 @@ Remaining reversible UI details may be resolved during implementation; live data
 cleanup remains separate and requires a reviewed, restorable plan.
 Product owns this Task. LOO-427 is integrated and completed; historical stacking
 details remain at `0bb13e9261:scratch/get-me-using-lf.md`. Portfolio implementation:
-`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Reconciled October 14
-against HEAD `87f275c282` and the working rendering diff over `9f19e3c5d1`.
-Rendering implementation and compression are complete. The database-driven UI
-pursuit below is active; affected-suite gate, publication and native acceptance remain. Product
-has no immediate child Wave memories in this checkout; parent objective and memory were read in full.
+`d43aa248d3`; shared-reader compression: `50e2cf44d1`. Rendering, database
+subscriptions and selected-terminal retention are implemented through `27613222eb`.
+Affected-suite gate, publication and native acceptance remain. Product has no
+immediate child Wave memories in this checkout.
+
+Reconciled October 14 against the current source and the preceding 86-test pass.
+No further implementation mismatch was found in the subscription/terminal-selection
+cut. The accepted scope is unchanged; native header geometry remains a proposal
+awaiting review. The latest integrated main is `92b88800ec` (v0.13.15); its shared
+Session preparation is adopted below, not a second Desktop launch path.
 
 ## Problem and accepted direction
 
@@ -160,17 +165,7 @@ owns summary severity. CLI launch, pane-owned new conversations, missing-Work
 recovery, Waiting links, raw diagnostics, TaskSessionGroups and ChatReference remain.
 No obsolete owner remains in these cuts. The 183 unresolved exported-API audit
 entries remain retained; absence of local callers is not deletion authority.
-The active subscription cut's deletion boundary is recorded below.
-
-## Implementation and remaining work
-
-The Work-first entry/navigation cut, isolated persisted fixture, configured-runtime
-failure and repaired launcher/Task entry are preserved at
-`0bb13e9261:scratch/get-me-using-lf.md`, this heading. Current owners remain:
-Rust primary admission, WorkProjection navigation, WorkModel opening and the
-retained SessionsWorkspaceRegistry. No native usability follows from fixtures.
-Current pursuit and remaining native proof are below; failed real-repository
-attempts and exact restoration boundaries stay in work-first-demo.md.
+The subscription cut's completed deletion boundary is recorded below.
 
 ## Portfolio — implemented, second review priority
 
@@ -198,7 +193,7 @@ state; partial/error readings do not launch or drop anything; hiding all tabs
 starts nothing. Existing lifecycle/DTO and navigation suites own this proof;
 a filter selecting zero tests is not proof.
 
-Publication uses `uv run python scripts/test.py --reuse-passing --base 37ca5fca81`
+Publication uses `uv run python scripts/test.py --reuse-passing --base 92b88800ec`
 with stdin closed. Its Rust runner materializes migrations only in a disposable
 checkout, clears inherited LF_* and isolates network side effects. The consolidated
 integration target includes lifecycle, DTO, Portfolio and documented-command proof;
@@ -244,107 +239,39 @@ compaction remains unverified for both providers. Instruments and limits live in
 attempts remain in work-first-demo.md. Prepared/first draw is not responsive input.
 No install, migration, app restart, takeover, broader cleanup or landing authority.
 
-### Current pursuit — rendering ownership, October 14
+### Rendering ownership — implemented
 
-Jack Heart approved implementing the previous rendering plan combined with the
-cmux research, then explicitly requested an updated design and background pursue.
-Return through publication for demo review; no landing, installation, live database
-cleanup, native takeover, or restart of the running demo is authorized by this cut.
-Prior semantic-color implementation and passing checks are preserved at
-`5ade59f428:scratch/get-me-using-lf.md`, **Implementation state — October 14**.
+Jack Heart approved the rendering plan plus cmux research, then authorized the
+sequential database pursuit after rendering finished at `e480b4bc7c`. Full
+proposal, repairs, failed publication and check receipts are preserved at
+`27613222eb:scratch/get-me-using-lf.md`, **Current pursuit — rendering ownership**
+through **Next pursuit — database-driven UI**.
 
-The rendering cut is implemented in the working diff:
+`WorkModel.installConversation` places the resolved Session/pane synchronously;
+`placeSession` also handles exact contextual links. Per-workspace request tokens
+fence late feedback. Cached switching skips preparation; missing Machine fails
+before connecting. Initial feedback stays in the terminal area, while the selected
+Work, last-good readings, panes, native surfaces, focus targets and drafts retain
+their owners. Prepared means mountable, never responsive agent input. Compact
+Workflow position/actions and Overview disclosure remain pending native judgment.
 
-- `WorkModel.installConversation` installs the resolved record and pane before
-  preparation ends; `placeSession` also serves exact contextual links. The existing
-  workspace carries a request token, not the proposed new workspace-opening API
-  or a view-observed mailbox. Generation and Machine/location checks survive.
-  Superseded preparation results are discarded; late readiness cannot redirect
-  navigation. Cached switches reuse their selected conversation without preparation.
-- The selected Work renders immediately through the retained pane host. Initial
-  opening/recovery feedback lives in its terminal area. Last-good Work/Workflow,
-  panes, native surfaces, focus targets and drafts retain their existing owners.
-  Prepared permits mounting; it does not prove responsive coding-agent input.
-- Current Workflow position/actions stay compact; Overview holds graph/details.
-  This is a reversible implementation choice for Jack Heart's suggested expandable
-  header, pending native geometry and interaction review.
-- Audit-backed deletions remove the obsolete inventory, handoff, presentation
-  branches and exclusive tests described above. Portfolio Task/Wave rows call
-  the existing destination opener. Unresolved exported APIs remain retained.
+The rendering-state review is historical at `5ade59f428`; its proposed green APIs
+are not final. The cmux study pins `321d7d4458abb4005584f8459cf98ade967b38ad`:
+retention, mounted visibility, focus and readiness are separate; it provides no
+Loopflow frame-sequence or benchmark evidence. The Swift audit's 183 unresolved
+exported APIs stay retained; only metadata/eight cuts, not all 14,483 entries,
+were reconciled. Authored-Wave file ownership and SwiftPM/XcodeGen resource parity
+remain follow-up candidates. No new deletion authority follows from these studies.
 
-The historical proposal in `rendering-state-review.html` is pinned to
-`5ade59f428`; its green APIs are not the final API. `pr-review.html` describes the
-working implementation. The cmux study is pinned to
-`321d7d4458abb4005584f8459cf98ade967b38ad`: retained terminal ownership, mounted
-visibility, focus and diagnostic readiness are separate. Its source research
-establishes no cmux benchmark or Loopflow native frame sequence.
-The Swift audit/inventory preserves 183 unresolved entries, not deletion authority.
-Reconciliation reviewed its metadata and eight cuts, not all 14,483 inventory entries.
+### Gate and publication blocker
 
-Jack Heart accepted broad update-boundary tests, preferring useful coverage to
-brittle exact SwiftUI body counts or private scheduling assertions. Existing
-headless opening/retention tests cover this rendering cut. They do not prove that
-unrelated database writes or transcript output avoid every expensive query.
-`scratch/datastore-reactivity-study.html` records separate, initial source research:
-current subscriptions are coarse, mutations still request broad refreshes, and
-revision tags alone do not establish a coherent SQLite snapshot. Query-dependent
-invalidation, second-process write coverage, read-your-write acknowledgment and
-external liveness/file adapters remain separate substantial work. No datastore
-framework rewrite or new Swift SQLite reader is part of this cut; Rust/lf remains
-the sole internal-schema reader and legal-action owner.
-
-Upstream `f9a16d6f84` adds provider continuation with `lf resume -a`; that does not
-supply native approval-once or input-readiness evidence for either provider here.
-The existing clone facility can isolate stand-in checks but still cannot substitute
-for real provider input or the accepted populated-repository demo.
-
-### Rendering implementation and remaining proof
-
-Implemented against `9f19e3c5d1`: immediate Work selection, model-owned synchronous
-Session/pane installation, terminal-local feedback and stable pane host; compact
-Workflow position/actions with graph in Overview. Last-good readings and surface
-ownership are unchanged. Headless tests observe ensure → installed/opening pane →
-prepared, same-pane/draft return, delayed request cancellation, companion visibility
-and readiness failures. Prepared still means mountable, never responsive agent input.
-
-Review findings fixed: contextual links and Task entry had duplicate placement;
-both now call `placeSession`. Per-workspace request identity prevents older cleanup
-from clearing a newer opening. Portfolio Task clicks previously wrote a constant-nil
-binding; they now route to the existing opener. The missing-Machine path must fail
-before connection instead of bypassing the unavailable workspace.
-
-All 183 unresolved audit entries remain intentionally retained: exported library
-APIs and their tests lack downstream-use evidence. Authored-Wave discovery/write
-ownership and SwiftPM/XcodeGen resource parity remain separate follow-up candidates,
-not deletion targets in this rendering cut. The pinned audit/research artifacts
-remain historical evidence; `pr-review.html` now describes actual APIs.
-
-Remaining: affected-suite gate and publication, then native geometry,
-focus, exact links and Portfolio review. Six Codex/Claude input trials, paired
-wall/CPU evidence and hook approval-once proof remain open. No install, app restart,
-takeover, live cleanup or datastore framework rewrite occurred.
-
-Publication review repaired TaskFlowProofTests' stale expectation that the Workflow
-graph remains visible in the collapsed header. It now checks compact position/actions
-and the graph under Overview. The initial Desktop run failed only that assertion;
-the repaired full run passes. The required consolidated gate did not start product
-suites: resource recovery exceeded its 60-second wrapper deadline while build pruning
-was still running. That invocation's orphaned pruning child was stopped. A subsequent
-read-only inventory also failed its five-second uv-cache measurement deadline;
-64.4 GiB remained free. Publication is blocked on a successful resource preflight and
-affected-suite gate. No PR update, app restart or installation occurred; the separate
-datastore study remains outside this checkpoint.
-
-Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` PASS (524 tests, 61 suites; optional native diagnostics skipped); architecture, Swift boundary and diff checks PASS; `uv run python scripts/test.py --reuse-passing --base f9a16d6f84 < /dev/null` BLOCKED (resource preflight, no product suites); logs `/tmp/loo462-publish-{desktop-final,gate}.log`, inventory `/tmp/loo462-publish-resources.json`. Native proof remains with demo; affected suites with gate.
-
-### Next pursuit — database-driven UI
-
-Jack Heart authorized starting this after the rendering pass finishes. That pass
-finished at `e480b4bc7c`; publication remains blocked as above. Implement
-`scratch/datastore-reactivity-study.html`, including **Accepted next pursuit**.
-This supersedes the earlier research-only boundary, not the no-second-schema-reader
-rule. Preserve rendering and native-proof limits. Return to demo; no landing.
-
+The repaired rendering run passed 524 Desktop tests. Consolidated gate never
+started product suites: resource recovery exceeded the 60-second wrapper deadline
+during pruning, and its orphaned child was stopped. Subsequent read-only inventory
+failed its five-second uv-cache deadline with 64.4 GiB free. Gate must resolve the
+resource preflight and run affected suites before publication; do not bypass it.
+Evidence: `/tmp/loo462-publish-{desktop-final,gate}.log` and
+`/tmp/loo462-publish-resources.json`. No PR update or native acceptance followed.
 
 ### Database update implementation — October 14
 
@@ -356,56 +283,40 @@ readings cannot confirm a save. External process/file facts remain observations,
 not transactional claims. Reconnect starts from current state; retained content
 and request/draft identities survive.
 
-Delete — do not maintain: ordinary post-write `WorkModel.refresh` calls in
+Removed: ordinary post-write `WorkModel.refresh` calls in
 Task actions, Workflow selection/save and directive save; Session write-triggered
-global Refresh. Preserve explicit Retry/wake recovery, non-stream transport reads,
-and file-catalog invalidation. Replace autocommit projection batches with one
-read snapshot; nested read transactions become savepoints. No migration, second
+global Refresh. Explicit Retry/wake recovery, non-stream transport reads,
+and file-catalog invalidation remain. Projection batches now share one
+read snapshot; nested joined reads use savepoints. No migration, second
 change bus, Swift schema reader or generic query framework.
 
-Implemented: snapshot-backed checkpoint delivery and cached replay; subscription-owned
-Task/Workflow updates; unchanged-scope query reuse; Flow-independent Work history;
-read joins use nested savepoints. Wave history now shares the reader connection.
-Reader failures preserve last-good UI, and request identity protects newer catalogue
-reads and rename drafts. No schema migration or native client changes.
+Implemented: snapshot-backed checkpoint delivery/replay, subscription-owned
+Task/Workflow updates, unchanged-scope query reuse and Flow-independent Work
+history. Wave history uses the same reader connection; joined reads use savepoints.
+Failures retain last-good UI, newer requests/drafts win, and checkpoints follow
+replacement frames even for throttled dependencies. Replay does not query.
 
-Source audit corrected the study's all-file definition assumption: `wave_workflows`
-is stored and moves the planning revision. Open Workflow catalogues now invalidate
-from stream revisions, including unchanged-body heartbeats; file activation/customize
-adapters remain separate. No Swift schema access was introduced. The catalogue is
-its own Rust reading, not claimed to be part of the Work frame's SQLite snapshot.
+Stored `wave_workflows` definitions move the planning revision; open catalogues
+invalidate even on unchanged-body heartbeats. File activation/customization remains
+separate, and the catalogue is not part of the Work frame's SQLite snapshot.
+Retained manual reads: Retry/wake/non-stream recovery, Flow/file catalogues,
+Portfolio config/authored Waves, Task files, telemetry and OS/configuration status.
+No second schema reader, new change bus, migration or generic query framework.
 
-Retained manual reads: Work Retry/sleep recovery and non-stream transports;
-Flow/file catalogue activation/customization; Portfolio configuration and authored
-Wave files; Task file reloads; explicit telemetry and OS/configuration automation
-status. Ordinary streamed Task actions, Workflow writes, directive writes and
-Session updates no longer request broad Refresh.
+Review repaired the context-hook fixture's committed conflict markers and the
+peer-planning test's incorrect binding/export atomicity assumption. Tests cover
+another process's writes, coherent joins, unchanged replay, failed confirmation,
+reconnect, external Git/process changes and newer drafts. Earlier focused checks
+passed (24 stream, 7 revision, 30 Desktop tests and one overlapping catalogue case;
+fmt/Clippy/diff passed). Nextest reported two leaky exits, including a pure usage
+predicate; gate owns diagnosis. Exact commands and logs:
+`27613222eb:scratch/get-me-using-lf.md`, **Database update implementation**;
+pre-compression evidence `/tmp/loo462-compress-before.patch` remains preserved.
 
-Review fixed two inherited proof issues: committed conflict markers in the context
-hook fixture (preserving current stdin and stable delivery context), and a peer
-planning test that treated separately committed binding/export as atomic. Its stream
-wait now observes the export receipt. Tests cover committed writes from another
-process, joined-read consistency, unchanged query work/replay, failed confirmation,
-reconnect, external Git/process changes and newer drafts. Remaining: gate/resource
-preflight, publication and the previously named native proof. This implement step
-does not run the broader gate or alter installation/running apps.
-
-
-Review: the surviving owners remain StoreRevisions, the foreground Work reader and
-WorkModel. Checkpoint and ordinary reads now share one scheduling decision; Activity
-frames declare their external observation at construction. Directive saves share
-failure/presence validation across transports. Editor return reloads only opened
-catalogues. Stream tests share a deadline-bounded checkpoint reader and inspect all
-frames before confirmation. Pending confirmations still follow replacement frames,
-including throttled dependencies; replay does not query. No remaining deletion target
-in this subscription cut. Pre-compression uncommitted evidence is preserved in
-`/tmp/loo462-compress-before.patch`; native and publication gaps above remain.
-
-Check: `materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow` with the network-isolation runner and `test(work_watch::)` / `test(store::sqlite::revisions::)` filters PASS (24 + 7 tests; nextest reported two leaky exits, including the pure usage predicate test; gate owns diagnosis); `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'TaskDirectiveEditorTests|WorkModelStreamTests|SessionRenameTests|TaskFlowProofTests'` PASS (30), updated catalogue case PASS (1 overlapping); `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Logs `/tmp/loo462-compress-{stream,rust,swift,catalog,clippy}.log`; initial Rust filter selected only revisions, corrected stream run above. Earlier implementation checks remain in `/tmp/loo462-reactivity-*.log` and the preserved patch. Broader gate/resource preflight, publication and native proof remain with their Flow steps.
-
-Sync review — October 14: merged pinned main `92b88800ec` through the owned sequencer (`b10cc7ce10`). Kept retained pane placement, authoritative Session inventory merging, checkout restoration, hook delivery and timing. Adopt the Task preparation returned by main without preparing again; ended terminals accept explicit preparation. Native acceptance gaps above remain.
-
-Check: `scripts/test_desktop.sh --jobs 4 --filter 'WorkDestinationTests|SessionsStoreTests' -Xswiftc -gnone` PASS (65 tests; initial compile exposed the repaired ended-state case); `cargo test -p loopflow --test session_lifecycle_tests a_task_primary_is_one_of_its_own_conversations -- --exact` PASS (1 test, inherited LF_* unset, stdin closed); logs `/tmp/loo462-sync-{desktop,rust}.log`. Broader checks remain with gate/CI.
+Sync `b10cc7ce10` merged main `92b88800ec`. Adopt returned Task preparation without
+preparing twice; ended terminals allow explicit preparation. The 65-test Desktop
+opening/store pass and one Rust primary-identity test passed; commands and logs
+remain at the same archive's **Sync review**. Native gaps are unchanged.
 
 ### Selected terminal Tasks and CLI regression — October 14
 
@@ -434,5 +345,58 @@ unselected terminal Tasks; a regression covers that boundary. Back does not reco
 its own return or leak visits across repositories. No cleanup or execution restart.
 Remaining: normal gate/resource preflight, publication, and native proof above.
 
-Check: `cargo build -p loopflow --bin lf --jobs 4` PASS; `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkCLISubscriptionTests|WorkNavigationTests|WorkDestinationTests|WorkModelTests'` PASS (123 tests); final CLI/Back/unplaced-terminal filter PASS (3 tests, CLI includes completion and cancellation); `git diff --check` PASS. Logs `/tmp/loo462-retention-{cli-build,desktop,final}.log`. Gate owns broader checks; demo owns rendered native proof.
+Earlier implementation checks (123 Desktop tests plus the final CLI/Back boundary
+filter and CLI build) remain at `27613222eb:scratch/get-me-using-lf.md`,
+**Selected terminal Tasks and CLI regression**.
 
+Review: the outline now resolves selected Task identity through the existing
+breadcrumb resolver, removing its second planning/runtime-ID matcher. Machine
+changes clear selection, Back history and retained selection evidence through one
+navigation operation. Back's history-control overload is private. No further
+obsolete owner was found; retained workspace/history and unknown audit APIs stay.
+
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'WorkCLISubscriptionTests|WorkNavigationTests|WorkModelTests|WorkCacheTests'` PASS (86 tests, 5 suites, preceding unchanged-code result reused from `/tmp/loo462-compress-selection.log`); `git diff --check` PASS. Broader suites/resource preflight: gate; native acceptance: demo.
+
+Gate recovery: the 60s outer resource timeout was shorter than its 120s cleanup
+child. Recovery now has a bounded 300s allowance for cleanup plus inventories;
+read-only measurement remains 60s. Timeout kills the owned process group rather
+than leaving cleanup children. Check: focused resource budget/child-exit tests PASS
+2/2 (initial fixture interception repaired); original full gate still needs replay.
+
+## Shipping approval and release — October 14
+
+Jack Heart accepted this diff as shippable after the configured demo and requested
+a minor release after it lands. This supersedes the no-landing boundary above.
+Finish gate and Task-completing shipping; then run `lf release run minor` only
+after verified merge. Native proof gaps remain honest, not retroactive acceptance.
+Final demo corrections: full-width green/red lifecycle header; completed/canceled
+Tasks appear only while selected, even with unresolved historical execution.
+Slow initial Workflow reading remains a reported usability issue; retain a concrete
+follow-up disposition rather than claim it solved. No live history deletion.
+
+### Shipping gate — October 14
+
+Reviewed the complete change against `92b88800ec`, including the retained worker
+edits. Two broader-suite failures were stale assertions: ordinary Task creation
+prints its resolvable identifier, and Codex hook declarations preserve existing
+trust without supplying new approvals. Repaired those tests to prove the intended
+behavior; no production change was needed. Updated TESTING.md's inventory deadline
+from five to 15 seconds to match the retained resource recovery change.
+
+- `uv run python scripts/test.py --reuse-passing --base 92b88800ec < /dev/null` — architecture, Python (473 + one separately sandboxed test), website (75), Desktop app/build/boundaries (534 tests), fmt and Clippy PASS; Rust 2,619 PASS, two stale assertions FAIL; clone phase not run after that failure. Resource preflight/postflight PASS at 51.8/51.7 GiB free; busy uv cache and timed-out build cleanup remain explicit warnings. Log: `/tmp/loo462-gate-final.log`; artifacts: `.lf/tmp/gate/run-55782/`.
+- `cargo fmt --all -- --check` and `cargo clippy --all-targets --jobs 4 -- -D warnings` — PASS after the test repairs; `/tmp/loo462-gate-repairs.log`.
+- `uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo --config 'target."cfg(all())".runner = ["uv", "run", "--no-sync", "python", "/Users/jack/src/loopflow.make-loopflow-a-work-first/scripts/test_network.py"]' nextest run -p loopflow --lib --test integration --build-jobs 4 --test-threads 4 -E 'test(ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_token) | test(codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_replay)'` — PASS 2/2; `/tmp/loo462-gate-repairs.log`.
+- `uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo test -p loopflow --test integration --jobs 4 data_clones:: -- --test-threads 4` — PASS 4/4; `/tmp/loo462-gate-repairs.log`.
+
+The original aggregate failure receipt remains intact; focused repair evidence
+does not claim an identical-tree aggregate pass eligible for reuse. No previously
+passing suite was replayed. The earlier leaky Rust exits did not recur.
+
+Jack Heart's shipping acceptance stands. Before Task completion, the shipping
+owner must disposition the slow initial Workflow read and remaining native proof
+through supported follow-up operations. The production performance signal remains
+Task click to rendered response to unsent input, separated by Codex/Claude and
+cached/resume/fresh cases, with paired wall/CPU evidence. No paired measurements,
+native trust acceptance, or speedup are claimed by this headless gate. Optional
+display diagnostics remain with demo/review; no app restart, release, or landing
+was performed in this gate step.

@@ -281,7 +281,7 @@ struct TaskFlowTests {
         #expect(try overview.find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
         let header = drawn()
-        #expect(header.contains("task-workflow"), "the accessibility tree is readable")
+        #expect(header.contains("task-workflow-position"), "the current Workflow position is accessible")
         #expect(!header.contains("task-workflow-node-demo"), "the graph stays collapsed in Overview")
         #expect(header.isDisjoint(with: [
             "work-materials", "work-toggle-materials", "work-toggle-files",

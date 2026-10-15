@@ -856,13 +856,9 @@ struct WorkDestinationTests {
         let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")
         document.editor.string = "unsaved draft"
-        let retained = SessionsContentView(
-            model: destination, repoPath: wave.wave.repo,
-            workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
-        )
-        #expect(throws: Never.self) {
-            try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-        }
+        destination.bindWorkspaces(registry, repository: "fixture-repository")
+        let selectedKey = try #require(registry.selectedWork)
+        #expect(registry.retained(selectedKey)?.location == task.reference.workspace?.identity)
         #expect(workspace.multiplexer.layout == layout)
         #expect(document.editor.string == "unsaved draft")
         #expect(throws: Never.self) {

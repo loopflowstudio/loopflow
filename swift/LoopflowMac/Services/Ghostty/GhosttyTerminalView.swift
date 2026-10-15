@@ -428,7 +428,13 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
     }
     var terminalTitle: String?
-    lazy var searchBar = TerminalSearchBar(terminal: self)
+    private var retainedSearchBar: TerminalSearchBar?
+    var searchBar: TerminalSearchBar {
+        if let retainedSearchBar { return retainedSearchBar }
+        let bar = TerminalSearchBar(terminal: self)
+        retainedSearchBar = bar
+        return bar
+    }
     private(set) var copyConfirmation: NSTextField?
     private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t?
@@ -572,7 +578,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         copyDismissal?.cancel()
         copyConfirmation?.removeFromSuperview()
         copyConfirmation = nil
-        searchBar.end()
+        // Cleanup must never initialize a control holding a weak reference to
+        // this view: destroySurface also runs during deinitialization.
+        retainedSearchBar?.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
         // Only an explicit reopen with a fresh view may launch another child.

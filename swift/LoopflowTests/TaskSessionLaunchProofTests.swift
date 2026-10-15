@@ -182,8 +182,8 @@ struct TaskSessionLaunchProofTests {
                 #expect(origin.taskSessionErrors.isEmpty)
                 #expect(model.selection == .task(id: "issue-review"))
                 #expect(origin.preparedTaskWorktrees["issue-review"] == fixtureWorkspace(checkout.path))
-                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-                    .text().string() == checkout.lastPathComponent)
+                let selectedKey = try #require(registry.selectedWork)
+                #expect(registry.retained(selectedKey)?.location?.worktree == checkout.path)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
                 #expect(args.hasPrefix("--mode\ninteractive\n--task\nW2-131\n:\n"))

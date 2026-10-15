@@ -28,13 +28,13 @@ struct WorkNavigationTests {
         #expect(root.multiplexer.layout == layout)
         let chooser = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: Never.self) {
-            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository")
+            try chooser.inspect().find(button: "loopflow")
         }
         #expect(throws: Never.self) {
             try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-search")
         }
-        try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar")
-            .find(ViewType.Button.self).tap()
+        let pin = try chooser.inspect().find(WorkGlyphButton.self).actualView()
+        try pin.inspect().find(ViewType.Button.self).tap()
         #expect(model.navigation.showsNavigator)
         #expect(model.navigation.palette == nil)
         model.navigation.resizeSidebar(460, availableWidth: 1200)
@@ -54,9 +54,13 @@ struct WorkNavigationTests {
         await model.refresh()
         model.navigation.showsNavigator = pinned
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        for identifier in ["work-wave-wave-1", "work-wave-wave-1", "work-open-repository", "work-open-repository"] {
+        for repository in [false, false, true, true] {
             model.navigation.palette = .search
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: identifier).button().tap()
+            if repository {
+                try navigator.inspect().find(button: "loopflow").tap()
+            } else {
+                try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+            }
             #expect(model.navigation.palette == nil)
             #expect(model.navigation.showsNavigator == pinned)
         }

@@ -167,34 +167,42 @@ struct TaskFilesTests {
         await peer.end(stale: false)
     }
 
-    @Test func directoryPagesRefreshIndependentlyOfComparisonAndRetainDocuments() async throws {
-        let query = RegistryQuery { args, _ in
-            if args.contains("--files") { throw RegistryQueryError("Task has no active PR") }
-            let path = args.contains("--cursor") ? "second.txt" : "first.txt"
-            var entries = [["path": path, "kind": "file"]]
-            if args.contains("--show-ignored") { entries.append(["path": "ignored.txt", "kind": "file"]) }
-            var value: [String: Any] = ["path": "", "entries": entries]
-            if !args.contains("--cursor") { value["next_cursor"] = "next" }
-            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
-        }
-        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: query)
-        store.showsChanges = true
+    @Test func chooserFiltersScratchAndParentChangesAndPreservesDrafts() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
+            guard args.contains("parent") else { throw RegistryQueryError("Expected recorded parent") }
+            let value = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            return String(decoding: try JSONSerialization.data(withJSONObject: value["changes"]!), as: UTF8.self)
+        })
         await store.refresh()
-        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt"])
-        #expect(store.changesError == "Task has no active PR")
-        let document = store.document("first.txt")
+        #expect(store.navigator == .closed)
+        #expect(store.scratchPaths == ["scratch/notes.md"])
+        #expect(store.changedPaths == ["new.txt"])
+        store.autosave = false
+        let document = store.document("scratch/notes.md")
         await document.reconcile(snapshot("original"))
         document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
-        store.autosave = false
-        await store.loadDirectory("", more: true)
-        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt", "second.txt"])
-        store.showIgnored = true
-        await store.refreshDirectories()
-        #expect(store.directories[""]?.entries.map(\.path) == ["first.txt", "ignored.txt"])
+        store.toggleNavigator()
+        store.search = "NOTES"
+        #expect(store.scratchPaths == ["scratch/notes.md"])
+        #expect(store.changedPaths.isEmpty)
+        store.selectFile("scratch/notes.md", mode: .file)
+        #expect(store.navigator == .closed)
         #expect(store.selectedDocument === document)
         #expect(document.text == "draft")
-        #expect(document.canSave)
-        #expect(store.directoryErrors.isEmpty)
+        store.togglePinnedNavigator()
+        store.search = "new"
+        #expect(store.scratchPaths.isEmpty)
+        #expect(store.changedPaths == ["new.txt"])
+        store.selectFile("new.txt", mode: .diff)
+        #expect(store.navigator == .pinned)
+        store.dismissNavigator()
+        #expect(store.navigator == .pinned)
+        store.togglePinnedNavigator()
+        #expect(store.navigator == .closed)
+        #expect(document.text == "draft")
     }
 
     @Test func diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk() async {
@@ -337,7 +345,6 @@ struct TaskFilesTests {
         store.observeFiles()
         store.showsChanges = true
         await store.refresh()
-        #expect(store.directories[""]?.entries.first?.path == "note.txt")
         #expect(store.changesError == "Task has no active PR")
         #expect(store.error == nil)
         await store.loadFile()
@@ -364,8 +371,6 @@ struct TaskFilesTests {
         await document.save(issue: store.issue, cwd: store.cwd, query: query)
         #expect(try String(contentsOf: file, encoding: .utf8) == "local\nexternal\n")
         await store.refresh()
-        #expect(store.directories[""]?.entries.first?.path == "note.txt")
-        #expect(store.directoryErrors.isEmpty)
         store.autosave = true
         document.editor.insertText("auto", replacementRange: NSRange(location: 0, length: 5))
         try await eventually { (try? String(contentsOf: file, encoding: .utf8)) == "auto\nexternal\n" }
@@ -406,6 +411,30 @@ struct TaskFilesTests {
         try Data("after".utf8).write(to: file, options: .atomic)
         try await Task.sleep(for: .milliseconds(200))
         #expect(retained == nil)
+    }
+
+    @Test func taskBrowserSwitchesViewsWithoutLosingItsFileSelection() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from:
+            Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
+        let task = try #require(roadmap.waves.first?.tasks.items.first)
+        let store = TaskFilesStore(issue: task.task.identifier, cwd: "/fixture", query: RegistryQuery { _, _ in "{}" })
+        store.selection = "draft.txt"
+        store.page = .task
+        let view = TaskFilesView(store: store, prURL: nil, checkoutBase: nil, task: task)
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "browser-task-overview")
+            .find(text: task.task.name).string() == task.task.name)
+        store.page = .pullRequest
+        #expect(try view.inspect().find(text: "No pull request published yet.").string() == "No pull request published yet.")
+        store.page = .files
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(store.navigator == .dropdown)
+        #expect(store.selection == "draft.txt")
+        store.page = .task
+        store.page = .files
+        #expect(store.navigator == .dropdown)
+        #expect(store.selection == "draft.txt")
     }
 
     @Test func taskWorkspaceUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() async throws {

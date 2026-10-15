@@ -413,7 +413,18 @@ final class WorkNavigation {
     var forwardStack: [WorkReference?] = []
     var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
-    var showsNavigator = true
+    var showsNavigator = false
+
+    func toggleNavigator() {
+        palette = nil
+        showsNavigator.toggle()
+    }
+
+    func pinNavigator() {
+        palette = nil
+        showsNavigator = true
+    }
+
     var sidebarWidth: CGFloat = 380
     var expandedWaves: Set<WorkNodeKey> = []
 

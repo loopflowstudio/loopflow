@@ -4,7 +4,7 @@
 uv run python scripts/loopflow-dev.py ghostty-build
 ```
 
-Requires Zig 0.16.0. Runs the patches' Zig tests, builds the pinned upstream revision,
+Requires Zig 0.16.0, `glslangValidator`, and a macOS Metal device. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
 publish the artifact. Packaging normalizes the upstream static archive to
@@ -33,6 +33,53 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## Terminal feedback and contrast
+
+`Package.swift` selects `GhosttyKit-a60e9e2-lf7.xcframework.zip`. Its public
+download matches SwiftPM checksum
+`32e1d35ca909f67191e0d85afba8b52eb93f95a37513efbbb75f2caf195b44ed`.
+The universal ReleaseFast build includes the reviewed failure-selection and
+absolute feedback-deadline repairs. Renderer cell-buffer tests keep foreground
+RGBA separate from the expanded background data. Headless checks exercise production Metal
+colors/background fragments, compile GLSL, and verify receipt lifetimes and
+surface-local copy notices.
+
+`0005-terminal-feedback.patch` moves shell block fills into the background pass,
+before text contrast. Swift retains gutter/header chrome and sends shell hover
+intent; Screen supplies the same viewport block list to both consumers.
+
+`ghostty_surface_read_selection_receipt` reads the current text or command-block
+selection and returns an opaque surface-local receipt under one lock. Confirm it
+with `ghostty_surface_confirm_copy` only after a successful clipboard write.
+Selection replacement, reset, reflow, viewport movement and hiding invalidate it.
+`ghostty_surface_set_feedback` updates visibility and Reduce Motion for retained
+surfaces. Copy confirmation appears only in the pane header; the receipt retains
+clear-on-copy behavior without painting cells or scheduling animation. Find edges
+use the background pass and the existing renderer timer; they expire after 160 ms
+without changing stored text or colors. Synchronized output cancels cues while
+preserving frozen text.
+
+Metal and GLSL adjust premultiplied foregrounds toward the nearest feasible
+black/white endpoint, preserving alpha, passing colors and the exact `1` bypass.
+Metal evaluates Display P3 luminance; GLSL evaluates sRGB. Unattainable ratios
+use the best achievable endpoint. Graphics exemptions remain upstream-owned.
+
+`scripts/check_ghostty_shaders.py SOURCE` compiles the include-expanded GLSL and
+runs production Metal color functions and background fragments offscreen.
+`TerminalColorTests` can also run that check with `LOOPFLOW_GHOSTTY_SOURCE=SOURCE`.
+The checks distinguish unattainable faint/high-ratio cases from passing colors.
+Native glyph appearance and presented-pixel timing remain demo evidence.
+
+```sh
+uv run python scripts/desktop_performance.py terminal-feedback --output /tmp/feedback-before
+# Add --mounted --lf target/debug/lf for contained native diagnostics.
+# Repeat on the candidate with --baseline /tmp/feedback-before.
+```
+
+The runner preserves fixture/build hashes, first/warm draw-call observations,
+and native CPU/RSS logs. Draw calls are not presented pixels; GPU time and visible
+onset/expiry require native capture. It launches only its owned fixture shell.
+
 ## Bounded text
 
 ```sh
@@ -54,8 +101,8 @@ an invalidated command-block selection no longer releases its tracked pin:
 selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
 retain their existing unbounded API and viewport metadata.
 
-`Package.swift` selects the published `GhosttyKit-a60e9e2-lf3.xcframework.zip`.
-Its public download matches SwiftPM checksum
+The bounded reader first shipped in `GhosttyKit-a60e9e2-lf3.xcframework.zip`,
+whose public download matched SwiftPM checksum
 `dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
 The October 9 macOS build passed 270 patch tests (four skipped) and exported the
 bounded reader for arm64 and x86_64. Reset now releases command-block selection

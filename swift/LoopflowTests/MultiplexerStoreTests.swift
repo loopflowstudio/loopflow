@@ -385,6 +385,50 @@ struct MultiplexerStoreTests {
         #expect(store.layout.allPanes.count == 2)
     }
 
+    @Test("Shell, Files and process companions alternate splits and preserve the conversation")
+    func companionsAlternateSplitsAndPreserveTheConversation() throws {
+        let store = MultiplexerStore()
+        let location = WorkspaceIdentity(machineId: "local", worktree: "/task")
+        store.load(sessionId: "main", location: location)
+        let main = store.focusedPane
+        let shell = try #require(store.newShell(location: location))
+        let files = try #require(store.show(.files(taskId: "task", location: location)))
+        let log = try #require(store.show(.flowLog(taskId: "task", location: location)))
+        guard case .split(.vertical, .leaf(let retained),
+            .split(.horizontal, .leaf(let retainedShell),
+                .split(.vertical, .leaf(let retainedFiles), .leaf(let retainedLog), _), _), _) = store.layout else {
+            Issue.record("Companions must alternate right, down, right")
+            return
+        }
+        #expect(retained == main)
+        #expect(retainedShell == shell)
+        #expect(retainedFiles == files)
+        #expect(retainedLog == log)
+        #expect(store.focusedPaneId == log.id)
+        store.close(log.id)
+        let next = try #require(store.newShell(location: location))
+        #expect(store.layout.allPanes.count == 4)
+        #expect(store.focusedPaneId == next.id)
+        #expect(store.layout.pane(for: main.id) == main)
+    }
+
+    @Test("Reset replaces the Session in place and preserves companion state")
+    func replacingSessionKeepsCompanions() throws {
+        let store = MultiplexerStore()
+        store.load(sessionId: "old")
+        let main = store.focusedPane
+        let shell = try #require(store.newShell(command: ["retained-command"]))
+        store.updateRatio(between: main.id, and: shell.id, ratio: 0.63)
+        store.replace(main.id, with: .session(id: "fresh", location: nil))
+        #expect(store.focusedPaneId == main.id)
+        #expect(store.focusedPane.sessionId == "fresh")
+        #expect(store.focusedPane.incarnation != main.incarnation)
+        #expect(store.layout.pane(for: shell.id) == shell)
+        #expect(store.shellCommands[shell.id] == ["retained-command"])
+        guard case .split(_, _, _, let ratio) = store.layout else { Issue.record("Lost split"); return }
+        #expect(ratio == 0.63)
+    }
+
     @Test("opening a Session keeps the shell pane alive")
     func loadingSessionPreservesShell() {
         let store = MultiplexerStore()

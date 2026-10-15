@@ -11,6 +11,19 @@ import Loopflow
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
+enum GhosttyTerminalShortcut: String {
+    case copy = "c"
+    case paste = "v"
+    case find = "f"
+
+    init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
+        let keys: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard modifiers.intersection(keys) == .command,
+              let characters else { return nil }
+        self.init(rawValue: characters.lowercased())
+    }
+}
+
 struct GhosttyTerminalView: View {
     let workingDirectory: String
     let argv: [String]
@@ -255,6 +268,11 @@ final class GhosttySurfacePool {
         }
     }
 
+    func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool {
+        guard let source = notification.object as? UUID, let view = views[terminal] else { return false }
+        return view.programStatus.incarnation == source
+    }
+
     func title(for id: TerminalIdentity) -> String? {
         views[id]?.terminalTitle
     }
@@ -341,37 +359,14 @@ func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> C
     )
 }
 
-/// Block chrome. A resting block has none; hover is faint; selection is a
-/// cream tint and bar; a reported failure is red, selected or not. Every fill keeps
-/// the dimmest palette color (8) at 3:1 or better, which caps red near 0.18.
-struct GhosttyCommandBlockStyle {
-    let fill: NSColor
-    let accent: NSColor
-
-    init(block: GhosttyCommandBlockLayout, hovered: Bool) {
-        // Red means failed and nothing else. Selection and hover are the
-        // terminal's cream, so a selected failure still reads as both.
-        let cream = NSColor(red: 0xF5 / 255, green: 0xF1 / 255, blue: 0xEA / 255, alpha: 1)
-        let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
-        if block.failed {
-            fill = red.withAlphaComponent(0.14)
-        } else if block.selected {
-            fill = cream.withAlphaComponent(0.06)
-        } else if hovered {
-            fill = cream.withAlphaComponent(0.03)
-        } else {
-            fill = .clear
-        }
-        if block.selected {
-            accent = cream.withAlphaComponent(0.9)
-        } else if block.failed {
-            accent = red.withAlphaComponent(hovered ? 1 : 0.75)
-        } else if hovered {
-            accent = cream.withAlphaComponent(0.3)
-        } else {
-            accent = .clear
-        }
-    }
+/// Gutter accents only. Ghostty composes cell backgrounds before text contrast.
+func ghosttyCommandBlockAccent(block: GhosttyCommandBlockLayout, hovered: Bool) -> NSColor {
+    // A selected failure retains its red renderer background and neutral gutter.
+    let cream = NSColor(red: 0xF5 / 255, green: 0xF1 / 255, blue: 0xEA / 255, alpha: 1)
+    let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
+    if block.selected { return cream.withAlphaComponent(0.9) }
+    if block.failed { return red.withAlphaComponent(hovered ? 1 : 0.75) }
+    return hovered ? cream.withAlphaComponent(0.3) : .clear
 }
 
 /// A right-click on the selected block opens the menu for that block. Ghostty
@@ -435,7 +430,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         retainedSearchBar = bar
         return bar
     }
-    private(set) var copyConfirmation: NSTextField?
+    private(set) var copyConfirmation: String?
     private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
@@ -470,6 +465,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             programStatus.associate(sessionId: id, terminalId: terminalMarker, provider: nil)
         }
         setupView()
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(updateFeedbackPreferences),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateFeedbackPreferences),
+            name: NSWindow.didChangeOcclusionStateNotification, object: nil)
     }
 
     required init?(coder: NSCoder) {
@@ -505,6 +504,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateContentScale()
             updateSurfaceSize()
             installCommandBlockOverlay()
+            ghostty_surface_set_command_block_chrome(surface, isShellPane, -1)
+            updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
             onSurfaceCreated()
@@ -522,6 +523,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         recordMountLifecycle("terminal-window")
+        updateFeedbackPreferences()
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
@@ -535,6 +537,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     func updateFocus(isFocused: Bool, isEnabled: Bool) {
         inputEnabled = isEnabled
+        updateFeedbackPreferences()
         let requested = isEnabled && isFocused
         let changed = focusRequested != requested
         focusRequested = requested
@@ -576,10 +579,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     func destroySurface() {
         copyDismissal?.cancel()
-        copyConfirmation?.removeFromSuperview()
-        copyConfirmation = nil
-        // Cleanup must never initialize a control holding a weak reference to
-        // this view: destroySurface also runs during deinitialization.
+        publishCopyConfirmation(nil)
         retainedSearchBar?.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
@@ -734,7 +734,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard read(&text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
         guard let bytes = text.text, text.text_len > 0 else { return nil }
-        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+        return String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(text.text_len)), as: UTF8.self)
     }
 
     private func renderCommandBlocks() {
@@ -755,14 +755,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 blankRowAbove: blockHeaders[block.startRow + 1] != nil,
                 blankRowBelow: promptHasBlankRow
             )
-            let style = GhosttyCommandBlockStyle(
-                block: block,
-                hovered: hoveredRow.map(block.contains) ?? false
-            )
-
             let surfaceLayer = CALayer()
             surfaceLayer.frame = frame
-            surfaceLayer.backgroundColor = style.fill.cgColor
 
             // A hairline above each block separates it from the one before.
             let separator = CALayer()
@@ -774,7 +768,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             let accentLayer = CALayer()
             accentLayer.frame = CGRect(x: 4, y: 2, width: 3, height: max(0, frame.height - 5))
             accentLayer.cornerRadius = 1.5
-            accentLayer.backgroundColor = style.accent.cgColor
+            accentLayer.backgroundColor = ghosttyCommandBlockAccent(
+                block: block, hovered: hoveredRow.map(block.contains) ?? false
+            ).cgColor
             surfaceLayer.addSublayer(accentLayer)
             return surfaceLayer
         }
@@ -891,16 +887,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else { return super.performKeyEquivalent(with: event) }
 
         let mods = event.modifierFlags
-        // Handle Cmd+C (copy), Cmd+V (paste) ourselves
-        if mods.contains(.command) {
-            if event.charactersIgnoringModifiers == "c" {
-                return copySelection()
-            } else if event.charactersIgnoringModifiers == "v" {
-                return pasteFromClipboard()
-            } else if event.charactersIgnoringModifiers == "f" {
-                searchBar.open(needle: nil)
-                return true
-            }
+        // Only the exact host shortcuts belong here. Modified combinations
+        // retain Ghostty bindings and the application's terminal key protocol.
+        switch GhosttyTerminalShortcut(characters: event.charactersIgnoringModifiers, modifiers: mods) {
+        case .copy:
+            return copySelection()
+        case .paste:
+            return pasteFromClipboard()
+        case .find:
+            searchBar.open(needle: nil)
+            return true
+        case nil:
+            break
         }
 
         if !mods.contains(.command) { clearBlockSelection() }
@@ -1158,6 +1156,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             let row = viewportRow(at: point)
             if row != hoveredRow {
                 hoveredRow = row
+                ghostty_surface_set_command_block_chrome(surface, true, Int32(row ?? -1))
                 renderCommandBlocks()
             }
         }
@@ -1178,6 +1177,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func mouseExited(with event: NSEvent) {
         if hoveredRow != nil {
             hoveredRow = nil
+            if let surface { ghostty_surface_set_command_block_chrome(surface, true, -1) }
             renderCommandBlocks()
         }
         guard let surface else { return }
@@ -1244,16 +1244,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     /// Copies whichever selection the terminal holds, read at copy time.
     private func copySelection() -> Bool {
-        guard let surface,
-              let selection = readText({
-                  ghostty_surface_has_selection(surface)
-                      ? ghostty_surface_read_selection(surface, $0)
-                      : ghostty_surface_read_selected_command_block(surface, $0)
-              })
+        guard let surface else { return false }
+        var receipt: UInt64 = 0
+        guard let selection = readText({ ghostty_surface_read_selection_receipt(surface, $0, &receipt) })
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         guard pasteboard.setString(selection, forType: .string) else { return false }
+        _ = ghostty_surface_confirm_copy(surface, receipt)
         showCopyConfirmation(selection)
         return true
     }
@@ -1261,29 +1259,27 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private func showCopyConfirmation(_ text: String) {
         guard let message = terminalCopyMessage(text) else { return }
         copyDismissal?.cancel()
-        copyConfirmation?.removeFromSuperview()
-        let notice = TerminalCopyNotice(labelWithString: message)
-        notice.font = .systemFont(ofSize: 11, weight: .medium)
-        notice.textColor = NSColor(TerminalPalette.foreground)
-        notice.backgroundColor = TerminalPalette.nsBackground
-        notice.drawsBackground = true
-        notice.isSelectable = false
-        notice.setAccessibilityIdentifier("terminal-copy-confirmation")
-        notice.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(notice)
-        NSLayoutConstraint.activate([
-            notice.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            notice.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-        ])
-        copyConfirmation = notice
+        publishCopyConfirmation(message)
         NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
             .announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
         ])
         copyDismissal = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(1.4)) } catch { return }
-            self?.copyConfirmation?.removeFromSuperview()
-            self?.copyConfirmation = nil
+            self?.publishCopyConfirmation(nil)
         }
+    }
+
+    private func publishCopyConfirmation(_ message: String?) {
+        copyConfirmation = message
+        NotificationCenter.default.post(name: .ghosttyCopyConfirmation, object: programStatus.incarnation,
+                                        userInfo: message.map { ["message": $0] })
+    }
+
+    @objc private func updateFeedbackPreferences() {
+        guard let surface else { return }
+        let visible = window != nil && !isHiddenOrHasHiddenAncestor
+            && window?.occlusionState.contains(.visible) != false
+        ghostty_surface_set_feedback(surface, visible, NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
     func performBinding(_ action: String) {
@@ -1442,6 +1438,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     deinit {
         MainActor.assumeIsolated {
+            NSWorkspace.shared.notificationCenter.removeObserver(self)
+            NotificationCenter.default.removeObserver(self)
             destroySurface()
         }
     }
@@ -1497,6 +1495,7 @@ final class GhosttySurfacePool {
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}
+    func ownsCopyConfirmation(_ notification: Notification, terminal: TerminalIdentity) -> Bool { false }
     func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
     func clearFocus() {}

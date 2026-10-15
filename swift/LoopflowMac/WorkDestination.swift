@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Work destinations and scoped actions; Task entry opens its conversation, not its Workflow.
 enum WorkDestination: Hashable {
+    case repository
     case wave(String)
     case task(String)
     case flow(String)

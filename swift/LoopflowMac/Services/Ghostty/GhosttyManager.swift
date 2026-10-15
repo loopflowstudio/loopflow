@@ -16,6 +16,7 @@ func terminalTemporaryDirectory() -> URL {
 }
 
 extension Notification.Name {
+    static let ghosttyCopyConfirmation = Notification.Name("loopflow.ghosttyCopyConfirmation")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
@@ -100,6 +101,7 @@ final class GhosttyManager: ObservableObject {
     // (`TerminalPalette`). Every ANSI color except 0 clears 3:1 on it; 0 is
     // black by convention and stays near the surface.
     static let loopflowConfig = """
+    minimum-contrast = 3
     # Loopflow Terminal Theme - Warm charcoal
     background = \(TerminalPalette.css(TerminalPalette.backgroundHex))
     foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))

@@ -7,6 +7,48 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
+    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode"])
+    func switchingProviderKeepsSession(agent: String) async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            session(id: "main", state: "closed", replacing: true)
+        })
+        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
+        let previous = try #require(item(store, "main"))
+        try await store.switchProvider("main", to: agent)
+        let prepared = try #require(item(store, "main"))
+        #expect(prepared.state == .prepared)
+        #expect(prepared.id == previous.id)
+        #expect(prepared.record.title == previous.record.title)
+        #expect(prepared.launchId != previous.launchId)
+        #expect(prepared.launchArguments == ["lf", "session", "connect", "main", "--takeover", "--agent", agent])
+        #expect(item(store, "other")?.state == .pending)
+    }
+
+    @Test("A refused provider change preserves the original Session presentation")
+    func refusedProviderChangeKeepsSession() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Provider unavailable")
+        })
+        store.reconcile(try records([session(id: "main", state: "active")]))
+        let previous = item(store, "main")
+        await #expect(throws: RegistryQueryError.self) { try await store.switchProvider("main", to: "claude") }
+        #expect(item(store, "main") == previous)
+    }
+
+    @Test("Reset prepares the successor and keeps the old conversation accessible")
+    func resetPreparesSuccessor() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            session(id: "fresh", state: "available")
+        })
+        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
+        let successor = try await store.reset("main")
+        #expect(successor.id == "fresh")
+        #expect(item(store, "fresh")?.state == .prepared)
+        #expect(item(store, "fresh")?.launchArguments == ["lf", "session", "connect", "fresh"])
+        #expect(item(store, "main")?.state == .ended("Replaced by a fresh conversation."))
+        #expect(item(store, "other")?.state == .pending)
+    }
+
     @Test("Filtered refresh retains Sessions without creating local terminals")
     func filteredRefreshRetainsSessions() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")

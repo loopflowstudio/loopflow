@@ -459,6 +459,9 @@ final class WorkModel {
                 store.surfaces.focus(.session(record.id, machineId: machine))
             }
         }
+        workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity,
+            execution: store.executionLocation(for: record.id))
+        workspace.prepareTaskPanes(query: store.query)
         workspace.presentation.selectedSessionId = record.id
         workspace.presentation.content = .terminals
         store.beginPaneLoad(record.id)
@@ -1433,6 +1436,7 @@ final class WorkModel {
     }
 
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
+        if navigation.palette == .search { navigation.palette = nil }
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
@@ -1525,6 +1529,7 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
+        if navigation.palette == .search { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil

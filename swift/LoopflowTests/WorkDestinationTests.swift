@@ -429,7 +429,7 @@ struct WorkDestinationTests {
                 #expect(throws: RegistryQueryError.self) { try workspace.split(unavailableFiles.id, axis: .vertical) }
                 #expect(store.layout == unavailableLayout)
             }
-            remote.multiplexer.load(sessionId: "replacement")
+            remote.multiplexer.replace(targetPane.id, with: .session(id: "replacement"))
             let unchanged = remote.multiplexer.layout
             #expect(throws: RegistryQueryError.self) {
                 try registry.controlPane(.init(target: target, action: .shell), model: model)
@@ -590,7 +590,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(try #require(link.url))
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
-        #expect(workspace.multiplexer.focusedPaneId == terminal.id)
+        #expect(workspace.multiplexer.focusedPane.content == .files(taskId: task.id, location: identity))
         #expect(files.selection == "retained-draft.rs")
         #expect(files.showsChanges)
         let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
@@ -622,7 +622,7 @@ struct WorkDestinationTests {
             case "closed": workspace.multiplexer.close(pane.id)
             case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
             case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
-            case "replaced": workspace.multiplexer.load(sessionId: "replacement")
+            case "replaced": workspace.multiplexer.replace(pane.id, with: .session(id: "replacement"))
             case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
             default: store.recordPaneLive(record.id)
             }
@@ -655,7 +655,7 @@ struct WorkDestinationTests {
         let opening = Task { await model.openTaskLink(url) }
         while !(await barrier.contains("comparison")) { await Task.yield() }
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
-        let originalPane = workspace.multiplexer.focusedPane
+        let originalPane = try #require(workspace.multiplexer.pane(forSessionId: record.id))
         #expect(workspace.openingConversation)
         let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
         // New request to the same Session, without its still-reading companion.
@@ -856,6 +856,13 @@ struct WorkDestinationTests {
         let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")
         document.editor.string = "unsaved draft"
+        let retained = SessionsContentView(
+            model: destination, repoPath: wave.wave.repo,
+            workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
+        )
+        #expect(throws: Never.self) {
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
+        }
         destination.bindWorkspaces(registry, repository: "fixture-repository")
         let selectedKey = try #require(registry.selectedWork)
         #expect(registry.retained(selectedKey)?.location == task.reference.workspace?.identity)

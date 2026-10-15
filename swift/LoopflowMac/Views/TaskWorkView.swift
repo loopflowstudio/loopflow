@@ -215,6 +215,64 @@ struct TaskWorkflowHeader: View {
     }
 }
 
+/// One compact control; hover or click reveals the Task's lifecycle actions.
+struct TaskLifecycleActions: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
+    let work: WorkReading<TaskOverview>
+    @State private var hovering = false
+    @State private var expanded = false
+    @State private var confirmingAbandon = false
+
+    private var unavailable: Bool {
+        model.navigation.taskRunDrafts[task.id]?.acting == true
+            || work.errorMessage != nil || model.roadmap.errorMessage != nil || model.showsSavedPlanning
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { expanded.toggle() } label: {
+                Label("Task", systemImage: "ellipsis.circle")
+            }
+            .help("Complete, pause, or abandon this Task")
+            .accessibilityIdentifier("task-lifecycle-menu")
+            .accessibilityValue(expanded || hovering ? "Expanded" : "Collapsed")
+            if let error = model.navigation.taskRunDrafts[task.id]?.error ?? task.runtime?.completionPending {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.red).help(error).accessibilityLabel(error)
+            }
+            if expanded || hovering {
+                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
+                        .accessibilityIdentifier("task-reopen")
+                } else {
+                    Button(task.runtime?.completionPending == nil ? "Complete" : "Retry completion") { Task { await model.completeTask(task, wave: wave) } }
+                        .accessibilityIdentifier("task-complete")
+                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
+                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                    }
+                    .accessibilityIdentifier("task-pause-resume")
+                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
+                        .accessibilityIdentifier("task-abandon")
+                }
+            }
+        }
+        .disabled(unavailable)
+        .font(Typography.body(11))
+        .fixedSize()
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) {
+                Task { await model.abandonTask(task, wave: wave) }
+            }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
+        }
+    }
+}
+
 /// The Task due date stays beside the conversation and in Task details.
 struct TaskDueDateView: View {
     let task: RoadmapTask

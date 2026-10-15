@@ -32,11 +32,12 @@ extension PaneState {
 @MainActor
 @Observable
 final class SessionsWorkspace {
-    var showsDetails = false
     var conversationRequest: UUID?
     var openingConversation: Bool { conversationRequest != nil }
     var conversationError: String?
     var didConsiderRepositoryEntry = false
+    private var didPrepareTaskPanes = false
+    private var retainedShells: [String: (content: PaneContent, command: [String])] = [:]
 
     /// Populate this retained Work even if navigation changes while lf prepares it.
     func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
@@ -70,11 +71,85 @@ final class SessionsWorkspace {
     var presentation = WorkNavigation.WorkspacePresentation()
     let localMachineId: String?
 
+    func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
+        guard key.kind == .task, !didPrepareTaskPanes else { return }
+        let panes = multiplexer.layout.allPanes
+        guard panes.count == 1, let session = panes.first,
+              session.content != .empty, session.content.location != nil else { return }
+        didPrepareTaskPanes = true
+        let content = PaneContent.files(taskId: key.id,
+            location: session.content.location, execution: session.executionLocation)
+        // A location error is presented by the browser's normal error view.
+        _ = try? files(for: content, task: nil, query: query)
+        guard let browser = multiplexer.show(content, beside: session.id, focus: false) else { return }
+        multiplexer.updateRatio(between: session.id, and: browser.id, ratio: LayoutNode.goldenRatio)
+    }
+
     @discardableResult
     func newShell(beside pane: String? = nil, focus: Bool = true) throws -> PaneState? {
         let (location, execution) = try shellLocation(beside: pane ?? multiplexer.focusedPaneId)
         let command = try shellCommand(at: location, execution: execution)
         return multiplexer.newShell(command: command, location: location, execution: execution, beside: pane, focus: focus)
+    }
+
+    /// A selection changes a retained companion; adding a split stays explicit.
+    func selectContent(_ content: PaneContent, in pane: PaneState, containsSession: Bool = false) throws {
+        guard multiplexer.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
+        if isSessionPane(pane) || containsSession {
+            if let companion = multiplexer.layout.allPanes.first(where: { $0.id != pane.id && !isSessionPane($0) }) {
+                try selectContent(content, in: companion)
+            } else if case .shell = content {
+                try newShell(beside: pane.id)
+            } else {
+                multiplexer.show(content, beside: pane.id)
+            }
+            return
+        }
+        // One retained document view can only be mounted in one pane at a time.
+        if let visible = multiplexer.layout.allPanes.first(where: { $0.id != pane.id && $0.content == content }) {
+            if case .files = content { multiplexer.setFocusedPane(visible.id); return }
+            if case .flowLog = content { multiplexer.setFocusedPane(visible.id); return }
+        }
+        var replacement = content
+        var command: [String]?
+        if case .shell = content {
+            if let retained = retainedShells[pane.id] {
+                replacement = retained.content
+                command = retained.command
+            } else {
+                let (location, execution) = try shellLocation(beside: pane.id)
+                replacement = .shell(location: location, execution: execution)
+                command = try shellCommand(at: location, execution: execution)
+            }
+        }
+        guard pane.content != replacement else { multiplexer.setFocusedPane(pane.id); return }
+        if case .shell = pane.content {
+            retainedShells[pane.id] = (pane.content, multiplexer.shellCommands[pane.id] ?? [])
+        }
+        surfaces.clearFocus()
+        multiplexer.replace(pane.id, with: replacement, shellCommand: command)
+    }
+
+    private func isSessionPane(_ pane: PaneState) -> Bool {
+        pane.sessionId != nil || pane.terminal.flatMap { surfaces.programStatus(for: $0)?.sessionId } != nil
+    }
+
+    func closePane(_ paneId: String) {
+        let pane = multiplexer.layout.pane(for: paneId)
+        if let retained = retainedShells.removeValue(forKey: paneId), let location = retained.content.location {
+            surfaces.release(.shell(paneId, machineId: location.machineId))
+        } else if let pane, case .shell = pane.content, let terminal = pane.terminal {
+            surfaces.release(terminal)
+        }
+        multiplexer.close(paneId)
+    }
+
+    func browserPage(for taskId: String) -> TaskFilesStore.Page {
+        taskFiles[taskId]?.store.page ?? .files
+    }
+
+    func selectFilesPage(taskId: String) {
+        taskFiles[taskId]?.store.page = .files
     }
 
     @discardableResult
@@ -191,10 +266,11 @@ final class SessionsWorkspace {
                 guard let terminal = notification.object as? TerminalIdentity,
                       case .shell(let paneId, _) = terminal else { return }
                 MainActor.assumeIsolated {
-                    guard let self,
-                          let pane = self.multiplexer.layout.pane(for: paneId),
-                          pane.terminal == terminal
-                    else { return }
+                    guard let self else { return }
+                    if self.retainedShells[paneId]?.content.location?.machineId == terminal.machineId {
+                        self.retainedShells.removeValue(forKey: paneId)
+                    }
+                    guard self.multiplexer.layout.pane(for: paneId)?.terminal == terminal else { return }
                     self.multiplexer.close(paneId)
                 }
             }
@@ -286,7 +362,10 @@ final class SessionsWorkspaceRegistry {
         let content = PaneContent.files(taskId: destination.task.id, location: identity, execution: destination.location)
         let files = try workspace.files(for: content, task: destination.task, query: query)
         files.showsChanges = true
-        workspace.multiplexer.show(content, focus: false)
+        files.page = .files
+        if let pane = workspace.multiplexer.pane(forSessionId: destination.record.id) {
+            try workspace.selectContent(content, in: pane)
+        } else { workspace.multiplexer.show(content, focus: false) }
         return files
     }
 
@@ -346,6 +425,7 @@ final class SessionsWorkspaceRegistry {
             } else {
                 .flowLog(taskId: projection.task.id, location: identity, execution: pane.executionLocation)
             }
+            if case .files = request.action { workspace.selectFilesPage(taskId: projection.task.id) }
             result = store.show(content, beside: target.pane, focus: false)
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
@@ -464,8 +544,14 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
+    var agentOverride: String?
+    var launchId = UUID()
 
     var id: String { record.id }
+
+    var launchArguments: [String] {
+        record.openArgv + (agentOverride.map { ["--agent", $0] } ?? [])
+    }
 
     var surface: SessionRecord? {
         switch state {
@@ -490,6 +576,8 @@ final class SessionsStore {
     let repoPath: String
     let query: RegistryQuery
     private var executionLocations: [String: TaskLocationObservation] = [:]
+
+    func executionLocation(for id: String) -> TaskLocationObservation? { executionLocations[id] }
 
     func retainLocation(_ location: TaskLocationObservation, for record: SessionRecord) {
         executionLocations[record.id] = location
@@ -632,6 +720,48 @@ final class SessionsStore {
         await recover(id, replacing: true)
     }
 
+    @discardableResult
+    func switchProvider(_ id: String, to agent: String) async throws -> SessionRecord {
+        guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+        let previous = sessions[index]
+        sessions[index].state = .opening
+        do {
+            let prepared = try await query(for: previous.record).prepareSession(id: id, takeover: true, cwd: repoPath)
+            if let reason = prepared.action(.moveHere)?.unavailableReason {
+                throw RegistryQueryError(reason)
+            }
+            guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+            if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
+            sessions[current].record = prepared
+            sessions[current].agentOverride = agent
+            sessions[current].launchId = UUID()
+            sessions[current].state = .prepared
+            return prepared
+        } catch {
+            if let current = _index(id) { sessions[current] = previous }
+            throw error
+        }
+    }
+
+    func reset(_ id: String) async throws -> SessionRecord {
+        guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+        let previous = sessions[index]
+        sessions[index].state = .opening
+        do {
+            let successor = try await query(for: previous.record).resetSession(
+                id: id, agent: previous.record.provider, cwd: repoPath)
+            if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
+            if let location = executionLocations[id] { retainLocation(location, for: successor) }
+            reconcile([successor])
+            adoptPreparation(successor)
+            if let current = _index(id) { sessions[current].state = .ended("Replaced by a fresh conversation.") }
+            return successor
+        } catch {
+            if let current = _index(id) { sessions[current] = previous }
+            throw error
+        }
+    }
+
     func beginPaneLoad(_ id: String) {
         metrics.beginPaneLoad(id)
     }
@@ -732,7 +862,9 @@ struct SessionsView: View {
                                     machineId: home, repository: repository, query: query)
             } else {
                 HStack {
-                    WorkNavigator(model: model, onOpenSession: { _ in })
+                    if model.navigation.showsNavigator {
+                        WorkNavigator(model: model, onOpenSession: { _ in })
+                    }
                     if let error = workspaces.machineError ?? repositoryError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                             .task(id: taskPage) {
@@ -813,34 +945,40 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                if navigation.showsNavigator {
-                    WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
-                        model.select(work)
-                        startConversation()
-                    }, onNewShell: {
-                        newShell(in: workspace)
-                        navigation.content = .terminals
-                    }, onShowTerminals: { navigation.content = .terminals }, onOpenTask: openTask,
-                        onOpenRepository: openRepositoryConversation, onOpenWave: openWaveConversation)
-                        .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
-                    SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
-                } else {
-                    VStack {
-                        WorkGlyphButton("sidebar.left", label: "Show sidebar", identifier: "work-toggle-sidebar") {
-                            navigation.showsNavigator = true
-                        }
-                        Spacer()
-                    }.padding(.top, 8).frame(width: 32).background(palette.surfaceMuted)
-                }
-                if let layout = workspaces.layout {
-                    WorkLayoutView(layout: layout, registry: workspaces) { key in
-                        workspacePanel(key).id(key)
+        VStack(spacing: 0) {
+            navigationBar
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    if navigation.showsNavigator {
+                        navigator
+                            .frame(width: min(navigation.sidebarWidth, max(260, geometry.size.width - 360)))
+                        SidebarDivider(navigation: navigation, availableWidth: geometry.size.width)
                     }
-                } else {
-                    ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                        description: Text("Open a repository, Wave or Task from the sidebar."))
+                    if let layout = workspaces.layout {
+                        WorkLayoutView(layout: layout, registry: workspaces) { key in
+                            workspacePanel(key).id(key)
+                        }
+                    } else {
+                        ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
+                            description: Text("Open a repository, Wave or Task from the sidebar."))
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if navigation.palette == .search && !navigation.showsNavigator {
+                        ZStack(alignment: .topLeading) {
+                            Color.black.opacity(0.001)
+                                .contentShape(Rectangle())
+                                .onTapGesture { navigation.palette = nil }
+                                .accessibilityIdentifier("work-navigation-dismiss")
+                            navigator
+                                .frame(width: min(navigation.sidebarWidth, geometry.size.width),
+                                       height: max(0, geometry.size.height - 12))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border))
+                                .shadow(color: .black.opacity(0.2), radius: 16, x: 4, y: 8)
+                                .accessibilityIdentifier("work-navigation-dropdown")
+                        }
+                    }
                 }
             }
         }
@@ -853,8 +991,6 @@ struct SessionsContentView: View {
                     .disabled(navigation.backStack.isEmpty)
                 Button("Forward") { model.goForward() }.keyboardShortcut("]", modifiers: .command)
                     .disabled(navigation.forwardStack.isEmpty)
-                Button("Toggle sidebar") { navigation.showsNavigator.toggle() }
-                    .keyboardShortcut("s", modifiers: [.command, .control])
             }.hidden().accessibilityHidden(true).frame(width: 0, height: 0)
         }
         .overlay {
@@ -864,23 +1000,22 @@ struct SessionsContentView: View {
             }
         }
         .background {
-            WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
+            WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus,
+                toggleSidebar: { navigation.toggleNavigator() }) {
                 restorePaletteFocus = true
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
         }
         .sheet(isPresented: Binding(
-            get: { navigation.palette != nil },
-            set: { if !$0 { navigation.palette = nil } }
+            get: { navigation.palette != nil && navigation.palette != .search },
+            set: { if !$0, navigation.palette != .search { navigation.palette = nil } }
         )) {
             switch navigation.palette {
             case .workflow(let name):
                 WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
             case .flow(let name):
                 FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
-            case .search:
-                WorkPalette(model: model, activate: navigate)
-            case nil:
+            case .search, nil:
                 EmptyView()
             }
         }
@@ -917,20 +1052,6 @@ struct SessionsContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
         }
-        .sheet(isPresented: Binding(get: { workspace.showsDetails }, set: { workspace.showsDetails = $0 })) {
-            VStack {
-                HStack {
-                    Button(navigation.showsActivity ? "Hide Activity" : "Show Activity") { navigation.showsActivity.toggle() }
-                        .accessibilityIdentifier("work-toggle-activity")
-                    Spacer()
-                    Button("Done") { workspace.showsDetails = false }
-                }.padding()
-                HSplitView {
-                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask, onNewSession: newTaskSession)
-                    if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
-                }
-            }.frame(minWidth: 680, minHeight: 560)
-        }
         .alert(launchErrorTitle, isPresented: Binding(
             get: { launchError != nil },
             set: { if !$0 { launchError = nil } }
@@ -938,6 +1059,75 @@ struct SessionsContentView: View {
             Button("OK") { launchError = nil }
         } message: { Text(launchError ?? "") }
         .accessibilityIdentifier("sessions-surface")
+    }
+
+    private var navigator: some View {
+        WorkNavigator(model: model, onOpenSession: { record in
+            dismissNavigationForSelection()
+            openSession(record)
+        }, onConversation: { work in
+            dismissNavigationForSelection()
+            model.select(work)
+            startConversation()
+        }, onNewShell: {
+            dismissNavigationForSelection()
+            newShell(in: workspace)
+            navigation.content = .terminals
+        }, onShowTerminals: {
+            dismissNavigationForSelection()
+            navigation.content = .terminals
+        }, onOpenTask: { work in
+            dismissNavigationForSelection()
+            openTask(work)
+        }, onOpenRepository: {
+            dismissNavigationForSelection()
+            openRepositoryConversation()
+        }, onOpenWave: { work in
+            dismissNavigationForSelection()
+            openWaveConversation(work)
+        })
+    }
+
+    private func dismissNavigationForSelection() {
+        restorePaletteFocus = false
+        if navigation.palette == .search { navigation.palette = nil }
+    }
+
+    private var navigationBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                restorePaletteFocus = true
+                navigation.palette = navigation.palette == .search ? nil : .search
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(palette.emphasisInk)
+                    Text(title(for: currentKey)).font(Typography.strong(16))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 12)
+                    Text("⌘K").font(Typography.code(11)).foregroundStyle(palette.textSecondary)
+                    Image(systemName: navigation.palette == .search ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 14).frame(height: 44)
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(palette.border))
+            }
+            .frame(maxWidth: navigation.sidebarWidth)
+            .buttonStyle(.plain)
+            .help("Choose Work (⌘K)").accessibilityIdentifier("work-location-picker")
+            .accessibilityValue(title(for: currentKey))
+            Spacer(minLength: 0)
+            if let task = fileTask, let wave = model.breadcrumb?.wave?.roadmap.wave {
+                TaskLifecycleActions(model: model, task: task.task, wave: wave,
+                    work: model.taskWork[task.task.id])
+                workspaceCreation(for: workspace, task: task.task)
+                if multiplexer.zoomedPaneId != nil {
+                    Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(palette.surfaceMuted)
     }
 
     private func workspacePanel(_ key: WorkWorkspaceKey) -> some View {
@@ -949,11 +1139,11 @@ struct SessionsContentView: View {
         let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
             selection: key.reference, sessionId: entry.presentation.selectedSessionId)
         let terminals = key.kind == .task || entry.presentation.content == .terminals
-        let context = workspaces.openWork.count > 1 || !navigation.showsNavigator
+        let context = workspaces.openWork.count > 1
         return VStack(spacing: 0) {
             if context {
                 HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
                         if let wave = crumb?.wave {
                             Text(wave.roadmap.wave.displayName).font(Typography.body(10))
                                 .foregroundStyle(palette.emphasisInk)
@@ -967,7 +1157,7 @@ struct SessionsContentView: View {
                             .accessibilityIdentifier("work-hide-\(key.id)")
                     }
                 }
-                .padding(10).contentShape(Rectangle()).onTapGesture { model.select(key.reference) }
+                .padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle()).onTapGesture { model.select(key.reference) }
                 .background(palette.surfaceMuted)
                 .accessibilityIdentifier("work-context-\(key.id)")
             }
@@ -975,32 +1165,16 @@ struct SessionsContentView: View {
                 WorkSessionToolbar(model: model, crumb: crumb, onOpenSession: openSession)
             }
             if terminals, let task, active {
-                TaskWorkflowHeader(model: model, task: task.task, wave: task.wave.wave,
-                    work: model.taskWork[task.task.id], workspaceActions: AnyView(
-                        HStack(spacing: 6) {
-                            Button("Details") { model.select(key.reference); entry.showsDetails = true }
-                                .accessibilityIdentifier("work-task-details")
-                            workspaceCreation(for: entry, task: task.task)
-                            if entry.multiplexer.zoomedPaneId != nil {
-                                Button("Restore") { entry.toggleFocus(entry.multiplexer.focusedPaneId) }
-                            }
-                        }
-                    ))
+                missingCheckout
                     .task(id: model.linkedTaskPage) {
-                        if active, let request = model.linkedTaskPage,
+                        if let request = model.linkedTaskPage,
                            request.taskID == task.task.id, request.repo == store.repoPath.normalizedFilePath {
                             model.finishTaskPage(request)
                         }
                     }
-                missingCheckout
-            } else if terminals, task != nil {
-                Button("Workflow and Task actions") { model.select(key.reference) }
-                    .buttonStyle(WorkPlainButtonStyle()).font(Typography.body(11))
-                    .foregroundStyle(palette.textSecondary).padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if terminals {
-                WorkspacePanesView(workspace: entry, isFocused: active, sessions: store)
+                WorkspacePanesView(workspace: entry, isFocused: active && navigation.palette == nil, sessions: store)
                     .overlay(alignment: .top) {
                         if let error = entry.conversationError {
                             HStack {
@@ -1047,7 +1221,10 @@ struct SessionsContentView: View {
             let multiplexer = workspace.multiplexer
             let location = workspace.location
             let execution = multiplexer.focusedPane.executionLocation
-            Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task.id, location: location, execution: execution)) }
+            Button("Files", systemImage: "doc") {
+                workspace.selectFilesPage(taskId: task.id)
+                multiplexer.show(.files(taskId: task.id, location: location, execution: execution))
+            }
                 .accessibilityIdentifier("work-add-files")
             Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task.id, location: location, execution: execution)) }
                 .accessibilityIdentifier("work-add-flow-log")
@@ -1092,37 +1269,6 @@ struct SessionsContentView: View {
                 launchError = error.localizedDescription
             }
         }
-    }
-
-    private func navigate(_ destination: WorkDestination) {
-        // Refreshes can remove an action while the palette is open.
-        guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
-        restorePaletteFocus = false
-        navigation.palette = nil
-        switch destination {
-        case .wave(let id): model.select(.wave(id: id))
-        case .task(let id):
-            let trace = UUID().uuidString
-            Perf.$inputTrace.withValue(trace) {
-                Perf.agentInput("task_click", task: id, detail: "source=palette")
-                Task { await model.openPaletteTask(id) }
-            }
-            return
-        case .flow(let name): navigation.palette = .flow(name)
-        case .workflow(let name): navigation.palette = .workflow(name)
-        case .rename(let id):
-            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
-            openSession(record)
-            model.beginSessionRename(record)
-        case .bind(let id):
-            guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
-            model.beginSessionBinding(record)
-        case .flowLog(let id):
-            model.select(.task(id: id))
-            navigation.content = .terminals
-            multiplexer.show(.flowLog(taskId: id, location: taskIdentity, execution: multiplexer.focusedPane.executionLocation))
-        }
-        model.remember(destination)
     }
 
     private func openSession(_ record: SessionRecord) {
@@ -1213,17 +1359,6 @@ struct SessionsContentView: View {
         }
     }
 
-    private func _destroySurface(in pane: PaneState) {
-        switch pane.content {
-        case .empty, .flowLog, .files:
-            return
-        case .shell:
-            if let terminal = pane.terminal { store.surfaces.release(terminal) }
-        case .session:
-            return
-        }
-    }
-
     private func split(_ axis: SplitAxis) {
         do { try workspace.split(multiplexer.focusedPaneId, axis: axis) }
         catch { launchErrorTitle = "Could not split pane"; launchError = error.localizedDescription }
@@ -1231,13 +1366,14 @@ struct SessionsContentView: View {
 
     private func _handle(_ shortcut: SessionsShortcut) {
         switch shortcut {
+        case .newTerminal:
+            newShell(in: workspace)
         case .splitRight:
             split(.vertical)
         case .splitDown:
             split(.horizontal)
         case .close:
-            _destroySurface(in: multiplexer.focusedPane)
-            multiplexer.close(multiplexer.focusedPaneId)
+            workspace.closePane(multiplexer.focusedPaneId)
         case .undoClose:
             multiplexer.undoClose()
         case .zoom:
@@ -1287,12 +1423,15 @@ private struct WorkLayoutView<Content: View>: View {
                 let vertical = axis == .vertical && geometry.size.width >= 720
                 let extent = vertical ? geometry.size.width : geometry.size.height
                 let effectiveAxis: SplitAxis = vertical ? .vertical : .horizontal
+                let sizing = SplitSizing(extent: extent, firstMinimum: vertical ? 360 : 200,
+                                         secondMinimum: vertical ? 360 : 200)
+                let displayedRatio = sizing.constrain(ratio)
                 let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 stack {
                     WorkLayoutView(layout: first, registry: registry, content: content)
-                        .frame(width: vertical ? max(0, extent * ratio - 3) : nil,
-                               height: vertical ? nil : max(0, extent * ratio - 3))
-                    SplitDivider(axis: effectiveAxis, ratio: ratio, extent: extent, update: { value in
+                        .frame(width: vertical ? max(0, extent * displayedRatio - 3) : nil,
+                               height: vertical ? nil : max(0, extent * displayedRatio - 3))
+                    SplitDivider(axis: effectiveAxis, ratio: displayedRatio, sizing: sizing, update: { value in
                         if let firstKey = first.keys.first, let secondKey = second.keys.first {
                             registry.resize(between: firstKey, and: secondKey, ratio: value)
                         }
@@ -1395,30 +1534,26 @@ private struct MultiplexerNodeView: View {
         case .split(let axis, let first, let second, let ratio):
             return AnyView(
                 GeometryReader { geometry in
-                    if axis == .vertical {
-                        HStack(spacing: 0) {
-                            _child(first)
-                                .frame(width: max(120, geometry.size.width * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.width,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            _child(first)
-                                .frame(height: max(100, geometry.size.height * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.height,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
+                    let vertical = axis == .vertical
+                    let extent = vertical ? geometry.size.width : geometry.size.height
+                    let firstSize = first.minimumPaneSize
+                    let secondSize = second.minimumPaneSize
+                    let sizing = SplitSizing(extent: extent,
+                        firstMinimum: vertical ? firstSize.width : firstSize.height,
+                        secondMinimum: vertical ? secondSize.width : secondSize.height)
+                    let displayedRatio = sizing.constrain(ratio)
+                    let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
+                    let secondExtent = max(0, extent - firstExtent - sizing.divider)
+                    let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                    stack {
+                        _child(first)
+                            .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
+                            .clipped()
+                        SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
+                            update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
+                        _child(second)
+                            .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
+                            .clipped()
                     }
                 }
             )
@@ -1436,40 +1571,92 @@ private struct MultiplexerNodeView: View {
     }
 }
 
+/// Minimums follow the visible split tree; short windows shrink them together.
+extension LayoutNode {
+    var minimumPaneSize: CGSize {
+        switch self {
+        case .leaf: return CGSize(width: 240, height: 140)
+        case .split(let axis, let first, let second, _):
+            let a = first.minimumPaneSize, b = second.minimumPaneSize
+            if axis == .vertical {
+                return CGSize(width: a.width + b.width + 6, height: max(a.height, b.height))
+            } else {
+                return CGSize(width: max(a.width, b.width), height: a.height + b.height + 6)
+            }
+        }
+    }
+}
+
+struct SplitSizing {
+    let extent: CGFloat
+    let firstMinimum: CGFloat
+    let secondMinimum: CGFloat
+    var divider: CGFloat { min(6, max(0, extent)) }
+
+    func constrain(_ ratio: Double) -> Double {
+        guard extent > 0 else { return 0.5 }
+        let available = max(0, extent - divider)
+        let scale = min(1, available / max(1, firstMinimum + secondMinimum))
+        let lower = (firstMinimum * scale + divider / 2) / extent
+        let upper = 1 - (secondMinimum * scale + divider / 2) / extent
+        return min(max(ratio, lower), max(lower, upper))
+    }
+
+    func snapped(_ ratio: Double) -> Double {
+        let bounded = constrain(ratio)
+        for target in [1 - LayoutNode.goldenRatio, LayoutNode.goldenRatio] {
+            if abs(bounded - target) * extent <= 10, abs(constrain(target) - target) < 0.000001 {
+                return target
+            }
+        }
+        return bounded
+    }
+}
+
 private struct SplitDivider: View {
     let axis: SplitAxis
     let ratio: Double
-    let extent: CGFloat
+    let sizing: SplitSizing
     let update: (Double) -> Void
-
+    @Environment(\.palette) private var palette
     @State private var dragStart: Double?
+    @State private var hovering = false
 
     var body: some View {
         Rectangle()
-            .fill(Color.clear)
-            .frame(
-                width: axis == .vertical ? 6 : nil,
-                height: axis == .horizontal ? 6 : nil
-            )
+            .fill(hovering || dragStart != nil ? palette.borderActive : .clear)
+            .frame(width: axis == .vertical ? sizing.divider : nil,
+                   height: axis == .horizontal ? sizing.divider : nil)
             .contentShape(Rectangle())
+            .onHover { inside in
+                guard hovering != inside else { return }
+                hovering = inside
+                if inside { (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() }
+                else { NSCursor.pop() }
+            }
+            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
                         let start = dragStart ?? ratio
                         if dragStart == nil { dragStart = ratio }
-                        let delta = axis == .vertical
-                            ? value.translation.width
-                            : value.translation.height
-                        guard extent > 0 else { return }
-                        update(start + Double(delta / extent))
+                        let delta = axis == .vertical ? value.translation.width : value.translation.height
+                        guard sizing.extent > 0 else { return }
+                        update(sizing.snapped(start + Double(delta / sizing.extent)))
                     }
                     .onEnded { _ in dragStart = nil }
             )
+            .accessibilityLabel(axis == .vertical ? "Resize panes horizontally" : "Resize panes vertically")
+            .accessibilityValue("\(Int(ratio * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                update(sizing.constrain(ratio + (direction == .increment ? 0.02 : -0.02)))
+            }
     }
 }
 
 private struct SessionPaneView: View {
     @State private var shellError: String?
+    @State private var changingSession = false
     @Environment(WorkModel.self) private var model
     @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1480,6 +1667,7 @@ private struct SessionPaneView: View {
     let hover: PaneHover
     @State private var bellRinging = false
     @State private var terminalTitle: String?
+    @State private var copyConfirmation: String?
 
     private var hovering: Bool { hover.paneId == pane.id }
 
@@ -1519,7 +1707,7 @@ private struct SessionPaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
-        .alert("Could not open shell", isPresented: Binding(
+        .alert("Could not change pane", isPresented: Binding(
             get: { shellError != nil }, set: { if !$0 { shellError = nil } }
         )) {
             Button("OK") { shellError = nil }
@@ -1534,12 +1722,18 @@ private struct SessionPaneView: View {
                   update.terminal == _terminalIdentity else { return }
             terminalTitle = sessions.surfaces.title(for: update.terminal)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyCopyConfirmation)) { notification in
+            guard let terminal = _terminalIdentity,
+                  sessions.surfaces.ownsCopyConfirmation(notification, terminal: terminal) else { return }
+            copyConfirmation = notification.userInfo?["message"] as? String
+        }
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
         }
-        .onChange(of: _terminalIdentity) { _, _ in
+        .onChange(of: pane.incarnation) { _, _ in
             bellRinging = false
             terminalTitle = nil
+            copyConfirmation = nil
         }
     }
 
@@ -1551,11 +1745,22 @@ private struct SessionPaneView: View {
                 Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
             }
-            Label(programHeading.name, systemImage: programHeading.symbol)
-                .font(Typography.body(11)).fontWeight(.semibold)
-                .foregroundStyle(TerminalPalette.foreground)
-                .fixedSize()
-                .accessibilityIdentifier("pane-program-\(pane.id)")
+            Menu {
+                paneContentChoices
+            } label: {
+                Label(programHeading.name, systemImage: programHeading.symbol)
+                    .font(Typography.body(11)).fontWeight(.semibold)
+                    .foregroundStyle(TerminalPalette.foreground)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .disabled(changingSession)
+            .help("Choose this Session's agent or open a companion pane")
+            .accessibilityIdentifier("pane-program-\(pane.id)")
+            if let session = primarySession {
+                stripButton("arrow.clockwise", label: "Reset session", id: "pane-reset-session",
+                    help: "Start fresh with current Work context. Keeps history; discards unsent input.",
+                    disabled: changingSession) { changeSession(session, agent: nil) }
+            }
             Text(programHeading.context)
                 .font(Typography.code(11)).foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1).truncationMode(.middle)
@@ -1570,6 +1775,14 @@ private struct SessionPaneView: View {
                     .help(error).accessibilityLabel(error)
             }
             Spacer(minLength: 8)
+            if let copyConfirmation {
+                Text(copyConfirmation)
+                    .font(Typography.body(11))
+                    .foregroundStyle(TerminalPalette.foreground)
+                    .lineLimit(1)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("terminal-copy-confirmation")
+            }
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
@@ -1606,6 +1819,87 @@ private struct SessionPaneView: View {
     }
 
     @ViewBuilder
+    private var paneContentChoices: some View {
+        if let session = primarySession {
+            Section("Session agent") {
+                ForEach(["claude", "codex", "opencode"], id: \.self) { agent in
+                    Button {
+                        changeSession(session, agent: agent)
+                    } label: {
+                        Label(agent == "opencode" ? "OpenCode" : agent.capitalized,
+                              systemImage: session.record.provider == agent ? "checkmark" : "bubble.left")
+                    }
+                    .disabled(session.record.provider == agent)
+                    .help("Continue this Session with \(agent). Replaces the current process; unsent input is lost.")
+                }
+            }
+            Divider()
+        }
+        if let taskId = paneTaskId {
+            ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
+                Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
+                    let content = PaneContent.files(taskId: taskId, location: pane.content.location,
+                        execution: pane.executionLocation)
+                    do {
+                        let files = try workspace.files(for: content, task: model.task(id: taskId)?.task, query: sessions.query)
+                        files.page = page
+                        try workspace.selectContent(content, in: pane, containsSession: !paneSessions.isEmpty)
+                    } catch { shellError = error.localizedDescription }
+                }
+            }
+            Button("lf process", systemImage: "list.bullet.rectangle") {
+                selectContent(.flowLog(taskId: taskId, location: pane.content.location,
+                    execution: pane.executionLocation))
+            }
+        }
+        Button("Shell", systemImage: "terminal") {
+            selectContent(.shell(location: pane.content.location, execution: pane.executionLocation))
+        }
+    }
+
+    private func selectContent(_ content: PaneContent) {
+        do { try workspace.selectContent(content, in: pane, containsSession: !paneSessions.isEmpty) }
+        catch { shellError = error.localizedDescription }
+    }
+
+    private var primarySession: SessionItem? {
+        guard paneSessions.count == 1, let session = paneSessions.first,
+              session.record.taskPrimary || session.record.primaryScope != nil else { return nil }
+        return session
+    }
+
+    private var paneTaskId: String? {
+        switch pane.content {
+        case .files(let task, _, _), .flowLog(let task, _, _): return task
+        default:
+            if let work = primarySession?.record.work, work.kind == .task { return work.id }
+            return workspace.key.kind == .task ? workspace.key.id : nil
+        }
+    }
+
+    private func changeSession(_ session: SessionItem, agent: String?) {
+        changingSession = true
+        Task { @MainActor in
+            defer { changingSession = false }
+            do {
+                let record: SessionRecord
+                if let agent {
+                    record = try await sessions.switchProvider(session.id, to: agent)
+                } else {
+                    record = try await sessions.reset(session.id)
+                }
+                guard store.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
+                store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
+                    execution: pane.executionLocation))
+                workspace.presentation.selectedSessionId = record.id
+                if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
+                    model.navigation.selectedSessionId = record.id
+                }
+            } catch { shellError = error.localizedDescription }
+        }
+    }
+
+    @ViewBuilder
     private var paneActions: some View {
         Button("Split right (⌘D)") { split(.vertical) }
         Button("Split down (⌘⇧D)") { split(.horizontal) }
@@ -1624,12 +1918,7 @@ private struct SessionPaneView: View {
         catch { shellError = error.localizedDescription }
     }
 
-    private func closePane() {
-        if case .shell = pane.content {
-            if let terminal = pane.terminal { sessions.surfaces.release(terminal) }
-        }
-        store.close(pane.id)
-    }
+    private func closePane() { workspace.closePane(pane.id) }
 
     /// One strip glyph with a hit target larger than its symbol.
     private func stripButton(
@@ -1724,7 +2013,7 @@ private struct SessionPaneView: View {
             switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
             case .success(let files):
                 TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                    checkoutBase: task?.reference.workspace?.baseCommit)
+                    checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
                     .environment(\.colorScheme, .light)
                     .simultaneousGesture(TapGesture().onEnded { focusPane() })
             case .failure(let error):
@@ -1886,7 +2175,7 @@ private struct SessionPaneView: View {
            let terminal = pane.terminal {
             GhosttyTerminalView(
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
-                argv: surface.openArgv,
+                argv: item.launchArguments,
                 terminal: terminal,
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
@@ -1897,7 +2186,7 @@ private struct SessionPaneView: View {
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
-            .id(surface.id)
+            .id(item.launchId)
         } else {
             Text("Session location unavailable")
         }
@@ -1916,7 +2205,7 @@ private struct SessionPaneView: View {
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
         case .flowLog: "Flow processes"
-        case .files: "Files"
+        case .files(let taskId, _, _): workspace.browserPage(for: taskId).rawValue
         }
     }
 
@@ -1926,7 +2215,7 @@ private struct SessionPaneView: View {
         case .session: "Session"
         case .shell: "Shell"
         case .flowLog: "Flow processes"
-        case .files: "Files"
+        case .files(let taskId, _, _): workspace.browserPage(for: taskId).rawValue
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.record.provider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,
@@ -2028,6 +2317,7 @@ private struct PaneFocusTarget: NSViewRepresentable {
 }
 
 private enum SessionsShortcut {
+    case newTerminal
     case splitRight
     case splitDown
     case close
@@ -2097,6 +2387,9 @@ private struct SessionsShortcutMonitor: NSViewRepresentable {
             // Shift is the one modifier `charactersIgnoringModifiers` keeps, so
             // ⌘⇧D arrives as "D".
             let key = event.charactersIgnoringModifiers?.lowercased()
+            if modifiers == [.command], key == "t" {
+                return .newTerminal
+            }
             if modifiers == [.command], key == "d" {
                 return .splitRight
             }

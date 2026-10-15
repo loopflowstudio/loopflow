@@ -53,37 +53,19 @@ enum WorkTone {
         }
     }
 
-    /// Opaque fill so a tone keeps its hue over a loop tint.
-    func fill(in palette: LoopflowPalette) -> Color {
+    private func style(in palette: LoopflowPalette) -> ThemeTone {
         switch self {
-        case .running: Color(hex: palette.isDark ? 0x2C3E57 : 0xE7EFFA)
-        case .done: Color(hex: palette.isDark ? 0x2D4735 : 0xD6EBD9)
-        case .waiting: Color(hex: palette.isDark ? 0x544321 : 0xF8E3AE)
-        case .failure: Color(hex: palette.isDark ? 0x5A2E2B : 0xFBE6E3)
-        case .stopped: Color(hex: palette.isDark ? 0x3E434A : 0xEEEAE5)
-        case .neutral: .clear
+        case .running: palette.workingTone
+        case .done: palette.successTone
+        case .waiting: palette.waitingTone
+        case .failure: palette.failureTone
+        case .stopped, .neutral: palette.stoppedTone
         }
     }
+    func fill(in palette: LoopflowPalette) -> Color { self == .neutral ? .clear : style(in: palette).fill }
+    func stroke(in palette: LoopflowPalette) -> Color { style(in: palette).stroke }
+    func text(in palette: LoopflowPalette) -> Color { style(in: palette).text }
 
-    func stroke(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .running, .failure, .stopped: ink(in: palette)
-        case .done: Color(hex: palette.isDark ? 0x5E8E6A : 0x9CC4A3)
-        case .waiting: Color(hex: palette.isDark ? 0x9A7A36 : 0xDDB763)
-        case .neutral: Color(hex: palette.isDark ? 0x56606B : 0xD6CCC0)
-        }
-    }
-
-    /// Text on `fill`.
-    func text(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .running: Color(hex: palette.isDark ? 0xC9DCF5 : 0x1C4480)
-        case .done: Color(hex: palette.isDark ? 0xC4E6CC : 0x28523A)
-        case .waiting: Color(hex: palette.isDark ? 0xF4DDA6 : 0x6F4C0C)
-        case .failure: Color(hex: palette.isDark ? 0xF8CBC5 : 0x8A2A22)
-        case .stopped, .neutral: Color(hex: palette.isDark ? 0xD2CBC3 : 0x5F5752)
-        }
-    }
 }
 
 extension TaskExecutionState {

@@ -55,7 +55,7 @@ struct WaveLensTests {
     func unknownIsLit() {
         #expect(WaveLensColor.unknown.isLit)
         #expect(!WaveLensColor.black.isLit)
-        #expect(WaveLensColor.unknown.glow != WaveLensColor.black.glow)
+        #expect(WaveLensColor.unknown.ink(in: .light) != WaveLensColor.black.ink(in: .light))
     }
 
     // MARK: - Task row (shared condition, verbatim)

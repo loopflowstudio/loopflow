@@ -244,11 +244,11 @@ struct GhosttyShellBlockTests {
         func style(exit: Int?, selected: Bool = false, hovered: Bool = false) -> GhosttyCommandBlockStyle {
             GhosttyCommandBlockStyle(
                 block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
-                hovered: hovered
+                hovered: hovered, palette: .light
             )
         }
         func isRed(_ color: NSColor) -> Bool {
-            color.alphaComponent > 0 && color.redComponent > 0.8 && color.greenComponent < 0.4
+            color.alphaComponent > 0 && color.redComponent > color.greenComponent * 1.5
         }
 
         #expect(style(exit: 0).fill.alphaComponent == 0)
@@ -264,33 +264,19 @@ struct GhosttyShellBlockTests {
         #expect(style(exit: 0, selected: true).accent == style(exit: 1, selected: true).accent)
     }
 
-    @Test("dim text stays readable on every block fill")
-    @MainActor
+    @Test("default text stays readable on every block fill")
     func commandBlockFillContrast() throws {
-        func rgb(_ hex: UInt) -> [CGFloat] {
-            [CGFloat((hex >> 16) & 0xFF), CGFloat((hex >> 8) & 0xFF), CGFloat(hex & 0xFF)].map { $0 / 255 }
-        }
-        func luminance(_ rgb: [CGFloat]) -> CGFloat {
-            let linear = rgb.map { $0 <= 0.03928 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
-            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-        }
-        // Palette 8 is the dimmest color a shell prints text in.
-        let config = GhosttyManager.loopflowConfig
-        let entry = try #require(config.range(of: "palette = 8=#"))
-        let dim = rgb(try #require(UInt(config[entry.upperBound...].prefix(6), radix: 16)))
-        let background = rgb(TerminalPalette.backgroundHex)
-
-        for exit in [0, 1] {
-            for (selected, hovered) in [(false, true), (true, false), (false, false)] {
-                let fill = try #require(GhosttyCommandBlockStyle(
-                    block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
-                    hovered: hovered
-                ).fill.usingColorSpace(.sRGB))
-                let alpha = fill.alphaComponent
-                let shown = zip([fill.redComponent, fill.greenComponent, fill.blueComponent], background)
-                    .map { $0 * alpha + $1 * (1 - alpha) }
-                let ratio = (luminance(dim) + 0.05) / (luminance(shown) + 0.05)
-                #expect(ratio >= 3, "exit \(exit) selected \(selected) hovered \(hovered): \(ratio)")
+        for theme in ThemeDefinition.builtins {
+            for exit in [0, 1] {
+                for (selected, hovered) in [(false, true), (true, false), (false, false)] {
+                    let fill = try #require(GhosttyCommandBlockStyle(
+                        block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
+                        hovered: hovered, palette: theme.palette
+                    ).fill.usingColorSpace(.sRGB))
+                    let rgb = ThemeRGB(UInt32(fill.redComponent * 255) << 16 | UInt32(fill.greenComponent * 255) << 8 | UInt32(fill.blueComponent * 255))
+                    let shown = theme.terminal.background.mixed(with: rgb, amount: fill.alphaComponent)
+                    #expect(theme.terminal.foreground.contrast(shown) >= 4.5)
+                }
             }
         }
     }

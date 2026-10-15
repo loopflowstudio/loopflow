@@ -8,6 +8,8 @@ struct TaskAutomationView: View {
     @State private var error: String?
     @State private var busy = false
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Delivery checks").font(.headline)
@@ -46,7 +48,7 @@ struct TaskAutomationView: View {
             } else if error == nil {
                 ProgressView()
             }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
+            if let error { Text(error).foregroundStyle(palette.failure).font(.caption) }
             Button("Refresh") { perform {} }
         }
         .padding(20)

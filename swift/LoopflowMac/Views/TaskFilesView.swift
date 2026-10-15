@@ -326,7 +326,7 @@ private struct TaskPatchView: NSViewRepresentable {
             .foregroundColor: NSColor(palette.text),
         ])
         for line in lines {
-            let color = (line.added ? NSColor.systemGreen : NSColor.systemRed).withAlphaComponent(0.10)
+            let color = NSColor(line.added ? palette.successTone.fill : palette.failureTone.fill)
             attributed.addAttribute(.backgroundColor, value: color, range: line.range)
         }
         text.textStorage?.setAttributedString(attributed)

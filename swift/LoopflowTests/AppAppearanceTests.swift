@@ -13,8 +13,11 @@ struct AppAppearanceTests {
     func paletteFollowsWindow(mode: String, system: ColorScheme) async throws {
         _ = NSApplication.shared
         var observed: (ColorScheme, Color)?
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let appearance = AppearanceStore(defaults: defaults, systemDark: system == .dark)
+        appearance.apply(mode)
         let view = AppearanceProbe { observed = ($0, $1) }
-            .modifier(AppAppearance(mode: mode))
+            .modifier(AppAppearance(appearance: appearance))
             .environment(\.colorScheme, system)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 150),
                               styleMask: [.titled], backing: .buffered, defer: false)

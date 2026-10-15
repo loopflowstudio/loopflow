@@ -608,8 +608,7 @@ private extension String {
 enum FlowPalette {
     /// Loop tints alternate in authored order.
     static func loop(_ level: Int, in palette: LoopflowPalette) -> Color {
-        let colors: [UInt] = palette.isDark ? [0x86B0EA, 0xB4CDEF] : [0x3A74C4, 0x24508F]
-        return Color(hex: colors[level % colors.count])
+        level.isMultiple(of: 2) ? palette.working : palette.workingTone.text
     }
 
     static func tone(_ state: FlowNodeState) -> WorkTone {

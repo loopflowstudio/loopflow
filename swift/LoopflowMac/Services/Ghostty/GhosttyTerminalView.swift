@@ -338,30 +338,11 @@ struct GhosttyCommandBlockStyle {
     let fill: NSColor
     let accent: NSColor
 
-    init(block: GhosttyCommandBlockLayout, hovered: Bool) {
-        // Red means failed and nothing else. Selection and hover are the
-        // terminal's cream, so a selected failure still reads as both.
-        let cream = NSColor(red: 0xF5 / 255, green: 0xF1 / 255, blue: 0xEA / 255, alpha: 1)
-        let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
-        if block.failed {
-            fill = red.withAlphaComponent(0.14)
-        } else if block.selected {
-            fill = cream.withAlphaComponent(0.06)
-        } else if hovered {
-            fill = cream.withAlphaComponent(0.03)
-        } else {
-            fill = .clear
-        }
-        if block.selected {
-            accent = cream.withAlphaComponent(0.9)
-        } else if block.failed {
-            accent = red.withAlphaComponent(hovered ? 1 : 0.75)
-        } else if hovered {
-            accent = cream.withAlphaComponent(0.3)
-        } else {
-            accent = .clear
-        }
+    init(block: GhosttyCommandBlockLayout, hovered: Bool, palette: LoopflowPalette) {
+        fill = NSColor(block.failed ? palette.terminalFailure : block.selected ? palette.terminalSelection : hovered ? palette.terminalHover : .clear)
+        accent = NSColor(block.selected ? palette.selectionEdge : block.failed ? palette.failure : hovered ? palette.textSecondary : .clear)
     }
+
 }
 
 /// A right-click on the selected block opens the menu for that block. Ghostty
@@ -422,6 +403,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
+    private var theme = GhosttyManager.shared.theme
+    private nonisolated(unsafe) var themeObserver: NSObjectProtocol?
     private var _markedText = NSMutableAttributedString()
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
@@ -451,6 +434,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             programStatus.associate(sessionId: id, terminalId: terminalMarker, provider: nil)
         }
         setupView()
+        themeObserver = NotificationCenter.default.addObserver(forName: .loopflowThemeChanged, object: nil, queue: .main) { [weak self] notification in
+            guard let theme = notification.object as? ThemeDefinition else { return }
+            MainActor.assumeIsolated { self?.applyTheme(theme) }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -460,10 +447,19 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = TerminalPalette.nsBackground.cgColor
+        layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
         registerForDraggedTypes(ghosttyDropTypes)
+    }
+
+    private func applyTheme(_ theme: ThemeDefinition) {
+        self.theme = theme
+        layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
+        dropHighlight?.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
+        dropHighlight?.layer?.backgroundColor = NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
+        renderCommandBlocks()
+        needsDisplay = true
     }
 
     func createSurface(manager: GhosttyManager) {
@@ -732,7 +728,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             )
             let style = GhosttyCommandBlockStyle(
                 block: block,
-                hovered: hoveredRow.map(block.contains) ?? false
+                hovered: hoveredRow.map(block.contains) ?? false, palette: theme.palette
             )
 
             let surfaceLayer = CALayer()
@@ -742,7 +738,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             // A hairline above each block separates it from the one before.
             let separator = CALayer()
             separator.frame = CGRect(x: 0, y: frame.height - 1, width: frame.width, height: 1)
-            separator.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+            separator.backgroundColor = NSColor(theme.palette.border).cgColor
             surfaceLayer.addSublayer(separator)
 
             // The accent bar sits in the left gutter, clear of the text.
@@ -767,7 +763,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             textLayer.string = text
             textLayer.font = font
             textLayer.fontSize = font.pointSize
-            textLayer.foregroundColor = GhosttyBlockHeader.color.cgColor
+            textLayer.foregroundColor = NSColor(theme.palette.textSecondary).cgColor
             textLayer.truncationMode = .start
             textLayer.contentsScale = scale
             return textLayer
@@ -1284,9 +1280,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             highlight.wantsLayer = true
             highlight.layer?.borderWidth = 2
             highlight.layer?.cornerRadius = 6
-            highlight.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            highlight.layer?.borderColor = NSColor(theme.palette.keyboardFocus).cgColor
             highlight.layer?.backgroundColor =
-                NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+                NSColor(theme.palette.keyboardFocus).withAlphaComponent(0.08).cgColor
             highlight.autoresizingMask = [.width, .height]
             addSubview(highlight)
             dropHighlight = highlight
@@ -1378,6 +1374,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     deinit {
+        if let themeObserver { NotificationCenter.default.removeObserver(themeObserver) }
         MainActor.assumeIsolated {
             destroySurface()
         }
@@ -1476,6 +1473,8 @@ struct GhosttyTerminalView: View {
         self.manager = manager
     }
 
+    @Environment(\.theme) private var theme
+
     var body: some View {
         VStack {
             Image(systemName: "terminal")
@@ -1488,7 +1487,7 @@ struct GhosttyTerminalView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TerminalPalette.background)
+        .background(theme.terminal.background.color)
         .onAppear { onSurfaceFailed("Embedded terminal not available in this build.") }
     }
 }
@@ -1511,7 +1510,6 @@ enum GhosttyBlockHeader {
 
     /// Smaller than the terminal's 13pt body.
     static let fontSize: CGFloat = 11
-    static let color = NSColor(TerminalPalette.dim)
 
     /// The header a terminal row holds, or `nil` for any other row.
     static func text(inRow row: String) -> String? {
@@ -1592,7 +1590,7 @@ enum LoopflowZshBootstrap {
             # nested commands without changing the user's shell configuration.
             if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
-            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
+            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{5}\u{276F}%f '
             # The command is bold; zsh ends the highlight before output starts.
             zle_highlight=(${zle_highlight:#default:*} default:bold)
         }
@@ -1603,7 +1601,6 @@ enum LoopflowZshBootstrap {
 
     """
 
-    private static let accent = TerminalPalette.css(TerminalPalette.accentHex)
 
     /// Writes the bootstrap and returns its directory. Rewritten per shell:
     /// the system may clear temporary files while the app stays open, and a

@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Rex Polish for Loopflow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a single reading column; each technique is a before/after pair of
+   schematic Loopflow windows, a diff of what changed, then likes vs tradeoffs. */
+:root {
+  --bg: #FAF8F5;
+  --surface: #FFFDFB;
+  --muted: #F3EEE7;
+  --border: #E3DDD5;
+  --fg: #1A1A1A;
+  --fg2: #5E5852;
+  --accent: #722F37;
+  --accent-hover: #8B3D47;
+  --plus: #2D6A4F;
+  --plus-bg: #E6F0EA;
+  --minus: #9B2D1F;
+  --minus-bg: #F6E6E2;
+  --font-serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Lato', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #2B3036; --surface: #343B44; --muted: #3C4550; --border: #46505B;
+    --fg: #F5F1EA; --fg2: #C8C1B8; --accent: #E3A3AC; --accent-hover: #F0BCC3;
+    --plus: #8FD1A8; --plus-bg: #2F4A3E; --minus: #F2A493; --minus-bg: #4D3532;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #2B3036; --surface: #343B44; --muted: #3C4550; --border: #46505B;
+  --fg: #F5F1EA; --fg2: #C8C1B8; --accent: #E3A3AC; --accent-hover: #F0BCC3;
+  --plus: #8FD1A8; --plus-bg: #2F4A3E; --minus: #F2A493; --minus-bg: #4D3532;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-sans); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 48px 72px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover, a:focus-visible { color: var(--accent-hover); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+h1, h2, h3 { text-wrap: balance; }
+
+/* ---------- Intro ---------- */
+.intro { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg2); font-weight: 700; }
+h1 { font-family: var(--font-serif); font-weight: 600; font-size: clamp(40px, 7vw, 64px); line-height: 1.02; margin: 0; color: var(--accent); }
+.lede { font-size: 18px; margin: 0; max-width: 65ch; }
+blockquote { margin: 0; padding: 4px 0 4px 18px; border-left: 2px solid var(--border); font-family: var(--font-serif); font-style: italic; font-size: 22px; line-height: 1.35; color: var(--fg); }
+blockquote cite { display: block; margin-top: 6px; font-family: var(--font-sans); font-style: normal; font-size: 13px; color: var(--fg2); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 14px; color: var(--fg2); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.swatch { width: 18px; height: 12px; border-radius: 3px; border: 1.5px dashed; }
+.swatch.p { border-color: var(--plus); }
+.swatch.m { border-color: var(--minus); }
+.fine { font-size: 13px; color: var(--fg2); margin: 0; max-width: 70ch; }
+.toc { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 24px; padding: 0; margin: 4px 0 0; list-style: none; counter-reset: toc; }
+.toc li { counter-increment: toc; font-size: 15px; }
+.toc li::before { content: counter(toc); font-family: var(--font-mono); font-size: 12px; color: var(--fg2); display: inline-block; width: 22px; }
+
+/* ---------- Sections ---------- */
+section { display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 24px; }
+.sec-head { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; align-items: baseline; border-top: 1px solid var(--border); padding-top: 22px; }
+.num { font-family: var(--font-mono); font-size: 13px; color: var(--fg2); }
+h2 { font-family: var(--font-serif); font-weight: 600; font-size: clamp(30px, 4.4vw, 40px); line-height: 1.1; margin: 0; color: var(--fg); }
+.rex { grid-column: 2; margin: 0; color: var(--fg2); font-size: 15px; max-width: 72ch; }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.compare figure { margin: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.compare figcaption { font-family: var(--font-mono); font-size: 12px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.compare figcaption.m { color: var(--minus); }
+.compare figcaption.p { color: var(--plus); }
+.compare figcaption b { font-weight: 600; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; }
+.compare figcaption.m b { background: var(--minus-bg); }
+.compare figcaption.p b { background: var(--plus-bg); }
+
+.diff { margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.7; padding: 8px 0; }
+.diff div { padding: 0 14px; white-space: pre-wrap; }
+.diff .dm { background: var(--minus-bg); color: var(--minus); }
+.diff .dp { background: var(--plus-bg); color: var(--plus); }
+.diff .dc { color: var(--fg2); }
+
+.notes { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.notes > div { min-width: 0; }
+.notes h3 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin: 0 0 8px; color: var(--fg2); }
+.notes p { margin: 0; max-width: 65ch; }
+.notes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.notes code { font-family: var(--font-mono); font-size: .86em; background: var(--muted); padding: 1px 5px; border-radius: 4px; }
+
+@media (max-width: 760px) {
+  .compare, .notes { grid-template-columns: 1fr; }
+  .rex { grid-column: 1 / -1; }
+}
+
+/* ---------- Mock windows ----------
+   Schematic Loopflow Desktop. Every mock carries its own fixed palette
+   (the app's light chrome and charcoal terminal), so it reads the same on
+   either page theme. Themed variants only redefine these variables. */
+.mock {
+  --m-ground: #E9E3DA;
+  --m-chrome: #FAF8F5;
+  --m-side: #F3EEE7;
+  --m-line: #E3DDD5;
+  --m-ink: #1A1A1A;
+  --m-ink2: #6B6560;
+  --m-sel: #E8DFD4;
+  --m-seledge: #722F37;
+  --m-term: #24211F;
+  --m-termfg: #EDE7DF;
+  --m-dim: #A39B93;
+  --m-divider: rgba(240,235,228,.14);
+  --m-rose: #D9959D;
+  --m-work: #2F6FCC;
+  --m-wait: #A8741C;
+  --m-fail: #B4443A;
+  --m-ok: #2D6A4F;
+  --m-work-t: #6FA3F0;
+  --m-wait-t: #E2B45C;
+  --m-ok-t: #7CC79A;
+  --m-add: #2F8F5B;
+  --m-del: #C0392B;
+  border-radius: 10px; overflow: hidden; background: var(--m-chrome); color: var(--m-ink);
+  font-family: var(--font-sans); font-size: 10px; line-height: 1.35;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 8px 24px rgba(40,30,20,.12);
+  border: 1px solid rgba(0,0,0,.08);
+}
+.tb { height: 24px; display: flex; align-items: center; gap: 5px; padding: 0 9px; background: var(--m-chrome); border-bottom: 1px solid var(--m-line); }
+.tb i { width: 8px; height: 8px; border-radius: 50%; background: #E0544B; }
+.tb i:nth-child(2) { background: #E2B33C; }
+.tb i:nth-child(3) { background: #5DB549; }
+.tb .tt { margin-left: 8px; color: var(--m-ink2); font-size: 9.5px; }
+.mb { display: grid; grid-template-columns: 36% 1fr; height: 214px; }
+.mb.nos { grid-template-columns: 1fr; }
+.side { background: var(--m-side); border-right: 1px solid var(--m-line); padding: 7px 6px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
+.repo { font-weight: 700; font-size: 10.5px; padding: 2px 5px 4px; color: var(--m-seledge); }
+.wave { font-size: 8px; letter-spacing: .08em; text-transform: uppercase; color: var(--m-ink2); padding: 5px 5px 1px; font-weight: 700; }
+.row { padding: 4px 5px; border-radius: 4px; display: grid; grid-template-columns: auto 1fr; column-gap: 5px; align-items: center; min-width: 0; }
+.row > .rt { grid-column: 1 / -1; min-width: 0; }
+.row.ic > .rt { grid-column: 2; }
+.row.sel { background: var(--m-sel); box-shadow: inset 2px 0 0 var(--m-seledge); }
+.t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+.mt { font-size: 8.5px; color: var(--m-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt .w { color: var(--m-work); font-weight: 700; }
+.mt .a { color: var(--m-wait); font-weight: 700; }
+.mt .f { color: var(--m-fail); font-weight: 700; }
+.mt .k { color: var(--m-ok); font-weight: 700; }
+.mn { display: flex; flex-direction: column; min-width: 0; background: var(--m-chrome); }
+.crumb { height: 20px; display: flex; align-items: center; gap: 5px; padding: 0 8px; font-size: 9px; color: var(--m-ink2); border-bottom: 1px solid var(--m-line); white-space: nowrap; overflow: hidden; }
+.crumb b { color: var(--m-ink); font-weight: 700; }
+.wfh { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px; font-size: 9px; border-bottom: 1px solid var(--m-line); white-space: nowrap; overflow: hidden; }
+.wfh .pos { color: var(--m-ink2); }
+.wfh .pos b { color: var(--m-ink); }
+.wfh .btn { margin-left: auto; display: flex; gap: 4px; }
+.wfh .btn span { border: 1px solid var(--m-line); border-radius: 4px; padding: 0 5px; background: #fff; color: var(--m-ink); }
+.panes { flex: 1; display: grid; grid-template-columns: 1fr 1fr; background: var(--m-term); min-height: 0; }
+.panes.one { grid-template-columns: 1fr; }
+.panes.tri { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.panes.tri .pane:first-child { grid-row: 1 / 3; }
+.pane { background: var(--m-term); color: var(--m-termfg); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.panes:not(.islands) .pane + .pane { border-left: 1px solid var(--m-divider); }
+.panes.tri:not(.islands) .pane:nth-child(3) { border-top: 1px solid var(--m-divider); }
+.strip { height: 16px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 6px; font-family: var(--font-mono); font-size: 8px; color: var(--m-dim); border-bottom: 1px solid var(--m-divider); white-space: nowrap; overflow: hidden; }
+.dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.dot.w { background: var(--m-work-t); } .dot.a { background: var(--m-wait-t); } .dot.k { background: var(--m-ok-t); }
+.tx { padding: 4px 6px; font-family: var(--font-mono); font-size: 7.5px; line-height: 1.5; color: var(--m-termfg); overflow: hidden; }
+.tx .d { color: var(--m-dim); } .tx .r { color: var(--m-rose); } .tx .g { color: #8CC79B; } .tx .x { color: #E08A7E; } .tx .y { color: #E2C26B; } .tx .b { color: #86A8E0; }
+
+/* diff highlight inside mocks */
+.add { outline: 1.5px dashed var(--m-add); outline-offset: -1.5px; }
+.del { outline: 1.5px dashed var(--m-del); outline-offset: -1.5px; }
+.add-o { outline: 1.5px dashed var(--m-add); outline-offset: 1px; }
+
+/* 1 · islands */
+.panes.islands { gap: 5px; padding: 5px; background: linear-gradient(135deg, #E9D9DC 0%, #E7E1D8 45%, #D3E7EA 100%); }
+.panes.islands .pane { border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.panes.islands .pane.focus { box-shadow: 0 0 0 1px rgba(255,255,255,.55), 0 4px 10px rgba(0,0,0,.28); }
+.panes.islands .strip { border-bottom: 0; }
+
+/* 2 · themes */
+.mock.tn {
+  --m-chrome: #1F2335; --m-side: #1A1B26; --m-line: #2A2E42; --m-ink: #C0CAF5; --m-ink2: #7A82A8;
+  --m-sel: #283457; --m-seledge: #7AA2F7; --m-term: #1A1B26; --m-termfg: #C0CAF5; --m-dim: #6B7394;
+  --m-divider: rgba(122,162,247,.16); --m-rose: #BB9AF7;
+  --m-work: #7AA2F7; --m-wait: #E0AF68; --m-ok: #9ECE6A; --m-fail: #F7768E;
+}
+.mock.tn .wfh .btn span { background: #24283B; color: var(--m-ink); }
+.mock.tn .tb i { opacity: .9; }
+.themes { display: flex; gap: 4px; margin-left: auto; }
+.themes span { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,.25); }
+.themes span.on { box-shadow: 0 0 0 1.5px var(--m-seledge); }
+
+/* 3 · deck icons */
+.deck { position: relative; width: 15px; height: 15px; flex: none; }
+.deck i { position: absolute; width: 11px; height: 11px; border-radius: 3px; border: 1px solid rgba(0,0,0,.18); }
+.deck i:nth-child(1) { left: 4px; top: 0; }
+.deck i:nth-child(2) { left: 2px; top: 2px; }
+.deck i:nth-child(3) { left: 0; top: 4px; }
+.c-claude { background: #D97757; } .c-git { background: #4E9A5C; } .c-sh { background: #4A4542; } .c-node { background: #6E8F3C; } .c-codex { background: #2B2B2B; } .c-cargo { background: #C2703A; }
+.deck.one i:nth-child(1) { left: 2px; top: 2px; }
+
+/* 4 · headers */
+.hdr { height: 18px; flex: none; display: flex; align-items: center; gap: 5px; padding: 0 6px; font-size: 8.5px; color: var(--m-termfg); border-bottom: 1px solid var(--m-divider); white-space: nowrap; overflow: hidden; }
+.hdr .ico { width: 10px; height: 10px; border-radius: 2.5px; flex: none; }
+.hdr b { font-weight: 700; }
+.hdr .pth { color: var(--m-dim); overflow: hidden; text-overflow: ellipsis; }
+.hdr .st { margin-left: auto; color: var(--m-wait-t); font-size: 8px; flex: none; }
+.hdr .st.w { color: var(--m-work-t); }
+
+/* 5 · pill tabs */
+.pills { display: flex; gap: 4px; margin-left: 8px; min-width: 0; overflow: hidden; }
+.pill { display: flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-radius: 999px; font-size: 9px; color: var(--m-ink2); white-space: nowrap; }
+.pill.on { background: #fff; color: var(--m-ink); box-shadow: 0 0 0 1px var(--m-line), 0 1px 2px rgba(0,0,0,.08); }
+.pill .dot { width: 5px; height: 5px; }
+.mode { margin-left: auto; font-size: 8.5px; color: var(--m-ink2); border: 1px solid var(--m-line); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.mach { font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--m-ink2); padding: 5px 5px 1px; font-weight: 700; display: flex; gap: 4px; align-items: center; }
+.mach::before { content: ""; width: 9px; height: 6px; border: 1px solid var(--m-ink2); border-radius: 1.5px; }
+
+/* 6 · activity */
+.eye { margin-left: auto; font-size: 8.5px; padding: 1px 6px; border-radius: 4px; color: var(--m-ink2); border: 1px solid var(--m-line); }
+.eye.on { background: var(--m-seledge); color: #fff; border-color: var(--m-seledge); }
+.shead { display: flex; align-items: center; padding: 0 5px 4px; }
+.act { padding: 4px 5px; border-radius: 4px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.act .l1 { display: flex; gap: 5px; align-items: center; font-size: 9.5px; min-width: 0; }
+.act .l1 .t { flex: 1; }
+.act .age { color: var(--m-ink2); font-size: 8px; flex: none; }
+.act .why { font-size: 8.5px; color: var(--m-ink2); padding-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.act.need { background: #F6EBD8; }
+.grp { font-size: 8px; letter-spacing: .08em; text-transform: uppercase; color: var(--m-ink2); padding: 5px 5px 1px; font-weight: 700; }
+.histhint { margin-top: auto; font-size: 8px; color: var(--m-ink2); padding: 4px 5px; border-top: 1px solid var(--m-line); }
+
+/* 7 · peek */
+.peek { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 7px; background: #2E2A27; }
+.thumb { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.thumb .tw { height: 44px; border-radius: 5px; background: var(--m-term); display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+.thumb .tw.one { grid-template-columns: 1fr; }
+.thumb .tw div { background: repeating-linear-gradient(180deg, rgba(237,231,223,.32) 0 1px, transparent 1px 4px); border-radius: 2px; }
+.thumb .tw div.short { background: repeating-linear-gradient(180deg, rgba(237,231,223,.32) 0 1px, transparent 1px 4px) top / 100% 30% no-repeat; }
+.thumb .tw div.busy { background: repeating-linear-gradient(180deg, rgba(134,168,224,.5) 0 1px, transparent 1px 3px); }
+.thumb .cap { font-size: 8px; color: #D9D2C9; display: flex; gap: 4px; align-items: center; white-space: nowrap; overflow: hidden; }
+.pushed { flex: 1; display: flex; flex-direction: column; min-height: 0; transform: translateY(6px); opacity: .55; }
+.hint { font-size: 8px; color: #B9B1A8; text-align: center; padding: 2px 0 0; background: #2E2A27; }
+
+/* 8 · touches */
+.tiles { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 7px; background: var(--m-ground); height: 238px; }
+.tile { border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.tile .lab { font-size: 8px; letter-spacing: .06em; text-transform: uppercase; color: var(--m-ink2); padding: 0 2px 3px; font-weight: 700; }
+.tile .scr { flex: 1; border-radius: 5px; font-family: var(--font-mono); font-size: 8px; line-height: 1.55; padding: 5px 7px; position: relative; overflow: hidden; }
+.scr.dark { background: var(--m-term); color: var(--m-termfg); }
+.scr.light { background: #FBFAF7; color: #2A2622; border: 1px solid var(--m-line); }
+.selx { background: rgba(217,149,157,.35); }
+.flash { background: rgba(217,149,157,.35); box-shadow: 0 0 0 2px rgba(255,214,170,.55), 0 0 12px rgba(255,200,150,.6); border-radius: 2px; }
+.toast { position: absolute; right: 6px; top: 5px; font-family: var(--font-sans); font-size: 8px; background: rgba(255,255,255,.12); color: var(--m-termfg); padding: 1px 6px; border-radius: 999px; }
+.lowy { color: #F2E04A; } .lowc { color: #9EE8E8; }
+.fixy { color: #8A6A00; } .fixc { color: #1F7A86; }
+.find { position: absolute; right: 7px; top: 4px; font-family: var(--font-sans); font-size: 8px; background: #3A3532; color: var(--m-termfg); border-radius: 5px; padding: 2px 6px; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.find.moved { top: auto; bottom: 4px; }
+.hit { background: rgba(226,180,92,.55); color: #fff; border-radius: 1px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .flash { animation: glow 2.4s ease-in-out infinite; }
+  @keyframes glow { 0%, 60%, 100% { box-shadow: 0 0 0 2px rgba(255,214,170,.55), 0 0 12px rgba(255,200,150,.6); } 80% { box-shadow: 0 0 0 0 rgba(255,214,170,0), 0 0 0 rgba(255,200,150,0); } }
+}
+</style>
+
+<div class="wrap">
+
+<header class="intro">
+  <div class="eyebrow">Design study · LOO-462 · October 15, 2026</div>
+  <h1>Rex Polish for Loopflow</h1>
+  <p class="lede">Superlogical's Rex has a look other terminal apps are copying. This guide takes the eight elements behind that look and sketches each one on Loopflow Desktop as it stands today, with what people would likely enjoy and what it would cost.</p>
+  <blockquote>“Pretty easy to demonstrate causality since the style didn't exist before (the combination of all the elements, not any one thing individually).”
+    <cite>Mitchell Hashimoto, <a href="https://x.com/mitchellh/status/2110125009922662824">October 13, 2026</a></cite></blockquote>
+  <div class="legend">
+    <span><i class="swatch m"></i>Removed or replaced in the “after” design</span>
+    <span><i class="swatch p"></i>Added by the technique</span>
+  </div>
+  <p class="fine">The “today” windows are schematic, not screenshots. They are drawn from Desktop source at <code>52ee931af5</code>: the 320pt Repo → Wave → Task sidebar (<code>WorkNavigator</code>, <code>TaskRowMetadata</code>), the breadcrumb and Workflow header, and flat charcoal panes with a 24pt monospace strip (<code>SessionsView</code>, <code>TerminalPalette</code>). Task names and numbers are illustrative.</p>
+  <ol class="toc">
+    <li><a href="#islands">Islands</a></li>
+    <li><a href="#themes">Whole-app theming</a></li>
+    <li><a href="#deck">Deck icons</a></li>
+    <li><a href="#headers">Program-aware pane headers</a></li>
+    <li><a href="#tabs">Pill tabs and an operator sidebar</a></li>
+    <li><a href="#activity">Activity Mode</a></li>
+    <li><a href="#peek">Tab peek</a></li>
+    <li><a href="#touches">Small touches</a></li>
+  </ol>
+</header>
+
+<!-- ============ 1 ISLANDS ============ -->
+<section id="islands">
+  <div class="sec-head">
+    <span class="num">1</span><h2>Islands</h2>
+    <p class="rex">In Rex, every terminal is a rounded card floating over the window's wallpaper or gradient. A compact mode switches back to single-pixel borders. <a href="https://x.com/almonk/status/2097439320076403125">Alasdair Monk, Sep 8</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> fix slow Workflow load<br><span class="d">Read work_watch.rs</span><br><span class="d">Update WorkModel.swift</span><br><span class="g">+18</span> <span class="x">−4</span></div></div>
+              <div class="pane del"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift<br><span class="g">M</span> work_watch.rs<br><span class="d">2 files staged</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With islands</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes islands add">
+              <div class="pane focus"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> fix slow Workflow load<br><span class="d">Read work_watch.rs</span><br><span class="d">Update WorkModel.swift</span><br><span class="g">+18</span> <span class="x">−4</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift<br><span class="g">M</span> work_watch.rs<br><span class="d">2 files staged</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ SessionsView · WorkspacePanesView @@</div>
+    <div class="dm">- panes share one charcoal plane, split by a 1pt line at 12% opacity</div>
+    <div class="dp">+ each pane is a card with a ~10pt radius and a 6pt gap to its neighbours</div>
+    <div class="dp">+ the window ground (cream, or a soft wine-to-cyan wash) shows between cards</div>
+    <div class="dp">+ the focused card is lifted with a shadow; the others stay flat</div>
+    <div class="dp">+ a Compact setting keeps today's 1pt dividers</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>Panes read as separate objects, so a Task with an agent, lazygit and a dev server stops looking like one wall of text. Focus shows through elevation instead of a coloured border. It is the single change that most makes Rex look like a Mac app rather than a tmux skin, which is why copies like GoRex start here.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Every gap and corner costs terminal columns, roughly one or two per split at 13pt.</li>
+      <li>It reverses a deliberate choice. <code>TerminalPalette.swift</code> says the charcoal region should "read as the page rather than a panel."</li>
+      <li>It needs a compact mode for dense layouts, as Rex ships, so there are two layouts to test.</li>
+      <li>Shadows and rounded clipping add compositor work on every live resize.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 2 THEMES ============ -->
+<section id="themes">
+  <div class="sec-head">
+    <span class="num">2</span><h2>Whole-app theming</h2>
+    <p class="rex">Rex ships 41 themes that tint the entire application, not just the terminal, and its materials range from full Liquid Glass to solid system palettes. <a href="https://x.com/almonk/status/2097439320076403125">Alasdair Monk, Sep 8</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow · Appearance: Light</span></div>
+        <div class="mb">
+          <aside class="side del">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Remove Session clutter</div><div class="mt"><span class="f">Failed</span> · LOO-458</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes one">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Read WorkModel.swift</span><br><span class="b">Edit</span> confirmWorkUpdate(after:)<br><span class="g">+42</span> <span class="x">−9</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With a whole-app theme</figcaption>
+      <div class="mock tn add-o">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow · Theme: Tokyo Night</span><span class="themes add"><span style="background:#FAF8F5"></span><span style="background:#2B3036"></span><span class="on" style="background:#1A1B26"></span><span style="background:#2E3440"></span></span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Remove Session clutter</div><div class="mt"><span class="f">Failed</span> · LOO-458</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes one">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Read WorkModel.swift</span><br><span class="b">Edit</span> confirmWorkUpdate(after:)<br><span class="g">+42</span> <span class="x">−9</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ LoopflowPalette · TerminalPalette @@</div>
+    <div class="dm">- two fixed appearances, cream and slate, each paired with one charcoal terminal</div>
+    <div class="dp">+ a theme picker that retints the sidebar, headers, selection and terminal together</div>
+    <div class="dp">+ import of an existing Ghostty theme as the starting point</div>
+    <div class="dp">+ semantic roles (selection, focus, Working, Waiting, Failed) remapped per theme</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>The window feels like one object instead of a cream app wrapped around a dark terminal. People who spent years tuning a Ghostty theme bring it with them on day one, which Rex makes a celebrated moment. In a tool open all day, making it look like your own is a strong reason to keep using it.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Loopflow's palette is semantic. <code>WorkPaletteTests</code> composites real colours and requires 4.5:1 for text and 3:1 for indicators. Each theme multiplies that matrix.</li>
+      <li>Status colours can clash with a theme's own hues. On a red-heavy theme, Failed stops standing out.</li>
+      <li>The burgundy identity in <code>VISUAL_DESIGN.md</code> weakens once the app can be any colour.</li>
+      <li>Rex keeps 41 themes up to date. That is ongoing design work, not a one-off.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 3 DECK ICONS ============ -->
+<section id="deck">
+  <div class="sec-head">
+    <span class="num">3</span><h2>Deck icons</h2>
+    <p class="rex">Rex gives terminal apps favicons. A tab's icon stacks the tiles of the programs in its panes like a deck of cards, with the focused pane in front. The icons are drawn by human artists. <a href="https://x.com/almonk/status/2084549282120511575">Monk, Aug 4</a> · <a href="https://x.com/mitchellh/status/2107190365325570075">Hashimoto, Oct 5</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Portfolio configuration</div><div class="mt">LOO-470</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt"><span class="k">Done</span> · LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes tri">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+              <div class="pane"><div class="strip">zsh</div><div class="tx"><span class="d">$</span> swift test</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With deck icons</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row ic sel"><span class="deck add-o"><i class="c-sh"></i><i class="c-git"></i><i class="c-claude"></i></span><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row ic"><span class="deck add-o"><i class="c-node"></i><i class="c-codex"></i></span><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row ic"><span class="deck"></span><div class="rt"><div class="t">Portfolio configuration</div><div class="mt">LOO-470</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row ic"><span class="deck one add-o"><i class="c-cargo"></i></span><div class="rt"><div class="t">Task process index</div><div class="mt"><span class="k">Done</span> · LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes tri">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+              <div class="pane"><div class="strip">zsh</div><div class="tx"><span class="d">$</span> swift test</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ WorkNavigator · Task row @@</div>
+    <div class="dc">  title / status · task · PR · Machine           (unchanged)</div>
+    <div class="dp">+ a 16pt stacked icon: one tile per program open in the Task's workspace</div>
+    <div class="dp">+ the focused pane's program drawn in front</div>
+    <div class="dp">+ an empty slot for Tasks with no open workspace, so titles stay aligned</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>You recognise a Task by its shape before you read its title. At a glance you can see which Tasks have an agent, a git UI or a server running, which the text metadata line can't show. Hand-drawn icons make a dense sidebar feel warmer.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>A Loopflow Task is not a tab. Many Tasks have no open workspace on this Mac, or run on another Machine. Their icon would be empty or stale, which could look like a broken state.</li>
+      <li>It needs reliable program detection and a library of drawn icons. Rex paid artists for theirs.</li>
+      <li>The sidebar row was tuned for density on October 13. An icon pushes every title right and squeezes the metadata line.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 4 HEADERS ============ -->
+<section id="headers">
+  <div class="sec-head">
+    <span class="num">4</span><h2>Program-aware pane headers</h2>
+    <p class="rex">A Rex pane header shows the program's icon, a friendly name ("Git Changes" for lazygit, "Node" for a dev server) and its folder, with split buttons. <a href="https://x.com/almonk/status/2109262000165437943">Activity Mode demo, Oct 11</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb nos">
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="panes tri">
+              <div class="pane"><div class="strip del"><i class="dot a"></i>✳ Claude Code — loopflow.make-loopfl…</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Read WorkModel.swift</span><br><span class="y">? Allow edit to WorkModel.swift</span><br><span class="d">  1. Yes  2. No</span></div></div>
+              <div class="pane"><div class="strip del">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift<br><span class="g">M</span> TaskWorkView.swift</div></div>
+              <div class="pane"><div class="strip del">pnpm</div><div class="tx"><span class="g">✓</span> Ready in 1655ms<br><span class="d">localhost:3000</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With program headers</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb nos">
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="panes tri">
+              <div class="pane"><div class="hdr add"><i class="ico c-claude"></i><b>Claude Code</b><span class="pth">~/src/loopflow.make-loopflow…</span><span class="st">Waiting · asks to edit</span></div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Read WorkModel.swift</span><br><span class="y">? Allow edit to WorkModel.swift</span><br><span class="d">  1. Yes  2. No</span></div></div>
+              <div class="pane"><div class="hdr add"><i class="ico c-git"></i><b>Git Changes</b><span class="pth">2 modified</span></div><div class="tx"><span class="g">M</span> WorkModel.swift<br><span class="g">M</span> TaskWorkView.swift</div></div>
+              <div class="pane"><div class="hdr add"><i class="ico c-node"></i><b>Node</b><span class="pth">website · :3000</span></div><div class="tx"><span class="g">✓</span> Ready in 1655ms<br><span class="d">localhost:3000</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ SessionsView · pane strip @@</div>
+    <div class="dm">- monospace terminal title, whatever the program last set</div>
+    <div class="dp">+ program icon and friendly name in the UI face</div>
+    <div class="dp">+ working folder (shortened) or a one-line program summary, dimmed</div>
+    <div class="dp">+ the OSC 7501 reason moves into the header's right edge</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>With three or more splits you can find the right pane without reading terminal text. Headers stop depending on each program setting a good title, so pnpm, cargo and lazygit all label themselves sensibly. Loopflow starts with an advantage: <code>lf</code> launches the agent, so it already knows which harness is running in each pane.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Someone has to maintain the table that maps processes to friendly names and icons.</li>
+      <li>Detecting the foreground process (GoRex uses <code>tcgetpgrp</code>) gets unreliable inside ssh, wrappers and nested shells.</li>
+      <li>A wrong friendly name is worse than an honest raw title. Unknown programs need a plain fallback.</li>
+      <li>A wider header leaves less room before the hover-only split and close buttons.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 5 TABS ============ -->
+<section id="tabs">
+  <div class="sec-head">
+    <span class="num">5</span><h2>Pill tabs and an operator sidebar</h2>
+    <p class="rex">Rex switches between horizontal pill tabs for focused work and vertical tabs ("operator mode") that span sessions and machines. The vertical list is grouped by machine first. <a href="https://x.com/almonk/status/2092908172381982782">Alasdair Monk, Aug 27</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side del">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472 · mini-heart</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Rust lint in CI</div><div class="mt">LOO-468</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>Focus mode with pill tabs</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i>
+          <span class="pills add"><span class="pill on"><i class="dot w"></i>LOO-462 work-first home</span><span class="pill"><i class="dot a"></i>LOO-466 input</span><span class="pill">LOO-472</span></span>
+          <span class="mode add">⇥ Operator</span></div>
+        <div class="mb nos">
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Read WorkModel.swift</span><br><span class="b">Edit</span> confirmWorkUpdate(after:)<br><span class="g">+42</span> <span class="x">−9</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift<br><span class="g">M</span> TaskWorkView.swift<br><span class="d">2 files staged</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="p"><b>+</b>Operator mode, grouped by Machine</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span><span class="mode add">⇤ Focus</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="mach add">This Mac</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="mach add">mini-heart</div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <div class="diff" role="group" aria-label="Changes" style="align-self:end">
+      <div class="dc">@@ SessionsView · navigation @@</div>
+      <div class="dm">- the 320pt outline is the only navigation, always visible</div>
+      <div class="dp">+ Focus mode: pill tabs for open Tasks in the titlebar, sidebar hidden</div>
+      <div class="dp">+ Operator mode: today's outline, with an optional Machine grouping</div>
+      <div class="dp">+ the Machine name moves from row metadata to a group header</div>
+      <div class="dc">  one shortcut toggles; selection, Back and retained panes are shared</div>
+    </div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>Focus mode gives 320pt back to terminals when you are deep in one or two Tasks. It is the closest thing to Jack's old cmux habit of a few tabs per repo window. Operator mode keeps the full picture for supervising many Tasks, and grouping by Machine answers "what is running on mini-heart" without opening each Task.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Two navigation surfaces must share selection, Back history and retained workspaces. LOO-462 has only just made that behaviour stable.</li>
+      <li>Tabs suggest an ad-hoc set of open things, while Loopflow's model says Wave → Task is the navigation. Deciding which Tasks get a pill is new state someone has to own.</li>
+      <li>Grouping by Machine competes with grouping by Wave. Today Machine is quiet metadata, shown only for remote Tasks.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 6 ACTIVITY ============ -->
+<section id="activity">
+  <div class="sec-head">
+    <span class="num">6</span><h2>Activity Mode</h2>
+    <p class="rex">An eye toggle in Rex switches the sidebar to the active and idle processes and agents, with extra metadata for quick switching. It is driven by OSC 7501 program status, plus weeks of tuning on when to show which state. <a href="https://x.com/almonk/status/2109262000165437943">Monk, Oct 11</a> · <a href="https://x.com/mitchellh/status/2109279616519241920">Hashimoto, Oct 11</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side del">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Portfolio configuration</div><div class="mt">LOO-470</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt"><span class="f">Failed</span> · LOO-472 · mini-heart</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Rust lint in CI</div><div class="mt">LOO-468</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes one">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With Activity Mode on</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side add">
+            <div class="shead"><span class="repo" style="padding:0">Live</span><span class="eye on">◉ Activity</span></div>
+            <div class="grp">Needs you</div>
+            <div class="act need"><div class="l1"><i class="dot a" style="background:var(--m-wait)"></i><span class="t">LOO-466 · Codex</span><span class="age">4m</span></div><div class="why">Waiting · approve test run?</div></div>
+            <div class="act need"><div class="l1"><i class="dot" style="background:var(--m-fail)"></i><span class="t">LOO-472 · cargo test</span><span class="age">12m</span></div><div class="why">Failed · 3 tests · mini-heart</div></div>
+            <div class="grp">Working</div>
+            <div class="act"><div class="l1"><i class="dot" style="background:var(--m-work)"></i><span class="t">LOO-462 · Claude</span><span class="age">now</span></div><div class="why">editing WorkModel.swift</div></div>
+            <div class="grp">Idle</div>
+            <div class="act"><div class="l1"><i class="dot" style="background:#B8B0A6"></i><span class="t">LOO-470 · zsh</span><span class="age">1h</span></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes one">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound checkpoint confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ WorkNavigator · WorkActivityView @@</div>
+    <div class="dm">- status shown inside each Task row, scattered across the Wave outline</div>
+    <div class="dm">- a separate Activity pane that lists history (Work creation, Runs, PRs, Steers)</div>
+    <div class="dp">+ an eye toggle that swaps the outline for a flat list of live programs</div>
+    <div class="dp">+ Needs you → Working → Idle, oldest wait first, across every Wave and Machine</div>
+    <div class="dp">+ the reported reason inline ("approve test run?"); Unknown is never listed</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>It answers "what needs me?" in one glance without expanding Waves. Switching to the next blocked agent becomes one click. Rex's team says it is the first activity inbox they actually use, and people tend to remember the tool that gets them unstuck.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>It is only as good as the status signals. Loopflow's rule is that Waiting is judged from owned provider streams and Unknown shows nothing. A feed of guesses would break that rule.</li>
+      <li>Monk called the timing "hard." An inbox that fires too eagerly turns into "email but worse."</li>
+      <li>The name clashes with the existing Activity history pane. One of them should be removed or renamed rather than kept beside the other.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 7 PEEK ============ -->
+<section id="peek">
+  <div class="sec-head">
+    <span class="num">7</span><h2>Tab peek</h2>
+    <p class="rex">In Rex, a three-finger swipe down shows live, Metal-rendered previews of the other tabs, splits included. Dragging further opens a Mission Control–style grid. The terminal slides down out of the way and is never resized. <a href="https://x.com/mitchellh/status/2087537750182666290">Mitchell Hashimoto, Aug 12</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row del"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466 <span style="color:var(--m-del)">← click to check</span></div></div></div>
+            <div class="row del"><div class="rt"><div class="t">Portfolio configuration</div><div class="mt">LOO-470 <span style="color:var(--m-del)">← click to check</span></div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+            <div class="wfh"><span class="pos">implement → <b>review</b></span><span class="btn"><span>Complete</span><span>Pause</span></span></div>
+            <div class="panes">
+              <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation<br><span class="d">Edit WorkModel.swift</span></div></div>
+              <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>Peeking mid-swipe</figcaption>
+      <div class="mock">
+        <div class="tb"><i></i><i></i><i></i><span class="tt">loopflow</span></div>
+        <div class="mb">
+          <aside class="side">
+            <div class="repo">loopflow</div>
+            <div class="wave">Product</div>
+            <div class="row sel"><div class="rt"><div class="t">Make Loopflow a work-first home</div><div class="mt"><span class="w">Working</span> · LOO-462 · #1531</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Responsive agent input</div><div class="mt"><span class="a">Waiting</span> · LOO-466</div></div></div>
+            <div class="row"><div class="rt"><div class="t">Portfolio configuration</div><div class="mt">LOO-470</div></div></div>
+            <div class="wave">Systems</div>
+            <div class="row"><div class="rt"><div class="t">Task process index</div><div class="mt">LOO-472 · mini-heart</div></div></div>
+          </aside>
+          <div class="mn">
+            <div class="peek add">
+              <div class="thumb"><div class="tw"><div class="short"></div><div></div></div><div class="cap"><i class="dot a"></i>LOO-466</div></div>
+              <div class="thumb"><div class="tw one"><div class="short"></div></div><div class="cap">LOO-470</div></div>
+              <div class="thumb"><div class="tw"><div class="busy"></div><div class="busy"></div></div><div class="cap"><i class="dot w"></i>LOO-472</div></div>
+            </div>
+            <div class="hint add">keep dragging for every Task</div>
+            <div class="pushed">
+              <div class="crumb">loopflow › Product › <b>LOO-462</b></div>
+              <div class="panes">
+                <div class="pane"><div class="strip"><i class="dot w"></i>claude · LOO-462</div><div class="tx"><span class="r">›</span> bound confirmation</div></div>
+                <div class="pane"><div class="strip">lazygit</div><div class="tx"><span class="g">M</span> WorkModel.swift</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ SessionsView · retained workspaces @@</div>
+    <div class="dm">- checking another Task means selecting it, which swaps the main area</div>
+    <div class="dp">+ a swipe or shortcut slides the workspace down without resizing it</div>
+    <div class="dp">+ live thumbnails of the other retained Task workspaces, splits included</div>
+    <div class="dp">+ dragging further opens a grid of every Task; releasing returns without navigating</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>You can't read thumbnail text, but its shape tells you plenty. A scroll of output means still working, and a short screen ending in a prompt means waiting. You check on other Tasks without leaving yours or losing your place, and because nothing reflows, coming back is instant. Mitchell says it becomes a reflex.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Live thumbnails mean rendering every retained Ghostty surface at once. That competes with the agent-input latency work this Task is profiling.</li>
+      <li>Tasks without a retained workspace have nothing to show, so the peek only covers what you have already opened.</li>
+      <li>Remote Machines need their streams attached. A peek must stay passive, since passive display acquires no claim.</li>
+      <li>A three-finger swipe can collide with the system Mission Control gesture, so a keyboard shortcut has to be the primary trigger.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 8 TOUCHES ============ -->
+<section id="touches">
+  <div class="sec-head">
+    <span class="num">8</span><h2>Small touches</h2>
+    <p class="rex">Rex has a shader flash when you copy text, a find bar that nudges itself off a match, automatic contrast correction for light themes, a Doom pixel-melt when the server is killed, and an animated update screen. <a href="https://x.com/almonk/status/2101298258706362515">copy</a> · <a href="https://x.com/almonk/status/2095134190631096428">search</a> · <a href="https://x.com/almonk/status/2100659108697305577">contrast</a> · <a href="https://x.com/almonk/status/2097612610166288713">melt</a></p>
+  </div>
+  <div class="compare">
+    <figure>
+      <figcaption class="m"><b>−</b>Loopflow today</figcaption>
+      <div class="mock">
+        <div class="tiles">
+          <div class="tile"><div class="lab">Copy</div><div class="scr dark">$ lf task status LOO-462<br><span class="selx">state: started · workflow: review</span><br><span class="selx">pr: #1531 open</span></div></div>
+          <div class="tile"><div class="lab">Find</div><div class="scr dark"><span class="del find">Find: checkpoint · 1 of 3</span>2026-10-15 confirm <span class="hit">checkpoint</span> sent<br>frame applied · task revision 4412<br>heartbeat · 2s</div></div>
+          <div class="tile"><div class="lab">Light terminal theme</div><div class="scr light">lazygit · <span class="lowy">⚠ 2 unstaged</span><br>btop · cpu <span class="lowc">42%</span> mem <span class="lowc">3.8G</span></div></div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption class="p"><b>+</b>With the touches</figcaption>
+      <div class="mock">
+        <div class="tiles">
+          <div class="tile"><div class="lab">Copy</div><div class="scr dark add">$ lf task status LOO-462<br><span class="flash">state: started · workflow: review</span><br><span class="flash">pr: #1531 open</span><span class="toast">Copied 2 lines</span></div></div>
+          <div class="tile"><div class="lab">Find</div><div class="scr dark add"><span class="find moved">Find: checkpoint · 1 of 3</span>2026-10-15 confirm <span class="hit">checkpoint</span> sent<br>frame applied · task revision 4412<br>heartbeat · 2s</div></div>
+          <div class="tile"><div class="lab">Light terminal theme</div><div class="scr light add">lazygit · <span class="fixy">⚠ 2 unstaged</span><br>btop · cpu <span class="fixc">42%</span> mem <span class="fixc">3.8G</span></div></div>
+        </div>
+      </div>
+    </figure>
+  </div>
+  <div class="diff" role="group" aria-label="Changes">
+    <div class="dc">@@ Ghostty surface · terminal chrome @@</div>
+    <div class="dm">- copy happens silently; the selection just clears</div>
+    <div class="dm">- the find bar floats over whatever text is underneath it</div>
+    <div class="dm">- program colours pass through unchanged, even when unreadable on a light background</div>
+    <div class="dp">+ a brief glow on the copied cells and a "Copied 2 lines" note</div>
+    <div class="dp">+ the find bar steps aside when it would cover the current match</div>
+    <div class="dp">+ low-contrast foreground colours corrected toward the theme (OKLab, cached)</div>
+  </div>
+  <div class="notes">
+    <div><h3>What people might like</h3>
+      <p>Each one fixes a small irritation people have stopped noticing. Copying over ssh is famously unreliable, so a confirmation removes the guesswork. A find bar that hides the match is a bug in nearly every app. Readable lazygit on a light theme means light-mode users stop switching themes just to read. Together they make the app feel cared for.</p></div>
+    <div><h3>Tradeoffs</h3><ul>
+      <li>Every animation needs a reduced-motion version and must stay off the input path.</li>
+      <li>Contrast correction rewrites colours that programs chose on purpose, such as diff and syntax colours, and some people will call that wrong.</li>
+      <li>Loopflow's terminal is always dark today, so contrast correction only pays off if light terminal themes arrive with whole-app theming (section 2).</li>
+      <li>Whimsy like the melt can read as noise in a tool about getting work done.</li>
+    </ul></div>
+  </div>
+</section>
+
+</div>
+
+</body>
+</html>

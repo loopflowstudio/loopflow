@@ -12,6 +12,8 @@ struct ProjectRealignmentView: View {
     @State private var busy = false
     @State private var applied = false
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Realign Projects").font(.title2)
@@ -34,7 +36,7 @@ struct ProjectRealignmentView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red).textSelection(.enabled) }
+            if let errorMessage { Text(errorMessage).foregroundStyle(palette.failure).textSelection(.enabled) }
             if applied { Text("Projects realigned.") }
             HStack {
                 Button("Close") { dismiss() }.disabled(busy)

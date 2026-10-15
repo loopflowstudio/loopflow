@@ -2,6 +2,7 @@
 // Wraps the libghostty C API for terminal embedding in Loopflow.
 
 import Foundation
+import Loopflow
 import SwiftUI
 import AppKit
 import Darwin
@@ -16,6 +17,7 @@ func terminalTemporaryDirectory() -> URL {
 }
 
 extension Notification.Name {
+    static let loopflowThemeChanged = Notification.Name("loopflow.themeChanged")
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
     static let ghosttySurfaceClosed = Notification.Name("loopflow.ghosttySurfaceClosed")
@@ -96,40 +98,30 @@ final class GhosttyManager: ObservableObject {
 
     static let shared = GhosttyManager()
 
-    // Loopflow color scheme — warm charcoal in the canvas's hue family
-    // (`TerminalPalette`). Every ANSI color except 0 clears 3:1 on it; 0 is
-    // black by convention and stays near the surface.
-    static let loopflowConfig = """
-    # Loopflow Terminal Theme - Warm charcoal
-    background = \(TerminalPalette.css(TerminalPalette.backgroundHex))
-    foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
-    cursor-color = \(TerminalPalette.css(TerminalPalette.accentHex))
-    selection-background = \(TerminalPalette.css(TerminalPalette.selectionHex))
-    selection-foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
+    private nonisolated(unsafe) var baseline: ghostty_config_t?
+    private(set) var theme = ThemeDefinition.light
+    static let loopflowConfig = "font-size = 13\n"
 
-    # Palette - muted tones on warm charcoal
-    palette = 0=#1A1816
-    palette = 1=#D4756A
-    palette = 2=#8B9A6B
-    palette = 3=#D4A574
-    palette = 4=#7B8FA8
-    palette = 5=#A67B93
-    palette = 6=#7FAFAF
-    palette = 7=#C8C1B8
-
-    # Bright variants (8 lifted from #3C4550, which was 1.65:1 on the surface)
-    palette = 8=#7F766F
-    palette = 9=#E89888
-    palette = 10=#ABB97B
-    palette = 11=#E8C594
-    palette = 12=#9BAFC8
-    palette = 13=#C69BB3
-    palette = 14=#9FCFCF
-    palette = 15=#F5F1EA
-
-    font-size = 13
-
-    """
+    func applyTheme(_ theme: ThemeDefinition) throws {
+        if let baseline {
+            let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
+            if let app {
+                ghostty_app_update_config(app, candidate)
+                ghostty_app_set_color_scheme(app, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
+            }
+            if let config { ghostty_config_free(config) }
+            config = candidate
+        } else {
+            guard Self.libraryReady, let empty = ghostty_config_new() else {
+                throw ThemeError("Could not initialize terminal appearance.")
+            }
+            defer { ghostty_config_free(empty) }
+            let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: empty)
+            ghostty_config_free(candidate)
+        }
+        self.theme = theme
+        NotificationCenter.default.post(name: .loopflowThemeChanged, object: theme)
+    }
 
     // These settings load after user defaults. Resources enable Ghostty's
     // native shell integration for detected shells; provider Sessions launch
@@ -156,19 +148,6 @@ final class GhosttyManager: ObservableObject {
 
     private init() {}
 
-    private func loadConfig(_ contents: String, into config: ghostty_config_t) {
-        let path = terminalTemporaryDirectory().appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: path) }
-        do {
-            // The unique file is private until this synchronous load. Atomic
-            // Foundation writes can stage in the account's shared temp directory.
-            try Data(contents.utf8).write(to: path)
-            path.path.withCString { ghostty_config_load_file(config, $0) }
-        } catch {
-            print("[GhosttyManager] Failed to load embedded config: \(error)")
-        }
-    }
-
     func initialize() {
         guard state == .uninitialized else { return }
         state = .initializing
@@ -194,8 +173,8 @@ final class GhosttyManager: ObservableObject {
             return
         }
 
-        // Load Loopflow theme first, then user defaults
-        loadConfig(Self.loopflowConfig, into: cfg)
+        do {
+        try GhosttyThemeConfiguration.load(Self.loopflowConfig, into: cfg)
         ghostty_config_load_default_files(cfg)
         var embeddedConfig = Self.embeddedConfig
         // Ghostty treats a failed CoreVideo display link as an allocation error
@@ -207,9 +186,17 @@ final class GhosttyManager: ObservableObject {
             print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
         }
         displayLink = nil
-        loadConfig(embeddedConfig, into: cfg)
+        try GhosttyThemeConfiguration.load(embeddedConfig, into: cfg)
         ghostty_config_finalize(cfg)
-        self.config = cfg
+        self.baseline = cfg
+        self.config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
+        } catch {
+            if baseline == nil { ghostty_config_free(cfg) }
+            state = .failed(error.localizedDescription)
+            return
+        }
+        guard let config else { return }
+
 
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
@@ -325,12 +312,13 @@ final class GhosttyManager: ObservableObject {
             }
         }
 
-        guard let ghosttyApp = ghostty_app_new(&runtimeConfig, cfg) else {
+        guard let ghosttyApp = ghostty_app_new(&runtimeConfig, config) else {
             state = .failed("Failed to create Ghostty app")
             return
         }
 
         self.app = ghosttyApp
+        ghostty_app_set_color_scheme(ghosttyApp, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         state = .ready
     }
 
@@ -372,9 +360,8 @@ final class GhosttyManager: ObservableObject {
         if let app {
             ghostty_app_free(app)
         }
-        if let config {
-            ghostty_config_free(config)
-        }
+        if let config { ghostty_config_free(config) }
+        if let baseline { ghostty_config_free(baseline) }
     }
 }
 
@@ -393,6 +380,9 @@ final class GhosttyManager: ObservableObject {
     @Published private(set) var state: State = .failed("GhosttyKit not available")
 
     static let shared = GhosttyManager()
+
+    private(set) var theme = ThemeDefinition.light
+    func applyTheme(_ theme: ThemeDefinition) throws { self.theme = theme }
 
     private init() {}
 

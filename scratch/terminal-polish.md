@@ -4,7 +4,9 @@ Status: accepted for implementation and demo, 2026-10-15. Jack Heart reviewed
 the proposal: “seems fine. i think i need to try it to know”. Build the proposed
 3:1 contrast default, original-color override and brief feedback for hands-on
 review. Visual acceptance and landing remain pending that demo. Preserve the
-LOO-462 stack. No implementation or rendered acceptance is claimed yet.
+LOO-462 stack. Implementation is complete; native visual acceptance and measured
+performance remain with gate/demo. The delivered LOO-462 owner was integrated
+through `lf sync --manual` at merge `213136cd79` (parent `dc402dc833`).
 
 ## Problem and intended experience
 
@@ -253,19 +255,20 @@ continuous glow, new notification policy or broader Workflow-loading repair.
    agreement. Update `swift/README.md` with effects, override and limits. Run gate
    once, then collect paired native measurements and review the demo.
 
-**Delete — do not maintain:** remove the `GhosttyCommandBlockStyle.fill` path and
-`surfaceLayer.backgroundColor = style.fill.cgColor` from Swift once the renderer
-owns fills; migrate exclusive fill assertions to renderer tests. Remove both old
-black/white-only shader implementations in the same patch. Refine the parent's
-`showCopyConfirmation` placement in place. Keep block selection/exit status,
+**Delete — do not maintain (completed):** removed `GhosttyCommandBlockStyle.fill`,
+`surfaceLayer.backgroundColor = style.fill.cgColor`, and their exclusive Swift
+fill assertions; renderer tests now cover composition and failure precedence.
+Replaced both old black/white-only shader implementations. Removed the parent's
+`TerminalCopyNotice` overlay; `showCopyConfirmation` now feeds the pane strip
+through surface-incarnation-scoped notices. Keep block selection/exit status,
 headers, gutter markers, hover, copy extraction, bounded reads, search counts and
 retained-surface tests. Do not maintain old/new rendering paths, a Swift selection
 mirror, duplicated search storage or test-only production interfaces.
 
 ## Done when and gate contract
 
-New test/scenario names below are implementation deliverables, not commands
-already claimed to exist. The source-to-consumer scenario feeds ANSI/truecolor,
+The test/scenario names below now exist. Gate owns the complete affected-suite
+run; implementation ran focused behavior and build checks. The source-to-consumer scenario feeds ANSI/truecolor,
 inverse/faint/conceal, a failed shell block and repeated error text into the real
 terminal model; selects/copies, confirms the receipt, navigates search, advances
 the effect clock and resizes. Assert original text/style storage and copied bytes,
@@ -328,4 +331,26 @@ Reduce Motion. Missing display access defers that judgment, not the headless
 implementation checks. Delivery evidence must state measured costs and remaining
 limits rather than inventing a latency threshold or reviving a soak requirement.
 
-Check: `uv run --no-project python` contrast probe + `swift -e` Metal-device probe — 12 opaque sRGB cases reached 3:1 or preserved passing colors; offscreen device available; shader execution/native behavior unmeasured.
+## Remaining delivery evidence
+
+- Final artifact is published and pinned: `GhosttyKit-a60e9e2-lf5.xcframework.zip`,
+  public download SHA-256 `032f84a23d685cb87be75d06222d2bb07d3b8a847e4631e27beb8799bcb8be62`.
+  The earlier `lf4` upload completed before cancellation; it is not selected by
+  the final manifest and is never overwritten.
+- Gate: run the affected suites and automated acceptance commands above once.
+  The focused checks cover receipt lifetimes, geometry/reset invalidation,
+  exact wrapped/wide/combining text, selected-failure appearance, surface-local
+  notice routing, finite deadline scheduling, production color functions and
+  background-edge fragments. The Metal harness does not claim full glyph or
+  source-to-presented-pixel proof; the mounted fixture remains a separate check.
+- Demo/review: collect paired optimized native observations and presented-pixel,
+  GPU/CPU/RSS evidence; judge cues on configured Codex/Claude, diffs, imported
+  palettes, original-color mode and Reduce Motion. No latency improvement or
+  visual acceptance is claimed. The inherited parent landing hold remains.
+
+Review repairs are in `scratch/terminal-review.md`: both queued findings plus
+absolute expiry under custom-shader redraws and safe unopened-Find teardown.
+No parallel clipboard writer, search store, selection owner or animation loop
+was added. No Wave memory change is selected.
+
+Check: `zig build test -Dtest-filter='terminal contrast' -Dtest-filter='terminal feedback'` and `zig build -Doptimize=ReleaseFast -Demit-macos-app=false` PASS; `scripts/test_desktop.sh --filter 'TerminalColorTests|TerminalFeedbackTests|TerminalPolishTests|GhosttyShellBlockTests' -Xswiftc -gnone --jobs 4` with `LOOPFLOW_GHOSTTY_SOURCE` PASS against the public lf5 artifact (12 tests, one native diagnostic skipped; 324 production Metal cases and background fragments). Offline GLSL, Python artifact test, Ruff and platform-boundary checks PASS. Gate owns broader suites; demo/review owns native appearance and paired performance evidence.

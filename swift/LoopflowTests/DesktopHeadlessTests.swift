@@ -76,7 +76,7 @@ struct DesktopHeadlessTests {
         }, repoPath: "/src/loopflow")
         await model.refresh()
         #expect(model.peerPlanning.value?.count == 2)
-        let view = RoadmapView(model: model, onOpenWave: { _ in })
+        let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
         let statusView = try view.inspect().find(PeerPlanningView.self)
         #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
@@ -210,6 +210,7 @@ struct DesktopHeadlessTests {
             }
             return ""
         })
+        model.confirmMachine(fixtureMachineId)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         func eventually(_ condition: @MainActor () -> Bool) async throws {
@@ -235,8 +236,14 @@ struct DesktopHeadlessTests {
                             body: ["task": task.task.identifier, "work": work, "flow_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
+        #expect(model.taskDiagnostics[task.id].value == nil)
+        model.observeTaskDiagnostics(task, visible: true)
+        feed.send(try frame("task_history", sequence: 3, answers: feed.requests.last?.id ?? 2,
+                            body: ["task": task.task.identifier, "work": work]))
+        try await eventually { model.taskDiagnostics[task.id].value != nil }
+        let diagnostics = try #require(model.taskDiagnostics[task.id].value)
         let view = TaskWorkView(model: model, task: task)
-        for id in shown.sessions.map(\.id) + shown.processes.map(\.id) {
+        for id in diagnostics.sessions.map(\.id) + diagnostics.processes.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
 
@@ -262,9 +269,9 @@ struct DesktopHeadlessTests {
         let oldRead = Task { await model.loadComments(task: task, wave: wave) }
         try await eventually { model.comments.inFlight.contains(task.id) }
 
-        // Desktop's own write asks the reader again and shows what it answers.
+        // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
-        try await eventually { feed.requests.last == .refresh(id: 3) }
+        try await eventually { feed.requests.last == .checkpoint(id: 4, replay: []) }
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
         work["workflow"] = workflow
@@ -283,11 +290,12 @@ struct DesktopHeadlessTests {
             "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
-        feed.send(try frame("task", sequence: 3, answers: 2, body: moved))
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(model.taskWork[task.id].value?.flowProcesses.count == 1)
-        feed.send(try frame("task", sequence: 4, answers: 3, body: moved))
-        feed.send(try frame("planning", sequence: 5, answers: 3, body: planning))
+        feed.send(try frame("task", sequence: 4, answers: 2, body: moved))
+        try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
+        #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
+        feed.send(try frame("task", sequence: 5, answers: 4, body: moved))
+        feed.send(try frame("planning", sequence: 6, answers: 4, body: planning))
+        feed.send(try frame("checkpoint", sequence: 7, answers: 4, body: [:]))
         await moving.value
         try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
@@ -386,8 +394,8 @@ struct DesktopHeadlessTests {
 
     @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
     func taskWorkflow() async throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let planning = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: planning)
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil })
         var wire = try #require(JSONSerialization.jsonObject(
@@ -396,6 +404,7 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery(
             start: { args, _ in await started.add(args) },
             run: { args, _ in
+                if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
                 return "{}"
             }))
@@ -404,7 +413,7 @@ struct DesktopHeadlessTests {
             if let position { workflow["position"] = position }
             workflow["outgoing"] = outgoing
             wire["workflow"] = workflow
-            let work = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
+            let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
             return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
         }
 
@@ -427,12 +436,10 @@ struct DesktopHeadlessTests {
 
         // At `demo` the edges leaving it are the buttons, named by what they run.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
-        #expect(throws: (any Error).self) {
-            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position")
-        }
+        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string() == "feature · demo")
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
-        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-process-4").button()
+        let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-action-4").button()
         #expect(try ship.labelView().text().string() == "ship")
         try ship.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
@@ -441,7 +448,7 @@ struct DesktopHeadlessTests {
         // A Task that has taken up no workflow starts on its Project's.
         wire["workflow"] = NSNull()
         let unstarted = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(
-            try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))))
+            try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
         try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
         for _ in 0..<200 where await started.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
@@ -453,6 +460,36 @@ struct DesktopHeadlessTests {
         // Completion has its own operation and does not move the Workflow.
         await model.completeTask(task, wave: wave.wave)
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
+    }
+
+    @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])
+    func taskLifecycleControls(state: String) throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first)
+        let original = try #require(wave.tasks.items.first)
+        let root = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
+        let waves = try #require(root["waves"] as? [[String: Any]])
+        let tasks = try #require(waves.first?["tasks"] as? [String: Any])
+        var row = try #require((tasks["items"] as? [[String: Any]])?.first)
+        var planning = try #require(row["task"] as? [String: Any])
+        planning["state"] = state
+        planning["completed"] = state == "completed"
+        row["task"] = planning
+        let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
+        #expect(task.id == original.id)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
+        let view = TaskWorkflowHeader(model: model, task: task, wave: wave.wave,
+            work: .available(TaskOverview(sessions: [], flowProcesses: [], workflow: nil)))
+        if state == "unstarted" {
+            _ = try view.inspect().find(button: "Complete")
+            _ = try view.inspect().find(button: "Pause")
+            _ = try view.inspect().find(button: "Abandon…")
+        } else {
+            _ = try view.inspect().find(button: "Reopen")
+            #expect(throws: (any Error).self) { try view.inspect().find(button: "Complete") }
+        }
     }
 
     @Test("A workflow is drawn as a graph: circles, described nodes, a loop arc and an arrow per edge")
@@ -470,7 +507,7 @@ struct DesktopHeadlessTests {
             var workflow = try #require(wire["workflow"] as? [String: Any])
             change(&workflow)
             wire["workflow"] = workflow
-            let work = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
+            let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
             drawnWorkflow = work.workflow
             return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
         }
@@ -526,23 +563,23 @@ struct DesktopHeadlessTests {
         #expect(lanes.size.height > lanes.arrows[3].label.y)
     }
 
-    @Test("A Task lists waiting conversations before working ones, its primary leading each")
+    @Test("A Task lists available conversations before working ones, its primary leading each")
     func taskSessions() throws {
         let base = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
-        func session(_ id: String, waiting: Bool = false, primary: Bool = false, state: String = "unknown") throws -> SessionRecord {
+        func session(_ id: String, available: Bool = false, primary: Bool = false, state: String = "unknown") throws -> SessionRecord {
             var value = base
             value["id"] = id
             value["state"] = state
-            value["attention"] = waiting ? "waiting" : NSNull()
+            value["attention"] = available ? "available" : NSNull()
             value["task_primary"] = primary
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         }
         let groups = TaskSessionGroups([
-            try session("working"), try session("closed", waiting: true, state: "closed"),
-            try session("asks", waiting: true), try session("primary", primary: true),
+            try session("working"), try session("closed", available: true, state: "closed"),
+            try session("asks", available: true), try session("primary", primary: true),
         ])
-        #expect(groups.waiting.map(\.id) == ["asks"])
+        #expect(groups.available.map(\.id) == ["asks"])
         #expect(groups.working.map(\.id) == ["primary", "working"])
         #expect(try session("run").statusLabel == "Session")
     }
@@ -587,7 +624,6 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
-        model.navigation.presentation = .full
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
             .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()

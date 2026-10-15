@@ -1,0 +1,10 @@
+{
+  "configured": true,
+  "mode": "manual",
+  "root": "/src",
+  "repos": [
+    { "path": "/src/loopflow", "error": null },
+    { "path": "/other/missing", "error": "Repository unavailable" }
+  ],
+  "error": null
+}

@@ -87,6 +87,7 @@
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
               "workspace": {
                 "machine_id": "home_00000000000000000000000000000001",
+                "machine_label": "build-server",
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
                 "worktree": "/src/loopflow.make-lf-work-the-machine",
@@ -462,6 +463,7 @@
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
               "workspace": {
                 "machine_id": "home_00000000000000000000000000000001",
+                "machine_label": "build-server",
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
                 "worktree": "/src/loopflow.all-wave-roadmap",
@@ -930,6 +932,7 @@
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
               "workspace": {
                 "machine_id": "home_00000000000000000000000000000001",
+                "machine_label": "build-server",
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
                 "worktree": "/src/loopflow.now-available-research",

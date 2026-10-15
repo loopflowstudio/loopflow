@@ -27,16 +27,6 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// for the command through its `RegistryRunner`.
 public typealias RegistryStarter = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> Void
 
-/// Entry emitted by `lf list --json`.
-public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
-    public let name: String
-    public let kind: String
-    public let source: String
-    public let description: String
-    public let invocation: String
-    public var id: String { name }
-}
-
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
@@ -59,6 +49,10 @@ public struct RegistryQuery: Sendable {
         self.start = start
         self.observeFiles = watchFiles
         self.observeWork = watchWork
+    }
+
+    public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
+        try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
     }
 
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
@@ -207,7 +201,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["machine", "user", "--json"], nil)
+        let stdout = try await run(["config", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
     }
 
@@ -280,13 +274,6 @@ public struct RegistryQuery: Sendable {
         return result
     }
 
-    public func sessionSkills(cwd: String) async throws -> [DiscoveryEntry] {
-        let stdout = try await run(["list", "--json"], cwd)
-        return try Self.decode([DiscoveryEntry].self, from: stdout)
-            .filter { $0.kind == "skill" }
-            .sorted { $0.name < $1.name }
-    }
-
     /// Every selectable Flow with the topology it would capture, via the shared loader.
     public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
         let stdout = try await run(["flow", "list", "--json"], cwd)
@@ -337,6 +324,14 @@ public struct RegistryQuery: Sendable {
 
     public func completeTask(issue: String, cwd: String?) async throws {
         _ = try await run(["task", "complete", issue], cwd)
+    }
+
+    public func reopenTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "reopen", issue], cwd)
+    }
+
+    public func abandonTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "abandon", issue], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before
@@ -421,6 +416,18 @@ public struct RegistryQuery: Sendable {
         if let after { args += ["--after", after] }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionPage.self, from: stdout)
+    }
+
+    /// Include historical Waves for the deliberate first-use entry check.
+    public func repositoryWaves(cwd: String) async throws -> [WaveSnapshot] {
+        try Self.decode([WaveSnapshot].self, from: await run(["wave", "list", "--json"], cwd))
+    }
+
+    /// The repository or Wave's retained conversation; explicit opening only.
+    public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
+        var args = ["session", "ensure", "--json"]
+        if let wave { args += ["--wave", wave] }
+        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
 
     /// The Task's one ongoing conversation: the one already chosen, else its

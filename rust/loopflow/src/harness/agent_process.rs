@@ -87,6 +87,7 @@ pub(crate) fn spawn_native(
     owner: &AttachmentOwner,
 ) -> Result<std::process::Child> {
     let (store, session, attachment) = owner;
+    crate::agent_input_timing::record("provider_spawn_begin", session);
     let capability = store.reserve_steer_adapter(session, attachment)?;
     command.env(
         crate::steer::PROVIDER_CONTEXT_ENV,
@@ -97,6 +98,14 @@ pub(crate) fn spawn_native(
             store.record_agent_process_launch(session, attachment, &command, true)?;
             let spawned =
                 crate::os_process::spawn_native_agent_process(command, record_identity(owner));
+            crate::agent_input_timing::record(
+                if spawned.is_ok() {
+                    "provider_spawn_returned"
+                } else {
+                    "provider_spawn_failed"
+                },
+                session,
+            );
             if spawned.is_err() {
                 store.record_agent_process_exit(session, attachment, false)?;
             }
@@ -645,7 +654,7 @@ mod tests {
             crate::journal::ProcessIdentityEvidence::Dead
         );
         assert!(summary.terminal_id.is_none());
-        assert!(!summary.waiting);
+        assert!(!summary.available);
         assert_eq!(
             store
                 .process(&attachment.agent_process_id)

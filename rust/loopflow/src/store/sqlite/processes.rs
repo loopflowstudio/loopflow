@@ -206,7 +206,7 @@ fn agent_process_progress_in(
     agent: &LfProcessId,
 ) -> StoreResult<(bool, bool)> {
     Ok(conn.query_row(
-        "SELECT completed_at IS NOT NULL,spawn_state='reserved' AND pid IS NULL
+        "SELECT completed_at IS NOT NULL,spawn_state IS 'reserved' AND pid IS NULL
          FROM processes WHERE id=?1",
         [agent],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1145,6 +1145,26 @@ mod discovery_tests {
             )
             .unwrap();
         id
+    }
+
+    #[test]
+    fn legacy_unknown_spawn_state_is_not_a_reservation_or_an_exit() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment("session", None, &LfProcessId::new(), true)
+            .unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE processes SET spawn_state=NULL WHERE id=?1",
+            [&attachment.agent_process_id],
+        )
+        .unwrap();
+        assert_eq!(
+            super::agent_process_progress_in(&conn, &attachment.agent_process_id).unwrap(),
+            (false, false)
+        );
     }
 
     #[test]

@@ -59,6 +59,8 @@ struct LocalWaveAgentLauncherTests {
             "CI": "1", "PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
             "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
             "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
+            "CMUX_WORKSPACE_ID": "launching-workspace", "CMUX_SURFACE_ID": "launching-surface",
+            "CMUX_SOCKET_PATH": "/tmp/cmux.sock",
         ]
         let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
 
@@ -67,28 +69,6 @@ struct LocalWaveAgentLauncherTests {
         for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
     }
 
-
-    @Test("Task controls use the Task commands")
-    func taskControlCommandShapes() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
-
-        #expect(LocalWaveAgentLauncher.taskRunArguments(issue: "W2-131") == ["-b", "task", "run", "W2-131"])
-        #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "interrupt", "W2-131",
-        ])
-    }
-
-    @Test("PR review delegates to lf pr open rather than opening a URL itself")
-    func pullRequestReviewDelegatesToCLI() {
-        let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
-        let command = LocalWaveAgentLauncher.pullRequestReviewCommand(lfPath: lf)
-
-        // The one review-presentation action shells `lf pr open` — the single
-        // presentation boundary — and never constructs a github.com URL to open.
-        #expect(command == [lf, "pr", "open"])
-        #expect(!command.contains { $0.contains("github.com") })
-        #expect(!command.contains { $0.hasPrefix("http") })
-    }
 
     @Test("Prepared checkout receipts retain the owning Machine and require its evidence")
     func checkoutIdentityFixture() throws {
@@ -113,7 +93,7 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Bundled binary boundary
 
-    @Test("a clone selects its own helper before development or bundled helpers")
+    @Test("a clone selects its own helper before bundled helpers")
     func cloneSelectsPinnedHelper() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let bin = directory.appendingPathComponent("bin")
@@ -123,10 +103,10 @@ struct LocalWaveAgentLauncherTests {
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         let environment = ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path]
-        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), developmentConfig: nil, environment: environment) == helper.path)
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment) == helper.path)
         try FileManager.default.removeItem(at: helper)
         #expect(throws: LocalLfError.self) {
-            try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), developmentConfig: nil, environment: environment)
+            try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment)
         }
     }
 
@@ -134,8 +114,7 @@ struct LocalWaveAgentLauncherTests {
     func missingBundledHelperFails() {
         #expect {
             try LocalWaveAgentLauncher.controlLfPath(
-                bundled: nil,
-                developmentConfig: nil
+                bundled: nil
             )
         } throws: { error in
             guard error is LocalLfError else { return false }
@@ -144,21 +123,9 @@ struct LocalWaveAgentLauncherTests {
         }
     }
 
-    @Test("a development app uses its explicit machine lf gate")
-    func developmentAppUsesMachineGate() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let config = directory.appending(path: "LoopflowDevControl.json")
-        try Data(#"{"lf_path":"/bin/sh"}"#.utf8).write(to: config)
-
-        let path = try LocalWaveAgentLauncher.controlLfPath(
-            bundled: nil,
-            developmentConfig: config
-        )
-
-        #expect(path == "/bin/sh")
+    @Test("the app selects its bundled helper")
+    func appUsesBundledHelper() throws {
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh")) == "/bin/sh")
     }
 
     #if !SWIFT_PACKAGE

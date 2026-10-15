@@ -172,13 +172,17 @@ impl SqliteStore {
 
     /// Acquire the effect only while the captured decision is still current.
     /// A canceled request remains attempted, so a later read must resolve it.
-    pub(crate) fn attempt_task_state(&self, delivery: &TaskStateDelivery) -> StoreResult<bool> {
+    pub(crate) fn attempt_task_state(
+        &self,
+        delivery: &TaskStateDelivery,
+        retry: bool,
+    ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE task_state_deliveries SET attempted=1
-             WHERE id=?1 AND attempted=0 AND settled=0 AND conflict_json IS NULL
+             WHERE id=?1 AND (attempted=0 OR ?3) AND settled=0 AND conflict_json IS NULL
              AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)",
-            params![delivery.id, delivery.task_id.as_str()],
+            params![delivery.id, delivery.task_id.as_str(), retry],
         )? == 1)
     }
 

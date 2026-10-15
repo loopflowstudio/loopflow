@@ -155,7 +155,7 @@ final class WorkLinkRouter {
 
     private static func readRepository(path: String, query: RegistryQuery) async throws -> RepositoryReading {
         let localPath = await Task.detached {
-            RepoScanner().mainRepository(URL(fileURLWithPath: path))?.normalizedFilePath
+            RepositoryPath().mainRepository(URL(fileURLWithPath: path))?.normalizedFilePath
         }.value
         guard let localPath else { throw RegistryQueryError("\(path) is not an available local Git repository.") }
         return try await RepositoryReading(identity: query.repositoryIdentity(cwd: localPath), path: localPath)

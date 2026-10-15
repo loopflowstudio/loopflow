@@ -1674,7 +1674,8 @@ impl LinearClient {
 
     /// Deliver the caller's UUID. An uncertain reply is resolved by exact identity.
     pub async fn sync_comment(&self, id: &str, issue: &str, body: &str) -> LinearResult<()> {
-        uuid::Uuid::parse_str(id).map_err(|error| LinearError::Message(error.to_string()))?;
+        let id = comment_delivery_id(id)?;
+        let id = id.as_str();
         let response: LinearResult<CommentData> = self
             .graphql(
                 r#"mutation SyncComment($id: String!, $issueId: String!, $body: String!) {
@@ -1688,14 +1689,26 @@ impl LinearClient {
         match response {
             Ok(response) if response.comment_create.comment.id == id => Ok(()),
             result => {
-                let read: Value = self
+                let read: LinearResult<Value> = self
                     .graphql(
                         r#"query CommentDelivery($id: String!) {
                         comment(id: $id) { id body issue { id } }
                     }"#,
                         json!({"id": id}),
                     )
-                    .await?;
+                    .await;
+                let read = match read {
+                    Ok(read) => read,
+                    Err(error) => {
+                        return Err(LinearError::Message(format!(
+                            "Comment {id} is pending sync: {}; confirmation unavailable: {error}",
+                            match result {
+                                Err(error) => error.to_string(),
+                                Ok(_) => "creation returned a different identity".into(),
+                            }
+                        )))
+                    }
+                };
                 let comment = &read["comment"];
                 if comment["id"].as_str() == Some(id)
                     && comment["body"].as_str() == Some(body)
@@ -1886,6 +1899,19 @@ pub(crate) enum PlanningResponse {
         project: Box<LinearProject>,
         content: String,
     },
+}
+
+/// Historical filing comments use name-derived UUIDs. Linear accepts the v4
+/// version bits only; keep the same 122 identity bits and retain the local receipt.
+pub(crate) fn comment_delivery_id(id: &str) -> LinearResult<String> {
+    let uuid =
+        uuid::Uuid::parse_str(id).map_err(|error| LinearError::Message(error.to_string()))?;
+    if uuid.get_version_num() != 5 {
+        return Ok(uuid.to_string());
+    }
+    let mut bytes = *uuid.as_bytes();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    Ok(uuid::Uuid::from_bytes(bytes).to_string())
 }
 
 fn planning_response(payload: &Value, project: bool, id: &str) -> LinearResult<PlanningResponse> {
@@ -2717,6 +2743,27 @@ mod tests {
             convert_legacy_project_content("## Notes\nrecommended: prose").unwrap(),
             "## Notes\nrecommended: prose"
         );
+    }
+
+    #[tokio::test]
+    async fn zero_retry_after_still_pauses_other_callers_without_more_requests() {
+        let mut limited = json_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            json!({"errors":[{"message":"Rate limit exceeded"}]}),
+        );
+        limited.headers.push(("retry-after".into(), "0".into()));
+        limited
+            .headers
+            .push(("x-ratelimit-requests-reset".into(), "1".into()));
+        let (url, requests) = test_server::spawn(vec![limited]).await;
+        for _ in 0..5 {
+            let client = LinearClient::with_base_url("token".into(), None, url.clone());
+            assert!(matches!(
+                client.initiatives().await,
+                Err(crate::linear::LinearError::RateLimited { .. })
+            ));
+        }
+        assert_eq!(requests.lock().await.len(), 1);
     }
 
     #[tokio::test]

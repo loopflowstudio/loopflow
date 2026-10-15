@@ -475,6 +475,10 @@ fn run_native_session(
         );
         route.pin_session_blocking(agent_session.cloned())?;
     }
+    process.env_remove(crate::context_block::CONTEXT_DELIVERY_ENV);
+    if let Some(context) = &command.context {
+        context.configure_hooks(&mut process)?;
+    }
     process.args(crate::harness::context::native_args(
         &command.program,
         command.context.as_ref(),

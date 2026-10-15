@@ -1,6 +1,38 @@
 # Loopflow Visual Design System
 
-The unified design system for loopflow (Swift app) and loopflowstudio (website).
+Desktop uses the semantic roles in `LoopflowPalette`. The website shares the
+palette and typography, with separate marketing conventions below.
+
+## Desktop semantics
+
+Select a Task: neutral tint plus edge marks selection while the title stays neutral.
+Tab to a control: a separate burgundy/rose outline marks keyboard focus, including
+on a selected row with an error. Ordinary controls use neutral ink; only an explicitly
+emphasized action uses burgundy. Repo identity may retain burgundy. Links use
+secondary ink and underline on hover/focus in navigation and control chrome.
+
+| Role | Source / behavior |
+|------|-------------------|
+| Structure and text | `background`, surface ladder, `text`, `textSecondary`, `textTertiary` |
+| Selection | `selectionFill`, `selectionEdge`; independent of failure |
+| Keyboard focus | `keyboardFocus`; visible with selection |
+| Links | `linkInk`, `linkHover`; separate from status |
+| Actions | `actionInk`, `actionHover`; `emphasisInk` for deliberate emphasis |
+| Program activity | `working` blue, `waiting` amber, `failure` red, `success` green |
+
+Unknown and client-liveness-only observations have no activity label or dot. Shared
+Waiting remains explicitly inferred; reported Blocked is not renamed Waiting.
+Program Done is not Task completion. Workflow position uses neutral marking; a
+stopped edge alone is not a red error. Read failures remain inspectable. Terminal
+ANSI colors retain their existing owner; surrounding pane chrome uses the same
+semantic roles with the dark palette.
+
+Both Desktop appearances have explicit roles. `WorkPaletteTests` resolves actual
+SwiftUI colors and composites selection fills over each surface: ordinary text
+must reach 4.5:1, meaningful indicators 3:1. Static marketing hex examples below
+are not Desktop status colors or contrast evidence.
+
+## Marketing reference
 
 ---
 
@@ -401,5 +433,5 @@ Before merging UI changes:
 - [ ] Respects `prefers-reduced-motion` / `reduceMotion`
 - [ ] Icon-only buttons have accessibility labels
 - [ ] Color contrast meets WCAG AA (4.5:1 for text)
-- [ ] Headings use burgundy color
+- [ ] Desktop headings remain neutral; marketing headings may use burgundy
 - [ ] Test with VoiceOver/screen reader enabled

@@ -26,6 +26,7 @@ struct TaskFilesView: View {
             documentPane
         }
         .background(palette.background)
+        .tint(palette.actionInk)
         .task(id: "\(store.base)|\(store.needsComparison)|\(checkoutBase ?? "")") {
             // Later readings follow the checkout and its Git metadata changing.
             if store.needsComparison { await store.refreshChanges() }
@@ -44,7 +45,7 @@ struct TaskFilesView: View {
         VStack(spacing: 0) {
             if let prURL {
                 HStack {
-                    Link("Pull request ↗", destination: prURL)
+                    Link("Pull request ↗", destination: prURL).buttonStyle(WorkLinkStyle())
                     Spacer()
                 }
                 .font(Typography.caption(11))
@@ -86,6 +87,7 @@ struct TaskFilesView: View {
                     .padding(8)
                 }
                 .focusable().focused($navigatorFocused)
+                .keyboardFocusRing(navigatorFocused)
                 .onMoveCommand { direction in
                     let rows = visibleFiles("").map { ($0, TaskFilesStore.Mode.file) }
                         + (store.showsChanges ? (store.changes?.files ?? []).map { ($0.path, TaskFilesStore.Mode.diff) } : [])
@@ -100,17 +102,18 @@ struct TaskFilesView: View {
             if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions ↗") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: directory))
-                }.buttonStyle(.plain).font(.caption).lineLimit(1).padding(8)
+                }.buttonStyle(WorkPlainButtonStyle()).font(.caption).lineLimit(1).padding(8)
             }
         }
         .background(palette.surfaceMuted)
         .frame(minWidth: 190, idealWidth: 230, maxWidth: 320)
     }
 
+    // The navigator owns keyboard focus; rows show selection, not inherited focus rings.
     private func directoryRows(_ path: String) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 2) {
             if let error = store.directoryErrors[path] {
-                Text(error).font(.caption).foregroundStyle(Color.statusWarning)
+                Text(error).font(.caption).foregroundStyle(palette.waiting)
             }
             ForEach(store.directories[path]?.entries ?? []) { entry in
                 if entry.kind == .directory {
@@ -162,6 +165,7 @@ struct TaskFilesView: View {
                             await store.refresh()
                         }
                     }
+                    .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                     .disabled(!document.canSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .fixedSize()
@@ -178,7 +182,7 @@ struct TaskFilesView: View {
             .background(palette.surfaceMuted)
             Divider()
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(Color.statusWarning).padding(8)
+                Text(error).font(.caption).foregroundStyle(palette.waiting).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(.caption).padding(8)
@@ -239,7 +243,7 @@ struct TaskFilesView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4).padding(.vertical, 5)
-            .background(store.selection == path && store.mode == mode ? palette.selectionTint : .clear)
+            .workSelection(store.selection == path && store.mode == mode)
             .contentShape(Rectangle())
         }.buttonStyle(.plain).help(path)
             .id("\(mode.rawValue):\(path)")

@@ -131,6 +131,13 @@ launch an installed version. Regenerate its wire capture with
 then run `cargo test -p loopflow --test integration dto_fixtures::composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
+The Work-first entry capture comes from isolated repository-primary admission,
+reopening and mixed Session history. Regenerate it with
+`LOOPFLOW_UPDATE_WORK_FIRST_FIXTURE=1 TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test session_lifecycle_tests work_first_repository_entry < /dev/null`.
+`scripts/test_desktop.sh --filter 'WorkNavigationTests/composedWorkFirstEntry' -Xswiftc -gnone`
+consumes that capture through the repository-entry callback and retained Work owners.
+This checks configuration and identity, not a mounted provider or native usability.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
@@ -304,7 +311,7 @@ prune policy. Repeated calls drain an eligible backlog. Python inventories capac
 and consumes Rust cleanup receipts; an unavailable capable `lf` retains builds and
 reports the missing owner. A timed-out or invalid cleanup receipt reports an unknown
 result and triggers fresh inventory, since deletion may already have occurred.
-Each inventory `du` has a five-second deadline;
+Each inventory `du` has a 15-second deadline;
 failures appear as measurement issues. Total inventory time still scales with the
 number of roots. Inventory timeouts grant no deletion authority; Rust independently
 retains candidates whose ownership, activity or content inspection is unknown.
@@ -475,6 +482,10 @@ swift test --package-path swift --filter SomeTestClass  # Filtered
 ```
 
 Pass `--no-parallel` explicitly: main-actor observations share scheduling.
+`WorkCLISubscriptionTests` creates and starts Tasks with `target/debug/lf` in an
+isolated repository while the production Work reader is already open. It checks
+sidebar updates, completion/cancellation, Back and retained workspace identity.
+It launches no provider and proves no rendered native behavior.
 After integrating Session kind changes, run `scripts/test_desktop.sh --filter
 'TaskFlowTests|WorkspaceNavigationTests'` to compile Desktop consumers and exercise
 participation and navigation fixtures together.
@@ -1409,6 +1420,19 @@ Session interactivity must not select an individual launch’s process-group pol
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
+
+### Portfolio CLI/Desktop round trip
+
+After building `target/debug/lf`, run the shared portfolio tests against it in a
+private temporary Machine. The test pins `LF_BIN` inside the network boundary;
+it never edits the installed portfolio.
+
+```bash
+LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --filter PortfolioServiceTests -Xswiftc -gnone
+```
+
+Without the explicit binary, the CLI round-trip case is skipped; service and DTO
+cases still run. Rust's `portfolio_cli_tests` covers standalone command dispatch.
 
 ## Instruction decisions
 

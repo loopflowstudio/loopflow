@@ -8,7 +8,7 @@ import SwiftUI
 struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
-    /// Opens a Task the way the sidebar does: its one Session, else its overview.
+    /// Opens the retained Task conversation and workspace, as the sidebar does.
     var onOpenTask: ((WorkReference) -> Void)?
     /// Starts an independent Task-context conversation in the Task's checkout.
     var onNewSession: ((String) async throws -> Void)?
@@ -79,7 +79,7 @@ struct WorkSurfaceView: View {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Author a Wave to put work on the surface.")
+                description: Text("Open the repository conversation to decide what to work on.")
             )
             .accessibilityIdentifier("loopflow-work-empty")
         } else {
@@ -146,7 +146,7 @@ struct WorkSurfaceView: View {
                             model.historyReference = nil
                             model.historyWave = roadmap.wave
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WorkPlainButtonStyle())
                         .font(Typography.body(12.5))
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("wave-chapter-history")
@@ -168,7 +168,7 @@ struct WorkSurfaceView: View {
                 case .unavailable(let reason):
                     section {
                         WorkSectionHeading("Tasks")
-                        Text(reason).font(Typography.body(13)).foregroundStyle(Color.statusWarning)
+                        Text(reason).font(Typography.body(13)).foregroundStyle(palette.waiting)
                     }
                 case .available(let inventory, let truncated):
                     let filter = model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter()
@@ -196,7 +196,7 @@ struct WorkSurfaceView: View {
                             .workPanel()
                         }
                         if truncated {
-                            Text("Planning is partial; more Tasks exist.").font(Typography.body(12)).foregroundStyle(Color.statusWarning)
+                            Text("Planning is partial; more Tasks exist.").font(Typography.body(12)).foregroundStyle(palette.waiting)
                         }
                     }
                 }
@@ -269,16 +269,17 @@ struct WorkSurfaceView: View {
                         Spacer()
                         if let workspace = task.reference.workspace {
                             Button("Worktree") { openWorktree(workspace) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(WorkPlainButtonStyle())
                                 .font(Typography.body(12.5))
                         }
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
+                                .buttonStyle(WorkLinkStyle())
                                 .font(Typography.body(12.5))
                         }
                     }
-                    .tint(palette.accentInk)
-                    .foregroundStyle(palette.accentInk)
+                    .tint(palette.actionInk)
+                    .foregroundStyle(palette.actionInk)
                     TaskDueDateView(task: task)
                     if task.task.acquisition.state != .available {
                         Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
@@ -293,46 +294,26 @@ struct WorkSurfaceView: View {
                 TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Flow process log disagree with them.
-                DisclosureGroup("Debug") { TaskWorkView(model: model, task: task) }
+                TaskDiagnosticsView(model: model, task: task)
+                    .id(task.id)
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
-                if let sessions, !sessions.isEmpty {
-                    let groups = TaskSessionGroups(sessions)
-                    if !groups.waiting.isEmpty {
-                        section {
-                            WorkSectionHeading("Waiting", count: groups.waiting.count)
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(groups.waiting.enumerated()), id: \.element.id) { index, session in
-                                    if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                                    sessionRow(session)
-                                }
-                            }
-                            .workPanel()
-                        }
-                        .accessibilityIdentifier("task-sessions-waiting")
+                // Exact Available links preserve access to secondary conversations
+                // needing input without restoring a Session inventory.
+                ForEach((sessions ?? []).filter { $0.attention == .available }) { session in
+                    Button { onOpenSession(session) } label: {
+                        Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
-                    if !groups.working.isEmpty {
-                        section {
-                            WorkSectionHeading("Sessions", count: groups.working.count)
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(groups.working) { session in compactSessionRow(session) }
-                            }
-                        }
-                        .accessibilityIdentifier("task-sessions-working")
-                    }
-                } else if sessions != nil, model.sessions.value != nil, model.sessions.errorMessage == nil {
-                    Text("No open Sessions.")
-                        .font(Typography.body(12.5))
-                        .foregroundStyle(palette.textTertiary)
-                        .accessibilityIdentifier("work-no-sessions")
+                    .buttonStyle(WorkPlainButtonStyle())
+                    .accessibilityIdentifier("task-available-\(session.id)")
                 }
                 section {
                     WorkSectionHeading(title: "Description") {
                         Button("Edit description") {
                             editingTask = TaskSelection(wave: found.wave.wave, task: task)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(WorkPlainButtonStyle())
                         .font(Typography.body(12.5))
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("work-edit-directive")
@@ -362,96 +343,6 @@ struct WorkSurfaceView: View {
         VStack(alignment: .leading, spacing: 10) { content() }
     }
 
-    private func sessionRow(_ session: SessionRecord) -> some View {
-        Button { onOpenSession(session) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Image(systemName: "bubble.left")
-                    .font(.system(size: 12))
-                    .foregroundStyle(palette.textTertiary)
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                        Text(session.title)
-                            .font(Typography.strong(13))
-                            .foregroundStyle(palette.text)
-                        primaryTag(session)
-                    }
-                    HStack(spacing: Spacing.xs) {
-                        if let provider = session.provider {
-                            Text(provider)
-                                .font(Typography.caption(11))
-                                .foregroundStyle(palette.textSecondary)
-                                .accessibilityIdentifier("task-session-provider-\(session.id)")
-                            Text("·").foregroundStyle(palette.textTertiary)
-                        }
-                        Text(session.flowMembership.label)
-                            .font(Typography.code(11))
-                            .foregroundStyle(membershipTone(session.flowMembership))
-                    }
-                    // Only a summary the Session actually recorded; never a
-                    // preview derived from its prompt or transcript.
-                    if let summary = session.readySummary {
-                        Text(summary)
-                            .font(Typography.body(12))
-                            .foregroundStyle(palette.textSecondary)
-                            .lineLimit(2)
-                            .help(summary)
-                            .accessibilityIdentifier("task-session-summary-\(session.id)")
-                    }
-                }
-                Spacer(minLength: Spacing.sm)
-                WorkChip(text: session.statusLabel, tone: session.attention == nil ? sessionTone(session.state) : .human)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("task-session-\(session.id)")
-    }
-
-    @ViewBuilder
-    private func primaryTag(_ session: SessionRecord) -> some View {
-        if session.taskPrimary {
-            Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
-        }
-    }
-
-    /// One line for a conversation that is not waiting on anyone.
-    private func compactSessionRow(_ session: SessionRecord) -> some View {
-        Button { onOpenSession(session) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Text(session.title)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.text)
-                    .lineLimit(1)
-                primaryTag(session)
-                Spacer(minLength: Spacing.sm)
-                Text(session.statusLabel)
-                    .font(Typography.caption(11))
-                    .foregroundStyle(palette.textTertiary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("task-session-\(session.id)")
-    }
-
-    private func membershipTone(_ membership: SessionFlowMembership) -> Color {
-        if case .step = membership { return FlowPalette.loops[1] }
-        return palette.textTertiary
-    }
-
-    private func sessionTone(_ state: SessionState) -> WorkTone {
-        switch state {
-        case .unknown: .neutral
-        case .active: .running
-        case .closed: .stopped
-        }
-    }
-
     private func planRow(_ task: RoadmapTask, rank: Int) -> some View {
         let state = planState(task)
         return Button {
@@ -464,8 +355,8 @@ struct WorkSurfaceView: View {
                     .foregroundStyle(palette.textTertiary)
                     .frame(width: 20, alignment: .trailing)
                 Circle()
-                    .fill(state.tone == .neutral ? Color.clear : state.tone.ink)
-                    .overlay(Circle().strokeBorder(state.tone == .neutral ? palette.borderStrong : state.tone.ink, lineWidth: 1.5))
+                    .fill(state.tone == .neutral ? Color.clear : state.tone.ink(in: palette))
+                    .overlay(Circle().strokeBorder(state.tone == .neutral ? palette.borderStrong : state.tone.ink(in: palette), lineWidth: 1.5))
                     .frame(width: 9, height: 9)
                     .frame(width: 14)
                 Text(task.task.name)
@@ -488,7 +379,7 @@ struct WorkSurfaceView: View {
             .frame(minHeight: 32)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .help(task.task.name)
         .accessibilityIdentifier("loopflow-task-\(task.id)")
     }
@@ -512,15 +403,15 @@ struct WorkSurfaceView: View {
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(WorkTone.human.ink)
+                    .foregroundStyle(palette.waiting)
                 Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkTone.human.text)
+                    .foregroundStyle(WorkTone.waiting.text(in: palette))
                 Spacer(minLength: Spacing.sm)
                 Button(open ? "Hide details" : "Details") {
                     if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(palette.accentInk)
+                .buttonStyle(WorkPlainButtonStyle())
+                .foregroundStyle(palette.actionInk)
                 .accessibilityIdentifier("wave-notice-details-\(task.taskId)")
             }
             if open {
@@ -542,7 +433,7 @@ struct WorkSurfaceView: View {
         .font(Typography.body(12.5))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(WorkTone.human.fill.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .background(WorkTone.waiting.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("wave-notice-\(task.taskId)")
     }
 
@@ -552,7 +443,7 @@ struct WorkSurfaceView: View {
         ContentUnavailableView(
             "Selected Work is unavailable",
             systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its Sessions remain accessible in the work list.")
+            description: Text("This planning read cannot resolve the selection. Its workspace and conversations remain retained.")
         )
     }
 
@@ -571,7 +462,7 @@ struct WorkSurfaceView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.statusWarning)
+                .foregroundStyle(palette.waiting)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.strong(11))
@@ -585,7 +476,7 @@ struct WorkSurfaceView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(Color.statusWarning.opacity(0.12))
+        .background(palette.waiting.opacity(0.12))
     }
 
     // MARK: - Controls
@@ -651,9 +542,9 @@ struct WaveObjectiveView: View {
                 Button(open ? "less" : "more") {
                     if expanded.remove(waveId) == nil { expanded.insert(waveId) }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WorkPlainButtonStyle())
                 .font(Typography.body(12.5))
-                .foregroundStyle(palette.accentInk)
+                .foregroundStyle(palette.actionInk)
                 .accessibilityLabel(open ? "Show less of the objective" : "Show the whole objective")
                 .accessibilityIdentifier("wave-objective-more")
             }
@@ -694,7 +585,7 @@ struct TaskDirectiveEditor: View {
             if let saveError {
                 Text(saveError)
                     .font(Typography.body(12))
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(palette.waiting)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-directive-error")
             }
@@ -776,18 +667,18 @@ struct WaveWorkflowView: View {
                      ?? model.workflowCatalog.errorMessage
                      ?? (model.workflowCatalog.isLoading ? "Reading workflows…" : "\(name) names no workflow here"))
                     .font(Typography.caption())
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(palette.waiting)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-invalid")
             }
             if let error = model.workflowCatalog.errorMessage {
-                Text(error).foregroundStyle(Color.statusWarning)
+                Text(error).foregroundStyle(palette.waiting)
                 Button("Retry") { Task { await model.loadWorkflowCatalog(force: true) } }
             }
             if let error = model.workflowErrors[wave.id] {
                 Text(error)
                     .font(Typography.body(12))
-                    .foregroundStyle(WorkTone.blocked.ink)
+                    .foregroundStyle(palette.failure)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-error")
             }
@@ -798,6 +689,7 @@ struct WaveWorkflowView: View {
 }
 
 struct WorkflowEditor: View {
+    @Environment(\.palette) private var palette
     let model: WorkModel
     let wave: WaveSnapshot
     let name: String
@@ -813,7 +705,7 @@ struct WorkflowEditor: View {
             TextEditor(text: $content).font(.system(.body, design: .monospaced))
                 .disabled(!ready || saving)
                 .accessibilityIdentifier("workflow-content")
-            if let error { Text(error).foregroundStyle(Color.statusWarning) }
+            if let error { Text(error).foregroundStyle(palette.waiting) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()

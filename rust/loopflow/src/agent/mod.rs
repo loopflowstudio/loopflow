@@ -165,8 +165,9 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 7] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 8] = [
     crate::steer::PROVIDER_CONTEXT_ENV,
+    crate::context_block::CONTEXT_DELIVERY_ENV,
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
@@ -1451,6 +1452,15 @@ fn _run_agent_once(
         session_environment(launch, process.context_file.as_deref())
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?,
     );
+    if let Some(context) = launch
+        .conversation_context
+        .as_ref()
+        .filter(|_| matches!(harness.as_str(), "claude" | "codex"))
+    {
+        context
+            .configure_hooks(&mut cmd)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
     progress.finish();
     let title = crate::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd);
     if let Some(input) = &command.input {

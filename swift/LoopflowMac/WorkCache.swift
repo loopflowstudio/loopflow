@@ -84,6 +84,11 @@ final class WorkCache: @unchecked Sendable {
                 return nil
             }
             snapshot = envelope.snapshot
+            snapshot.repositories = snapshot.repositories.mapValues { entry in
+                var entry = entry
+                entry.sessionPages = entry.sessionPages.flatMap(Self.quietSessionPages)
+                return entry
+            }
             return snapshot
         }
     }
@@ -98,9 +103,8 @@ final class WorkCache: @unchecked Sendable {
 
     func saveSessions(_ pages: [String], repo: String, at date: Date = Date()) {
         update("sessions:\(repo)", input: pages.joined(separator: "\n")) { snapshot in
-            let quiet = pages.compactMap(Self.quietSessionPage)
             var entry = snapshot.repositories[repo] ?? .init(savedAt: date)
-            entry.sessionPages = quiet.count == pages.count ? quiet : nil
+            entry.sessionPages = Self.quietSessionPages(pages)
             entry.savedAt = date
             snapshot.repositories[repo] = entry
         }
@@ -194,6 +198,11 @@ final class WorkCache: @unchecked Sendable {
         return rewrite(text, quiet)
     }
 
+    private static func quietSessionPages(_ pages: [String]) -> [String]? {
+        let quiet = pages.compactMap(quietSessionPage)
+        return quiet.count == pages.count ? quiet : nil
+    }
+
     /// Every Session becomes `unknown` and keeps only its open action; `lf`
     /// decides whether opening is still possible.
     static func quietSessionPage(_ text: String) -> String? {
@@ -202,6 +211,8 @@ final class WorkCache: @unchecked Sendable {
             page["entries"] = entries.map { entry in
                 var entry = entry
                 entry["state"] = SessionState.unknown.rawValue
+                entry["attention"] = NSNull()
+                entry["program_status"] = NSNull()
                 entry["actions"] = (entry["actions"] as? [[String: Any]] ?? []).filter {
                     $0["kind"] as? String == SessionActionKind.open.rawValue
                 }

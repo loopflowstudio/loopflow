@@ -169,6 +169,7 @@ mod tests {
                 super::super::planning_changes::PlanningChanges::Project(&project.id),
                 &change,
                 Some("2026-10-10T12:00:00Z"),
+                false,
             )
             .unwrap());
         assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");

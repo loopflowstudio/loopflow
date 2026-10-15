@@ -668,8 +668,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut statement = conn.prepare(
             "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id, created_at FROM wave_addresses
              UNION ALL
@@ -2227,6 +2227,21 @@ mod frontier_tests {
                 |row| row.get(0),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn development_build_uses_compatible_shared_work_without_migrating() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, Published, &shared.home, Authorized).unwrap();
+        seed_current_wave(&path);
+        let before = frontier(&path);
+        let store = open(&path, ValidationOnly, &shared.home, Forbidden).unwrap();
+        let wave = Wave::new(WaveId::new(), "From app".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        assert_eq!(current_wave(&path), "Current");
+        assert_eq!(frontier(&path), before);
+        open(&path, Published, &shared.home, Forbidden).unwrap();
     }
 
     #[test]

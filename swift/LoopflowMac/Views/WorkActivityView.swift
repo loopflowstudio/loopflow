@@ -5,7 +5,6 @@ struct WorkActivityView: View {
     @Bindable var model: WorkModel
 
     @Environment(\.palette) private var palette
-    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -130,7 +129,7 @@ struct WorkActivityView: View {
                 if let github = entry.fact.github {
                     Link("Open PR #\(github.number)", destination: github.url)
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(Color.loopflowBurgundy)
+                        .buttonStyle(WorkLinkStyle())
                         .accessibilityIdentifier("loopflow-open-pr-\(github.number)")
                 }
             }
@@ -183,20 +182,20 @@ struct WorkActivityView: View {
 
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
-        case .workCreated: ("plus", .statusNeutral)
-        case .inputCaptured, .providerHistoryRecorded: ("play.fill", .statusInfo)
+        case .workCreated: ("plus", palette.textTertiary)
+        case .inputCaptured, .providerHistoryRecorded: ("play.fill", palette.working)
         case .inputCompletionRecorded(_, _, let status):
             (
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
-                    ? .statusSuccess
-                    : .statusWarning
+                    ? palette.success
+                    : palette.waiting
             )
-        case .prStarted: ("arrow.triangle.branch", .statusNeutral)
-        case .prPublishRequested: ("arrow.up.right", .statusInfo)
-        case .prMergeRequested: ("arrow.triangle.merge", .statusInfo)
-        case .prMerged: ("checkmark.seal.fill", .statusSuccess)
-        case .prAbandoned: ("xmark", .statusWarning)
+        case .prStarted: ("arrow.triangle.branch", palette.textTertiary)
+        case .prPublishRequested: ("arrow.up.right", palette.working)
+        case .prMergeRequested: ("arrow.triangle.merge", palette.working)
+        case .prMerged: ("checkmark.seal.fill", palette.success)
+        case .prAbandoned: ("xmark", palette.waiting)
         case .steerIssued: ("arrow.turn.down.right", Color.loopflowBurgundy)
         }
     }
@@ -214,13 +213,13 @@ struct WorkActivityView: View {
     private func evidenceBanner(_ reason: String) -> some View {
         Label(reason, systemImage: "exclamationmark.triangle.fill")
             .font(Typography.caption(9))
-            .foregroundStyle(Color.statusWarning)
+            .foregroundStyle(palette.waiting)
             .lineLimit(2)
             .textSelection(.enabled)
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.statusWarning.opacity(0.10))
+            .background(palette.waiting.opacity(0.10))
     }
 
 }

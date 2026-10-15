@@ -15,6 +15,14 @@ pub struct TaskWork {
     pub workflow: Option<crate::ops::workflow::Workflow>,
 }
 
+/// Workspace facts needed before opening diagnostic Process history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOverview {
+    pub sessions: Vec<TaskSession>,
+    pub flow_processes: Vec<FlowProcessInventoryEntry>,
+    pub workflow: Option<crate::ops::workflow::Workflow>,
+}
+
 /// Conversation identity and completion, without loading its input or transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {

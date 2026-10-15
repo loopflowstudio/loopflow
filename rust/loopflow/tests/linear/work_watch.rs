@@ -294,6 +294,24 @@ impl Watch {
         self.frames.recv_timeout(within).ok()
     }
 
+    /// Deliver every frame through the requested confirmation, in wire order.
+    fn checkpoint(&mut self, id: u64, replay: &[&str]) -> Vec<WorkFrame> {
+        self.request(serde_json::json!({"action":"checkpoint", "id":id, "replay":replay}));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut frames = Vec::new();
+        loop {
+            let frame = self
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("checkpoint never arrived");
+            let confirmed =
+                matches!(frame.content, WorkContent::Checkpoint) && frame.answers == Some(id);
+            frames.push(frame);
+            if confirmed {
+                return frames;
+            }
+        }
+    }
+
     /// The next planning frame whose Tasks satisfy `accept`.
     fn planning(&self, within: Duration, accept: impl Fn(&[String]) -> bool) -> Vec<String> {
         let deadline = Instant::now() + within;
@@ -397,6 +415,224 @@ fn stable(mut value: serde_json::Value) -> serde_json::Value {
     }
     strip(&mut value);
     value
+}
+
+#[test]
+fn joined_planning_stays_on_one_commit_while_another_writer_changes_wave_names() {
+    let home = Machine::new();
+    let watch = home.watch();
+    watch.planning(Duration::from_secs(30), |_| true);
+    let conn = home.raw();
+    let wave = home.wave.id().to_string();
+    let writer = std::thread::spawn(move || {
+        for index in 0..100 {
+            conn.execute(
+                "UPDATE waves SET name=?1 WHERE id=?2",
+                rusqlite::params![format!("revision-{index}"), wave],
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    let mut readings = 0;
+    for frame in watch.parts(Duration::from_secs(4)) {
+        if let WorkContent::Planning(Some(part)) = frame.content {
+            assert_eq!(part.roadmap.waves[0].wave.name, part.waves[0].name);
+            readings += 1;
+        }
+    }
+    writer.join().unwrap();
+    assert!(readings > 0);
+}
+
+#[test]
+fn a_flow_graph_write_does_not_requery_work_history() {
+    let home = Machine::new();
+    for index in 0..15 {
+        home.raw().execute("INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,'trace',1,2,'succeeded')", [format!("history-proof-{index}")]).unwrap();
+    }
+    let mut watch = home.watch();
+    watch.request(
+        serde_json::json!({"action":"scope","id":1,"repo":null,"headless":false,
+        "task":null,"wave":null,"activity":{"wave":home.wave.id(),"project":null,"task":null}}),
+    );
+    let before = watch.heartbeat();
+    assert!(before.contains_key("work_activity"));
+    let started = Instant::now();
+    for index in 0..15 {
+        home.raw()
+            .execute(
+                "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,'example','{}')",
+                [format!("history-proof-{index}")],
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    let frames = watch.checkpoint(2, &[]);
+    assert!(frames
+        .iter()
+        .all(|frame| !matches!(frame.content, WorkContent::WorkActivity(_))));
+    let after = watch.heartbeat();
+    let clock_budget = started.elapsed().as_secs() / 2 + 1;
+    assert!(after["work_activity"] - before["work_activity"] <= clock_budget);
+    assert!(after["planning"] > before["planning"]);
+}
+
+#[test]
+fn diagnostic_history_is_read_only_when_requested() {
+    let home = Machine::new();
+    home.plan(1);
+    home.conversation();
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    let conn = home.raw();
+    // This test decodes mechanical history, unlike the lightweight Session fixture.
+    conn.execute("UPDATE processes SET trace_id=id", [])
+        .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='conversation'",
+        [task.id.as_str(), home.wave.id().as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+        SELECT 'conversation','observed','diagnostic-process',1,'{}',id FROM processes LIMIT 1",
+        [],
+    )
+    .unwrap();
+    let mut watch = home.watch();
+    watch.request(serde_json::json!({"action":"scope", "id":1, "repo":null,
+        "headless":false, "task":"FIX-1", "wave":null, "activity":null}));
+    let frames = watch.checkpoint(2, &[]);
+    let overview = frames
+        .iter()
+        .find_map(|frame| match &frame.content {
+            WorkContent::Task(Some(part)) => Some(part),
+            _ => None,
+        })
+        .unwrap();
+    assert!(!overview.work.sessions.is_empty());
+    assert!(serde_json::to_value(&overview.work)
+        .unwrap()
+        .get("processes")
+        .is_none());
+    assert!(!watch.heartbeat().contains_key("task_history"));
+    watch.request(serde_json::json!({"action":"task_history", "id":3, "task":"FIX-1"}));
+    let frames = watch.checkpoint(4, &[]);
+    let history = frames
+        .iter()
+        .find_map(|frame| match &frame.content {
+            WorkContent::TaskHistory(Some(part)) => Some(part),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing diagnostic history: {frames:?}"));
+    assert!(!history.work.processes.is_empty());
+    watch.request(serde_json::json!({"action":"task_history", "id":5, "task":null}));
+    watch.checkpoint(6, &[]);
+    let before = watch.heartbeat()["task_history"];
+    conn.execute("UPDATE processes SET command='changed'", [])
+        .unwrap();
+    watch.checkpoint(7, &[]);
+    assert_eq!(watch.heartbeat()["task_history"], before);
+}
+
+#[test]
+fn selected_task_arrives_before_portfolio_and_confirmation() {
+    let home = Machine::new();
+    home.plan(1);
+    let mut watch = home.watch();
+    watch.request(serde_json::json!({
+        "action":"scope", "id":1, "repo":null, "headless":false,
+        "task":"FIX-1", "wave":null, "activity":null,
+    }));
+    watch.checkpoint(2, &[]);
+    // Make every subscription due; the selected Task must not queue behind
+    // portfolio work, while confirmation must still follow all projections.
+    watch.request(serde_json::json!({"action":"refresh", "id":3}));
+    let frames = watch.checkpoint(4, &[]);
+    let task = frames
+        .iter()
+        .position(
+            |frame| matches!(&frame.content, WorkContent::Task(Some(part)) if part.task == "FIX-1"),
+        )
+        .expect("selected Task was not delivered");
+    let planning = frames
+        .iter()
+        .position(|frame| matches!(&frame.content, WorkContent::Planning(Some(_))))
+        .expect("portfolio was not delivered");
+    assert!(task < planning);
+    assert!(matches!(
+        frames.last().unwrap().content,
+        WorkContent::Checkpoint
+    ));
+    assert_eq!(frames[task].unavailable, None);
+    assert_eq!(frames[task].revisions, frames[planning].revisions);
+}
+
+#[test]
+fn changing_task_scope_reuses_the_unchanged_wave_projection() {
+    let home = Machine::new();
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = |id, task| {
+        serde_json::json!({"action":"scope","id":id,"repo":null,
+        "headless":false,"task":task,"wave":home.wave.id(),"activity":null})
+    };
+    watch.request(scope(1, None::<&str>));
+    let before = watch.heartbeat();
+    assert!(before.contains_key("wave"));
+    watch.request(scope(2, Some("FIX-1")));
+    loop {
+        let frame = watch
+            .next(Duration::from_secs(10))
+            .expect("no scoped Wave reading");
+        if matches!(frame.content, WorkContent::Wave(Some(_))) && frame.answers == Some(2) {
+            break;
+        }
+    }
+    assert_eq!(watch.heartbeat()["wave"], before["wave"]);
+}
+
+#[test]
+fn a_failed_subscription_cannot_confirm_a_write() {
+    let home = Machine::new();
+    let mut watch = home.watch();
+    watch.request(serde_json::json!({"action":"scope","id":1,"repo":null,
+        "headless":false,"task":"missing","wave":null,"activity":null}));
+    let frames = watch.checkpoint(2, &[]);
+    assert!(frames
+        .last()
+        .unwrap()
+        .unavailable
+        .as_ref()
+        .unwrap()
+        .contains("task"));
+}
+
+#[test]
+fn a_checkpoint_confirms_another_process_write_without_forcing_queries() {
+    let home = Machine::new();
+    let mut watch = home.watch();
+    watch.planning(Duration::from_secs(30), |_| true);
+    let before = watch.heartbeat();
+    home.plan(1);
+    let frames = watch.checkpoint(1, &[]);
+    assert!(
+        frames.iter().any(|frame| matches!(&frame.content,
+        WorkContent::Planning(Some(part)) if identifiers(&part.roadmap) == ["FIX-1"])),
+        "confirmation overtook its changed projection"
+    );
+    let confirmed = frames.last().unwrap();
+    assert!(confirmed.revisions.is_some());
+    assert!(confirmed.unavailable.is_none());
+    let after_write = watch.heartbeat();
+    assert!(after_write["planning"] > before["planning"]);
+    watch.checkpoint(2, &[]);
+    assert_eq!(watch.heartbeat()["planning"], after_write["planning"]);
+    let frames = watch.checkpoint(3, &["planning"]);
+    assert!(frames.iter().any(|frame| frame.answers == Some(3)
+        && matches!(&frame.content,
+        WorkContent::Planning(Some(part)) if identifiers(&part.roadmap) == ["FIX-1"])));
+    assert_eq!(watch.heartbeat()["planning"], after_write["planning"]);
 }
 
 #[test]
@@ -569,7 +805,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
          SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
-    watch.session(|record| record["attention"] == "waiting");
+    watch.session(|record| record["attention"] == "available");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
     watch.session(|record| record["attention"].is_null());
 
@@ -1044,7 +1280,13 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
     .unwrap();
     let id = home.store.bind_peer_planning(repo, &destination).unwrap();
     home.store.export_peer_planning(repo, &id).unwrap();
-    let statuses = read(&|statuses| !statuses.is_empty());
+    // Binding and export are separate commits; the first visible binding can
+    // legitimately precede its export receipt.
+    let statuses = read(&|statuses| {
+        statuses
+            .iter()
+            .any(|status| status.id == id && status.selected_records > 0)
+    });
     assert!(!statuses[0].active);
     assert_eq!(statuses.len(), 1);
     assert_eq!(statuses[0].id, id);

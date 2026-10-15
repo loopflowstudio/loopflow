@@ -190,7 +190,7 @@ struct TelemetryDashboardView: View {
         if let errorMessage {
             Text(errorMessage)
                 .font(Typography.caption())
-                .foregroundStyle(Color.statusError)
+                .foregroundStyle(palette.failure)
         } else if let doctor {
             HStack(spacing: Spacing.sm) {
                 ForEach(doctor.checks) { check in
@@ -290,9 +290,9 @@ struct TelemetryDashboardView: View {
 
     private func healthColor(_ status: String) -> Color {
         switch status {
-        case "ok": .statusSuccess
-        case "warn": .statusWarning
-        default: .statusError
+        case "ok": palette.success
+        case "warn": palette.waiting
+        default: palette.failure
         }
     }
 }
@@ -547,7 +547,7 @@ private struct IcicleNode: View {
     }
 
     private var depthColor: Color {
-        let ramp: [Color] = [.loopflowBurgundy, .statusInfo, .statusSuccess, .statusWarning]
+        let ramp: [Color] = [.loopflowBurgundy, palette.working, palette.success, palette.waiting]
         return ramp[min(depth, ramp.count - 1)]
     }
 }

@@ -1653,6 +1653,16 @@ mod tests {
     }
 
     #[test]
+    fn git_get_default_branch_uses_the_standalone_branch_without_main() {
+        let repo = init_repo();
+        commit_file(repo.path(), "README.md", "hello");
+        git_stdout(repo.path(), &["branch", "-m", "demo"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "demo");
+        git_stdout(repo.path(), &["branch", "main"]).unwrap();
+        assert_eq!(get_default_branch(repo.path()).unwrap(), "main");
+    }
+
+    #[test]
     fn git_get_default_branch_prefers_existing_configured_branch() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");

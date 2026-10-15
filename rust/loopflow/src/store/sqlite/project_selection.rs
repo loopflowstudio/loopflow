@@ -315,8 +315,8 @@ pub struct ProjectActivation {
 
 impl SqliteStore {
     pub(crate) fn selected_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
         let readiness = readiness_in(&tx, wave)?;
         match readiness.state {
             ProjectReadinessState::Unconfigured => return Ok(None),

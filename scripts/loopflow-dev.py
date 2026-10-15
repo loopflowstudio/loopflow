@@ -58,7 +58,10 @@ GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf3.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
-    env = {"LOOPFLOW_DEV_WAVE_REPO": str(repo)}
+    env = {
+        "LOOPFLOW_DEV_WAVE_REPO": str(repo),
+        "LF_BIN": str(DEV_APP / "Contents/MacOS/lf"),
+    }
     if value := os.environ.get("LF_HOME"):
         env["LF_HOME"] = value
     return env
@@ -301,12 +304,11 @@ def cmd_ghostty_build() -> int:
 def cmd_run() -> int:
     """Build and launch the app."""
     print("Building and running Loopflow...")
-    result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    _stop_loopflow_app(DEV_APP)
-    _install_dev_app()
+    result = cmd_install()
+    if result != 0:
+        return result
+    if not _check_repository_opening(REPO_ROOT):
+        return 1
     # Tell the app which checkout initiated the launch. Repository discovery
     # collapses linked worktrees to their authoritative main checkout.
     command = ["open", "-n"]
@@ -315,6 +317,38 @@ def cmd_run() -> int:
     command.extend([str(DEV_APP), "--args", "--repo", str(REPO_ROOT)])
     run(command)
     return 0
+
+
+def _check_repository_opening(repo: Path) -> bool:
+    cli = DEV_APP / "Contents" / "MacOS" / "lf"
+    # Match an app launch, not the enclosing agent's Task or process context.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    env.update(_app_environment(repo))
+    print(f"Checking repository opening through {cli}...", flush=True)
+    try:
+        result = subprocess.run(
+            [str(cli), "repo", "identity", "--json"],
+            cwd=repo,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        detail = str(error)
+    else:
+        if result.returncode == 0:
+            return True
+        detail = result.stderr.strip() or f"lf exited with status {result.returncode}"
+
+    print(f"Loopflow Dev cannot open this repository:\n{detail}", file=sys.stderr)
+    print(
+        "The app uses its bundled CLI. Check the reported repository or schema error; "
+        "ordinary app commands never migrate the shared database.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _print_run_debug_checklist() -> None:
@@ -328,18 +362,18 @@ def _print_run_debug_checklist() -> None:
 def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     """Build and run with stdout visible. `repo` is the repo the app opens."""
     print("Building and running Loopflow (debug mode with logs)...")
-    result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
-    if result.returncode != 0:
-        return result.returncode
-
-    _stop_loopflow_app(DEV_APP)
-    _install_dev_app()
+    result = cmd_install()
+    if result != 0:
+        return result
+    if not _check_repository_opening(repo):
+        return 1
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
-    # The app resolves `lf` from its own bundle before PATH, so the dashboard
-    # reads this branch's ledger surfaces (`lf session list/trace/doctor --json`) rather
-    # than whatever `lf` happens to be installed.
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
+    print(
+        "The app and its children use the bundled CLI; "
+        "LF_HOME selects data, not a different binary."
+    )
     print("Telemetry dashboard: Go → Telemetry (⌘1)")
     _print_run_debug_checklist()
     print("Press Ctrl+C to quit")
@@ -595,7 +629,7 @@ def _apply_dev_identity(plist: Path) -> None:
 
 def _build_control_tools() -> Path:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. Its bundled CLI forwards ordinary commands to the installed CLI;
+    # build. The app selects its bundled CLI for every child;
     # it has no authority to migrate the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [

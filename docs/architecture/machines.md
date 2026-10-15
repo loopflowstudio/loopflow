@@ -232,10 +232,17 @@ uv run python scripts/install.py local # build an experimental CLI
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
 
-All ordinary commands use the installed CLI and `~/.lf`. Source CLI commands
-forward there before opening a store. Task Flows, Flow steps, sessions and
-agent tools inherit the same Machine; no source-specific or installed-development
-Machine exists.
+Ordinary terminal commands default to the installed CLI and `~/.lf`. Desktop
+uses its bundled CLI for queries, actions and newly launched Sessions, through
+explicit `LF_BIN` selection. Provider children inherit that executable and put
+its directory first on PATH. No global installation or shell configuration changes.
+An already running provider keeps its existing environment when reattached.
+
+Executable selection and data selection are independent. A development app can
+use compatible main-Machine data; the store validates its released schema and
+ordinary opens never initialize or advance it. An incompatible schema remains
+an explicit error, not a reason to fall back to another binary. Development
+builds retain validation-only migration authority.
 
 `LF_HOME` explicitly selects an empty, disposable experiment. Its database is
 always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable

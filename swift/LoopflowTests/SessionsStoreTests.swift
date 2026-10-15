@@ -11,32 +11,32 @@ struct SessionsStoreTests {
     func filteredRefreshRetainsSessions() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([
-            session(id: "a", state: "waiting"),
+            session(id: "a", state: "available"),
             session(id: "b", state: "active"),
         ]))
 
         #expect(item(store, "a")?.state == .pending)
         #expect(item(store, "b")?.surface == nil)
 
-        store.reconcile(try records([session(id: "a", state: "waiting")]))
+        store.reconcile(try records([session(id: "a", state: "available")]))
 
         #expect(store.sessions.map(\.id) == ["a", "b"])
         #expect(item(store, "a")?.state == .pending)
     }
 
-    @Test("selecting one waiting Task recovers only that terminal")
+    @Test("selecting one available Task recovers only that terminal")
     func opensOnlyTheSelectedSession() async throws {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args.first == "session")
                 #expect(args.dropFirst().first == "connect")
-                return session(id: args[2], state: "waiting")
+                return session(id: args[2], state: "available")
             }
         )
         store.reconcile(try records([
-            session(id: "first", state: "waiting"),
-            session(id: "second", state: "waiting"),
+            session(id: "first", state: "available"),
+            session(id: "second", state: "available"),
         ]))
 
         await store.select("second")
@@ -45,13 +45,19 @@ struct SessionsStoreTests {
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
     }
 
-    @Test("A prepared Task target enters its terminal without another preparation")
-    func taskPreparationIsConsumedDirectly() async throws {
+    @Test("A prepared Task target enters its terminal without another preparation", arguments: [false, true])
+    func taskPreparationIsConsumedDirectly(ended: Bool) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             throw RegistryQueryError("The prepared command is already available")
         })
         let prepared = try #require(records([session(id: "primary", state: "closed")]).first)
         store.reconcile([prepared])
+        if ended {
+            store.adoptPreparation(prepared)
+            store.recordPaneLive(prepared.id)
+            store.noteSurfaceClosed(.session(prepared.id, machineId: fixtureMachineId), output: "Provider exited")
+            #expect(item(store, prepared.id)?.state == .ended("Provider exited"))
+        }
         store.adoptPreparation(prepared)
 
         await store.select(prepared.id)
@@ -67,7 +73,7 @@ struct SessionsStoreTests {
             repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in session(id: "native", state: "active") }
         )
-        store.reconcile(try records([session(id: "native", state: "waiting")]))
+        store.reconcile(try records([session(id: "native", state: "available")]))
 
         await store.select("native")
 
@@ -177,6 +183,22 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.surface == nil)
     }
 
+    @Test("Ended Session output survives a fresh inventory without relaunch")
+    func endedOutputSurvivesPolling() async throws {
+        let record = session(id: "native", state: "closed")
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in record })
+        store.reconcile(try records([record]))
+        await store.select("native")
+        store.recordPaneLive("native")
+        store.noteSurfaceClosed(.session("native", machineId: fixtureMachineId),
+            output: "Error: Previous AgentProcess has no observed exit")
+        store.reconcile(try records([record]))
+        #expect(item(store, "native")?.state == .ended("Error: Previous AgentProcess has no observed exit"))
+        #expect(item(store, "native")?.surface == nil)
+        await store.select("native")
+        #expect(item(store, "native")?.state == .prepared)
+    }
+
     @Test("A failed open stays visible across polling until superseded")
     func failedOpenSurvivesPolling() async throws {
         let store = SessionsStore(
@@ -208,10 +230,10 @@ struct SessionsStoreTests {
     @Test("Retained review feedback stays visible")
     func retainedFeedbackDoesNotDisappear() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
-        store.reconcile(try records([session(id: "review", state: "waiting")]))
+        store.reconcile(try records([session(id: "review", state: "available")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.record.attention == .waiting)
+        #expect(store.sessions.first?.record.attention == .available)
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
@@ -256,8 +278,8 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
 }
 
 private func session(id: String, state: String, replacing: Bool = false) -> String {
-    // A conversation waiting on a person has no client; `waiting` is its attention.
-    let wire = state == "waiting" ? "unknown" : state
+    // A conversation available for a person has no client; `available` is its attention.
+    let wire = state == "available" ? "unknown" : state
     return """
     {
       "id": "\(id)", "run_id": "\(id)", "interactive": true,
@@ -266,8 +288,8 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "detail": "review-design",
       "cwd": "/tmp/repo.\(id)",
       "workspace": {"machine_id": "\(fixtureMachineId)", "worktree": "/tmp/repo.\(id)", "task_id": null, "unavailable": null},
-      "state": "\(wire)", "attention": \(state == "waiting" ? "\"waiting\"" : "null"),
-      "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
+      "state": "\(wire)", "attention": \(state == "available" ? "\"available\"" : "null"),
+      "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
       "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],

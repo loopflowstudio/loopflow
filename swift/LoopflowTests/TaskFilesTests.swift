@@ -408,7 +408,7 @@ struct TaskFilesTests {
         #expect(retained == nil)
     }
 
-    @Test func taskHeaderUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() async throws {
+    @Test func taskWorkspaceUsesRecordedCheckoutAndLeavesGenericWorkspaceIntact() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
@@ -423,17 +423,20 @@ struct TaskFilesTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, repository: "fixture-repository", query: query)
+        model.bindWorkspaces(registry, repository: "fixture-repository")
+        let rootKey = try #require(registry.selectedWork)
+        let rootWorkspace = try #require(registry.retained(rootKey))
+        let rootLayout = rootWorkspace.multiplexer.layout
         for (task, location) in [("issue-now", "loopflow.make-lf-work-the-machine"),
                                  ("issue-review", "loopflow.all-wave-roadmap"),
                                  ("issue-now", "loopflow.make-lf-work-the-machine")] {
             model.select(.task(id: task))
             model.navigation.content = .terminals
-            let text = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location").text().string()
-            #expect(text == location)
-            #expect(throws: (any Error).self) {
-                try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
-            }
+            let key = try #require(registry.selectedWork)
+            let workspace = try #require(registry.retained(key))
+            #expect(workspace.location?.worktree.hasSuffix(location) == true)
+            #expect(registry.retained(rootKey) === rootWorkspace)
+            #expect(rootWorkspace.multiplexer.layout == rootLayout)
         }
     }
 

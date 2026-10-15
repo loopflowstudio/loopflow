@@ -27,6 +27,7 @@ mod planning_exchange_tests;
 mod planning_foreground_tests;
 mod planning_git_tests;
 mod planning_setup_tests;
+mod portfolio_cli_tests;
 mod pr_review_tests;
 mod release_lock_tests;
 mod repo_commands;

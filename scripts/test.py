@@ -51,6 +51,9 @@ XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
 GATE_EVIDENCE_SCHEMA = 3
 RESOURCE_SCRIPT = REPO_ROOT / "scripts" / "resource_envelope.py"
+# Recovery includes a 120s build prune, cache cleanup and before/after inventory.
+RESOURCE_RECOVERY_TIMEOUT = 300
+RESOURCE_READ_TIMEOUT = 60
 RESOURCE_POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
 HOST_SECURITY_PROCESSES = {"amfid", "syspolicyd", "taskgated", "trustd"}
 
@@ -818,8 +821,20 @@ def _run_resource_check(recover: bool) -> tuple[Optional[dict[str, object]], Opt
     if recover:
         argv.append("--recover")
     try:
-        result = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        with subprocess.Popen(
+            argv, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        ) as process:
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=RESOURCE_RECOVERY_TIMEOUT if recover else RESOURCE_READ_TIMEOUT
+                )
+            except subprocess.TimeoutExpired as exc:
+                _kill_group(process, "resource-preflight")
+                process.communicate()
+                return None, f"RESOURCE MEASUREMENT FAILED: {exc}"
+            result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    except OSError as exc:
         return None, f"RESOURCE MEASUREMENT FAILED: {exc}"
     try:
         report = json.loads(result.stdout)

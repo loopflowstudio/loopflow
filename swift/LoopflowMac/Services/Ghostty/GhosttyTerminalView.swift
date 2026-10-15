@@ -110,7 +110,8 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
             nsView.onSurfaceCreated = onSurfaceCreated
             nsView.onSurfaceFailed = onSurfaceFailed
             nsView.onFocus = onFocus
-            nsView.sizeDidChange(size)
+            let searchHeight = nsView.searchBar.isHidden ? 0 : TerminalSearchBar.height
+            nsView.sizeDidChange(CGSize(width: size.width, height: max(0, size.height - searchHeight)))
 
             if case .ready = manager.state, nsView.surface == nil, !nsView.childExited,
                size.width > 0, size.height > 0 {
@@ -150,9 +151,18 @@ final class GhosttyTerminalMount: NSView {
         terminal.recordMountLifecycle("mount-window", host: self)
         guard window != nil else { return }
         configure?(terminal)
-        terminal.frame = bounds
-        terminal.autoresizingMask = [.width, .height]
+        terminal.autoresizingMask = []
         addSubview(terminal)
+        addSubview(terminal.searchBar)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard terminal.superview === self else { return }
+        let searchHeight = terminal.searchBar.isHidden ? 0 : min(TerminalSearchBar.height, bounds.height)
+        terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
+        terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
 
@@ -181,35 +191,13 @@ final class GhosttySurfacePool {
 
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         // Do not use view(for:) or hasSurface: those allocate or schedule cleanup.
-        guard let view = views[terminal], let surface = view.surface else {
+        guard let view = views[terminal], view.surface != nil else {
             return .unavailable(reason: .missingSurface)
         }
         guard view.programStatus.incarnation.uuidString.lowercased() == request.surface else {
             throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no text was read.")
         }
-        // The native reader formats directly into this fixed buffer under the
-        // renderer lock. Never read a whole terminal and truncate it in Swift.
-        var bytes = [CChar](repeating: 0, count: request.maxBytes)
-        var written = 0
-        var truncated = false
-        let succeeded = bytes.withUnsafeMutableBufferPointer { buffer in
-            if request.region == .selection {
-                return ghostty_surface_read_text_bounded(
-                    surface, nil, buffer.baseAddress, buffer.count, &written, &truncated)
-            }
-            let tag = request.region == .screen ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
-            var selection = ghostty_selection_s(
-                top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
-                bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
-                rectangle: false)
-            return ghostty_surface_read_text_bounded(
-                surface, &selection, buffer.baseAddress, buffer.count, &written, &truncated)
-        }
-        guard succeeded else {
-            throw RegistryQueryError("The terminal region could not be read; no unbounded fallback was used.")
-        }
-        let text = bytes.withUnsafeBytes { String(decoding: $0.prefix(written), as: UTF8.self) }
-        return .available(text: text, truncated: truncated)
+        return try view.readText(region: request.region, maxBytes: request.maxBytes)
     }
 
     func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {
@@ -440,6 +428,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
     }
     var terminalTitle: String?
+    private var retainedSearchBar: TerminalSearchBar?
+    var searchBar: TerminalSearchBar {
+        if let retainedSearchBar { return retainedSearchBar }
+        let bar = TerminalSearchBar(terminal: self)
+        retainedSearchBar = bar
+        return bar
+    }
+    private(set) var copyConfirmation: NSTextField?
+    private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -550,7 +547,40 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
     }
 
+    func readText(region: DesktopTextRegion, maxBytes: Int) throws -> DesktopTextResult {
+        guard let surface else { return .unavailable(reason: .missingSurface) }
+        // The native reader formats directly into this fixed buffer under the
+        // renderer lock. Never read a whole terminal and truncate it in Swift.
+        var bytes = [CChar](repeating: 0, count: maxBytes)
+        var written = 0
+        var truncated = false
+        let succeeded = bytes.withUnsafeMutableBufferPointer { buffer in
+            if region == .selection {
+                return ghostty_surface_read_text_bounded(
+                    surface, nil, buffer.baseAddress, buffer.count, &written, &truncated)
+            }
+            let tag = region == .screen ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
+            var selection = ghostty_selection_s(
+                top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+                bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+                rectangle: false)
+            return ghostty_surface_read_text_bounded(
+                surface, &selection, buffer.baseAddress, buffer.count, &written, &truncated)
+        }
+        guard succeeded else {
+            throw RegistryQueryError("The terminal region could not be read; no unbounded fallback was used.")
+        }
+        let text = bytes.withUnsafeBytes { String(decoding: $0.prefix(written), as: UTF8.self) }
+        return .available(text: text, truncated: truncated)
+    }
+
     func destroySurface() {
+        copyDismissal?.cancel()
+        copyConfirmation?.removeFromSuperview()
+        copyConfirmation = nil
+        // Cleanup must never initialize a control holding a weak reference to
+        // this view: destroySurface also runs during deinitialization.
+        retainedSearchBar?.end()
         programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
         // Only an explicit reopen with a fresh view may launch another child.
@@ -579,9 +609,16 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// UI can reclassify immediately instead of waiting for the next poll.
     func handleSurfaceClose() {
         guard surface != nil else { return }
+        var output: String?
+        if case .session = terminal,
+           case .available(let text, let truncated) = try? readText(region: .screen, maxBytes: 16384) {
+            let excerpt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            output = excerpt.isEmpty ? nil : excerpt + (truncated ? "\n[Terminal output truncated]" : "")
+        }
         destroySurface()
         pool?.discard(self)
-        NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal)
+        NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: terminal,
+            userInfo: output.map { ["output": $0] })
     }
 
     @objc private func displayLinkFired(_ link: CADisplayLink) {
@@ -593,6 +630,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         ghostty_surface_draw(surface)
         if let keyToDraw {
             self.keyToDraw = nil
+            if case .session(let id, _) = terminal { Perf.agentInput("key_draw", session: id) }
             Perf.signposter.endInterval(Perf.terminalKeyToDraw, keyToDraw)
         }
         let now = CACurrentMediaTime()
@@ -859,6 +897,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 return copySelection()
             } else if event.charactersIgnoringModifiers == "v" {
                 return pasteFromClipboard()
+            } else if event.charactersIgnoringModifiers == "f" {
+                searchBar.open(needle: nil)
+                return true
             }
         }
 
@@ -875,6 +916,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             return
         }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
+        if case .session(let id, _) = terminal { Perf.agentInput("key_received", session: id) }
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
@@ -1211,7 +1253,42 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        return pasteboard.setString(selection, forType: .string)
+        guard pasteboard.setString(selection, forType: .string) else { return false }
+        showCopyConfirmation(selection)
+        return true
+    }
+
+    private func showCopyConfirmation(_ text: String) {
+        guard let message = terminalCopyMessage(text) else { return }
+        copyDismissal?.cancel()
+        copyConfirmation?.removeFromSuperview()
+        let notice = TerminalCopyNotice(labelWithString: message)
+        notice.font = .systemFont(ofSize: 11, weight: .medium)
+        notice.textColor = NSColor(TerminalPalette.foreground)
+        notice.backgroundColor = TerminalPalette.nsBackground
+        notice.drawsBackground = true
+        notice.isSelectable = false
+        notice.setAccessibilityIdentifier("terminal-copy-confirmation")
+        notice.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(notice)
+        NSLayoutConstraint.activate([
+            notice.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            notice.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+        ])
+        copyConfirmation = notice
+        NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
+            .announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+        ])
+        copyDismissal = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(1.4)) } catch { return }
+            self?.copyConfirmation?.removeFromSuperview()
+            self?.copyConfirmation = nil
+        }
+    }
+
+    func performBinding(_ action: String) {
+        guard let surface else { return }
+        action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
 
     private func focusForPointerInput() {
@@ -1574,6 +1651,9 @@ enum LoopflowZshBootstrap {
         # Runs once, after the user's rc files have had their say.
         _loopflow_prompt() {
             precmd_functions=(${precmd_functions:#_loopflow_prompt})
+            # Login rc files may replace PATH. Keep this app's lf first for
+            # nested commands without changing the user's shell configuration.
+            if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN:h}:$PATH"; fi
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
             PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
             # The command is bold; zsh ends the highlight before output starts.
@@ -1592,16 +1672,24 @@ enum LoopflowZshBootstrap {
     /// the system may clear temporary files while the app stays open, and a
     /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
     static func install() -> String? {
+        install(contents: zshenv, name: ".zshenv")?.deletingLastPathComponent().path
+    }
+
+    static func installBash() -> String? {
+        install(contents: """
+        source "$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+        if [[ -n $LF_BIN ]]; then export PATH="${LF_BIN%/*}:$PATH"; fi
+        """, name: "bash-env")?.path
+    }
+
+    private static func install(contents: String, name: String) -> URL? {
         let directory = terminalTemporaryDirectory()
-            .appendingPathComponent("loopflow-zsh", isDirectory: true)
+            .appendingPathComponent("loopflow-shell", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try zshenv.write(
-                to: directory.appendingPathComponent(".zshenv"),
-                atomically: true,
-                encoding: .utf8
-            )
-            return directory.path
+            let file = directory.appendingPathComponent(name)
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+            return file
         } catch {
             return nil
         }
@@ -1627,11 +1715,11 @@ func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String
             bash)
                 export GHOSTTY_BASH_ENV="${ENV-}"
                 export GHOSTTY_BASH_INJECT=1
-                export ENV="$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash"
+                export ENV=\(LoopflowZshBootstrap.installBash().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/bash/ghostty.bash""#)
                 exec \(shellEscape(shell)) --posix -l
                 ;;
             fish)
-                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/ghostty-shell-integration.fish"'
+                exec \(shellEscape(shell)) -l -C 'source "$GHOSTTY_RESOURCES_DIR/shell-integration/fish/vendor_conf.d/ghostty-shell-integration.fish"; if test -n "$LF_BIN"; set -gx PATH (dirname "$LF_BIN") $PATH; end'
                 ;;
         esac
     fi

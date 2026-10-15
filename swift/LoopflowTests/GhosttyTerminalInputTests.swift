@@ -122,6 +122,7 @@ struct GhosttyShellBlockTests {
                 """
                 source ~/.zshrc
                 _loopflow_prompt
+                print -r -- "BUNDLED_PATH=$PATH"
                 _ghostty_deferred_init
                 print -Pn "$PS1"
                 _ghostty_preexec "loopflow-missing-command"
@@ -138,6 +139,7 @@ struct GhosttyShellBlockTests {
                 "GHOSTTY_SHELL_FEATURES": "",
                 "TERM": "xterm-256color",
                 "ZDOTDIR": bootstrap,
+                "LF_BIN": "/bundled app/Contents/MacOS/lf",
             ]
             let stdout = Pipe()
             process.standardOutput = stdout
@@ -156,6 +158,8 @@ struct GhosttyShellBlockTests {
                 remaining = remaining[range.upperBound...]
             }
         }
+
+        #expect(try run(rc: "PATH=/usr/bin:/bin\nPS1=custom\n").contains("BUNDLED_PATH=/bundled app/Contents/MacOS:/usr/bin:/bin"))
 
         // The stock prompt becomes a blank row, a concealed header row holding
         // the directory, then the command line.
@@ -333,6 +337,43 @@ struct GhosttyShellBlockTests {
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
 #if canImport(GhosttyKit)
+    @Test("Find reserves space and survives a resize without replacing the terminal")
+    @MainActor
+    func retainedSearchViewport() throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let terminal = GhosttyMetalView(terminal: .shell("find-proof", machineId: fixtureMachineId))
+        terminal.workingDirectory = NSTemporaryDirectory()
+        terminal.command = "/bin/cat"
+        let mount = GhosttyTerminalMount(terminal: terminal)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = mount
+        defer { terminal.destroySurface(); window.contentView = nil }
+        mount.layoutSubtreeIfNeeded()
+        terminal.createSurface(manager: manager)
+        let surface = try #require(terminal.surface)
+        #expect(window.makeFirstResponder(terminal))
+
+        terminal.searchBar.open(needle: "alpha")
+        #expect(terminal.frame.maxY <= terminal.searchBar.frame.minY)
+        #expect(terminal.frame.height == mount.bounds.height - TerminalSearchBar.height)
+        let searchResponder = window.firstResponder
+        #expect(searchResponder !== terminal)
+        mount.setFrameSize(NSSize(width: 220, height: 240))
+        mount.needsLayout = true
+        mount.layoutSubtreeIfNeeded()
+        #expect(terminal.frame.maxY <= terminal.searchBar.frame.minY)
+        #expect(terminal.surface == surface)
+        #expect(window.firstResponder === searchResponder)
+        terminal.performBinding("end_search")
+        terminal.searchBar.end()
+        #expect(terminal.frame == mount.bounds)
+        #expect(window.firstResponder === terminal)
+        #expect(terminal.surface == surface)
+    }
+
     @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
     @MainActor
     func shellSessionAttachment() async throws {
@@ -491,6 +532,7 @@ struct GhosttyTerminalInputTests {
         try click(row: initial[0].start_row)
         #expect(blocks().map(\.selected) == [true, false])
         #expect(copied() == "echo alpha\nalpha")
+        #expect(view.copyConfirmation?.stringValue == "Copied 2 lines")
         try click(row: initial[1].end_row)
         #expect(blocks().map(\.selected) == [false, true])
         #expect(copied() == "sdl\ncommand not found: sdl")
@@ -544,6 +586,40 @@ struct GhosttyTerminalInputTests {
         try click(row: wrapped[1].end_row + 1)
         #expect(blocks().allSatisfy { !$0.selected })
         #expect(copied() == nil)
+    }
+
+    @Test("A failed Session child retains its final output before releasing the surface")
+    @MainActor
+    func endedSessionRetainsTerminalOutput() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let pool = GhosttySurfacePool()
+        let identity = TerminalIdentity.session("failed-opening-proof", machineId: fixtureMachineId)
+        let view = pool.view(for: identity)
+        view.setFrameSize(CGSize(width: 800, height: 400))
+        view.workingDirectory = NSTemporaryDirectory()
+        view.command = "/bin/sh -c 'printf \"Error: owned opening failed\\n\"; sleep 0.2; exit 1'"
+        try await confirmation("final output retained") { confirmed in
+            let observer = NotificationCenter.default.addObserver(
+                forName: .ghosttySurfaceClosed, object: nil, queue: nil
+            ) { notification in
+                guard notification.object as? TerminalIdentity == identity else { return }
+                #expect((notification.userInfo?["output"] as? String)?.contains("Error: owned opening failed") == true)
+                confirmed()
+            }
+            defer { NotificationCenter.default.removeObserver(observer); pool.release(identity) }
+            view.createSurface(manager: manager)
+            _ = try #require(view.surface)
+            let deadline = ContinuousClock.now + .seconds(5)
+            while view.surface != nil, ContinuousClock.now < deadline {
+                manager.tick()
+                _ = pool.hasSurface(identity)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(view.surface == nil)
+            #expect(!pool.hasSurface(identity))
+        }
     }
 
     @Test("releasing a retained terminal affects only its owning window")

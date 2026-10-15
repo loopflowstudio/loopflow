@@ -50,22 +50,14 @@ enum WorkLens: String, CaseIterable, Identifiable {
     }
 }
 
-/// A Task row is actionable when the user can click something on it — the one
-/// contextual action, or Interrupt. When neither applies the row is not hidden;
-/// it is greyed with its `next_move.reason` attached, so nothing silently
-/// disappears (the OmniFocus failure mode). One hiding mechanism, never two.
-func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
-    roadmapTaskAction(task) != nil
-}
-
 /// Loopflow Desktop's shared Work surface: one machine-wide `lf wave show --json`
 /// read, rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
+    let onOpenTask: (String, String) -> Void
 
     @Environment(\.palette) private var palette
     private let model: WorkModel
-    @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
@@ -73,11 +65,12 @@ struct RoadmapView: View {
     /// Renders the window's model; that window keeps it current.
     init(
         model: WorkModel,
-        onOpenWave: @escaping (WaveSnapshot) -> Void
+        onOpenWave: @escaping (WaveSnapshot) -> Void,
+        onOpenTask: @escaping (String, String) -> Void
     ) {
         self.model = model
-        _selection = .constant(nil)
         self.onOpenWave = onOpenWave
+        self.onOpenTask = onOpenTask
     }
 
     private var repoPath: String? { model.repoPath }
@@ -87,24 +80,6 @@ struct RoadmapView: View {
 
     private var visibleWaves: [WaveRoadmap] {
         model.visibleRoadmaps
-    }
-
-    private var selectedWaveRoadmap: WaveRoadmap? {
-        guard let selection, let waveId = model.waveId(for: selection) else { return nil }
-        return model.wave(id: waveId)
-    }
-
-    private var selectedRosterWave: Wave? {
-        guard let selection, selection.kind == .wave else { return nil }
-        return model.rosterWave(id: selection.id)?.api
-    }
-
-    private var selectedTask: (
-        wave: WaveRoadmap,
-        task: RoadmapTask
-    )? {
-        guard let selection, selection.kind == .task else { return nil }
-        return model.task(id: selection.id)
     }
 
     var body: some View {
@@ -133,29 +108,24 @@ struct RoadmapView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                if selection != nil {
-                    workBreadcrumb
-                }
-                Text(workTitle)
+                Text("Work")
                     .font(Typography.sectionTitle(20))
                     .foregroundStyle(palette.text)
-                Text(workSubtitle)
+                Text(repoPath == nil ? "All planned Work" : "Planned Work in this repository")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
             }
             Spacer()
-            if selection == nil {
-                Picker("Lens", selection: $lens) {
-                    ForEach(WorkLens.allCases) { lens in
-                        Text(lens.title).tag(lens)
-                    }
+            Picker("Lens", selection: $lens) {
+                ForEach(WorkLens.allCases) { lens in
+                    Text(lens.title).tag(lens)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityIdentifier("work-lens")
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier("work-lens")
             if isRefreshing {
                 ProgressView()
                     .controlSize(.small)
@@ -172,66 +142,6 @@ struct RoadmapView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
-    }
-
-    @ViewBuilder
-    private var workBreadcrumb: some View {
-        HStack(spacing: Spacing.xs) {
-            Button("Work") { selection = nil }
-                .buttonStyle(.plain)
-            if let waveId = selectedWaveRoadmap?.wave.id ?? selectedRosterWave?.id,
-               let waveName = selectedWaveRoadmap?.wave.name ?? selectedRosterWave?.name {
-                breadcrumbSeparator
-                Button(waveName) { selection = .wave(id: waveId) }
-                    .buttonStyle(.plain)
-                    .disabled(selection == .wave(id: waveId))
-            }
-            if let task = selectedTask?.task {
-                breadcrumbSeparator
-                Text(task.task.identifier)
-            }
-        }
-        .font(Typography.caption(9).weight(.semibold))
-        .foregroundStyle(palette.textSecondary)
-        .accessibilityIdentifier("loopflow-work-breadcrumb")
-    }
-
-    private var breadcrumbSeparator: some View {
-        Image(systemName: "chevron.right")
-            .font(.system(size: 7, weight: .bold))
-            .foregroundStyle(palette.textSecondary.opacity(0.7))
-    }
-
-    private var workTitle: String {
-        switch selection {
-        case nil:
-            "Work"
-        case .some(let work):
-            switch work.kind {
-            case .wave:
-                selectedWaveRoadmap?.wave.name ?? selectedRosterWave?.name ?? "Wave"
-            case .project:
-                selectedWaveRoadmap?.wave.name ?? "Wave"
-            case .task:
-                selectedTask?.task.task.name ?? "Task"
-            }
-        }
-    }
-
-    private var workSubtitle: String {
-        switch selection {
-        case nil:
-            repoPath == nil ? "All planned Work" : "Planned Work in this repository"
-        case .some(let work):
-            switch work.kind {
-            case .wave:
-                selectedWaveRoadmap?.wave.goal ?? "No readable plan for this Wave"
-            case .project:
-                selectedWaveRoadmap?.wave.goal ?? "Wave unavailable"
-            case .task:
-                selectedTask?.task.condition.reason ?? "Task unavailable"
-            }
-        }
     }
 
     @ViewBuilder
@@ -255,61 +165,11 @@ struct RoadmapView: View {
             )
             .accessibilityIdentifier("loopflow-work-empty")
         } else {
-            if selection != nil {
-                focusedContent
-            } else {
-                switch lens {
-                case .now: nowContent
-                case .roadmap: roadmapContent
-                }
+            switch lens {
+            case .now: nowContent
+            case .roadmap: roadmapContent
             }
         }
-    }
-
-    @ViewBuilder
-    private var focusedContent: some View {
-        switch selection?.kind {
-        case .wave:
-            if let roadmap = selectedWaveRoadmap {
-                focusedScroll {
-                    waveCard(roadmap)
-                }
-            } else {
-                missingFocus("No planned Work for this Wave")
-            }
-        case .project:
-            if let roadmap = selectedWaveRoadmap { focusedScroll { waveCard(roadmap) } }
-            else { missingFocus("Project unavailable") }
-        case .task:
-            if let selectedTask {
-                focusedScroll {
-                    taskCard(selectedTask.task, wave: selectedTask.wave.wave)
-                }
-            } else {
-                missingFocus("Task unavailable")
-            }
-        case nil:
-            EmptyView()
-        }
-    }
-
-    private func focusedScroll<Content: View>(
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        ScrollView {
-            content()
-                .padding(Spacing.xl)
-                .frame(maxWidth: 920, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
-        }
-    }
-
-    private func missingFocus(_ title: String) -> some View {
-        ContentUnavailableView(
-            title,
-            systemImage: "map",
-            description: Text("Return to Work or refresh the latest roadmap.")
-        )
     }
 
     private var nowSectionsList: [NowSection] {
@@ -330,10 +190,9 @@ struct RoadmapView: View {
                     ForEach(nowSectionsList) { section in
                         NowSectionView(
                             section: section,
-                            selection: selection,
                             activeControlId: activeControlId,
                             onSelect: { row in
-                                selection = .task(id: row.task.id)
+                                onOpenTask(row.wave.repo, row.task.id)
                             },
                             onTaskAction: { row, action in
                                 perform(action, task: row.task, wave: row.wave)
@@ -368,15 +227,9 @@ struct RoadmapView: View {
     private func waveCard(_ roadmap: WaveRoadmap) -> some View {
         RoadmapWaveCard(
             roadmap: roadmap,
-            selection: selection,
             activeControlId: activeControlId,
-            onSelect: { selected in selection = selected },
-            onOpen: {
-                selection = .wave(id: roadmap.wave.id)
-                openWave(roadmap.wave)
-            },
-            onRefresh: { await refresh() },
-            onError: { controlError = $0 },
+            onOpenWave: { onOpenWave(roadmap.wave) },
+            onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
             onTaskAction: { task, action in
                 perform(action, task: task, wave: roadmap.wave)
             },
@@ -384,30 +237,10 @@ struct RoadmapView: View {
         )
     }
 
-    private func taskCard(_ task: RoadmapTask, wave: WaveSnapshot) -> some View {
-        RoadmapTaskRow(
-            task: task,
-            isSelected: true,
-            activeControlId: activeControlId,
-            onSelect: {},
-            onAction: { action in
-                perform(action, task: task, wave: wave)
-            },
-            onOpenWorktree: openWorktree
-        )
-        .padding(Spacing.lg)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.lg)
-                .stroke(palette.border, lineWidth: 1)
-        }
-    }
-
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.statusWarning)
+                .foregroundStyle(palette.waiting)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.caption(11).weight(.semibold))
@@ -421,18 +254,12 @@ struct RoadmapView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(Color.statusWarning.opacity(0.12))
+        .background(palette.waiting.opacity(0.12))
     }
 
     @MainActor
     private func refresh() async {
         await model.refresh()
-    }
-
-    /// Navigate to the Wave. Starting a stopped Wave remains the Machine control's
-    /// job; this only opens the detail.
-    private func openWave(_ wave: WaveSnapshot) {
-        onOpenWave(wave)
     }
 
     private func perform(_ action: RoadmapTaskAction, task: RoadmapTask, wave: WaveSnapshot) {
@@ -452,7 +279,7 @@ struct RoadmapView: View {
                     try await Task.detached(priority: .userInitiated) {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
                     }.value
-                    await refresh()
+                    try await model.confirmWorkUpdate()
                 } catch {
                     controlError = error.localizedDescription
                 }
@@ -479,12 +306,9 @@ struct RoadmapView: View {
 
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
-    let selection: WorkReference?
     let activeControlId: String?
-    let onSelect: (WorkReference) -> Void
-    let onOpen: () -> Void
-    let onRefresh: () async -> Void
-    let onError: (String) -> Void
+    let onOpenWave: () -> Void
+    let onOpenTask: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
@@ -511,10 +335,7 @@ private struct RoadmapWaveCard: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { onSelect(.wave(id: roadmap.wave.id)) }
-                .accessibilityAddTraits(
-                    selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
-                )
+                .onTapGesture(perform: onOpenWave)
                 Spacer()
                 Text(roadmap.wave.machine.map { $0.route == "local" ? $0.id : $0.route } ?? "Unplaced")
                     .font(Typography.caption(10))
@@ -525,18 +346,18 @@ private struct RoadmapWaveCard: View {
             if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(Color.statusWarning)
+                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.waiting)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
-                    RoadmapTaskRow(task: task, isSelected: selection == .task(id: task.id),
-                        activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },
+                    RoadmapTaskRow(task: task,
+                        activeControlId: activeControlId, onSelect: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
-                if truncated { Text("Older Tasks are truncated.").foregroundStyle(Color.statusWarning) }
+                if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.waiting) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(Color.statusWarning)
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.waiting)
             }
         }
         .padding(Spacing.lg)
@@ -544,11 +365,7 @@ private struct RoadmapWaveCard: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.lg)
-                .stroke(
-                    selection == .wave(id: roadmap.wave.id)
-                        ? Color.loopflowBurgundy : palette.border,
-                    lineWidth: selection == .wave(id: roadmap.wave.id) ? 2 : 1
-                )
+                .stroke(palette.border, lineWidth: 1)
         }
         .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")
     }
@@ -556,7 +373,6 @@ private struct RoadmapWaveCard: View {
 
 struct RoadmapTaskRow: View {
     let task: RoadmapTask
-    let isSelected: Bool
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
@@ -570,7 +386,7 @@ struct RoadmapTaskRow: View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: task.task.isSuccessful ? "checkmark.circle.fill" : "circle")
                 .font(Typography.caption(11))
-                .foregroundStyle(task.task.isSuccessful ? Color.statusSuccess : task.section.color)
+                .foregroundStyle(task.task.isSuccessful ? palette.success : task.section.color(in: palette))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -589,7 +405,7 @@ struct RoadmapTaskRow: View {
                     Spacer()
                     Text(task.section.label)
                         .font(Typography.caption(9).weight(.semibold))
-                        .foregroundStyle(task.section.color)
+                        .foregroundStyle(task.section.color(in: palette))
                 }
                 Text(task.condition.reason)
                     .font(Typography.caption(10))
@@ -607,15 +423,11 @@ struct RoadmapTaskRow: View {
             }
         }
         .padding(Spacing.sm)
-        .background(
-            isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.background.opacity(0.6)
-        )
+        .background(palette.background)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier("loopflow-task-\(task.id)")
-        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
 
@@ -627,9 +439,9 @@ struct WorkChannelChips: View {
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
-            channel("Condition", task.condition.state.rawValue, task.condition.state.color)
+            channel("Condition", task.condition.state.rawValue, task.condition.state.color(in: palette))
             channel("PM", task.task.terminalLabel ?? "open",
-                    task.task.isSuccessful ? Color.statusSuccess : palette.textSecondary)
+                    task.task.isSuccessful ? palette.success : palette.textSecondary)
             if let runtime = task.runtime {
                 channel("Status", runtime.status.label, statusColor(runtime.status))
             } else {
@@ -651,7 +463,7 @@ struct WorkChannelChips: View {
     }
 
     private func statusColor(_ status: TaskState) -> Color {
-        status.isTerminal ? .statusNeutral : .statusInfo
+        status.isTerminal ? palette.textTertiary : palette.working
     }
 }
 
@@ -691,7 +503,6 @@ struct TaskActionCluster: View {
 
 struct NowSectionView: View {
     let section: NowSection
-    let selection: WorkReference?
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
@@ -704,7 +515,7 @@ struct NowSectionView: View {
             HStack(spacing: Spacing.sm) {
                 Text(section.group.title)
                     .font(Typography.sectionTitle(15))
-                    .foregroundStyle(nowColor(section.group))
+                    .foregroundStyle(section.group.color(in: palette))
                 Text("\(section.rows.count)")
                     .font(Typography.caption(10).weight(.semibold))
                     .foregroundStyle(palette.textSecondary)
@@ -717,7 +528,6 @@ struct NowSectionView: View {
             ForEach(section.rows) { row in
                 NowRowView(
                     row: row,
-                    isSelected: selection == .task(id: row.task.id),
                     activeControlId: activeControlId,
                     onSelect: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },
@@ -727,20 +537,10 @@ struct NowSectionView: View {
         }
         .accessibilityIdentifier("loopflow-now-\(section.group.rawValue)")
     }
-
-    private func nowColor(_ group: TaskConditionState) -> Color {
-        switch group {
-        case .waiting: WaveLensColor.blue.glow
-        case .blocked: .statusError
-        case .clear: .statusNeutral
-        case .unknown: .statusWarning
-        }
-    }
 }
 
 private struct NowRowView: View {
     let row: NowRow
-    let isSelected: Bool
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
@@ -787,7 +587,7 @@ private struct NowRowView: View {
             )
         }
         .padding(Spacing.sm)
-        .background(isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.surface)
+        .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
@@ -795,9 +595,7 @@ private struct NowRowView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier("loopflow-task-\(task.id)")
-        .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
 
@@ -811,23 +609,19 @@ extension RoadmapSection {
         }
     }
 
-    var color: Color {
+    func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .now: .statusSuccess
-        case .waiting: .statusWarning
-        case .available: .statusInfo
-        case .later: .statusNeutral
+        case .waiting: palette.waiting
+        case .now, .available, .later: palette.textTertiary
         }
     }
 }
 
 private extension TaskConditionState {
-    var color: Color {
+    func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .blocked: .statusError
-        case .waiting: WaveLensColor.blue.glow
-        case .clear: .statusNeutral
-        case .unknown: .statusWarning
+        case .blocked, .waiting: palette.waiting
+        case .clear, .unknown: palette.textTertiary
         }
     }
 }

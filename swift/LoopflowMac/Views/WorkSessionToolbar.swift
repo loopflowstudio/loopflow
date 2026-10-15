@@ -1,119 +1,27 @@
 import Loopflow
 import SwiftUI
 
-/// The workspace's one toolbar: the Wave → Task → Session drill-down on the
-/// left, the surface's controls on the right. It sits in the sidebar tone and
-/// its bottom hairline continues the sidebar's right hairline, so frame and
-/// navigation read as one inverted L. Ancestors navigate upward; the final
-/// crumb names the exact Session, chooses among its siblings, and renames it
-/// in place through the shared Session authority.
-struct WorkBreadcrumbBar<Trailing: View>: View {
+/// Explicit secondary Sessions keep their naming and binding actions beside their panes.
+struct WorkSessionToolbar: View {
     @Bindable var model: WorkModel
     let crumb: WorkBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
-    var onTaskDetails: (() -> Void)? = nil
-    var programStatus: ProgramStatusRecords? = nil
-    var programStatusError: String? = nil
-    @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 10) {
-            if let crumb { crumbs(crumb) }
-            Spacer(minLength: 10)
-            if let programStatus, programStatus.summary != nil {
-                ProgramStatusLabel(status: programStatus)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("workspace-program-status")
+        if let crumb, let session = crumb.session, !session.taskPrimary, session.primaryScope == nil {
+            HStack(spacing: 8) {
+                sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible), isTask: crumb.taskWork != nil)
+                Spacer(minLength: 0)
             }
-            if let programStatusError {
-                Image(systemName: "exclamationmark.circle")
-                    .help(programStatusError).accessibilityLabel(programStatusError)
-            }
-            trailing
-            if model.navigation.content == .details {
-                WorkGlyphButton(
-                    "sidebar.right",
-                    label: model.navigation.showsActivity ? "Hide Activity" : "Show Activity",
-                    identifier: "work-toggle-activity"
-                ) { model.navigation.showsActivity.toggle() }
-            }
+            .font(Typography.text).padding(.horizontal, 14).padding(.vertical, 6)
+            .background(palette.surfaceMuted)
+            .accessibilityIdentifier("work-session-toolbar")
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .font(Typography.text)
-        .tint(palette.textSecondary)
-        .padding(.horizontal, 14)
-        .frame(height: TaskFileChrome.headerHeight)
-        .background(palette.surfaceMuted)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("work-toolbar")
-    }
-
-    private func crumbs(_ crumb: WorkBreadcrumb) -> some View {
-        HStack(spacing: 6) {
-            if let work = crumb.waveWork {
-                Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
-                    .help(crumb.wave == nil ? "Wave name unavailable" : "Show Wave")
-                    .disabled(crumb.wave == nil)
-                    .accessibilityIdentifier("breadcrumb-wave")
-            }
-            if let task = crumb.task {
-                if crumb.waveWork != nil { separator }
-                // The Task overview shows its title once below; inside a
-                // Session the ancestor carries the title to navigate upward.
-                if let onTaskDetails {
-                    Button(task.task.task.name, action: onTaskDetails)
-                        .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).truncationMode(.tail).layoutPriority(-2)
-                        .help("Task details and Flow")
-                        .accessibilityIdentifier("breadcrumb-task")
-                } else if crumb.session != nil {
-                    // The ancestor's title gives way first when the bar is narrow.
-                    Button(task.task.task.name) { model.select(task.id.work) }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(-2)
-                        .help(task.task.task.name)
-                        .accessibilityIdentifier("breadcrumb-task")
-                }
-                if let url = task.task.reference.issueUrl {
-                    Link(destination: url) {
-                        Text(task.task.task.identifier)
-                            .font(Typography.code(12))
-                            .underline(color: palette.accentInk.opacity(0.35))
-                    }
-                    .foregroundStyle(palette.accentInk)
-                        .accessibilityIdentifier("breadcrumb-issue")
-                } else {
-                    Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
-                }
-            } else if let work = crumb.taskWork {
-                if crumb.waveWork != nil { separator }
-                Text("Task \(work.id)")
-                    .font(Typography.code(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .help("Task name and planning details unavailable")
-                    .accessibilityIdentifier("breadcrumb-task")
-            }
-            if let session = crumb.session {
-                if crumb.waveWork != nil || crumb.taskWork != nil { separator }
-                sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible))
-            }
-        }
-        .lineLimit(1)
-    }
-
-    private var separator: some View {
-        Text("/").foregroundStyle(palette.borderStrong)
     }
 
     @ViewBuilder
-    private func sessionCrumb(_ session: SessionRecord, siblings: [SessionRecord]) -> some View {
+    private func sessionCrumb(_ session: SessionRecord, siblings: [SessionRecord], isTask: Bool) -> some View {
         if let draft = model.navigation.renaming, draft.sessionId == session.id {
             TextField("Session name", text: Binding(
                 get: { model.navigation.renaming?.text ?? draft.text },
@@ -132,12 +40,12 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                 .disabled(draft.submitting)
             if let error = draft.error {
                 Text(error)
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(palette.waiting)
                     .lineLimit(2)
                     .accessibilityIdentifier("session-rename-error")
             }
         } else {
-            if siblings.count > 1 {
+            if !isTask, siblings.count > 1 {
                 Menu(session.title) {
                     ForEach(siblings) { record in
                         Button(record.title) { onOpenSession(record) }
@@ -175,9 +83,11 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                         set: { if !$0 { model.cancelSessionBinding() } }
                     )) { bindingForm }
             }
-            membershipChip(session)
-                .help(membershipHelp(session.flowMembership))
-                .accessibilityIdentifier("session-flow-membership")
+            if !isTask {
+                membershipChip(session)
+                    .help(membershipHelp(session.flowMembership))
+                    .accessibilityIdentifier("session-flow-membership")
+            }
         }
     }
 
@@ -206,7 +116,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                         .accessibilityIdentifier("session-bind-preview")
                 }
                 if let error = draft.error {
-                    Text(error).foregroundStyle(Color.statusWarning)
+                    Text(error).foregroundStyle(palette.waiting)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)
@@ -252,13 +162,6 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
     }
 }
 
-extension WorkBreadcrumbBar where Trailing == EmptyView {
-    init(model: WorkModel, crumb: WorkBreadcrumb?,
-         onOpenSession: @escaping (SessionRecord) -> Void) {
-        self.init(model: model, crumb: crumb, onOpenSession: onOpenSession) { EmptyView() }
-    }
-}
-
 /// A toolbar action as a quiet glyph: no border, a hover tint, a 28pt target.
 struct WorkGlyphButton: View {
     let systemImage: String
@@ -279,13 +182,13 @@ struct WorkGlyphButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13))
-                .foregroundStyle(hovering ? palette.accentInk : palette.textTertiary)
+                .foregroundStyle(hovering ? palette.text : palette.textTertiary)
                 .frame(width: 28, height: 28)
-                .background(hovering ? palette.accentInk.opacity(0.08) : Color.clear,
+                .background(hovering ? palette.actionHover : Color.clear,
                             in: RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .onHover { hovering = $0 }
         .help(label)
         .accessibilityLabel(label)
@@ -296,10 +199,12 @@ struct WorkGlyphButton: View {
 /// Report text is always literal; the tooltip exposes the other bounded records.
 struct ProgramStatusLabel: View {
     let status: ProgramStatusRecords
+    @Environment(\.palette) private var palette
 
     var body: some View {
         if let report = status.summary {
             Text(verbatim: report.displayText)
+                .foregroundStyle(report.state.workTone.ink(in: palette))
                 .font(Typography.code(11))
                 .lineLimit(1)
                 .truncationMode(.tail)

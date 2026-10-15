@@ -21,7 +21,7 @@ impl SqliteStore {
     /// planned in its Wave's current chapter.
     pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let conn = connection.transaction()?;
+        let conn = connection.savepoint()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
@@ -43,8 +43,8 @@ impl SqliteStore {
         &self,
         external_issue_id: &str,
     ) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let id = conn
             .query_row(
                 "SELECT id FROM tasks WHERE external_issue_id=?1",
@@ -145,7 +145,7 @@ impl SqliteStore {
 
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.transaction()?;
+        let snapshot = conn.savepoint()?;
         placement_in(&snapshot, work)
     }
 
@@ -208,6 +208,17 @@ impl SqliteStore {
                 [task_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional()?;
             if let Some((at, saved_reason)) = retained {
+                // Migrated cancellations can predate delivery receipts. An explicit
+                // repeat repairs that missing intention without replacing uncertainty.
+                let has_delivery: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1)",
+                    [task_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                if !has_delivery {
+                    super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
+                }
+                tx.commit()?;
                 return Ok(AbandonReceipt {
                     work: work.clone(),
                     reason: saved_reason.unwrap_or_else(|| reason.to_string()),

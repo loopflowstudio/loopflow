@@ -227,7 +227,7 @@ struct DesktopNativeSessionTests {
         for _ in 0..<3 {
             await model.openTaskLink(try #require(link.url))
             #expect(model.selection?.id == fixture.taskId)
-            #expect(model.linkedSession?.record.taskIds.contains(fixture.taskId) == true)
+            #expect(model.sessions.value?.contains { $0.id == model.navigation.selectedSessionId && $0.taskIds.contains(fixture.taskId) } == true)
             store.reconcile(try await fixture.records())
             await store.select(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)

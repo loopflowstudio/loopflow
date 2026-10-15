@@ -1943,17 +1943,17 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
 // references at turn time; later scratch edits must not rewrite earlier evidence.
 fn record_context_script() -> &'static str {
     r#"printf '[%s,%s]\n' "$thread_start" "$turn_start" | python3 -c '
-import json, pathlib, shlex, subprocess, sys
+import json, pathlib, re, subprocess, sys
 requests = json.load(sys.stdin)
 hook = requests[0]["params"]["config"]["hooks"]["SessionStart"][0]["hooks"][0]["command"]
 event = {"session_id": requests[1]["params"]["threadId"], "hook_event_name": "SessionStart", "source": "startup"}
 block = json.loads(subprocess.check_output(hook, shell=True, input=json.dumps(event).encode()))["hookSpecificOutput"]["additionalContext"]
-args = shlex.split(hook)
-delivery = json.loads(pathlib.Path(args[args.index("--delivery") + 1]).read_text())
-references = "\n".join(pathlib.Path(path).read_text() for path in delivery["references"])
+pointer = re.search(r"\"(?:[^\"\\]|\\.)*-context-manifest\.md\"", block).group(0)
+listing = json.loads(pathlib.Path(json.loads(pointer)).read_text())
+references = "\n".join(pathlib.Path(entry["path"]).read_text() for entry in listing["files"])
 requests.append({"context": block + "\n" + references})
 print(json.dumps(requests))
-' >> "$LF_HOME/prompts""#
+' >> "$LF_HOME/prompts" || exit 1"#
 }
 
 fn received_contexts(home: &Path) -> Vec<String> {

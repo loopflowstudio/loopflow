@@ -25,6 +25,7 @@
       "issue_url": null,
       "workspace": {
         "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits",
@@ -427,6 +428,7 @@
       "issue_url": null,
       "workspace": {
         "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits",
@@ -829,6 +831,7 @@
       "issue_url": null,
       "workspace": {
         "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits",
@@ -1359,6 +1362,7 @@
       "issue_url": null,
       "workspace": {
         "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits",
@@ -1761,6 +1765,7 @@
       "issue_url": null,
       "workspace": {
         "machine_id": "home_00000000000000000000000000000001",
+        "machine_label": "build-server",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits",

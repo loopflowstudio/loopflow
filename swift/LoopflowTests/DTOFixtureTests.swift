@@ -345,6 +345,14 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Task overview reads Workflow without diagnostic history")
+    func taskOverviewFixture() throws {
+        let overview = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_overview.json"))
+        #expect(overview.workflow != nil)
+        #expect(overview.sessions.count == 2)
+        #expect(overview.flowProcesses.count == 1)
+    }
+
     @Test("Task work retains conversations, Flows and command history")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")
@@ -659,6 +667,7 @@ struct DTOFixtureTests {
         #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
+        #expect(tasks[0].reference.workspace?.machineLabel == "build-server")
         #expect(tasks[2].reference.workspace == nil)
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
@@ -822,12 +831,12 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .unknown)
-        #expect(session.attention == .waiting)
+        #expect(session.attention == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
-        #expect(session.statusLabel == "Waiting")
+        #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
@@ -873,8 +882,13 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        guard case .taskHistory(let history?) = frames[9].content else {
+            Issue.record("diagnostic history frame missing")
+            return
+        }
+        #expect(!history.work.processes.isEmpty)
         guard case .peerPlanning(let peers?) = frames[7].content else {
             Issue.record("peer planning frame missing")
             return
@@ -885,6 +899,11 @@ struct DTOFixtureTests {
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
         #expect(frames[4].revisions == nil)
+        guard case .checkpoint = frames[8].content else {
+            Issue.record("checkpoint frame missing")
+            return
+        }
+        #expect(frames[8].answers == 8)
         guard case .task(nil) = frames[2].content else {
             Issue.record("a failed reading has no body")
             return

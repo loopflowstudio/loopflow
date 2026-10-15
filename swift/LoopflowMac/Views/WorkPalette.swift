@@ -36,11 +36,6 @@ extension WorkModel {
                 rows.append(recent)
             }
         }
-        for session in visibleSessions {
-            rows.append(.init(id: .session(session.id), title: session.title,
-                              detail: ["Session", session.workPath, session.provider].compactMap { $0 }.joined(separator: " · "),
-                              key: session.title))
-        }
         for flow in flowCatalog.value ?? [] {
             rows.append(.init(id: .flow(flow.name), title: flow.name,
                               detail: "Flow definition", key: flow.name))
@@ -224,6 +219,7 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 }
 
 struct FlowCatalogInspector: View {
+    @Environment(\.palette) private var palette
     let entry: FlowCatalogEntry?
     @Bindable var navigation: WorkNavigation
     let model: WorkModel
@@ -245,7 +241,7 @@ struct FlowCatalogInspector: View {
                 }
             }
             if let error = sourceError ?? model.flowCatalog.errorMessage {
-                Text(error).foregroundStyle(Color.statusWarning)
+                Text(error).foregroundStyle(palette.waiting)
             }
             Button("Refresh") { Task { await model.loadFlowCatalog(force: true) } }
             if let graph = entry?.graph, let composition = entry?.composition {
@@ -258,6 +254,7 @@ struct FlowCatalogInspector: View {
 }
 
 struct WorkflowCatalogInspector: View {
+    @Environment(\.palette) private var palette
     let entry: WorkflowCatalogEntry?
     let model: WorkModel
     @State private var editingWorkflow = false
@@ -273,7 +270,7 @@ struct WorkflowCatalogInspector: View {
                 .disabled(model.breadcrumb?.wave?.roadmap.wave == nil)
             }
             if let error = model.workflowCatalog.errorMessage {
-                Text(error).foregroundStyle(Color.statusWarning)
+                Text(error).foregroundStyle(palette.waiting)
             }
             Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
             if let workflow = entry?.workflow {
@@ -303,7 +300,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
-        field.placeholderString = "Go to a Wave, Task, Session or Flow"
+        field.placeholderString = "Go to a Wave, Task or Flow"
         field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator
         return field

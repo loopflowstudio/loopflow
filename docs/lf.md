@@ -100,6 +100,23 @@ can set `repo_root: ~/projects` instead of the default `~/src`. Absolute paths,
 keeps the current directory. Linked worktrees retain their checkout and share
 canonical repository identity. Missing/non-Git paths fail without creating work.
 Repository selection does not register a plan, join peers, or change saved defaults.
+
+```bash
+lf portfolio --json                    # immediate main checkouts under ~/src
+lf portfolio folder ~/projects         # change discovery and named-repo lookup root
+lf portfolio manual                    # use only saved individual repositories
+lf portfolio add ~/src/loopflow ~/other/nested/repo
+lf portfolio remove ~/other/nested/repo # remove membership, keep files and Work
+```
+
+Portfolio is Machine-local. Folder discovery excludes linked worktrees; manual
+additions normalize them to their main checkout. Switching modes keeps the inactive
+selection. Missing repositories remain listed with an error and can be removed.
+Opening a repository does not enroll it. Desktop's Portfolio window edits the same
+selection, including an explicit import of old Desktop membership before shared
+configuration exists. `lf portfolio import PATH…` performs that one-time import;
+an existing shared selection takes precedence.
+
 Read `lf repo identity` on one Machine, then use
 `lf repo identity --bind repo_ID` on the peer, even when both already have Work.
 Binding selects the shared repository identity and retains prior IDs as local
@@ -142,9 +159,10 @@ same normalization as `lf wt create`; single words and longer names are accepted
 Flow output shows each step's position and name followed by the agent's messages.
 Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
 diagnostics. Codex Sessions start through the provider protocol and attach the
-native terminal.
-Prompts and instructions stay off the command line; no hook setup or saved trust
-changes are required to record the conversation.
+native terminal. Prompts and instructions stay off the command line. Conversation
+capture requires no hook approval; context refresh uses stable launch hooks.
+Review new or changed declarations with Codex’s `/hooks`; headless runs skip
+untrusted hooks. Loopflow never writes provider trust decisions.
 
 A Task takes up its Project's workflow and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
@@ -205,6 +223,18 @@ lf task comment <id> "Keep escaped quotes intact"
 lf task checkout <id>
 lf task run <id> research
 ```
+
+Restore a lost Task branch only after locating its committed history:
+
+```sh
+lf task checkout EXP-12 --recover-from COMMIT
+```
+
+Recovery uses the recorded checkout and branch without starting a Flow or
+changing Task identity. It never replaces an existing branch or checkout with
+a different commit. Without an explicit recovery commit, a lost started branch
+is not recreated from its old base.
+
 
 Without a selected Wave, explicit creation uses `inbox`. A Task gets its
 identity before placement; creation starts no agent and requires no Linear login.
@@ -272,8 +302,8 @@ Placement, native Sessions, workflow skills and GitHub delivery use the same Tas
 identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
 merge, optional new work uses ordinary Task creation;
 `lf task complete <task-id>` completes the source. A repository without a code
-remote supports local work and refuses hosted landing. Local planning does not
-require Linear at any of these boundaries.
+remote supports local work and refuses hosted landing. If it has no `main` branch,
+new checkouts use its current branch. Local planning does not require Linear.
 
 Delivery reconciliation skips deleted checkouts and retains their Task, PR and
 merge intent. It continues checking available work without recreating directories
@@ -302,7 +332,17 @@ Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use
 `refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
 when `planning` is omitted. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git.
+Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
+repository are queued for publication, including Tasks created offline. Retry a
+specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+identity before synchronizing state, fields, and comments. An uncertain creation remains
+pending instead of silently creating a duplicate. To deliberately retry an
+uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses
+the saved issue ID and first checks for an existing issue; it can recreate a
+previously deleted issue. Ordinary sync never makes that choice.
+For an uncertain saved state or field update, `lf task sync <task> --retry-updates`
+retries that saved intention after reading Linear again. Observed conflicts still
+win; this flag does not retry deletion or allocate another issue.
 `lf repo connect <wave>` saves the repository Team and selects Linear, overriding
 a personal Git preference.
 
@@ -403,7 +443,8 @@ The repository and each Wave have one ongoing conversation. `session ensure`
 finds it or prepares it, a Wave's with its goal and memory, and repeats return the
 same Session. `session new` stops that conversation, keeps it as history, and prepares
 a fresh one. Neither launches a provider; `session connect SESSION` opens it in
-the current terminal.
+the current terminal. First-use trust or sign-in prompts stay open until answered
+or canceled; waiting for input does not time out the foreground conversation.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
@@ -920,8 +961,8 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you. In Desktop,
-a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+`--available` narrows that selection to conversations available for your input. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Available,
 as does idle for an interactive Session. Working, done, error and explicit clear
 suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.

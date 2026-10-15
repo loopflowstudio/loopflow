@@ -226,18 +226,16 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let provider = home.path().join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
-import json, os, pathlib, shlex, sys, time
+import json, os, pathlib, sys, time
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
-settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
-args = shlex.split(settings['hooks']['SessionStart'][0]['hooks'][0]['command'])
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'handoff-native'
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'handoff-native'}), flush=True)
-(home / 'handoff.json').write_text(json.dumps({'delivery': args[args.index('--delivery') + 1], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
+(home / 'handoff.json').write_text(json.dumps({'delivery': os.environ['LF_CONTEXT_DELIVERY'], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
 deadline = time.monotonic() + 15
 while not (home / 'finish').exists() and time.monotonic() < deadline:
     time.sleep(.01)
@@ -319,18 +317,16 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
             .env("LF_AGENT_CALLER", declaration["caller"].as_str().unwrap())
             .env("LF_CAPTURE_KEY", declaration["capture"].as_str().unwrap())
             .env(
+                "LF_CONTEXT_DELIVERY",
+                declaration["delivery"].as_str().unwrap(),
+            )
+            .env(
                 "LF_PROVIDER_CONTEXT",
                 declaration["capability"].as_str().unwrap(),
             )
             .env("PATH", "/usr/bin:/bin")
             .current_dir(repo.path())
-            .args([
-                "__context-block",
-                "--delivery",
-                declaration["delivery"].as_str().unwrap(),
-                "--moment",
-                "start",
-            ])
+            .args(["__context-block", "--moment", "start"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

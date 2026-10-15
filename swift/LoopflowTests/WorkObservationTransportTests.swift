@@ -109,13 +109,14 @@ struct WorkObservationTransportTests {
     }
 
     @Test("Malformed and cut-off frames fail rather than becoming empty",
-          arguments: ["malformed", "partial-exit"])
+          arguments: ["malformed", "wrong-type", "partial-exit"])
     func invalidFrames(kind: String) async throws {
         let directory = try directory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let payload: String
         switch kind {
         case "malformed": payload = "{bad}\n"
+        case "wrong-type": payload = "{\"sequence\":\"not a number\"}\n"
         default: payload = "{\"part\":"
         }
         try Data(payload.utf8).write(to: directory.appendingPathComponent("frame"))
@@ -131,6 +132,7 @@ struct WorkObservationTransportTests {
         } catch {
             #expect(error is RegistryQueryError)
             if kind == "malformed" { #expect(error.localizedDescription.contains("Invalid workspace observation")) }
+            if kind == "wrong-type" { #expect(error.localizedDescription.contains("sequence")) }
             if kind == "partial-exit" { #expect(!error.localizedDescription.contains("ten seconds")) }
         }
         await reader.cancel()

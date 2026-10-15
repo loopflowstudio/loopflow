@@ -137,7 +137,7 @@ mod tests {
                         .unwrap();
                 }
                 let filter = SessionFilter {
-                    waiting: true,
+                    available: true,
                     ..SessionFilter::default()
                 };
                 assert_eq!(store.session_summaries(&filter, 500).unwrap().len(), 1);
@@ -154,7 +154,7 @@ mod tests {
                     "{reading}"
                 );
                 let summary = store.session_summary("session", 500).unwrap().unwrap();
-                assert!(!summary.waiting);
+                assert!(!summary.available);
                 assert!(summary.program_status.is_none());
                 assert_eq!(
                     summary.agent_process_evidence,
@@ -210,7 +210,7 @@ mod tests {
             )
             .unwrap();
         let filter = SessionFilter {
-            waiting: true,
+            available: true,
             limit: 1,
             interactive: None,
             ..SessionFilter::default()
@@ -241,7 +241,7 @@ mod tests {
             )
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
-        assert_eq!(store.next_quiet_waiting(1).unwrap(), None);
+        assert_eq!(store.next_quiet_available(1).unwrap(), None);
         records.records.push(Report {
             state: State::Blocked,
             id: Some("worker".into()),

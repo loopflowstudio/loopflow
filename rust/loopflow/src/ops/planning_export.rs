@@ -32,6 +32,18 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
 }
 
 pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
+    export(store, repo, work, false).await
+}
+
+pub(crate) async fn retry_task_export(
+    store: &Store,
+    repo: &Path,
+    task: &crate::durable::TaskId,
+) -> OpsResult<()> {
+    export(store, repo, &WorkRef::Task(task.clone()), true).await
+}
+
+async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool) -> OpsResult<()> {
     if !super::linear_observe::connected(&repo.to_string_lossy()) {
         return Ok(());
     }
@@ -85,7 +97,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
             .sqlite
             .planning_export_attempts(owner)
             .map_err(message)?;
-        if attempted {
+        if attempted && !retry_creation {
             return Err(message(
                 "Creation remains uncertain; no repeated create issued",
             ));
@@ -116,7 +128,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &input, false)
+            .attempt_planning_export(owner, &input, false, retry_creation)
             .map_err(message)?
         {
             return Ok(());
@@ -124,7 +136,8 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         let response = match client.deliver_planning_creation(project, input).await {
             Ok(response) => response,
             Err(error) => {
-                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                // A rejected retry cannot disprove the earlier uncertain attempt.
+                if !attempted && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store
                         .sqlite
                         .reject_planning_export(owner, false)
@@ -224,7 +237,7 @@ async fn attach_project(
         }
         if !store
             .sqlite
-            .attempt_planning_export(owner, &export.input, true)
+            .attempt_planning_export(owner, &export.input, true, false)
             .map_err(message)?
         {
             return Ok(());

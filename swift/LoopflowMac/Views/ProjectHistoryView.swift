@@ -3,6 +3,7 @@ import Loopflow
 import SwiftUI
 
 struct ProjectHistoryView: View {
+    @Environment(\.palette) private var palette
     let wave: String
     let repo: String
     var sourceReference: String? = nil
@@ -19,7 +20,7 @@ struct ProjectHistoryView: View {
                 Spacer()
                 Button("Done") { dismiss() }
             }
-            if let error { Text(error).foregroundStyle(Color.statusWarning) }
+            if let error { Text(error).foregroundStyle(palette.waiting) }
             if !loaded { ProgressView("Reading Projects…") }
             if loaded && projects.isEmpty && error == nil { Text("No Projects in this Wave.") }
             Picker("Project", selection: $selected) {

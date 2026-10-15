@@ -17,7 +17,7 @@ struct TaskSessionLaunchProofTests {
     func delayedPreparationKeepsItsTask() async throws {
         // SwiftPM's main bundle is its SDK helper. Re-enter this one test in
         // an owned copy, retaining SwiftPM's framework search environment.
-        // The development configuration below must never touch the SDK.
+        // The bundled helper below must never touch the SDK.
         if ProcessInfo.processInfo.environment["LOOPFLOW_PREPARATION_TEST_HOST"] == nil {
             let host = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try FileManager.default.createDirectory(at: host, withIntermediateDirectories: true)
@@ -26,8 +26,6 @@ struct TaskSessionLaunchProofTests {
             try #require(executable.lastPathComponent == "swiftpm-testing-helper")
             let owned = host.appendingPathComponent(executable.lastPathComponent)
             try FileManager.default.copyItem(at: executable, to: owned)
-            try JSONSerialization.data(withJSONObject: ["lf_path": host.appendingPathComponent("fixture/lf").path])
-                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
             let process = Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: SessionLaunchBundleMarker.self).executablePath),
@@ -55,20 +53,14 @@ struct TaskSessionLaunchProofTests {
         try fm.createDirectory(at: checkout, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: directory) }
 
-        // Configure only the generated SwiftPM test bundle, through the same
-        // explicit helper configuration used by a development app.
+        // Install beside the owned test executable, just like the app bundle.
         let resources = try #require(Bundle.main.resourceURL)
         try #require(resources.resolvingSymlinksInPath().path == URL(fileURLWithPath: ownedHost).resolvingSymlinksInPath().path)
-        let config = resources.appendingPathComponent("LoopflowDevControl.json")
-        let original = try? Data(contentsOf: config)
-        defer {
-            if let original { try? original.write(to: config) }
-            else { try? fm.removeItem(at: config) }
-        }
-        let helper = directory.appendingPathComponent("lf")
+        let helper = resources.appendingPathComponent("lf")
+        defer { try? fm.removeItem(at: helper) }
         let script = #"""
         #!/bin/sh
-        fixture_dir=$(dirname "$0")
+        fixture_dir="$(dirname "$0")/fixture"
         if [ "$1" = "task" ] && [ "$2" = "checkout" ]; then
             printf '%s\n' "$@" > "$fixture_dir/prepare-args"
             pwd > "$fixture_dir/prepare-cwd"
@@ -95,7 +87,6 @@ struct TaskSessionLaunchProofTests {
         """#
         try script.write(to: helper, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        try JSONSerialization.data(withJSONObject: ["lf_path": helper.path]).write(to: config)
         try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
         try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "machine_id": fixtureMachineId]).write(
             to: directory.appendingPathComponent("receipt.json"))
@@ -191,8 +182,8 @@ struct TaskSessionLaunchProofTests {
                 #expect(origin.taskSessionErrors.isEmpty)
                 #expect(model.selection == .task(id: "issue-review"))
                 #expect(origin.preparedTaskWorktrees["issue-review"] == fixtureWorkspace(checkout.path))
-                #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-                    .text().string() == checkout.lastPathComponent)
+                let selectedKey = try #require(registry.selectedWork)
+                #expect(registry.retained(selectedKey)?.location?.worktree == checkout.path)
                 try await wait { fm.fileExists(atPath: directory.appendingPathComponent("conversation-args").path) }
                 let args = try String(contentsOf: directory.appendingPathComponent("conversation-args"), encoding: .utf8)
                 #expect(args.hasPrefix("--mode\ninteractive\n--task\nW2-131\n:\n"))

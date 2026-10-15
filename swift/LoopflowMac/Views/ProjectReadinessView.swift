@@ -4,6 +4,7 @@ import SwiftUI
 
 /// Both Wave surfaces render the Rust reading; none of these labels mutate readiness.
 struct ProjectReadinessView: View {
+    @Environment(\.palette) private var palette
     let readiness: ProjectReadiness?
     let isPending: Bool
     let transportError: String?
@@ -31,7 +32,7 @@ struct ProjectReadinessView: View {
             if isPending {
                 ProgressView("Preparing Project…")
             } else if let message {
-                Text(message).foregroundStyle(Color.statusWarning).textSelection(.enabled)
+                Text(message).foregroundStyle(palette.waiting).textSelection(.enabled)
                 if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
             }
             if let successor = readiness?.pendingSuccessor {

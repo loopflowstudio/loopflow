@@ -14,6 +14,18 @@ public struct TaskWork: Codable, Sendable, Equatable {
     }
 }
 
+/// Workspace facts; mechanical Process history is a separate diagnostic read.
+public struct TaskOverview: Codable, Sendable, Equatable {
+    public let sessions: [TaskSession]
+    public let flowProcesses: [FlowProcessInventoryEntry]
+    public let workflow: Workflow?
+
+    enum CodingKeys: String, CodingKey {
+        case sessions, workflow
+        case flowProcesses = "flow_processes"
+    }
+}
+
 /// A Task's Workflow: the definition it took up, where the Task stands on it,
 /// and how it got there. `start` and `end` are implicit nodes.
 public struct Workflow: Codable, Sendable, Equatable {

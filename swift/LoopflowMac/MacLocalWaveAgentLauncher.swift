@@ -8,37 +8,11 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-private struct DevelopmentControlConfig: Decodable {
-    let lfPath: String
-}
-
 enum LocalWaveAgentLauncher {
     /// Run a filed Task on its workflow. `lf task run` owns Project lookup,
     /// worktree placement and Flow selection; the app does not reproduce them.
     static func runTask(repoPath: String, issue: String) throws {
         try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
-    }
-
-    /// Queue the audited Task interrupt. The live run observes it, stops its
-    /// provider turn and records the receipt in the shared store.
-    static func interruptTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
-    }
-
-    /// Open the branch's PR for review from `worktree`. This delegates to
-    /// `lf pr open` — the single presentation boundary — instead of building a
-    /// GitHub URL and opening it here, so any later review-surface preference is
-    /// honored in one place. Only an explicit user review action calls this;
-    /// background app work publishes with `lf pr publish`.
-    static func reviewPullRequest(worktree: String) throws {
-        let lfPath = try controlLfPath()
-        try runChecked(pullRequestReviewCommand(lfPath: lfPath), cwd: worktree)
-    }
-
-    static func pullRequestReviewCommand(lfPath: String) -> [String] {
-        [lfPath, "pr", "open"]
     }
 
     /// Ensure Task Work and its checkout without running a Flow; returns
@@ -66,20 +40,9 @@ enum LocalWaveAgentLauncher {
         ["-b", "task", "run", issue]
     }
 
-    static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "interrupt", issue]
-    }
-
-    /// Return the CLI that owns the Machine this Mac client controls.
-    ///
-    /// Use an explicitly configured helper when present; otherwise use the
-    /// bundled CLI, which shares the app's protocol and selects its own Machine.
+    /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
-        developmentConfig: URL? = Bundle.main.url(
-            forResource: "LoopflowDevControl",
-            withExtension: "json"
-        ),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
         if let root = environment["LF_CLONE_ROOT"] {
@@ -89,27 +52,6 @@ enum LocalWaveAgentLauncher {
                 throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
             }
             return helper
-        }
-        if let developmentConfig {
-            let config: DevelopmentControlConfig
-            do {
-                let data = try Data(contentsOf: developmentConfig)
-                let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase
-                config = try decoder.decode(DevelopmentControlConfig.self, from: data)
-            } catch {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev has an invalid machine control configuration: "
-                        + error.localizedDescription
-                )
-            }
-            guard FileManager.default.isExecutableFile(atPath: config.lfPath) else {
-                throw LocalLfError(
-                    errorDescription: "Loopflow Dev's machine lf is missing or not executable: "
-                        + config.lfPath
-                )
-            }
-            return config.lfPath
         }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
@@ -188,10 +130,6 @@ enum LocalWaveAgentLauncher {
             process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
         return process
-    }
-
-    private static func runChecked(_ args: [String], cwd: String) throws {
-        _ = try runCheckedOutput(args, cwd: cwd)
     }
 
     private static func runCheckedOutput(_ args: [String], cwd: String) throws -> String {

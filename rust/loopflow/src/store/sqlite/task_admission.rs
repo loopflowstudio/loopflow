@@ -103,7 +103,7 @@ impl SqliteStore {
         request: &str,
     ) -> StoreResult<Option<TaskAdmission>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.savepoint()?;
         let Some(authority) = authority_in(&tx, task)? else {
             return Ok(None);
         };

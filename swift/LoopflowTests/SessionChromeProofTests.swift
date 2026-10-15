@@ -11,15 +11,14 @@ import ViewInspector
 private let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 
-/// Session chrome (S3): the toolbar is the only chrome; one pane has none of
-/// its own, two or more get a 24pt strip whose trio appears on hover of the
-/// focused pane; split, close and zoom answer to keybinds. Every proof mounts
+/// Program headers identify each nonempty pane. Their controls appear on hover
+/// of the focused pane; split, close and zoom also answer to keybinds. Each proof mounts
 /// the production `SessionsView` over real Ghostty `/bin/cat` PTYs and checks
 /// the terminal, its unfinished draft and its companion survive.
 @Suite(.requiresDisplay, .serialized)
 @MainActor
 struct SessionChromeProofTests {
-    @Test("A single pane has no chrome; two panes get a strip whose trio appears only on hover of the focused pane",
+    @Test("Program headers survive closing a companion; controls follow hover and focus",
           arguments: [CGSize(width: 1440, height: 900), CGSize(width: 1100, height: 800)])
     func paneStripTrioFollowsHoverAndFocus(size: CGSize) async throws {
         _ = NSApplication.shared
@@ -82,15 +81,13 @@ struct SessionChromeProofTests {
         let draft = "chrome-draft"
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
-        // The toolbar carries the location, the worktree, membership as text and Complete.
+        // The Task toolbar carries the conversation and worktree, without Flow provenance.
         #expect(throws: Never.self, "session crumb") {
             let name = try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session").text().string()
             #expect(name == "Release outcomes")
         }
-        #expect(throws: Never.self, "membership text") {
-            let label = try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button()
-                .labelView().text().string()
-            #expect(label.contains("feature / realign"))
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership")
         }
         #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
@@ -98,14 +95,8 @@ struct SessionChromeProofTests {
 
         model.navigation.selectedSessionId = nil
         try await settle(window)
-        #expect(throws: Never.self, "Task-only worktree location") {
-            let location = try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
-                .text().string()
-            #expect(location == "loopflow")
-        }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "worktree-chip")
-        }
+        let selectedKey = try #require(registry.selectedWork)
+        #expect(registry.retained(selectedKey)?.location?.worktree == repo)
         model.navigation.selectedSessionId = "release"
         try await settle(window)
 
@@ -128,7 +119,7 @@ struct SessionChromeProofTests {
         }
         try snapshot(window, "two-panes-\(Int(size.width))x\(Int(size.height))")
 
-        // Closing the companion from its own strip leaves one pane and no chrome.
+        // Closing the companion keeps the remaining program header and terminal.
         try hover(panes[0], inside: false, in: window)
         workspace.multiplexer.setFocusedPane(panes[1])
         try await settle(window)
@@ -137,7 +128,7 @@ struct SessionChromeProofTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "pane-close").button().tap()
         try await settle(window)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [panes[0]])
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(panes[0])") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(panes[0])")
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-actions") }
         try snapshot(window, "one-pane-\(Int(size.width))x\(Int(size.height))")
 
@@ -260,7 +251,7 @@ struct SessionChromeProofTests {
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
             if args.prefix(2) == ["wave", "show"] { return roadmap }
-            if args.first == "session" { return try await inventory.read() }
+            if args.first == "session" { return await inventory.read() }
             if args.first == "flow" { return flows }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
@@ -323,85 +314,8 @@ struct SessionChromeProofTests {
         if case .wave(let id) = second { #expect(model.selection == .wave(id: id)) }
         else { Issue.record("The fixture's second palette destination should be its Wave") }
 
-        // Repeated Session activation focuses the exact retained shell each time.
-        for (visit, index) in [0, 1, 0].enumerated() {
-            let selected = [record, companion][index]
-            try press("k", keyCode: 40, modifiers: [.command], in: window)
-            try await settle(window)
-            let sessionSheet = try #require(window.attachedSheet)
-            try await settle(sessionSheet)
-            for char in selected.title { try press(String(char), keyCode: 0, modifiers: [], in: sessionSheet) }
-            try press("\r", keyCode: 36, modifiers: [], in: sessionSheet)
-            try await Task.sleep(for: .milliseconds(400))
-            #expect(model.navigation.selectedSessionId == selected.id)
-            #expect(window.firstResponder === terminals[index])
-            #expect(terminals[index].surface == surfaces[index])
-            let reply = "visit-\(visit)-reply"
-            reply.withCString { ghostty_surface_text(surfaces[index], $0, UInt(reply.utf8.count)) }
-            try await expectEcho(reply, on: surfaces[index])
-        }
-
-        // Removing a highlighted Session must give Return to a visible row.
-        model.navigation.content = .terminals
-        try await settle(window)
-        window.makeFirstResponder(terminals[1])
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let changing = try #require(window.attachedSheet)
-        try await settle(changing)
-        let initialRows = model.searchDestinations("")
-        let sessionIndex = try #require(initialRows.firstIndex { $0.id == .session(record.id) })
-        for _ in 0..<sessionIndex { try press("\u{f701}", keyCode: 125, modifiers: [], in: changing) }
-        await inventory.replace("[]")
-        await model.refreshSessions()
-        try await settle(changing)
-        let remaining = try #require(model.searchDestinations("").first?.id)
-        try press("\r", keyCode: 36, modifiers: [], in: changing)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(model.navigation.palette == nil)
-        #expect(model.navigation.selectedSessionId == nil)
-        if case .wave(let id) = remaining { #expect(model.selection == .wave(id: id)) }
-        else if case .task(let id) = remaining { #expect(model.selection == .task(id: id)) }
-        else { Issue.record("Expected a planning destination") }
-
-        // Empty search results submit nothing; failure retains last-good rows.
-        await inventory.replace(sessions)
-        await model.refreshSessions()
-        model.navigation.content = .terminals
-        try await settle(window)
-        window.makeFirstResponder(terminals[1])
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let empty = try #require(window.attachedSheet)
-        try await settle(empty)
-        for char in record.title { try press(String(char), keyCode: 0, modifiers: [], in: empty) }
-        await inventory.fail()
-        await model.refreshSessions()
-        try await settle(empty)
-        #expect(model.paletteIsStale)
-        #expect(model.searchDestinations(record.title).map(\.id) == [.session(record.id)])
-        try press("\r", keyCode: 36, modifiers: [], in: empty)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(model.navigation.selectedSessionId == record.id)
-        #expect(window.firstResponder === terminals[0])
-        #expect(terminals[0].surface == surfaces[0])
-
-        window.makeFirstResponder(terminals[1])
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let removed = try #require(window.attachedSheet)
-        try await settle(removed)
-        for char in record.title { try press(String(char), keyCode: 0, modifiers: [], in: removed) }
-        await inventory.replace("[]")
-        await model.refreshSessions()
-        try await settle(removed)
-        try press("\r", keyCode: 36, modifiers: [], in: removed)
-        #expect(model.navigation.palette == .search)
+        // Session inventory is not a palette destination, even when retained.
         #expect(model.searchDestinations(record.title).isEmpty)
-        try press("\u{1b}", keyCode: 53, modifiers: [], in: removed)
-        try await Task.sleep(for: .milliseconds(400))
-        #expect(window.firstResponder === terminals[1])
-        for surface in surfaces { #expect(!terminalText(surface).contains(record.title)) }
 
         // Flow inspection replaces search in the same sheet and dismisses once.
         model.navigation.content = .terminals
@@ -546,12 +460,9 @@ struct SessionChromeProofTests {
 }
 private actor PaletteSessionInventory {
     private var value: String
-    private var failed = false
     init(_ value: String) { self.value = value }
-    func replace(_ value: String) { self.value = value; failed = false }
-    func fail() { failed = true }
-    func read() throws -> String {
-        if failed { throw RegistryQueryError("Session read unavailable") }
+    func replace(_ value: String) { self.value = value }
+    func read() -> String {
         return #"{"entries":\#(value),"next":null}"#
     }
 }

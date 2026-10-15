@@ -31,6 +31,7 @@ public struct LoopflowPalette: Sendable {
     public let textTertiary: Color
     public let accent: Color
     public let accentHover: Color
+    public let isDark: Bool
 
     public init(
         background: Color,
@@ -44,7 +45,8 @@ public struct LoopflowPalette: Sendable {
         textSecondary: Color,
         textTertiary: Color,
         accent: Color,
-        accentHover: Color
+        accentHover: Color,
+        isDark: Bool = false
     ) {
         self.background = background
         self.surface = surface
@@ -58,7 +60,22 @@ public struct LoopflowPalette: Sendable {
         self.textTertiary = textTertiary
         self.accent = accent
         self.accentHover = accentHover
+        self.isDark = isDark
     }
+
+    // Desktop roles: navigation and focus never borrow program status colors.
+    public var selectionFill: Color { surface.opacity(0.72) }
+    public var selectionEdge: Color { textSecondary }
+    public var keyboardFocus: Color { emphasisInk }
+    public var linkInk: Color { textSecondary }
+    public var linkHover: Color { text }
+    public var actionInk: Color { textSecondary }
+    public var actionHover: Color { surfaceElement }
+    public var emphasisInk: Color { Color(hex: isDark ? 0xEDB8BF : 0x722F37) }
+    public var working: Color { Color(hex: isDark ? 0xA4C8FA : 0x24579E) }
+    public var waiting: Color { Color(hex: isDark ? 0xF1CB85 : 0x79520D) }
+    public var failure: Color { Color(hex: isDark ? 0xFFA99F : 0xA02E25) }
+    public var success: Color { Color(hex: isDark ? 0xA8DDB5 : 0x31633E) }
 
     public static let light = LoopflowPalette(
         background: Color(hex: 0xFAF8F5),
@@ -70,12 +87,11 @@ public struct LoopflowPalette: Sendable {
         borderActive: Color(hex: 0xC2B5A6),
         text: Color(hex: 0x2A2624),
         textSecondary: Color(hex: 0x5F5752),
-        textTertiary: Color(hex: 0x6F665F),
+        textTertiary: Color(hex: 0x685F58),
         accent: .loopflowBurgundy,
         accentHover: .loopflowBurgundyHover
     )
 
-    // Dark palettes compile against the same shape; they are not yet designed.
     public static let dark = LoopflowPalette(
         background: Color(hex: 0x2B3036),
         surface: Color(hex: 0x343B44),
@@ -86,9 +102,10 @@ public struct LoopflowPalette: Sendable {
         borderActive: Color(hex: 0x6B7683),
         text: Color(hex: 0xF5F1EA),
         textSecondary: Color(hex: 0xC8C1B8),
-        textTertiary: Color(hex: 0xA39B93),
+        textTertiary: Color(hex: 0xC7BFB7),
         accent: .loopflowBurgundy,
-        accentHover: .loopflowBurgundyHover
+        accentHover: .loopflowBurgundyHover,
+        isDark: true
     )
 
     public static let deepWine = LoopflowPalette(
@@ -101,9 +118,10 @@ public struct LoopflowPalette: Sendable {
         borderActive: Color(hex: 0x6E4A5C),
         text: Color(hex: 0xF5EDE8),
         textSecondary: Color(hex: 0xC8B0A8),
-        textTertiary: Color(hex: 0xA8908A),
+        textTertiary: Color(hex: 0xC6B0A9),
         accent: Color(hex: 0x8B2252),
-        accentHover: Color(hex: 0xA52D63)
+        accentHover: Color(hex: 0xA52D63),
+        isDark: true
     )
 }
 

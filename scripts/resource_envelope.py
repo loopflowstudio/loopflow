@@ -25,6 +25,7 @@ BUILD_RELATIVE_PATHS = (
 )
 GATE_RELATIVE_PATH = Path(".lf/tmp/gate")
 UV_CACHE_PRUNE_TIMEOUT_SECONDS = 15
+INVENTORY_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -569,10 +570,12 @@ def _allocated_bytes(path: Path) -> int:
             ["du", "-sk", str(path)],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=INVENTORY_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
-        raise OSError(f"cannot measure {path}: five-second inventory deadline exceeded") from exc
+        raise OSError(
+            f"cannot measure {path}: {INVENTORY_TIMEOUT_SECONDS}-second inventory deadline exceeded"
+        ) from exc
     if result.returncode == 0:
         first = result.stdout.split(maxsplit=1)
         if first:

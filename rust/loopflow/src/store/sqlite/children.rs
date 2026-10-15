@@ -227,8 +227,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         conn.query_row(
             &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
             [task.as_str()],
@@ -239,8 +239,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
         let rows = statement.query_map([], |row| map_task_checkout(&conn, row))?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
@@ -401,8 +401,8 @@ impl SqliteStore {
     }
 
     pub fn task_acquisition(&self, id: &TaskId) -> StoreResult<crate::store::TaskAcquisition> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.savepoint()?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         let result = task_acquisition_in(&tx, &task, true)?;
         tx.commit()?;
@@ -410,8 +410,8 @@ impl SqliteStore {
     }
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         task_on(&conn, task_id)
     }
 
@@ -434,8 +434,8 @@ impl SqliteStore {
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
         match resolve_task_id_in(&snapshot, issue, None)? {
             Some(id) => task_on(&snapshot, &id),
             None => Ok(None),
@@ -448,14 +448,14 @@ impl SqliteStore {
         issue: &str,
         repo: Option<&str>,
     ) -> StoreResult<Option<TaskId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
         resolve_task_id_in(&snapshot, issue, repo)
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let query = format!("{TASK_COLUMNS} WHERE t.branch=?1");
         let mut statement = conn.prepare(&query)?;
         let tasks = statement
@@ -465,8 +465,8 @@ impl SqliteStore {
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
         let filter = match wave_id {
             Some(_) => "p.wave_id=?1 AND ",
             None => "",
@@ -931,8 +931,8 @@ impl SqliteStore {
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.unchecked_transaction()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
         if let Ok(project_id) = ProjectId::parse(project) {
             if let Some(project) = project_on(&snapshot, &project_id)? {
                 return Ok(Some(project));

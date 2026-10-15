@@ -9,11 +9,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::error::CoreError;
 use crate::prompt::{
     gather_documents, render_reference, write_prompt_log, Document, DocumentSource, GatherSpec,
 };
+
+pub(crate) const CONTEXT_DELIVERY_ENV: &str = "LF_CONTEXT_DELIVERY";
 
 const HOOK_CONTEXT_BYTES: usize = 10_000;
 
@@ -142,28 +145,46 @@ impl ContextDelivery {
         Ok(text)
     }
 
-    /// Saved settings are private and outlive the launching driver. Native
-    /// resumes do not need the original environment or replay the first turn.
-    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
+    /// Each provider process receives its own saved launch context separately
+    /// from the declarations the provider asks a person to trust.
+    pub(crate) fn configure_hooks(
+        &self,
+        command: &mut std::process::Command,
+    ) -> anyhow::Result<()> {
         let path = write_prompt_log(
             &self.repo,
             &serde_json::to_string(self)?,
             "context-delivery",
             None,
         )?;
+        command.env(CONTEXT_DELIVERY_ENV, path);
+        Ok(())
+    }
+
+    /// App-server hooks inherit the server environment, not thread shell policy.
+    /// Bind before the first turn so sibling threads never borrow launch context.
+    pub(crate) fn bind_codex_session(&self, session: &str) -> anyhow::Result<()> {
+        let path = codex_delivery_path(&self.home, session);
+        let parent = path.parent().expect("context binding has a parent");
+        fs::create_dir_all(parent)?;
+        let file = tempfile::NamedTempFile::new_in(parent)?;
+        serde_json::to_writer(file.as_file(), self)?;
+        file.persist(path)?;
+        Ok(())
+    }
+
+    pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary();
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
-            "env LF_HOME={} {} __context-block --delivery {} --moment",
+            "env LF_HOME={} {} __context-block --moment",
             quote(&self.home),
             quote(&executable),
-            quote(&path)
         );
         let check = format!(
-            "env LF_HOME={} {} __planning-check --delivery {}",
+            "env LF_HOME={} {} __planning-check",
             quote(&self.home),
             quote(&executable),
-            quote(&path)
         );
         Ok(serde_json::json!({
             "Stop": [{"hooks":[{"type":"command","command":check,"timeout":10}]}],
@@ -174,6 +195,12 @@ impl ContextDelivery {
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))
     }
+}
+
+pub(crate) fn codex_delivery_path(home: &Path, session: &str) -> PathBuf {
+    // Native IDs are opaque; never interpret one as a filesystem path.
+    home.join("context-deliveries")
+        .join(format!("{}.json", hex::encode(Sha256::digest(session))))
 }
 
 /// One complete, readable source in the checkout or saved launch references.

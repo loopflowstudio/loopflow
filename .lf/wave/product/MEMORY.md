@@ -2,9 +2,6 @@
 
 ## Direction after October 7
 
-LOO-387–430 briefs and LOO-427 steers supersede older designs.
-LOO-389 comments failed: unbound Initiative.
-
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
   replaces `lf ssh` with global `lf --machine LABEL COMMAND`, no alias or
@@ -96,20 +93,12 @@ Binding retains locators/Work/execution; imports allocate identity, exporting no
 RepositoryId. Locator readings need observation fences: A→B→A and concurrent
 locators defeat scene/per-path fences. Native proof remains.
 
-**Unmapping is not association:** it can enable duplicate creation. `66dd3c44f`
-composes LOO-412 through `de3c84b08`: correspondence/full-ID lookup preserves
-physical IDs, private selection, effects and execution; import creates no requests.
-Store/CLI/migration checks pass.
-`2afcfba1a`: lookup shares one snapshot, never a reservation.
-
-**Retention is not observation:** confirmation/frontier and correspondence lessons
-are preserved at `e97d908241:wave/product/MEMORY.md`, this heading. Their seeded
-execution fixtures never established live Linear, running-provider or mounted
-Desktop proof. Mixed-provider exchange is retired by LOO-412.
-
-#1512 connects live clients or resumes native history after driver death, never
-from import; #1517 preserves opaque AgentSessionId bytes. Evidence/limits:
-`829c9b993`, this heading; no takeover or native acceptance.
+**Unmapping is not association:** it can enable duplicate creation. Correspondence
+preserves physical IDs, private selection, effects and execution; lookup grants no
+reservation and import creates no requests. Retention is not observation.
+Historical exchange fixtures and contrary evidence remain at
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading; no live Linear,
+running-provider or mounted Desktop proof follows. Mixed-provider exchange is retired.
 
 `e3ca861b1`: mounted-page/visibility observation replaces callbacks; request IDs
 fence registration only. Pre-registration failures survive.
@@ -127,20 +116,14 @@ Scoped alias resolution does not replace repository checks for historical branch
 selectors, which can resolve only later through retained placement.
 Preview probes no providers and performs no takeover or completion/cleanup.
 
-October 9 completion exchange: accepted Git mutations supersede intent even when
-offline complete/reopen returns to the same value; replay preserves newer requests.
-Supersession/delivery share a savepoint. Linear's title-only revisions cannot cancel
-intent; end retry cannot revive it. `e79451d05`/`2a2379913` repair the `37cd026a7`
-counterexample. Seeded Workflow/PR/placement, disk drafts and one fake provider prove
-no running Flow or native acceptance. Full evidence and earlier failures:
-`829c9b993:wave/product/MEMORY.md`, this heading.
-
-October 9: `787f440ea`/`50bf78f1e` exchange Machine ID/time/provenance through
-Placement. Null restores inheritance; unknown Machines create no connections.
-Reaffirming explicit intent preserves timestamp/mutation; selecting legacy intent
-authors a save. Two-Home/file-Git and Store fixtures cover conflicts, narrower/future
-inheritance, clearing/no-echo and unchanged seeded execution, not running Flows.
-Earlier evidence/failed attempts: `829c9b993:wave/product/MEMORY.md`, this heading.
+October 9 exchange lessons: accepted Git mutations supersede completion intent
+even after complete/reopen returns to the same value; replay preserves newer
+requests. Linear title-only revisions cannot cancel intent; end retry cannot
+revive it. Placement carries Machine provenance; null restores inheritance,
+unknown Machines create no connections, and reaffirming explicit intent preserves
+its timestamp. Fixtures, counterexamples and limits are archived at
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading; no running-Flow or native
+acceptance was established.
 
 Remote evidence: `d16fc62d8`, this heading. Nonces fence replies; per-peer deadlines imply no global inventory. Positive owners survive unavailable peers; conflicting
 positives refuse, negatives never admit start. Remote Session/Files/shells retain
@@ -159,6 +142,7 @@ and LOO-453 (readiness/events); research:
 [the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
+October 13 replaced their visible strip with sidebar switching, retaining ownership.
 `39698225f3` keys registry/targets by Work with shared conversation state;
 hide/reopen retains panes, drafts and zoom.
 `37fa81df13`: terminals retain captured locations; Files/logs prefer recorded
@@ -176,12 +160,10 @@ New Tasks carry an immutable creating-Machine coordinator through planning; its
 SQLite transaction grants one permanent execution owner. Positive receipts stay
 local, outside planning merge. Lost replies retry the same owner; later delegation
 cannot replace it. Historical shared Tasks with no coordinator still refuse.
-Race/exchange and lost-reply CLI fixtures pass. This is isolated SSH/provider simulation,
-not live migration or native acceptance. LOO-414 keeps unavailable-coordinator
-recovery and detached launch retries. After #1491 merged (`d1973e5942`), integration
-checks passed: 2521 Rust cases across broad/focused runs, 18 skipped; Desktop
-build/66 focused tests; fmt and Clippy. Sync interrupted CLI-rebuilding tests;
-all affected cases passed on the stable checkout. CI and native proof remain.
+LOO-414 keeps unavailable-coordinator recovery and detached launch retries.
+Admission/integration checks and interrupted attempts:
+`cf67067b0d:.lf/wave/product/MEMORY.md`, this heading. Isolated SSH/provider
+simulation establishes neither live migration nor native acceptance.
 
 Jack Heart accepted LOO-427 for queue then Task-completing shipping on October 10
 (`16e9c950b9`), superseding the demo hold without claiming missing proof. LOO-397
@@ -216,20 +198,8 @@ against an unseen reopening. LOO-385 overlap does not establish closure.
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
-Jack starts real providers in dedicated windows. No host code is lifted.
-
-Taskless fixtures passed, not fresh-Task adoption. Native mode forwards through
-skills/Task launches (28 Flow tests). Jack confirmed cmux step two and herdr
-Flow/question/resize/input trials and authorized landing. Native resume, Task
-publication and Continue/Stop remain unresolved; no host integration or external
-progress. Release 0.13.9 revision, owners and earlier evidence:
-`31ec76b01:wave/product/MEMORY.md`, this heading.
-
-Native resume repeated the **Loopflow operating guide** once; first-content naming
-is only a hypothesis. Preserve native hooks/titles. Remaining trials keep LOO-421
-open; [findings](../../../docs/reviews/terminal-host-trial.md) and
-`31ec76b01:wave/product/MEMORY.md`, this heading, retain failed attempts and limits.
+Jack Heart authorized landing after cmux/herdr trials, without full adoption proof.
+LOO-421's failures and limits: `27613222eb:.lf/wave/product/MEMORY.md`, this heading.
 
 ## Live Home reconciliation
 
@@ -334,11 +304,8 @@ with their replacements (Started, steer cursors, attribution, normalization).
 SQL strings can compile against deleted columns. Whole-suite failures after passing
 slices are retained in the archive; diff rewritten plans for accidentally dropped work.
 
-October 6 gate and failed checkout-refresh/chapter tests are retained at
+October 6 gate failures and outstanding native/provider/migration proof:
 `16e9c950b9:wave/product/MEMORY.md`, **Task conversation and Workflows**.
-Real-provider, killed-driver, populated-migration, configured Desktop/cron and
-September 30 continuation/association/focus proof remained absent. October 7
-retired numeric layout/soak acceptance, not those limits.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -349,10 +316,9 @@ plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
 and requested PR-linked reports grouped as waiting on him, moving and stuck.
 Leaving unarmed merges to Jack is unreviewed.
 
-PR #1439 supersedes stopped-Flow continuation: a Task run starts fresh execs;
-reconcile never resumes. The agent's unreviewed policy waits on Jack at nodes
-and reruns failed edges for three attempts. Historical decisions and the dated
-disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
+Stopped-Flow continuation, retry-policy and cron history:
+`87f275c282:.lf/wave/product/MEMORY.md`, this heading. Current Workflow contracts
+govern; stopped execution is history, not permission to resume.
 
 An operator once reported `next_move.owner: wave` as someone else's handoff:
 name the reader's own responsibility explicitly. Nothing re-invokes a
@@ -361,20 +327,96 @@ launching again. The [review](../../../docs/reviews/session-operate-prompts.md) 
 simulations and two read-only model runs, not installed proof. Open conversations
 keep old instructions until `lf session replace`.
 
-## Capture and configurable New Session (October 1–3)
+## Capture and work-first entry (October 1–14)
 
-Jack Heart accepted capture, then selected New Session and the Linear-style compose
-row. He approved the searchable picker prototype and pursuit through demo, preserving
-its opening prompt. New Session launches; skill choice changes/persists only the next
-launch per repository. Default: `capture-tasks`.
+Jack Heart accepted capture in the owning repo/Wave conversation: self-contained
+Tasks, no workers or new authority. Retry uncertain writes with identical input
+in the original destination. Picker history:
+`ddc009d780:wave/product/MEMORY.md`, **Capture and configurable New Session**.
 
-Capture stays in its repository/Wave conversation and files cohesive self-contained Tasks
-without workers or new operation authority. Scope is a revisable clue. Preserve successful
-filings; uncertain writes reconcile and retry identical input in the original destination.
-Discovery uses lf-owned `skill NAME`, retaining Home/checkout, layouts and Task selection.
-Native/configured-CLI, provider/draft and cross-repository proof remain; no KR credit.
-Six-test evidence, failures and design links:
-`5825f95d9:wave/product/MEMORY.md`, this heading.
+October 10, LOO-462: Jack selected `af48fd81db:website/home.html` as the design
+anchor, Repo/Wave/Task navigation, conversation-first Task entry, retained repo
+conversation access from its name, and repo/session ownership. With no Waves or
+Tasks, begin with what to work on, not setup. Implementation is authorized through
+publication for demo review, not landing or cleanup. Shell-launched unscoped
+Sessions remain possible; generic picker/composer, Debug/Orphan and palette Session
+inventory are removed. Power-user Session search is deferred. History and
+missing-Work evidence remain; unknown/interrupted records are not debris.
+
+Reuse LOO-427's primary and retained Work owners without Workflow launch or takeover.
+**Current is not empty:** first-use entry checks fresh planning plus full Wave
+history; errors preserve uncertainty. Acquisition is considered once per retained
+repository workspace, never repeated by refresh/hide-all. Late ensure populates
+its originating Work. Task rows/palette prepare conversations; retained panes skip
+preparation. Bare links and Flow-log selection stay passive: asynchronous Task entry
+once redirected logs into prior Work. Overview sizing remains unreviewed.
+Rust/Swift capture proves primary reuse and retention, not native/provider usability.
+Cleanup still needs exact reviewed candidates and demonstrated isolated restoration.
+
+October 12: Jack Heart authorized bundled lf for Desktop, shells and new Session
+children. LF_BIN selects code independently of LF_HOME; existing providers retain
+their environment. Bundling grants no migration or takeover authority. Earlier
+runtime failures: `946dae6203:scratch/work-first-demo.md`.
+
+October 11: Jack Heart selected Portfolio as the primary UI for lf-owned
+folder/manual membership through RegistryQuery: one root (default `~/src`) or
+manual paths across directories, excluding linked worktrees. Opening never enrolls;
+legacy import is explicit. Multiple roots stay deferred. Shared readings serialize
+with mutations; failure/removal preserves Work and drafts. CLI/Swift proof is not
+native picker/menu acceptance. Earlier receipts: `0fe7f5da8a:.lf/wave/product/MEMORY.md`,
+this heading.
+
+October 13: Jack Heart selected sidebar-only switching, primary Task conversation,
+no sibling/Independent chrome, coherent opening and truthful Workflow display.
+Membership, historical links, panes and drafts survive. Successful null differs
+from loading/unavailability; failures preserve last-good Workflow content.
+
+Jack Heart's October 13 demo failed on missing `tasks.paused`, disappearing rows
+and null Workflow. The released-schema fixture fails before planning; the exact UI
+cause remains unconfirmed. Partial planning now retains readable rows/cache;
+disconnection retains Workflow content and disables stale actions. Task-status
+preflight cannot prove stream compatibility; Project recommendations cannot prove
+Task take-up. Authorized v0.13.14 installation and matching helper later restored
+real-repo navigation and LOO-462's feature/demo display, not provider input or
+overall acceptance. Failures/receipts: `7192b2cc00:scratch/work-first-demo.md`.
+
+Jack's October 13 Task metadata rows are implemented (`88d91e53ca`). Validated
+reports precede shared Waiting inference; cleared reporters stay unknown.
+Program status cannot complete Task/Workflow/Paused state. Stored Task/PR links
+are separate from conversation opening. Recorded checkout ownership supplies remote
+names, never delegation defaults; local names and assignments are omitted.
+Saved Session pages strip reports and Waiting with liveness: restoring them revived
+stale status. Focused tests pass; native link dispatch and density remain unproved.
+No new polling or authority.
+
+October 14, LOO-462: Jack Heart selected semantic roles in both existing appearances,
+preserving palette, ANSI and retained clients/drafts. Neutral selection, separate
+focus outline, quiet links and restrained action emphasis follow VISUAL_DESIGN.md.
+Omit unknown/client-only activity without calling it idle. Preserve report provenance:
+Working blue, Waiting/Blocked amber with distinct wording, Error red. Stopped edges
+alone are not errors. Use the supplied palette; native appearance can disagree.
+Composited contrast checks pass; native focus/appearance/input judgment remains.
+
+October 14 rendering: Jack Heart approved the ownership cut with cmux research.
+Model-owned pane installation now precedes ending preparation; exact links share
+placement. Request identity prevents an old opening clearing a newer one; superseded
+results cannot redirect navigation. Compact Workflow actions plus Overview's
+graph await native review. Jack Heart then authorized subscription-owned updates,
+implemented against Rust/lf as sole schema reader. Post-command checkpoints sample
+one SQLite snapshot and acknowledge after dependent frames, including unchanged
+content; failed readings cannot confirm saves. Cached replay fences stale delivery
+without querying again. Ordinary post-write broad refreshes are removed; explicit
+recovery and file/process observations remain. Stored Workflow definitions move
+planning revisions even on unchanged-body heartbeats; file catalogues remain outside
+the snapshot. Headless checks establish neither native geometry nor provider readiness.
+
+Jack renewed measured optimization for Codex and Claude separately: cached switch,
+resume and fresh launch end at visibly responsive unsent agent input. October 7's
+numeric/soak retirement still stands. Correlated wall milestones and local CPU
+flamegraphs exist; a real headless export proves parsing only. Failed trials have
+no comparison time; hook review remains in total elapsed time. Neither draw/focus
+nor CPU samples prove readiness or explain waiting. Six native cases, paired
+before/after and stable-hook approval across Tasks/resume/compaction remain open.
 
 ## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 
@@ -392,10 +434,8 @@ not establish status in cmux or herdr.
 
 ## Current Tasks and completion history (2026-10-02)
 
-LOO-371 measurements, failed attempts and limits: `5044add03:wave/product/MEMORY.md`,
-this heading, and [evidence](../../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
-OCR split an ID: verify the observer. Own benchmark process groups; overlaps prove
-nothing. October 7 retired performance acceptance; LOO-408 owns installed settlement.
+LOO-371's retired measurements and observer failures remain in the archive below;
+LOO-408 owns installed settlement.
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time
@@ -411,27 +451,26 @@ makes planning current despite an old timestamp. Equal-revision storage enrichme
 may fill a genuinely absent completion-date key, but cannot change an observed
 null or date. Snapshot acquisition and unrelated updates cannot establish recency.
 
-Jack relayed the coordinator finding that settled Tasks with removed checkouts
-still carried recovery conditions. That condition alone must not bypass history
-filtering. Current planning, nonterminal runtime, unresolved pinned Flow execution
-and observed unsettled files/commits remain visible; open Sessions stay reachable
-independently. This agrees with the Task workspace's checkout association contract.
+Jack relayed that removed checkouts alone must not keep settled Tasks current.
+Started and unresolved execution own ordinary sidebar membership (LOO-462).
+October 14: Jack Heart selected an exception for the selected completed/canceled
+Task, with green Completed/red Canceled header text. Navigation away removes the
+exception; Back restores the same workspace and row without reopening execution.
+History/filter changes never evict native surfaces, files or drafts. Real CLI
+create/start/complete/abandon reaches the open subscription and production outline;
+retained native-view identity is synthetic/unmounted, not native acceptance.
 
-Jack Heart subsequently approved the inline checkbox/number prototype and
-requested Desktop implementation. Completed enables the remembered range
-(initially seven days); the active label edits N Days, with zero shown as All
-Tasks. Enter/blur applies, Escape cancels, and invalid drafts preserve the range.
-One native text surface handles display and editing to preserve glyph placement;
-long integers scroll within the compact viewport. Wave identity bounds drafts.
+Jack Heart approved inline checkbox/number editing: remembered range starts at
+seven days; zero means All Tasks. Enter/blur applies, Escape cancels, invalid
+drafts preserve the range. Wave-scoped native text preserves glyph placement and
+scrolls long integers. Prototype details: the archive below.
 
-The earlier affected gate and configured app compilation passed. The later inline
-revision and compression have seven focused passing tests and SwiftPM compilation;
-queue gate and native visual/focus review remain separate. Jack's Growth screenshot
-shows six current Tasks without the seven duplicates. The isolated offline capture
-has no successful completions or Sessions, so it cannot prove recency or native
-Session continuation. Live refresh and retained-Session review remain unproven.
-See [the review evidence](../../../docs/reviews/task-history.md). These observations
-provide no sustained-use KR or external-progress credit.
+Earlier gate, seven focused tests and Jack's Growth screenshot are preserved at
+`c89c789fd1:.lf/wave/product/MEMORY.md`, this heading, and
+[the review evidence](../../../docs/reviews/task-history.md). The offline capture
+had no successful completions or Sessions: recency, native focus/continuation,
+live refresh and retained-Session review remain unproved. No sustained-use KR or
+external-progress credit follows.
 
 ## Ask removal decision (2026-10-01)
 
@@ -467,8 +506,8 @@ Flow reviews remain their own conversations. Jack’s October 1 correction makes
 all conversations in a Task checkout Task Sessions, regardless of attention or
 Flow membership. Repo and Wave Sessions retain their explicit scopes and are
 excluded. Any number of Task Sessions is allowed. `session list --orphan` filters
-Sessions without Task association; it provides no creation opt-out. Desktop keeps
-that diagnostic inventory under Debug → Sessions, outside ordinary navigation.
+Sessions without Task association; it provides no creation opt-out. LOO-462 removes
+its Desktop navigation.
 
 Earlier primary-runtime planning selected eager repo/Wave Sessions and a Task
 conversation on launch. The October 1 correction supersedes any interpretation
@@ -594,26 +633,22 @@ issue read. No Task was filed or changed by these records.
 
 ## Workspace redesign decisions (2026-09-26)
 
-Jack rejected the first native build of the calmer workspace on sight: "It just
-looks a lot worse than the mocks. Plus I bet we can even improve on the mocks."
-The retro found the build structurally faithful to direction D and tonally
-unfaithful: neutral ink where the mock was warm, a shadow halo under every
-panel, chrome no mock ever had (July's `WaveLensView`, system buttons, a rose
-tab strip, a blue-grey pane header, a green Complete capsule), and a sidebar
-assembled from four passes with no reconciliation. LOO-291 implements the fix as
-four slices: warm token ramp and surface ladder; one sidebar row component;
-one Session toolbar; the seven-step type ramp on Wave and Task pages.
+Jack rejected September 26's native calmer-workspace build: structural fidelity
+missed the mocks' warmth and accumulated inconsistent chrome. LOO-291 addressed
+tokens, rows, toolbar and typography. Diagnosis:
+`8f95d9e4e6:wave/product/MEMORY.md`, this heading.
 
 Decisions that outlive the branch (Jack's, verbatim where quoted):
 
-- Light mode only for now; dark is a follow-up "when we're at a happy place".
+- September 26 selected light first; October 14's semantic cut above now covers
+  both existing appearances. Neither has new native acceptance.
 - Serif for the repo name and page titles, including the Task title ("I'm
   kinda liking the serif task title now"). Sidebar Wave rows are sans
   ("sans-serif wins") with no glyph, no count, no dot ("nothing at all is
   even simpler"); a needs-you dot may return later.
 - Rust derives Task grouping from checkout identity, including previously
   unbound Sessions; Swift consumes it without rewriting Run attribution. The
-  global Session browser is diagnostic.
+  former diagnostic Session browser is removed by LOO-462.
 - One universal bind from the room, ⌘K and Task rows ("worth making the
   design and architecture simple and universal if it takes a little extra").
   Bind changes a Run's Task, never its name, panes or Flow membership.
@@ -691,14 +726,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
   ordinary content reads and typing. Preserve complete UTF-8/BOM/line endings
   within the 1 MB bound; previews never authorize Save. No arbitrary-writer
   exclusion, extended-attribute or power-loss guarantee follows from this design.
-- **Measure first selection without pre-reading the target.** Corrected review
-  measured 54/54 selections at 60–97 ms after real startup reads, checking exact
-  bytes after capture. These AppKit endpoints had warm caches: no physical-click,
-  compositor or p95 proof. Earlier 2,652 ms and failing populations remain
-  unexplained; later passes do not erase them. ARM SHA acceleration reduced
-  hashing cost while retaining install authority; priority/load changes did not
-  explain the interval. Sizes, widths and failed receipts survive at
-  `35e759aaf:wave/product/MEMORY.md`, this heading.
+- Historical warm-cache file timings, unexplained failures and optimization limits:
+  `27613222eb:.lf/wave/product/MEMORY.md`, this heading. Measure first selection
+  without pre-reading; these AppKit endpoints prove no physical-click/compositor p95.
 - **Native primitives and overall approval have separate evidence.** TextKit
   proved useful selection, Find, Undo and retained-terminal behavior; pathological
   million-byte lines remained slow. CodeEditTextView's comparison failed endpoint
@@ -711,8 +741,9 @@ preserve the failed attempts and superseded proposals. Current usage lives in
 
 ## Accepted calmer workspace (2026-09-25)
 
-Repo → Wave → Task → named Session is the public hierarchy. Project is internal
-chapter ownership. Optimize one repository: connected header/sidebar, started
+Repo → Wave → Task is current navigation (LOO-462); conversations live inside
+retained Work. Project owns chapters. Optimize one repository: connected
+header/sidebar, started
 Tasks only, bottom search. Starting work is durable evidence, independent of
 Session/process liveness; inspection never starts Task execution. The accepted
 September 30 desktop discovery operation ensures primary repo/Wave conversations;
@@ -731,13 +762,13 @@ by October 4's correction. Its details remain at
 `9d72242ce:wave/product/MEMORY.md` under this heading. Retain exact graph
 occurrences and independent return counts, including nested loops.
 
-New session sits beside the Task title, independently prepares its checkout and
-opens a conversation without starting its Flow. One open Session enters directly;
-several lead to named choices. Session names seed from the invoked skill or the
+LOO-462 replaces the old Task-title New Session/choice entry with retained primary
+conversation opening, without starting a Flow; pane-owned new conversations remain.
+Session names seed from the invoked skill or the
 recovered magical-musical generator (history had no animal list); inline rename
 and later agent suggestions preserve human names. Session view omits Description.
 Exact membership distinguishes current, earlier, past, independent and unknown;
-its chip reveals the exact graph occurrence, never a newer same-named invocation.
+October 13 removes its chip from ordinary Task chrome, preserving exact history.
 Recent Runs load on demand; provider and summaries come from recorded evidence.
 
 Navigation retains the existing checkout layouts and native surfaces. Explicit
@@ -807,6 +838,8 @@ Session/Process evidence preserved. LOO-378 is explicitly paused, its substantia
 unpublished work retained. Earlier p95, twenty-trial and soak obligations below
 are historical evidence, not instructions to restart that work. This does not
 rewrite the chapter's authored KRs or claim native/provider acceptance.
+October 13 renewed targeted input profiling/optimization above, without numeric
+or soak acceptance.
 
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
@@ -872,8 +905,8 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
   boundary, with navigation owned by the following decider. There is no agent
   exchange row, answer lane,
   or dedicated answer controller.
-- **#1521 replaces stored Wave documents.** Checkout
-  `wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
+- **#1521 replaces stored Wave documents; #1536 moves them.** Checkout
+  `.lf/wave/<name>/*.md` owns goals, memory and ancestor context; Workflow records
   stay stored. Reads never provision. Recent Wave Chat is not ambient Task context.
 - **Environment configures a process; it never decides what the process is.**
   Work identity comes from durable state; execution and signal authority must
@@ -950,23 +983,16 @@ this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 
-Jack Heart requested Desktop open on a usable workspace with one loading
-vocabulary and one refresh path (LOO-376). On Jack's Home no `lf` read fits the
-1000 ms budget (`roadmap --all` 14.5 s), so a returning launch shows saved wire
-text first; that latency has no owning Task (LOO-375 owns `wt list` only).
-
-- Save the reads' wire text, restore through the live decoder, and strip
-  liveness and legal actions before saving. Display evidence, never authority.
-  Keep it inside the Home; a different `lf home id` drops content and selection.
-- One model owns refresh; views that each start a loop supersede each other's
-  reads. A view that builds its own model reopens the blocking path.
-- Jack's delivery contract (2026-10-04): land on autonomous checks and honest
-  benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Measurements, normalization/dSYM findings, failed cold-cache/refresh and
-  duplicate-read observations: `b2add0cf8:wave/product/MEMORY.md`, this heading,
-  and `scripts/benchmarks/desktop-performance/`. October 7 retired LOO-376's
-  numeric acceptance; LOO-408 owns installed settlement. Stripping with a retained
-  dSYM remains Jack's open choice, not an optimization instruction.
+Jack Heart selected usable saved-work startup, one refresh owner and loading
+vocabulary (LOO-376). Save wire text within its Home, decode with current models,
+strip liveness/legal actions, and drop content/selection on Machine identity change.
+Saved display is evidence, never authority. Extra view-owned refresh loops reopen
+the blocking path. Jack accepted autonomous checks and honest benchmarks before
+post-merge rendered validation; October 7 retired numeric acceptance. LOO-408 owns
+installed settlement. Stripping with a retained dSYM remains Jack's open choice.
+Failed measurements, duplicate reads, original Home identity spelling and owners:
+`ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
+`scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

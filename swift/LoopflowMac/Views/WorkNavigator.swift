@@ -4,37 +4,30 @@ import SwiftUI
 struct WorkNavigator: View {
     @Bindable var model: WorkModel
     let onOpenSession: (SessionRecord) -> Void
+    let onOpenRepository: (() -> Void)?
+    let onOpenWave: ((WorkReference) -> Void)?
     let onOpenTask: ((WorkReference) -> Void)?
     let onConversation: ((WorkReference?) -> Void)?
-    let onNewSession: ((SessionSkillLaunch) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
-    @State private var hoveringPresentation = false
-    @State private var choosingSessionSkill = false
 
     init(model: WorkModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
          onOpenTask: ((WorkReference) -> Void)? = nil,
-         onNewSession: ((SessionSkillLaunch) -> Void)? = nil) {
+         onOpenRepository: (() -> Void)? = nil,
+         onOpenWave: ((WorkReference) -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
+        self.onOpenRepository = onOpenRepository
+        self.onOpenWave = onOpenWave
         self.onOpenTask = onOpenTask
         self.onConversation = onConversation
-        self.onNewSession = onNewSession
         self.onNewShell = onNewShell
         self.onShowTerminals = onShowTerminals
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
-    }
-
-    private func rows(_ workspace: WorkProjection) -> [WorkOutlineRow] {
-        workspace.outline(
-            presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
-            search: model.navigation.search,
-            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
-        )
     }
 
     private var repositories: [String] {
@@ -42,190 +35,208 @@ struct WorkNavigator: View {
             + [model.repoPath].compactMap { $0 }).map { model.repoIdentity($0) }).sorted()
     }
 
-    @ViewBuilder
-    private var sessionComposer: some View {
-        if let onNewSession, let launch = model.sessionSkillLaunch {
-            HStack(spacing: 0) {
-                Button { onNewSession(launch) } label: {
-                    Label("New Session", systemImage: "square.and.pencil")
-                        .fixedSize()
-                        .padding(.horizontal, 10)
-                        .frame(height: 34)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityIdentifier("work-create-task")
-                Rectangle().fill(palette.textTertiary.opacity(0.25)).frame(width: 1)
-                Button { choosingSessionSkill.toggle() } label: {
-                    HStack(spacing: 7) {
-                        Text(launch.skill).lineLimit(1).truncationMode(.tail)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 12, weight: .medium))
-                            .offset(y: -0.5)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .contentShape(Rectangle())
-                }
-                .accessibilityLabel("Choose skill, currently \(launch.skill)")
-                .accessibilityIdentifier("work-session-skill")
-                .popover(isPresented: $choosingSessionSkill, arrowEdge: .bottom) {
-                    SessionSkillPicker(model: model, repo: launch.repoPath) {
-                        choosingSessionSkill = false
-                    }
-                    .id(launch.repoPath)
-                }
-            }
-            .font(Font(NSFont.systemFont(ofSize: 13, weight: NSFont.Weight(rawValue: 0.265))))
-            .frame(height: 34)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
-            .overlay(RoundedRectangle(cornerRadius: 5).stroke(palette.textTertiary.opacity(0.25)))
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
-        }
-    }
-
     var body: some View {
         @Bindable var navigation = model.navigation
-        // One projection per render: rows and every row's menu share it.
         let workspace = model.visibleWork
-        let rows = rows(workspace)
-        let orphans = workspace.orphanSessions(search: model.navigation.search)
+        let presentation = workspace.navigator(search: navigation.search,
+            planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil,
+            selection: model.selection, unavailable: model.sessions.errorMessage)
+        let selectedWork = model.navigatorSelection
+        let searching = !navigation.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         VStack(spacing: 0) {
-            header(orphans)
-            sessionComposer
+            header(selectedWork: selectedWork)
+            forReadErrors
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    forReadErrors
-                    ForEach(rows) { row in outlineRow(row, orphans) }
-                    if model.repoPath != nil, rows.isEmpty, model.workStatus == .current {
-                        Text("No matching Work.")
-                            .foregroundStyle(palette.textSecondary).padding(8)
+                LazyVStack(alignment: .leading, spacing: 5) {
+                    if !presentation.available.isEmpty {
+                        sectionTitle("AVAILABLE · \(presentation.available.count)")
+                        ForEach(presentation.available) { item in
+                            taskRow(item.row, selectedWork: selectedWork, attention: item.attention)
+                        }
+                        Divider().padding(.vertical, 10)
                     }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                    sectionTitle(searching ? "MATCHING WAVES" : "WAVES")
+                    ForEach(presentation.waves) { branch in
+                        waveRow(branch.wave, count: branch.tasks.count, selectedWork: selectedWork)
+                        if searching || navigation.expandedWaves.contains(branch.id) {
+                            ForEach(branch.tasks) { taskRow($0, selectedWork: selectedWork).padding(.leading, 12) }
+                        }
+                    }
+                    if presentation.waves.isEmpty && presentation.available.isEmpty {
+                        Text(searching ? "No matching Work" : "No Waves yet")
+                            .foregroundStyle(palette.textSecondary).padding(12)
+                            .accessibilityIdentifier("work-search-empty")
+                    }
+                }.padding(10)
             }
             .scrollPosition($scrollPosition)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.listScrollOffset = offset }
-            // Search sits below the data so the repository heads its outline.
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
-                TextField("Find work or Sessions", text: Binding(
+                TextField("Find Work", text: Binding(
                     get: { navigation.search },
-                    set: { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline"); navigation.search = $0 }))
-                    .textFieldStyle(.plain)
-                    .font(Typography.body(13))
+                    set: {
+                        Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline")
+                        navigation.search = $0
+                    }))
+                    .textFieldStyle(.plain).font(Typography.body(13))
                     .accessibilityIdentifier("work-search")
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(10)
             .background(palette.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: 7))
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
+            .padding(10)
         }
         .font(Typography.body(12))
         .foregroundStyle(palette.text)
         .tint(palette.text)
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .background(palette.surfaceMuted)
-        .contextMenu { repositoryActions(orphans) }
+        .contextMenu { repositoryActions() }
         .accessibilityIdentifier("work-navigator")
-        .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
-        .onChange(of: rows.isEmpty, initial: true) { _, empty in
+        .onChange(of: navigation.search) { _, _ in
+            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        }
+        .onChange(of: model.repoPath) { _, _ in
+            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        }
+        .onChange(of: workspace.waves.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
             Perf.endAfterCommit(Perf.coldStart, id: "launch")
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: rows.map(\.id)) { _, _ in
-            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
-        }
     }
 
-    /// The repository heads its own outline: one scope, switched in place.
-    private func header(_ orphans: [SessionRecord]) -> some View {
-        @Bindable var navigation = model.navigation
-        return HStack(spacing: Spacing.sm) {
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func header(selectedWork: WorkReference?) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                if let onOpenRepository { onOpenRepository() } else { model.select(nil) }
+            } label: {
+                Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
+                     ?? "Choose repository")
+                    .font(Typography.strong(21))
+                    .foregroundStyle(selectedWork == nil ? palette.workSelectedText : palette.text)
+                    .lineLimit(1).padding(9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .disabled(model.repoPath == nil)
+            .workDestinationSelection(selectedWork == nil)
+            .accessibilityIdentifier("work-open-repository")
             Menu {
                 ForEach(repositories, id: \.self) { repo in
                     Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
                         .accessibilityIdentifier("work-repository-\(repo)")
                 }
                 Divider()
-                repositoryActions(orphans)
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
-                        ?? "Choose repository")
-                        .font(Typography.sectionTitle(25))
-                        .foregroundStyle(palette.accentInk)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(palette.textTertiary)
-                }
+                repositoryActions()
+            } label: { Image(systemName: "ellipsis").frame(width: 20, height: 28) }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Choose repository").accessibilityIdentifier("work-repository")
+            WorkGlyphButton("sidebar.left", label: "Hide sidebar", identifier: "work-toggle-sidebar") {
+                model.navigation.showsNavigator = false
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(model.repoPath ?? "Choose a repository")
-            .accessibilityLabel("Repository")
-            .accessibilityIdentifier("work-repository")
-            Spacer(minLength: 0)
-            Menu {
-                Picker("Presentation", selection: Binding(
-                    get: { navigation.presentation },
-                    set: { Perf.begin(Perf.hierarchyInteraction, "presentation", id: "outline"); navigation.presentation = $0 })) {
-                    ForEach(WorkPresentation.allCases, id: \.self) { presentation in
-                        Text(presentation.rawValue).tag(presentation)
+        }.padding(12)
+    }
+
+    private func waveRow(_ wave: WaveProjection, count: Int, selectedWork: WorkReference?) -> some View {
+        let selected = selectedWork == wave.id.work
+        let expanded = model.navigation.expandedWaves.contains(wave.id)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { open(wave.id.work) } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(wave.roadmap.wave.displayName).font(Typography.strong(17))
+                        .foregroundStyle(selected ? palette.workSelectedText : palette.emphasisInk).lineLimit(2)
+                    if !wave.roadmap.wave.goal.isEmpty {
+                        Text(wave.roadmap.wave.goal).font(Typography.body(12)).lineLimit(2)
+                            .foregroundStyle(selected ? palette.workSelectedText : palette.textSecondary)
                     }
                 }
-                Toggle("Show headless Sessions", isOn: Binding(
-                    get: { navigation.showsHeadlessSessions },
-                    set: {
-                        navigation.showsHeadlessSessions = $0
-                        Task { await model.refreshSessions() }
-                    }))
-                    .accessibilityIdentifier("work-headless-sessions")
-                if let onShowTerminals {
-                    Divider()
-                    Button("Show retained terminals", action: onShowTerminals)
-                        .accessibilityIdentifier("work-return-terminals")
-                }
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(hoveringPresentation ? palette.accentInk : palette.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14).contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 28, height: 28)
-            .background(hoveringPresentation ? palette.accentInk.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .onHover { hoveringPresentation = $0 }
-            .help("Outline presentation")
-            .accessibilityLabel("Outline presentation")
-            .accessibilityIdentifier("work-presentation")
+            .accessibilityIdentifier("work-wave-\(wave.roadmap.wave.id)")
+            .help("Open \(wave.roadmap.wave.displayName) conversation · Command-click to open beside current Work")
+            Button {
+                if expanded { model.navigation.expandedWaves.remove(wave.id) }
+                else { model.navigation.expandedWaves.insert(wave.id) }
+            } label: {
+                Text("\(count) \(count == 1 ? "Task" : "Tasks") · \(expanded ? "Hide" : "Show")")
+                    .font(Typography.body(10))
+                    .foregroundStyle(selected ? palette.workSelectedText : palette.textSecondary)
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(expanded ? "Hide" : "Show") \(wave.roadmap.wave.displayName) Tasks")
+            .accessibilityIdentifier("work-fold-\(wave.roadmap.wave.id)")
         }
-        .foregroundStyle(palette.text)
-        .padding(.leading, 18)
-        .padding(.trailing, 12)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
-        .background(palette.surfaceMuted)
+        .workDestinationSelection(selected)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .contextMenu {
+            ForEach(wave.sessions) { session in Button("Open \(session.title)") { onOpenSession(session) } }
+            subjectActions(wave.id.work, title: wave.roadmap.wave.displayName)
+        }
+    }
+
+    private func taskRow(_ row: WorkOutlineRow, selectedWork: WorkReference?, attention: WorkAttentionItem? = nil) -> some View {
+        let selected = selectedWork == row.id.work
+        return VStack(alignment: .leading, spacing: 7) {
+            Text(row.title).font(Typography.strong(14)).lineLimit(2)
+                .foregroundStyle(selected ? palette.workSelectedText : palette.text)
+                .frame(maxWidth: .infinity, alignment: .leading).allowsHitTesting(false)
+            if let attention {
+                Text(attention.waveName).font(Typography.body(11))
+                    .foregroundStyle(selected ? palette.workSelectedText : palette.emphasisInk)
+                    .allowsHitTesting(false)
+            }
+            if let task = row.task {
+                Text(task.task.description).font(Typography.body(12)).lineLimit(2)
+                    .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
+                    .allowsHitTesting(false)
+                TaskRowMetadata(task: task,
+                    status: SessionProgramStatus(sessions: attention.map { [$0.session] } ?? row.inlineSessions, unavailable: model.sessions.errorMessage),
+                    localMachineId: model.observingMachineId, selected: selected)
+            }
+        }
+        .padding(14).frame(minHeight: 82, alignment: .leading)
+        .background {
+            Button {
+                if let attention { openAttention(attention) } else { open(row.id.work) }
+            } label: { Color.clear.contentShape(Rectangle()) }
+                .buttonStyle(.plain).help(row.title).accessibilityLabel(row.title)
+                .accessibilityIdentifier(attention.map { "work-attention-\($0.work.kind.rawValue)-\($0.work.id)" } ?? "work-task-\(row.id.work.id)")
+        }
+        .workDestinationSelection(selected)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .contextMenu {
+            ForEach(row.inlineSessions) { session in Button("Open \(session.title)") { onOpenSession(session) } }
+            subjectActions(row.id.work, title: row.title)
+        }
+    }
+
+    private func openAttention(_ item: WorkAttentionItem) {
+        // Session opening owns selection too: an already retained surface may
+        // belong to another workspace. One opening means one Back entry.
+        onOpenSession(item.session)
+    }
+
+    private func open(_ work: WorkReference) {
+        model.navigation.search = ""
+        if work.kind == .task, let onOpenTask { onOpenTask(work) }
+        else if work.kind == .wave, let onOpenWave { onOpenWave(work) }
+        else { model.select(work) }
     }
 
     @ViewBuilder private var forReadErrors: some View {
-        let status = model.workStatus
-        if let message = status.message {
-            Group {
-                if case .failed = status { warning(message) }
-                else { Text(message).foregroundStyle(palette.textSecondary).padding(4) }
-            }
-            .accessibilityIdentifier("work-status")
+        if let message = model.workStatus.message {
+            warning(message).accessibilityIdentifier("work-status")
         }
         ForEach(model.projection.waves) { wave in
             if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
@@ -235,125 +246,13 @@ struct WorkNavigator: View {
         }
     }
 
-    /// One row component at two levels. A Wave is a sans section head with a
-    /// chevron and nothing else; a Task carries a dot only while it needs eyes
-    /// (running, blocked, waiting on you) and a count only while Sessions exist.
-    private func outlineRow(_ row: WorkOutlineRow, _ orphans: [SessionRecord]) -> some View {
-        let isWave = row.id.work.kind == .wave
-        return HStack(spacing: 6) {
-            if row.hasChildren {
-                let key = row.id
-                Button {
-                    Perf.begin(Perf.hierarchyInteraction, "fold", id: "outline")
-                    model.navigation.toggle(key)
-                } label: {
-                    Image(systemName: model.navigation.isExpanded(key) ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(palette.textTertiary)
-                        .frame(width: 14, height: 24)
-                }
-                .accessibilityLabel("Toggle \(row.title)")
-                .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
-            } else {
-                // The slot stays so titles align whether or not a Task has a dot.
-                Circle().fill(taskTone(row)?.ink ?? .clear)
-                    .frame(width: 6, height: 6).frame(width: 14)
-                    .accessibilityHidden(true)
-            }
-            Button {
-                if row.id.work.kind == .task, let onOpenTask {
-                    onOpenTask(row.id.work)
-                } else {
-                    model.select(row.id.work)
-                }
-            } label: {
-                Text(row.title)
-                    .font(isWave ? Typography.textStrong : Typography.text)
-                    .foregroundStyle(isWave
-                        ? (isSelected(row) ? palette.accentInk : palette.textSecondary)
-                        : palette.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .help(row.title)
-            .accessibilityIdentifier("work-\(row.id.work.kind.rawValue)-\(row.id.work.id)")
-            if !row.inlineSessions.isEmpty {
-                sessionCount(row.inlineSessions, work: row.id.work)
-            }
-        }
-        .padding(.horizontal, 6)
-        .frame(minHeight: 28)
-        .background(isSelected(row) ? palette.selectionTint : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if isSelected(row) {
-                RoundedRectangle(cornerRadius: 1).fill(palette.accentInk)
-                    .frame(width: 2).padding(.vertical, 7).offset(x: -10)
-            }
-        }
-        .padding(.top, isWave ? 8 : 0)
-        .padding(.leading, CGFloat(row.depth) * 14)
-        .contextMenu {
-            ForEach(row.inlineSessions) { session in
-                Button("Open \(session.title)") { onOpenSession(session) }
-            }
-            subjectActions(row.id.work, title: row.title)
-            ForEach(row.ancestors, id: \.key) { ancestor in
-                subjectActions(ancestor.key.work, title: ancestor.title)
-            }
-            Divider()
-            repositoryActions(orphans)
-        }
-    }
-
-    /// Open an exact available conversation from its Task or collapsed Wave.
-    private func sessionCount(_ sessions: [SessionRecord], work: WorkReference) -> some View {
-        let names = sessions.map(\.title).joined(separator: ", ")
-        return Menu {
-            ForEach(sessions) { session in
-                Button(session.title) { onOpenSession(session) }
-            }
-        } label: {
-            Label("\(sessions.count)", systemImage: "bubble.left")
-                .font(Typography.meta).foregroundStyle(palette.accentInk)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(names)
-        .accessibilityLabel("\(sessions.count) Sessions: \(names)")
-        .accessibilityIdentifier("work-session-count-\(work.id)")
-    }
-
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
-        if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
-            Button("New Session · \(title)") { onNewSession(launch) }
-                .accessibilityIdentifier("work-capture-wave-\(work.id)")
-        }
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    @ViewBuilder private func repositoryActions(_ orphans: [SessionRecord]) -> some View {
-        Menu("Debug") {
-            Menu("Sessions") {
-                // Partial planning must not strand conversations whose Work is
-                // missing. This menu reads the existing projection, not a new inventory.
-                ForEach(model.visibleWork.unmatchedSessions) { session in
-                    Button(session.title) { onOpenSession(session) }
-                        .accessibilityIdentifier("debug-session-\(session.id)")
-                }
-                Menu("Orphan Sessions") {
-                    ForEach(orphans) { session in
-                        Button(session.title) { onOpenSession(session) }
-                            .accessibilityIdentifier("debug-orphan-session-\(session.id)")
-                    }
-                    if orphans.isEmpty { Text("No Sessions without a Task association") }
-                }
-            }
-        }
-        if let onConversation { Button("New repository conversation") { onConversation(nil) } }
+    @ViewBuilder private func repositoryActions() -> some View {
+        if let onOpenRepository { Button("Repository conversation", action: onOpenRepository) }
         if let onNewShell { Button("New shell", action: onNewShell).accessibilityIdentifier("sessions-new-shell") }
         if let onShowTerminals { Button("Show retained terminals", action: onShowTerminals) }
     }
@@ -364,27 +263,8 @@ struct WorkNavigator: View {
         Task.detached { try? saveLoopflowState(LoopflowState(selectedRepoPath: path.normalizedFilePath)) }
     }
 
-    private func isSelected(_ row: WorkOutlineRow) -> Bool {
-        // A Task row carrying the open Session inline keeps its location visible.
-        if let selected = model.navigation.selectedSessionId {
-            return row.inlineSessions.contains { $0.id == selected }
-        }
-        return row.id.work == model.selection
-    }
-
-    /// The dot a Task row carries while it needs eyes, from its shared Flow
-    /// projection: running, blocked, or stalled. Stopped and idle rows
-    /// carry nothing.
-    private func taskTone(_ row: WorkOutlineRow) -> WorkTone? {
-        let work = row.id.work
-        guard work.kind == .task, let found = model.task(id: work.id),
-              let execution = found.task.execution else { return nil }
-        let state = execution.state.presentation
-        return state.label == nil ? nil : state.tone
-    }
-
     private func warning(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.triangle")
-            .foregroundStyle(Color.statusWarning).textSelection(.enabled).padding(4)
+            .foregroundStyle(palette.waiting).textSelection(.enabled).padding(4)
     }
 }

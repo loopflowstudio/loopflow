@@ -49,13 +49,11 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
 
 /// Shared Session history, newest input first. SQL selects the recent budget
 /// before decoding; exact Task and caller-input drills remain complete.
-pub(crate) fn collect_recent_history(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
+pub(crate) fn collect_recent_history(
+    store: &crate::store::sqlite::SqliteStore,
+    filter: WorkFilter,
+) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
-    let database = crate::store::database_path_from_env()?;
-    if !database.exists() {
-        return Ok((Vec::new(), false));
-    }
-    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
     Ok(store.recent_conversation_history(
         filter.wave,
         filter.project,

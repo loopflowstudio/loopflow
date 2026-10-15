@@ -161,6 +161,7 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
 
 public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     public let machineId: String?
+    public let machineLabel: String?
     public var identity: WorkspaceIdentity? { machineId.map { WorkspaceIdentity(machineId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
@@ -171,7 +172,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
         case baseCommit = "base_commit"
-        case machineId = "machine_id"
+        case machineId = "machine_id", machineLabel = "machine_label"
         case localExists = "local_exists"
     }
 }

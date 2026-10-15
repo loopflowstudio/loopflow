@@ -62,19 +62,26 @@ struct CommandArgTables {
     subcommands: HashMap<String, CommandArgTables>,
 }
 
-fn command_arg_tables(command: &clap::Command, root: bool) -> CommandArgTables {
+fn command_arg_tables(command: &clap::Command, inherited: &HashSet<clap::Id>) -> CommandArgTables {
     let mut direct = FlagTables::default();
     for arg in command
         .get_arguments()
-        .filter(|arg| root || !arg.is_global_set())
+        .filter(|arg| !inherited.contains(arg.get_id()))
     {
         direct.insert(arg);
     }
 
     let mut recursive = direct.clone();
     let mut subcommands = HashMap::new();
+    let mut inherited = inherited.clone();
+    inherited.extend(
+        command
+            .get_arguments()
+            .filter(|arg| arg.is_global_set())
+            .map(|arg| arg.get_id().clone()),
+    );
     for subcommand in command.get_subcommands() {
-        let child = command_arg_tables(subcommand, false);
+        let child = command_arg_tables(subcommand, &inherited);
         recursive.extend(&child.recursive);
         subcommands.insert(subcommand.get_name().to_string(), child);
     }
@@ -89,7 +96,9 @@ fn command_arg_tables(command: &clap::Command, root: bool) -> CommandArgTables {
 /// Derive flag ownership from the same command tree used for navigation.
 fn arg_tables() -> &'static CommandArgTables {
     static TABLES: OnceLock<CommandArgTables> = OnceLock::new();
-    TABLES.get_or_init(|| command_arg_tables(&loopflow::lf::navigation::command_tree(), true))
+    TABLES.get_or_init(|| {
+        command_arg_tables(&loopflow::lf::navigation::command_tree(), &HashSet::new())
+    })
 }
 
 fn flag_name(arg: &str) -> &str {
@@ -980,8 +989,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Ok(())
             }
         },
-        TaskCommand::Sync { issue } => {
-            println!("{}", loopflow::ops::task::task_sync(issue)?);
+        TaskCommand::Sync {
+            issue,
+            retry_creation,
+            retry_updates,
+        } => {
+            println!(
+                "{}",
+                loopflow::ops::task::task_sync(issue, *retry_creation, *retry_updates)?
+            );
             Ok(())
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
@@ -1030,13 +1046,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.id, issue.title);
+                println!("{} · {}", issue.identifier, issue.title);
             }
             if matches!(
                 loopflow::config::load_config_or_default(Some(repo)).planning_transport(),
                 loopflow::config::PlanningConfig::Linear {}
-            ) {
-                eprintln!("Saved locally; pending Linear sync.");
+            ) && issue.linear_id.is_none()
+            {
+                eprintln!(
+                    "Saved locally; pending Linear sync. Retry with `lf task sync {}`.",
+                    issue.identifier
+                );
             }
             Ok(())
         }
@@ -1844,6 +1864,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 design,
+                recover_from,
                 ..
             },
     }) = &cli.command
@@ -1858,6 +1879,9 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 ..Default::default()
             },
         )?;
+        if let Some(commit) = recover_from {
+            report.unavailable.push(format!("Explicit recovery from {commit}; commit availability and existing branch/checkout equality are checked under the checkout lease before restoring. No branch is reset."));
+        }
         if let Some(path) = design {
             report.unavailable.push(format!(
                 "Design handoff from {} is requested; source validation, retained receipt and child-file conflict checks have not run",
@@ -2142,6 +2166,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 design,
+                recover_from,
                 json,
             },
     }) = &cli.command
@@ -2169,6 +2194,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                     design: design.clone(),
+                    recover_from: recover_from.clone(),
                 },
             )?;
             print_task(&task, *json)
@@ -2334,14 +2360,15 @@ fn execute_command(
         Some(Commands::Desktop { .. }) => {
             unreachable!("Desktop dispatch precedes Work preparation")
         }
+        Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),
         Some(Commands::ContextBlock { delivery, moment }) => {
-            loopflow::lf::commands::context::emit_block(delivery, *moment)
+            loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
         Some(Commands::PlanningCheck { delivery }) => {
-            loopflow::lf::commands::context::check_planning(delivery)
+            loopflow::lf::commands::context::check_planning(delivery.as_deref())
         }
         Some(Commands::SessionTitle { .. }) => {
             unreachable!("title callbacks dispatch before command admission")
@@ -2936,6 +2963,25 @@ mod tests {
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    }
+
+    #[test]
+    fn reorder_args_keeps_nested_global_json_with_its_owner() {
+        for args in [
+            vec!["lf", "portfolio", "--json"],
+            vec!["lf", "portfolio", "manual", "--json"],
+            vec!["lf", "portfolio", "--json", "manual"],
+        ] {
+            let cli =
+                Cli::try_parse_from(reorder_args(args.into_iter().map(String::from).collect()))
+                    .and_then(Cli::checked)
+                    .unwrap();
+            assert!(!cli.json);
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Portfolio { json: true, .. })
+            ));
+        }
     }
 
     #[test]

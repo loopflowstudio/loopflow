@@ -21,6 +21,10 @@ enum Perf {
     static let hierarchyInteraction: StaticString = "hierarchy_interaction"
     /// Wave/Task selection → detail committed; Session selection → pane accepts input.
     static let taskWorkspaceReady: StaticString = "task_workspace_ready"
+    /// Task selection → header observes its cached or freshly delivered Workflow.
+    static let workflowReady: StaticString = "workflow_ready"
+    static let workFrameDecode: StaticString = "work_frame_decode"
+    static let workFrameApply: StaticString = "work_frame_apply"
     static let retainedWorkspaceAction: StaticString = "retained_workspace_action"
     /// One `lf` subprocess read; the message names the verb.
     static let lf: StaticString = "lf"
@@ -28,6 +32,14 @@ enum Perf {
     static let markdownParse: StaticString = "markdown_parse"
     /// Terminal key press → the next surface draw after it.
     static let terminalKeyToDraw: StaticString = "terminal_key_to_draw"
+
+    /// Correlates one Task gesture with preparation. It grants no readiness or ownership.
+    @TaskLocal static var inputTrace: String = ""
+
+    static func agentInput(_ phase: String, task: String = "", session: String = "", detail: String = "") {
+        signposter.emitEvent("agent_input",
+            "phase=\(phase, privacy: .public) trace=\(inputTrace, privacy: .public) task=\(task, privacy: .public) session=\(session, privacy: .public) wall=\(Date().timeIntervalSince1970, privacy: .public) \(detail, privacy: .public)")
+    }
 
     private struct Pending {
         let state: OSSignpostIntervalState
@@ -80,7 +92,7 @@ enum Perf {
     }
 
     static func measure<Value>(_ name: StaticString, _ detail: String, _ body: () async throws -> Value) async rethrows -> Value {
-        let state = signposter.beginInterval(name, id: signposter.makeSignpostID(), "\(detail, privacy: .public)")
+        let state = signposter.beginInterval(name, id: signposter.makeSignpostID(), "trace=\(inputTrace, privacy: .public) \(detail, privacy: .public)")
         defer { signposter.endInterval(name, state) }
         return try await body()
     }

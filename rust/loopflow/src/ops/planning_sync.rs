@@ -63,18 +63,16 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
             crate::config::PlanningConfig::Linear {} => {
-                tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                    super::planning_export::sync_repository_exports(store, repo).await?;
-                    let (fields, deliveries) = tokio::join!(
-                        super::planning_delivery::sync_repository_fields(store, repo),
-                        super::linear_observe::sync_repository_deliveries(store, repo)
-                    );
-                    fields?;
-                    deliveries?;
-                    Ok(())
-                })
-                .await
-                .map_err(message)?
+                // Export attempts have individual deadlines. A shared deadline
+                // lets older pending work starve the Task that was just saved.
+                super::planning_export::sync_repository_exports(store, repo).await?;
+                let (fields, deliveries) = tokio::join!(
+                    super::planning_delivery::sync_repository_fields(store, repo),
+                    super::linear_observe::sync_repository_deliveries(store, repo)
+                );
+                fields?;
+                deliveries?;
+                Ok(())
             }
         }
     };

@@ -269,17 +269,23 @@ struct TaskFlowTests {
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
         #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
 
-        // The header is the Workflow: the current node, its edges as buttons, Move to.
+        // The compact header keeps position/actions; Overview holds the graph.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
-        #expect(try find("task-workflow-node-demo").accessibilityValue().string() == "Current")
-        #expect(try find("task-workflow-process-4").button().labelView().text().string() == "ship")
+        let workflowName = try #require(workflow["name"] as? String)
+        #expect(try find("task-workflow-position").text().string() == "\(workflowName) · demo")
+        #expect(try find("task-workflow-action-4").button().labelView().text().string() == "ship")
         _ = try find("task-workflow-move")
+        let overview = try find("task-overview").disclosureGroup()
+        #expect(try !overview.isExpanded())
+        #expect(try overview.find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+            .accessibilityValue().string() == "Current")
         let header = drawn()
-        #expect(header.contains("task-workflow-node-demo"), "the accessibility tree is readable")
+        #expect(header.contains("task-workflow-position"), "the current Workflow position is accessible")
+        #expect(!header.contains("task-workflow-node-demo"), "the graph stays collapsed in Overview")
         #expect(header.isDisjoint(with: [
             "work-materials", "work-toggle-materials", "work-toggle-files",
-            "work-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
+            "work-current-stage", "task-show-monitor-\(task.id)",
             "task-flow-processes", "task-work", "task-flow-start",
         ]))
 
@@ -366,10 +372,13 @@ private final class ScriptedReader {
         switch request {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
         case .refresh(let request): id = request
+        case .checkpoint(let request, _): id = request
+        case .taskHistory(let request, _): id = request
         }
         send("planning", answers: id, body: planning)
         send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
         if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_processes": runs, "comments": ["identifier": task, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]) }
+        if case .checkpoint = request { send("checkpoint", answers: id, body: [:]) }
     }
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {

@@ -45,7 +45,7 @@ struct MarkdownBlocks: View, Equatable {
             }
         }
         .textSelection(.enabled)
-        .tint(palette.accentInk)
+        .tint(palette.linkInk)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

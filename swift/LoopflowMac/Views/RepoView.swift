@@ -57,6 +57,10 @@ struct RepoView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .foregroundStyle(palette.text)
+            if let error = portfolioService.error {
+                Text(error).font(.caption).foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled).padding(Spacing.sm)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
@@ -75,6 +79,11 @@ struct RepoView: View {
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
                    readText: { try sessionWorkspaces.readText($0) }) { url in
+                    if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
+                    if let machine = sessionWorkspaces.localMachineId {
+                        model.confirmMachine(machine)
+                        model.bindWorkspaces(sessionWorkspaces, repository: repository)
+                    }
                     await model.openTaskLink(url)
                 }.frame(width: 0, height: 0)
             }
@@ -90,13 +99,18 @@ struct RepoView: View {
             model.rescanWork()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.rereadDefinitions() }
+            Task {
+                await portfolioService.refresh()
+                if portfolioService.error == nil {
+                    await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
+                }
+                await model.rereadDefinitions()
+            }
         }
-        .task {
-            await model.refreshPortfolio(
-                initialRepoPath: initialRepoPath,
-                persistedRepos: portfolioService.repos
-            )
+        .task { await portfolioService.refresh() }
+        .task(id: portfolioService.selection) {
+            guard let selection = portfolioService.selection, selection.error == nil else { return }
+            await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
         }
         .task { await model.keepWorkCurrent() }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
@@ -107,14 +121,6 @@ struct RepoView: View {
             defer { CIWatchers.shared.close(repo) }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3600))
-            }
-        }
-        .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
-            Task {
-                await model.refreshPortfolio(
-                    initialRepoPath: initialRepoPath,
-                    persistedRepos: portfolioService.repos
-                )
             }
         }
     }

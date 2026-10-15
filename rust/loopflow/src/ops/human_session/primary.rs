@@ -62,6 +62,16 @@ pub(crate) async fn ensure_task(
             .await?
             .map(|session| session.id),
     };
+    if !binding.cwd.try_exists()? {
+        // Reuse Task preparation's recorded placement and restoration checks.
+        // Opening a conversation does not invent a checkout or start a Flow.
+        let repo = repo.to_path_buf();
+        let task = id.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::ops::task::task_checkout(&repo, &task, Default::default())
+        })
+        .await??;
+    }
     if let Some(session) = chosen {
         let primary = store.choose_task_primary(id, &session).await?;
         return surface(store, &primary).await;

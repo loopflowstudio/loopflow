@@ -82,7 +82,7 @@ struct WorktreeWorkspaceTests {
             WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "one"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "two")]
-        for key in keys { registry.open(key, title: key.id, location: location) }
+        for key in keys { registry.open(key, title: key.id, location: location, besideFocused: true) }
         #expect(registry.openWork == keys)
         let first = try #require(registry.retained(keys[2]))
         let shell = try #require(try first.newShell())
@@ -97,7 +97,7 @@ struct WorktreeWorkspaceTests {
         registry.hide(keys[2])
         #expect(!registry.openWork.contains(keys[2]))
         #expect(registry.retained(keys[2]) === first)
-        #expect(registry.open(keys[2], title: "Renamed Task", location: nil) === first)
+        #expect(registry.open(keys[2], title: "Renamed Task", location: nil, besideFocused: true) === first)
         #expect(registry.openWork.count == 4)
         #expect(first.title == "Renamed Task")
         #expect(first.multiplexer.layout == layout)

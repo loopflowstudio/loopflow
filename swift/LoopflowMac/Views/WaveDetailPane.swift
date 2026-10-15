@@ -92,7 +92,7 @@ struct WaveDetailPane: View {
                     .font(Typography.caption())
                     .foregroundStyle(palette.textSecondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkPlainButtonStyle())
             .help("Close wave")
             .accessibilityLabel("Close wave")
         }
@@ -200,7 +200,7 @@ private struct WavePlanView: View {
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textSecondary)
                 }
-                .tint(palette.accent)
+                .tint(palette.actionInk)
             }
         }
     }
@@ -234,7 +234,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(Color.statusWarning)
+                    Text(reason).foregroundStyle(palette.waiting)
                 case .available(let inventory, let truncated):
                     let tasks = inventory.filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
@@ -253,7 +253,7 @@ private struct WavePlanView: View {
             }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                    .foregroundStyle(Color.statusWarning)
+                    .foregroundStyle(palette.waiting)
             }
         }.accessibilityIdentifier("wave-tasks")
     }
@@ -330,7 +330,7 @@ struct WaveMetricPortfolioView: View {
                             systemImage: "exclamationmark.circle.fill"
                         )
                         .font(Typography.caption(11))
-                        .foregroundStyle(Color.statusError)
+                        .foregroundStyle(palette.failure)
                     }
                 }
                 .accessibilityIdentifier("wave-metric-summary")
@@ -362,7 +362,7 @@ struct WaveMetricPortfolioView: View {
                             systemImage: "exclamationmark.triangle.fill"
                         )
                         .font(Typography.strong(11))
-                        .foregroundStyle(Color.statusWarning)
+                        .foregroundStyle(palette.waiting)
                         ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
                             Text(issue.summary)
                                 .font(Typography.caption(11))
@@ -373,9 +373,9 @@ struct WaveMetricPortfolioView: View {
                     }
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
-                    .background(Color.statusWarning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(palette.waiting.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .leading) {
-                        Rectangle().fill(Color.statusWarning).frame(width: 2)
+                        Rectangle().fill(palette.waiting).frame(width: 2)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .accessibilityIdentifier("wave-metric-contract-issues")
@@ -464,13 +464,13 @@ private struct WaveMetricTableRow: View {
             }
             Text(detail(presentation))
                 .font(Typography.caption(11))
-                .foregroundStyle(metric.instrumented ? palette.textTertiary : Color.statusWarning)
+                .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.waiting)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = presentation.reason {
                 Text(reason)
                     .font(Typography.caption(11))
-                    .foregroundStyle(metric.evidence.stateColor)
+                    .foregroundStyle(metric.evidence.tone.ink(in: palette))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -597,21 +597,12 @@ private extension MetricFreshness {
 }
 
 private extension MetricEvidence {
-    var stateColor: Color {
-        switch self {
-        case .met: return .statusSuccess
-        case .missed: return .statusError
-        case .unknown, .untargeted: return .statusNeutral
-        case .unavailable: return .statusWarning
-        }
-    }
-
     var tone: WorkTone {
         switch self {
         case .met: return .done
-        case .missed: return .blocked
+        case .missed: return .failure
         case .unknown, .untargeted: return .neutral
-        case .unavailable: return .human
+        case .unavailable: return .waiting
         }
     }
 
@@ -722,7 +713,7 @@ private struct WaveTaskWorkView: View {
                 if let directive = task.directive {
                     Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
                         .font(Typography.caption(10))
-                        .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
+                        .foregroundStyle(palette.textSecondary)
                 }
                 if let pr = task.pr {
                     PrLink(pr: pr)
@@ -735,7 +726,7 @@ private struct WaveTaskWorkView: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
-                .stroke(isSelected ? palette.accent : Color.clear, lineWidth: 1)
+                .stroke(isSelected ? palette.selectionEdge : Color.clear, lineWidth: 1)
         }
         .contentShape(Rectangle())
         .accessibilityIdentifier("wave-task")
@@ -823,7 +814,7 @@ private struct WaveWorkInspector: View {
                 .textSelection(.enabled)
             Text(directive.incorporatedAt == nil ? "Awaiting incorporation" : "Incorporated")
                 .font(Typography.caption(10))
-                .foregroundStyle(directive.incorporatedAt == nil ? palette.textSecondary : palette.accent)
+                .foregroundStyle(palette.textSecondary)
         }
         if let provider {
             Text("Provider · \(provider)")
@@ -873,8 +864,8 @@ struct WaveProjectView: View {
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()
-                        .fill(kr.holds ? WorkTone.done.ink : Color.clear)
-                        .overlay(Circle().strokeBorder(kr.holds ? WorkTone.done.ink : palette.borderStrong, lineWidth: 1.5))
+                        .fill(kr.holds ? palette.success : Color.clear)
+                        .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
                         .frame(width: 12, height: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                     Text(kr.text)

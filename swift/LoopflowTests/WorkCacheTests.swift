@@ -17,7 +17,7 @@ struct WorkCacheTests {
         model.confirmMachine("machine-a")
         await model.refreshSessions()
         #expect(model.sessions.value?.isEmpty == false)
-        await source.hold(["session"])
+        await source.hold(["session", "list"])
         let pending = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.confirmMachine("machine-b")
@@ -52,7 +52,7 @@ struct WorkCacheTests {
         #expect(returning.savedMachineId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
-        #expect(returning.selection == .task(id: "issue-now"))
+        #expect(returning.selection == nil)
         #expect(returning.task(id: "issue-now") != nil)
         #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }
@@ -181,7 +181,7 @@ struct WorkCacheTests {
         let source = try Source()
         let cache = WorkCache(directory: directory)
         let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        await source.hold(["session"])
+        await source.hold(["session", "list"])
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.setRepoPath("/src/other")
@@ -230,7 +230,7 @@ struct WorkCacheTests {
 
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        #expect(returning.selection == .task(id: "issue-now"))
+        #expect(returning.selection == nil)
         await source.hold(["wave", "show"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
@@ -281,22 +281,8 @@ struct WorkCacheTests {
         #expect(returning.repoPath == Self.repo)
         #expect(returning.sessions.value?.isEmpty == false)
 
-        await returning.refreshPortfolio(initialRepoPath: nil)
+        await returning.applyPortfolio([], initialRepoPath: nil)
         #expect(returning.repoPath == nil)
-    }
-
-    @Test("Explicit history is read on request, never saved")
-    func headlessListingIsNotSaved() async throws {
-        let directory = try temporaryDirectory()
-        let source = try Source()
-        let cache = WorkCache(directory: directory)
-        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        model.navigation.showsHeadlessSessions = true
-        await model.refreshSessions()
-        cache.flush()
-
-        #expect(model.sessions.value?.isEmpty == false)
-        #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
     }
 
     @Test("Only the most recently saved repositories are kept")

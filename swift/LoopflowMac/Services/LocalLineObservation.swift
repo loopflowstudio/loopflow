@@ -150,7 +150,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
                     lastFrame = ProcessInfo.processInfo.systemUptime
                     continuation.yield(frame)
                 } catch {
-                    fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error.localizedDescription)"))
+                    fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error)"))
                     return
                 }
                 bytes.removeSubrange(...end)
@@ -260,7 +260,11 @@ enum LocalWorkObservation {
     ) throws -> WorkObservation {
         let reader = try LocalLineObservation<WorkFrame>.start(
             name: "Workspace", process: process, frameLimit: 64 * 1024 * 1024,
-            configurationChanged: configurationChanged, decode: WorkFrame.decode(line:))
+            configurationChanged: configurationChanged, decode: { line in
+                try Perf.measure(Perf.workFrameDecode, "bytes=\(line.count)") {
+                    try WorkFrame.decode(line: line)
+                }
+            })
         return WorkObservation(frames: reader.frames, request: { request in
             reader.send(request.line)
         }, cancel: reader.cancel)

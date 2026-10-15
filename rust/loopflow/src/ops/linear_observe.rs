@@ -229,24 +229,16 @@ pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
             false
         }
     };
-    if tokio::time::timeout(Duration::from_secs(5), async {
-        if let Err(error) = sync_repository_deliveries(store, repository).await {
-            tracing::debug!(%error, "planning delivery pending");
-        }
-        if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await
-        {
-            tracing::debug!(%error, "planning export pending");
-        }
-        if let Err(error) =
-            super::planning_delivery::sync_repository_fields(store, repository).await
-        {
-            tracing::debug!(%error, "planning field delivery pending");
-        }
-    })
-    .await
-    .is_err()
-    {
-        tracing::debug!("Linear delivery deadline elapsed; pending receipts retained");
+    // Each delivery has its own deadline. A shared deadline repeatedly canceled
+    // the first slow export and starved every later saved Task.
+    if let Err(error) = sync_repository_deliveries(store, repository).await {
+        tracing::debug!(%error, "planning delivery pending");
+    }
+    if let Err(error) = super::planning_export::sync_repository_exports(store, repository).await {
+        tracing::debug!(%error, "planning export pending");
+    }
+    if let Err(error) = super::planning_delivery::sync_repository_fields(store, repository).await {
+        tracing::debug!(%error, "planning field delivery pending");
     }
     changed
 }
@@ -286,6 +278,10 @@ pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) 
 }
 
 pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
+    deliver_task_state(store, task, false).await
+}
+
+pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) -> OpsResult<()> {
     let path = store
         .sqlite
         .home_dir()
@@ -343,7 +339,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
-        if delivery.attempted {
+        if delivery.attempted && !retry {
             return Err(OpsError::Message(
                 "Prior state delivery remains uncertain; saved decision retained".into(),
             ));
@@ -354,7 +350,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .map_err(message)?;
         if !store
             .sqlite
-            .attempt_task_state(&delivery)
+            .attempt_task_state(&delivery, retry)
             .map_err(message)?
         {
             return Ok(());
@@ -365,7 +361,9 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
             Ok(confirmed) => confirmed,
             Err(error) => {
-                if matches!(error, crate::linear::LinearError::RateLimited { .. }) {
+                if !delivery.attempted
+                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
+                {
                     store.sqlite.reject_task_state(&delivery).map_err(message)?;
                 }
                 return Err(message(&error));

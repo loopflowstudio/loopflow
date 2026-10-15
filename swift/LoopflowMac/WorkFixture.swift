@@ -79,7 +79,7 @@ enum WorkFixture {
         let repos = roadmap.waves.compactMap { roadmap -> PortfolioRepo? in
             let path = roadmap.wave.repo.normalizedFilePath
             guard seen.insert(path).inserted else { return nil }
-            return PortfolioRepo(path: path, lastOpened: .distantPast)
+            return PortfolioRepo(path: path, error: nil)
         }
         return (roadmap, waves, repos)
     }

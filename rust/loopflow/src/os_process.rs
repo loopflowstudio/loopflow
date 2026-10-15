@@ -219,10 +219,10 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
 }
 
 pub(crate) fn resolve_lf_binary() -> PathBuf {
+    if let Some(path) = std::env::var_os("LF_BIN").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path);
+    }
     if crate::store::custom_home_selected() {
-        if let Some(path) = std::env::var_os("LF_BIN").filter(|value| !value.is_empty()) {
-            return PathBuf::from(path);
-        }
         if let Some(path) = std::env::var_os("CARGO_BIN_EXE_lf") {
             return PathBuf::from(path);
         }
@@ -252,7 +252,11 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
-    if !crate::store::custom_home_selected() {
+    if !crate::store::custom_home_selected()
+        && std::env::var_os("LF_BIN")
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
         if let Some(cli) = crate::installation::installed_cli(&crate::installation::root()?)? {
             // One read resolves this for every Task; hash unchanged bytes once.
             static VERIFIED: Mutex<Option<(PathBuf, String, u64, SystemTime)>> = Mutex::new(None);
@@ -574,6 +578,21 @@ mod tests {
     use std::time::Duration;
 
     use super::{lf_session_shell_command, pin_control_binary, terminate_process_group};
+
+    #[test]
+    fn explicit_binary_selection_applies_to_the_main_machine() {
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let binary = std::env::current_exe().unwrap();
+        std::env::set_var("LF_BIN", &binary);
+        assert_eq!(super::resolve_lf_binary(), binary);
+        assert_eq!(super::resolve_pinned_lf_binary().unwrap(), binary);
+        // Dispatch must stay in this executable, not fall through to an
+        // installed CLI and replace the test process.
+        crate::installation::dispatch_default_cli().unwrap();
+        std::env::set_var("LF_BIN", "/missing/selected/lf");
+        assert!(super::resolve_pinned_lf_binary().is_err());
+        assert!(crate::installation::dispatch_default_cli().is_err());
+    }
 
     #[test]
     fn terminating_a_group_reaches_a_grandchild_that_outlived_its_leader() {

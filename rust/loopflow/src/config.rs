@@ -5,6 +5,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -545,6 +546,19 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     serde_yaml_ng::from_value(value).map_err(|error| {
         LoadError::InvalidFlow(format!("Invalid repo_root in {}: {error}", path.display()))
     })
+}
+
+/// Persist a Machine-local configuration mapping without exposing partial YAML.
+pub(crate) fn write_global_config_at(
+    path: &Path,
+    value: &serde_yaml_ng::Value,
+) -> anyhow::Result<()> {
+    let parent = path.parent().expect("config path has a parent");
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    file.write_all(serde_yaml_ng::to_string(value)?.as_bytes())?;
+    file.as_file().sync_all()?;
+    file.persist(path)?;
+    Ok(())
 }
 
 fn global_config_path() -> PathBuf {

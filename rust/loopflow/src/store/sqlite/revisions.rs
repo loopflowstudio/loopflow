@@ -8,6 +8,25 @@ use crate::store::StoreResult;
 
 use super::SqliteStore;
 
+/// Pins the dedicated Work reader's connection while its joined projections run.
+/// The connection must not be lent to a concurrent reader during this lifetime.
+#[derive(Debug)]
+pub(crate) struct ReadSnapshot<'a>(&'a SqliteStore);
+
+impl Drop for ReadSnapshot<'_> {
+    fn drop(&mut self) {
+        if let Err(error) = self
+            .0
+            .conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("ROLLBACK")
+        {
+            tracing::error!(%error, "cannot release Work read snapshot");
+        }
+    }
+}
+
 /// One counter per kind of displayed change. Equal revisions mean nothing a
 /// workspace surface reads from that domain was committed in between.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +40,14 @@ pub struct StoreRevisions {
 }
 
 impl SqliteStore {
+    pub(crate) fn read_snapshot(&self) -> StoreResult<ReadSnapshot<'_>> {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute_batch("BEGIN DEFERRED")?;
+        Ok(ReadSnapshot(self))
+    }
+
     pub(crate) fn revisions(&self) -> StoreResult<StoreRevisions> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut revisions = StoreRevisions {
@@ -106,6 +133,54 @@ mod tests {
     }
 
     #[test]
+    fn a_read_snapshot_keeps_joined_queries_and_revisions_at_one_commit() {
+        let (dir, writer) = store();
+        writer.test_session("first", &crate::session_record::new_artifact_key());
+        writer.test_session("second", &crate::session_record::new_artifact_key());
+        let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+        let snapshot = reader.read_snapshot().unwrap();
+        let before = reader.revisions().unwrap();
+        assert_eq!(
+            reader.session_summary("first", 1).unwrap().unwrap().title,
+            "Retained"
+        );
+        writer
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("BEGIN; UPDATE agent_sessions SET title='committed'; COMMIT;")
+            .unwrap();
+        // These readers have their own savepoints, nested inside the pinned read.
+        assert_eq!(
+            reader.session_summary("second", 1).unwrap().unwrap().title,
+            "Retained"
+        );
+        assert_eq!(reader.revisions().unwrap(), before);
+        drop(snapshot);
+        assert_eq!(
+            reader.session_summary("first", 1).unwrap().unwrap().title,
+            "committed"
+        );
+        assert_eq!(
+            reader.session_summary("second", 1).unwrap().unwrap().title,
+            "committed"
+        );
+        assert!(reader.revisions().unwrap().sessions > before.sessions);
+        // Failed projection exits release the transaction too.
+        let failed = || -> crate::store::StoreResult<()> {
+            let _snapshot = reader.read_snapshot()?;
+            reader
+                .conn
+                .lock()
+                .unwrap()
+                .execute_batch("SELECT absent FROM no_table")?;
+            Ok(())
+        };
+        assert!(failed().is_err());
+        assert!(reader.read_snapshot().is_ok());
+    }
+
+    #[test]
     fn store_revisions_cover_every_table() {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
@@ -187,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_reading_moves_sessions_only_when_waiting_could_change() {
+    fn a_session_reading_moves_sessions_only_when_availability_could_change() {
         let (_dir, store) = store();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = LfProcessId::new();
@@ -232,17 +307,17 @@ mod tests {
         assert_eq!(record(1010, 2, 0, false), 0, "another open tool");
         assert_eq!(record(1015, 0, 0, false), 1, "last tool returned");
         // Counting toward quiet from the newest reading, with no write when it arrives.
-        assert_eq!(store.next_quiet_waiting(1020).unwrap(), Some(1135));
+        assert_eq!(store.next_quiet_available(1020).unwrap(), Some(1135));
         assert_eq!(record(1020, 0, 0, false), 0, "streaming text");
-        assert_eq!(store.next_quiet_waiting(1025).unwrap(), Some(1140));
+        assert_eq!(store.next_quiet_available(1025).unwrap(), Some(1140));
         assert_eq!(
-            store.next_quiet_waiting(1140).unwrap(),
+            store.next_quiet_available(1140).unwrap(),
             None,
-            "already Waiting"
+            "already Available"
         );
         assert_eq!(record(1140, 0, 0, false), 1, "activity after quiet");
         assert_eq!(record(1145, 0, 1, false), 1, "question asked");
-        assert_eq!(store.next_quiet_waiting(1146).unwrap(), None);
+        assert_eq!(store.next_quiet_available(1146).unwrap(), None);
         assert_eq!(record(1150, 0, 0, false), 1, "question answered");
         assert_eq!(record(1155, 0, 0, true), 1, "turn handed back");
     }

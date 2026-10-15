@@ -277,6 +277,7 @@
                         "branch": "main",
                         "local_exists": true,
                         "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+                        "machine_label": "build-server",
                         "slug": "delivery",
                         "worktree": "/tmp/.tmp6k7XyI"
                       }
@@ -546,6 +547,7 @@
           "branch": "main",
           "local_exists": true,
           "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+          "machine_label": "build-server",
           "slug": "delivery",
           "worktree": "/tmp/.tmp6k7XyI"
         }
@@ -1824,6 +1826,7 @@
                         "branch": "main",
                         "local_exists": true,
                         "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+                        "machine_label": "build-server",
                         "slug": "delivery",
                         "worktree": "/tmp/.tmp6k7XyI"
                       }
@@ -2078,6 +2081,7 @@
           "branch": "main",
           "local_exists": true,
           "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+          "machine_label": "build-server",
           "slug": "delivery",
           "worktree": "/tmp/.tmp6k7XyI"
         }
@@ -3081,6 +3085,7 @@
                         "branch": "main",
                         "local_exists": true,
                         "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+                        "machine_label": "build-server",
                         "slug": "delivery",
                         "worktree": "/tmp/.tmp6k7XyI"
                       }
@@ -3335,6 +3340,7 @@
           "branch": "main",
           "local_exists": true,
           "machine_id": "home_84ff7b2f36aad97b2cb6018fca34526b",
+          "machine_label": "build-server",
           "slug": "delivery",
           "worktree": "/tmp/.tmp6k7XyI"
         }

@@ -159,6 +159,7 @@ When editing `*.rs` files:
 - If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
 - Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
+- Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
@@ -169,6 +170,9 @@ When editing `*.rs` files:
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
 - Never use `()` as an error type
+- SQLite read helpers that join statements use savepoints so they compose inside
+  the Work reader's pinned snapshot as well as standalone. Keep write transactions
+  at their existing command boundaries.
 - For public APIs, include `# Panics`/`# Errors`/`# Safety` doc sections where non-obvious
 
 When editing Rust tests:
@@ -268,7 +272,7 @@ Session for interactive and Run for headless work. AgentSession is the provider-
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a
 time; replacement preserves earlier selections in immutable history. It is not
-an OS process and has no separate table. Waiting is the one attention
+an OS process and has no separate table. Available is the one attention
 state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session

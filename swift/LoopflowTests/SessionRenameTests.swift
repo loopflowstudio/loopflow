@@ -74,6 +74,28 @@ import Testing
         #expect(model.navigation.renaming == nil)
     }
 
+    @Test("A late rename cannot dismiss a newer draft for the same Session")
+    func lateRenameKeepsNewDraft() async throws {
+        let first = try record("first", title: "Original")
+        let second = try record("second", title: "Other")
+        let source = RenameSource(records: [first, second])
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.beginSessionRename(first)
+        model.navigation.renaming?.text = "Submitted"
+        await source.holdNext("rename")
+        let saving = Task { await model.commitSessionRename() }
+        await source.waitUntilHeld("rename")
+        model.beginSessionRename(second)
+        model.beginSessionRename(first)
+        model.navigation.renaming?.text = "New unsent name"
+        await source.release("rename")
+        await saving.value
+        #expect(title(model, "first") == "Submitted")
+        #expect(model.navigation.renaming?.text == "New unsent name")
+        #expect(model.navigation.renaming?.submitting == false)
+    }
+
     @Test("The breadcrumb drills Wave → Task → exact Session, with siblings as the final choice")
     func breadcrumbNamesTheExactSession() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))

@@ -277,7 +277,7 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// Waiting on a person, judged from current stream or terminal reports; absent when it is
+    /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
@@ -310,7 +310,7 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAttention {
-    Waiting,
+    Available,
 }
 
 fn session_state(session: &crate::session::SessionSummary) -> SessionState {
@@ -322,7 +322,7 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
 }
 
 fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    session.waiting.then_some(SessionAttention::Waiting)
+    session.available.then_some(SessionAttention::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -676,6 +676,7 @@ pub(crate) async fn open(
     mode: OpenMode,
     resume: bool,
 ) -> Result<SessionRecord> {
+    crate::agent_input_timing::record("connect_begin", session_id);
     crate::data_clone::require_writable_session(session_id)?;
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
@@ -824,6 +825,7 @@ async fn connect_live_codex(
     session: &LfSession,
     provider: &crate::session_record::ProviderSessionRef,
 ) -> Result<bool> {
+    crate::agent_input_timing::record("live_relay_begin", &session.id);
     let expected = store.sqlite.session_attachment(&session.id)?;
     let Some((endpoint, thread)) = store.sqlite.session_connection(&session.id)? else {
         return Ok(false);
@@ -942,8 +944,10 @@ async fn connect_live_codex(
 /// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
+    crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
+    crate::agent_input_timing::record("launch_lock_acquired", id);
     // Resolve the current input under the launch lock, including completion
     // or replacement that happened while this opener waited.
     let session = store
@@ -956,6 +960,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
         return Ok(());
     }
+    crate::agent_input_timing::record("fresh_launch_selected", id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
     let session = if capture_is_prepared(&session.artifact_key)? {
@@ -1251,7 +1256,10 @@ pub(crate) async fn spawn_session_process(
         .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("could not start {launch}"))?;
-    let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
+    // This child owns the visible foreground terminal. First-use trust and
+    // authentication can wait for a person before native history exists; an
+    // elapsed startup deadline must not kill that conversation. Keep the launch
+    // lock until history is resumable or the child exits.
     loop {
         match crate::session_record::resolve_manifest(&home, artifact_key.as_str()) {
             Ok((dir, _manifest)) => {
@@ -1273,15 +1281,6 @@ pub(crate) async fn spawn_session_process(
                 }
             }
             bail!("{launch}: exited with {status} before becoming resumable");
-        }
-        if tokio::time::Instant::now() >= deadline {
-            // Reap the launcher before returning. Protocol providers are tied to
-            // its lifeline, including wrappers that never finish starting.
-            child
-                .kill()
-                .await
-                .context("stop timed-out Session launcher")?;
-            bail!("{launch}: did not become resumable within 30s");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -1339,6 +1338,7 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
+    crate::agent_input_timing::record("native_resume_selected", &session.id);
     crate::lf::commands::util::resume_session_with_env(
         &session.artifact_key,
         provider_session.as_ref(),
@@ -1871,6 +1871,11 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(session.state, super::SessionState::Unknown);
+        assert_eq!(session.attention, Some(super::SessionAttention::Available));
+        assert_eq!(
+            serde_json::to_value(&session).unwrap()["attention"],
+            "available"
+        );
         assert!(matches!(
             session.flow_membership,
             super::SessionFlowMembership::Step {
@@ -1897,7 +1902,7 @@ mod tests {
             agent_process_id: None,
             primary_scope: None,
             agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
-            waiting: false,
+            available: false,
             terminal_id: None,
             task_terminal: false,
             task_primary: false,
@@ -2276,6 +2281,35 @@ mod tests {
         );
         assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
         assert!(!argv.iter().any(|argument| argument == "tmux"));
+    }
+
+    #[test]
+    fn foreground_session_can_wait_for_first_use_before_native_history() {
+        let _lock = crate::journal::test_env_lock();
+        let home = SessionHome::new();
+        let _store =
+            crate::store::sqlite::SqliteStore::new(&home.home.path().join("loopflow.db")).unwrap();
+        let mut command = tokio::process::Command::new("/bin/sleep");
+        command.arg("60").stdin(std::process::Stdio::null());
+        let input = crate::session_record::new_artifact_key();
+        // Virtual time passes the old startup deadline while the owned child
+        // waits. Canceling the future then reaps it through kill_on_drop.
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(31),
+                    super::spawn_session_process(&mut command, &input),
+                )
+                .await
+            });
+        assert!(
+            result.is_err(),
+            "foreground launch ended before first-use input: {result:?}"
+        );
     }
 
     #[test]

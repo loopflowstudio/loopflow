@@ -61,6 +61,8 @@ struct WorkNavigationProofTests {
         host.frame = window.contentLayoutRect
         defer { window.contentView = nil }
         try await settle(window)
+        model.select(.wave(id: "wave-1"))
+        try await settle(window)
         let scroll = try #require(_scrollView(in: host))
         scroll.contentView.scroll(to: CGPoint(x: 0, y: 1200))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -91,7 +93,7 @@ struct WorkNavigationProofTests {
         #expect(abs(restored.contentView.bounds.minY - offset) < 1)
     }
 
-    @Test("At density the sidebar lists started Tasks under sans Wave heads and orphans in one bottom section")
+    @Test("At density drill-in lists the selected Wave’s started Tasks and keeps orphan Sessions out")
     func sidebarDensityWithOrphans() async throws {
         _ = NSApplication.shared
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -189,21 +191,22 @@ struct WorkNavigationProofTests {
             let suffix = "\(Int(size.width))x\(Int(size.height))"
             let navigator = try view.inspect().find(WorkNavigator.self).actualView()
             let outline = try navigator.inspect()
-            // 20 started Tasks under three sans Wave heads; no lens, no Wave count.
+            // The Wave remains in the index while its Tasks expand beneath it.
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
-            }.count == 20)
+            }.count == 8)
             #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("work-disclose-wave-")) == true
-            }.count == 3)
+                (try? $0.accessibilityIdentifier().hasPrefix("work-wave-wave-")) == true
+            }.count == model.visibleWork.waves.count)
+            _ = try outline.find(viewWithAccessibilityIdentifier: "work-wave-wave-0")
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
-            // Counts only where Sessions exist.
-            _ = try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0")
+            // Conversations do not add numeric controls to Work navigation.
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-7") }
             // Diagnostic Sessions do not consume main navigation space.
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-orphans-open") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
-            _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo") }
             try capture(window, "density-debug-orphans-\(suffix)")
         }
         // Zero orphans hides the section.
@@ -225,7 +228,9 @@ struct WorkNavigationProofTests {
 
     private func _scrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
-        return view.subviews.lazy.compactMap { _scrollView(in: $0) }.first
+        // The tall Task list is independent of the Wave list beside it.
+        return view.subviews.compactMap { _scrollView(in: $0) }
+            .max { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }
     }
 
     private func settle(_ window: NSWindow) async throws {
@@ -378,14 +383,10 @@ struct WorkNavigationProofTests {
         // Hidden headless Sessions stay selected, with the same native panes.
         try await named.headlessUnbound("first")
         await model.refreshSessions()
-        for visible in [true, false, true] {
-            model.navigation.showsHeadlessSessions = visible
-            await model.refreshSessions()
-            try await settle(window)
-            #expect(model.navigation.selectedSessionId == "first")
-            #expect(workspace.multiplexer.layout == layout)
-            #expect(terminals[0].surface == surfaces[0])
-        }
+        try await settle(window)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(terminals[0].surface == surfaces[0])
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-bind").button().tap()
         model.navigation.binding?.selector = "W2-131"
         await model.previewSessionBinding()
@@ -445,7 +446,6 @@ struct WorkNavigationProofTests {
             for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
             if reading != roadmap {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
-                #expect(model.projection.orphanSessions(search: "").isEmpty)
             } else {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
                     == "Show the all-wave roadmap and launch or attach")
@@ -606,7 +606,9 @@ struct WorkNavigationProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         for index in [1, 0] {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "debug-session-row-\(index)").button().tap()
+            let record = try #require(model.sessions.value?.first { $0.id == "row-\(index)" })
+            let navigator = try view.inspect().find(WorkNavigator.self).actualView()
+            navigator.onOpenSession(record)
             try await settle(window)
             #expect(window.firstResponder === terminals[index * 2])
             #expect(terminals[index * 2].window === window)
@@ -802,9 +804,8 @@ struct WorkNavigationProofTests {
         let draft = "split-draft"
         draft.withCString { ghostty_surface_text(sessionSurface, $0, UInt(draft.utf8.count)) }
 
-        for presentation in WorkPresentation.allCases {
-            model.navigation.presentation = presentation
-            model.navigation.content = presentation == .full ? .details : .terminals
+        for content in [WorkNavigation.Content.details, .terminals] {
+            model.navigation.content = content
             try await settle(window)
             if model.navigation.content == .details {
                 #expect(!model.navigation.showsActivity)
@@ -822,7 +823,7 @@ struct WorkNavigationProofTests {
             }
             if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
                 let path = URL(fileURLWithPath: directory)
-                    .appendingPathComponent("\(presentation.rawValue).png")
+                    .appendingPathComponent("\(content).png")
                 _ = try SnapshotService().snapshotWindow(window, to: path)
             }
             #expect(terminals[0].surface == sessionSurface)
@@ -835,7 +836,6 @@ struct WorkNavigationProofTests {
             }
         }
         if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"] {
-            model.navigation.presentation = .compact
             model.select(.wave(id: "wave-1"))
             try await settle(window)
             _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory)

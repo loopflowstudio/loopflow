@@ -61,11 +61,15 @@ public struct WorkScope: Equatable, Sendable {
 /// handled before that frame was read.
 public enum WorkRequest: Equatable, Sendable {
     case scope(id: Int, WorkScope)
+    case taskHistory(id: Int, task: String?)
     case refresh(id: Int)
+    /// Confirm delivery through a post-command snapshot. Replay only readings
+    /// superseded by an authoritative command result; this does not force queries.
+    case checkpoint(id: Int, replay: [String])
 
     public var id: Int {
         switch self {
-        case .scope(let id, _), .refresh(let id): id
+        case .scope(let id, _), .refresh(let id), .checkpoint(let id, _), .taskHistory(let id, _): id
         }
     }
 
@@ -83,7 +87,13 @@ public enum WorkRequest: Equatable, Sendable {
                 ["wave": activity.wave ?? NSNull(), "project": activity.project ?? NSNull(),
                  "task": activity.task ?? NSNull()] as [String: Any]
             } ?? NSNull()
+        case .taskHistory(_, let task):
+            object["action"] = "task_history"
+            object["task"] = task ?? NSNull()
         case .refresh: object["action"] = "refresh"
+        case .checkpoint(_, let replay):
+            object["action"] = "checkpoint"
+            object["replay"] = replay
         }
         // The values above are all JSON types.
         var data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
@@ -128,7 +138,7 @@ public struct WorkFrame: Decodable, Sendable {
     /// A Task's work and each of its Flow processes, in the order of `work.flowProcesses`.
     public struct TaskPart: Decodable, Sendable {
         public let task: String
-        public let work: TaskWork
+        public let work: TaskOverview
         public let flowProcesses: [FlowProcessDetail]
         public let comments: TaskComments
 
@@ -154,15 +164,22 @@ public struct WorkFrame: Decodable, Sendable {
     }
 
     /// A `nil` body is a reading that failed; `unavailable` says why.
+    public struct TaskHistoryPart: Decodable, Sendable {
+        public let task: String
+        public let work: TaskWork
+    }
+
     public enum Content: Sendable {
         case planning(Planning?)
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
+        case taskHistory(TaskHistoryPart?)
         case wave(WavePart?)
         case workActivity(WorkActivityPart?)
         case activity(ActivitySnapshot?)
         case heartbeat(Heartbeat)
+        case checkpoint
 
         public var part: String {
             switch self {
@@ -170,10 +187,12 @@ public struct WorkFrame: Decodable, Sendable {
             case .peerPlanning: "peer_planning"
             case .sessions: "sessions"
             case .task: "task"
+            case .taskHistory: "task_history"
             case .wave: "wave"
             case .workActivity: "work_activity"
             case .activity: "activity"
             case .heartbeat: "heartbeat"
+            case .checkpoint: "checkpoint"
             }
         }
     }
@@ -222,11 +241,13 @@ public struct WorkFrame: Decodable, Sendable {
         case "planning": content = .planning(try container.decode(Planning?.self, forKey: .body))
         case "peer_planning": content = .peerPlanning(try container.decode(PeerPlanning?.self, forKey: .body))
         case "sessions": content = .sessions(try container.decode(Sessions?.self, forKey: .body))
+        case "task_history": content = .taskHistory(try container.decode(TaskHistoryPart?.self, forKey: .body))
         case "task": content = .task(try container.decode(TaskPart?.self, forKey: .body))
         case "wave": content = .wave(try container.decode(WavePart?.self, forKey: .body))
         case "work_activity": content = .workActivity(try container.decode(WorkActivityPart?.self, forKey: .body))
         case "activity": content = .activity(try container.decode(ActivitySnapshot?.self, forKey: .body))
         case "heartbeat": content = .heartbeat(try container.decode(Heartbeat.self, forKey: .body))
+        case "checkpoint": content = .checkpoint
         default:
             throw DecodingError.dataCorruptedError(forKey: .part, in: container,
                                                    debugDescription: "unknown work part \(part)")

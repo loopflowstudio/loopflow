@@ -133,7 +133,7 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(WorkPlainButtonStyle())
             .focusable(interactions: .edit)
             .onKeyPress(keys: [.space, .return, .rightArrow, .leftArrow]) { press in
                 switch press.key {
@@ -373,7 +373,7 @@ struct FlowDiagram: View {
                 // Loop 1 arrives at the top-left, Loop 2 at the bottom-left.
                 for (level, span) in row.loops.enumerated() {
                     guard let from = frames[span.from], let to = frames[span.to] else { continue }
-                    let color = FlowPalette.loops[level % FlowPalette.loops.count]
+                    let color = FlowPalette.loop(level, in: palette)
                     let above = FlowLoopGeometry.returnsAbove(level)
                     let lane = above ? nodeTop - FlowLoopGeometry.laneOffset(level) : nodeBottom + FlowLoopGeometry.laneOffset(level)
                     let edge = above ? nodeTop : nodeBottom
@@ -413,7 +413,7 @@ struct FlowDiagram: View {
         let top = nodeTop - FlowLoopGeometry.above(level)
         let bottom = nodeBottom + FlowLoopGeometry.below(level)
         let width = right - left + pad * 2
-        let color = FlowPalette.loops[level % FlowPalette.loops.count]
+        let color = FlowPalette.loop(level, in: palette)
         let title = span.evidence.map { "Loop \(span.number) · \($0.traversals) \($0.traversals == 1 ? "return" : "returns")" }
             ?? "Loop \(span.number)"
         let shape = RoundedRectangle(cornerRadius: 12)
@@ -455,18 +455,18 @@ struct FlowDiagram: View {
                     .font(Typography.code(11))
                     .italic(node.kind == .op)
                     .lineLimit(1)
-                    .foregroundStyle(tone == .neutral ? palette.text : tone.text)
+                    .foregroundStyle(tone == .neutral ? palette.text : tone.text(in: palette))
             }
             .padding(.leading, 6)
             .padding(.trailing, 8)
             .frame(width: width, height: Self.nodeHeight, alignment: .leading)
             // An opaque base keeps state colors legible over the loop tint.
-            .background(shape.fill(tone == .neutral ? palette.surface : tone.fill))
+            .background(shape.fill(tone == .neutral ? palette.surface : tone.fill(in: palette)))
             .overlay {
                 if state == .stopped || state == .unknown {
-                    shape.strokeBorder(tone.stroke, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                    shape.strokeBorder(tone.stroke(in: palette), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
                 } else {
-                    shape.strokeBorder(tone == .neutral ? palette.borderStrong : tone.stroke,
+                    shape.strokeBorder(tone == .neutral ? palette.borderStrong : tone.stroke(in: palette),
                                        lineWidth: emphasized ? 2 : 1)
                 }
             }
@@ -478,12 +478,12 @@ struct FlowDiagram: View {
             }
             .overlay {
                 if selected {
-                    RoundedRectangle(cornerRadius: 9).stroke(palette.accentInk, lineWidth: 2).padding(-3)
+                    RoundedRectangle(cornerRadius: 9).stroke(palette.selectionEdge, lineWidth: 2).padding(-3)
                 }
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WorkPlainButtonStyle())
         .help(node.label)
         .accessibilityLabel("\(node.label), \(FlowPalette.describe(state))")
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -606,15 +606,18 @@ private extension String {
 }
 
 enum FlowPalette {
-    /// Loop tints in authored order; running shares the first.
-    static let loops = [Color.adaptive(light: 0x3A74C4, dark: 0x86B0EA), Color.adaptive(light: 0x24508F, dark: 0xB4CDEF)]
+    /// Loop tints alternate in authored order.
+    static func loop(_ level: Int, in palette: LoopflowPalette) -> Color {
+        let colors: [UInt] = palette.isDark ? [0x86B0EA, 0xB4CDEF] : [0x3A74C4, 0x24508F]
+        return Color(hex: colors[level % colors.count])
+    }
 
     static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done
         case .running: .running
-        case .pendingHuman: .human
-        case .blocked, .stalled: .blocked
+        case .pendingHuman: .waiting
+        case .blocked, .stalled: .waiting
         case .stopped, .unknown: .stopped
         case .pending: .neutral
         }

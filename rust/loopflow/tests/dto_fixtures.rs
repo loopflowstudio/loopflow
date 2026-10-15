@@ -164,6 +164,16 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     };
     assert!(!items.is_empty());
     assert_eq!(
+        items[0]
+            .reference
+            .workspace
+            .as_ref()
+            .unwrap()
+            .machine_label
+            .as_deref(),
+        Some("build-server")
+    );
+    assert_eq!(
         serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["workflow"],
         "feature"
     );
@@ -525,6 +535,12 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
+    assert!(matches!(frames[8].content, WorkContent::Checkpoint));
+    assert_eq!(frames[8].answers, Some(8));
+    let WorkContent::TaskHistory(Some(history)) = &frames[9].content else {
+        panic!("diagnostic history frame");
+    };
+    assert!(!history.work.processes.is_empty());
     let WorkContent::PeerPlanning(Some(peers)) = &frames[7].content else {
         panic!("peer planning frame");
     };
@@ -1120,4 +1136,15 @@ fn paused_task_state_is_unfinished() {
     assert_eq!(state, TaskState::Paused);
     assert!(!state.is_terminal());
     assert_eq!(serde_json::to_string(&state).unwrap(), "\"paused\"");
+}
+
+#[test]
+fn task_overview_excludes_diagnostic_process_history() {
+    let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
+    let overview: loopflow::task_work::TaskOverview = serde_json::from_str(input).unwrap();
+    assert!(overview.workflow.is_some());
+    assert_eq!(
+        serde_json::to_value(overview).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
 }

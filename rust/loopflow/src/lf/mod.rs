@@ -454,7 +454,7 @@ pub enum Commands {
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
-        delivery: std::path::PathBuf,
+        delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
     },
@@ -462,7 +462,7 @@ pub enum Commands {
     #[command(name = "__planning-check", hide = true)]
     PlanningCheck {
         #[arg(long)]
-        delivery: std::path::PathBuf,
+        delivery: Option<std::path::PathBuf>,
     },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
@@ -501,6 +501,13 @@ pub enum Commands {
     Self_ {
         #[command(subcommand)]
         cmd: SelfCommand,
+    },
+    /// Select repositories for the Machine-local portfolio
+    Portfolio {
+        #[command(subcommand)]
+        cmd: Option<crate::portfolio::PortfolioCommand>,
+        #[arg(long, global = true, id = "portfolio_json")]
+        json: bool,
     },
     /// Read Loopflow configuration
     Config {
@@ -921,7 +928,7 @@ pub enum SessionCommand {
     List {
         #[arg(long)]
         json: bool,
-        /// Include waiting steps from every repository on this machine
+        /// Include Sessions from every repository on this machine
         #[arg(long)]
         all: bool,
         /// Select interactive (true), headless (false), or both (all)
@@ -930,9 +937,9 @@ pub enum SessionCommand {
         /// Include completed conversations and historical reviews
         #[arg(long)]
         history: bool,
-        /// Only conversations waiting on you
+        /// Only conversations available for your input
         #[arg(long)]
-        waiting: bool,
+        available: bool,
         /// Maximum conversations; 0 reads the complete matching inventory
         #[arg(long, default_value_t = 100)]
         limit: usize,
@@ -1163,7 +1170,15 @@ pub enum TaskCommand {
     /// Clear a Task pause without starting execution
     Resume { issue: String },
     /// Synchronize a Task; observed planning conflicts adopt Linear
-    Sync { issue: String },
+    Sync {
+        issue: String,
+        /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue
+        #[arg(long)]
+        retry_creation: bool,
+        /// Retry uncertain saved field/state updates after observing current Linear values
+        #[arg(long)]
+        retry_updates: bool,
+    },
     /// Inspect or reset this Task's captured Workflow
     Workflow {
         #[command(subcommand)]
@@ -1201,6 +1216,9 @@ pub enum TaskCommand {
         /// Hand off a child-specific design from the caller's checkout
         #[arg(long, value_name = "PATH")]
         design: Option<PathBuf>,
+        /// Restore a missing Task branch from a deliberately recovered commit; never reset existing work
+        #[arg(long, value_name = "COMMIT", conflicts_with_all = ["stack_on", "name", "directive", "design"])]
+        recover_from: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2762,6 +2780,7 @@ mod tests {
                     directive,
                     design,
                     json,
+                    ..
                 },
         }) = cli.command
         else {

@@ -14,7 +14,7 @@ struct TaskRowMetadataTests {
         let report = ProgramStatusReport(state: state, id: "worker", kind: nil, progress: nil,
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
         let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
-        let waiting = try session("waiting", attention: .waiting)
+        let waiting = try session("waiting", attention: .available)
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == state.rawValue.capitalized)
         #expect(status.help.contains("reporter"))
@@ -38,29 +38,29 @@ struct TaskRowMetadataTests {
         #expect(status.help.contains("(b)"))
     }
 
-    @Test("Live clients and unknown readings omit activity; shared Waiting remains visible")
+    @Test("Live clients and unknown readings omit activity; shared Available remains visible")
     func inference() throws {
         let active = try session("active")
-        let waiting = try session("waiting", attention: .waiting)
+        let waiting = try session("waiting", attention: .available)
         #expect(SessionProgramStatus(sessions: [active], unavailable: nil).label == nil)
-        #expect(SessionProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Waiting · inferred")
+        #expect(SessionProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Available · inferred")
         let unknown = try session("unknown", state: .unknown)
-        let closed = try session("closed", state: .closed, attention: .waiting)
+        let closed = try session("closed", state: .closed, attention: .available)
         #expect(SessionProgramStatus(sessions: [unknown, closed], unavailable: nil).label == nil)
         #expect(SessionProgramStatus(sessions: [active], unavailable: "Offline").label == nil)
     }
 
-    @Test("Cleared reporter records do not revive inferred activity or Waiting")
+    @Test("Cleared reporter records do not revive inferred activity or Available")
     func clearDoesNotInfer() throws {
-        let cleared = try session("cleared", attention: .waiting, status: .init(seen: true, records: []))
+        let cleared = try session("cleared", attention: .available, status: .init(seen: true, records: []))
         #expect(SessionProgramStatus(sessions: [cleared], unavailable: nil).label == nil)
     }
 
-    @Test("Saved readings cannot resurrect program reports or Waiting")
+    @Test("Saved readings cannot resurrect program reports or Available")
     func savedStatusIsUnknown() throws {
         let report = ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil,
                                          app: nil, title: nil, msg: "Proceed?")
-        let record = try session("saved", attention: .waiting, status: .init(seen: true, records: [report]))
+        let record = try session("saved", attention: .available, status: .init(seen: true, records: [report]))
         let page = SessionPage(entries: [record], next: nil)
         let wire = String(decoding: try JSONEncoder().encode(page), as: UTF8.self)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -96,7 +96,7 @@ struct TaskRowMetadataTests {
         #expect(try icon.accessibilityLabel().string().contains("Offline"))
     }
 
-    @Test("Selection preserves reported failure and shared Waiting semantics")
+    @Test("Selection preserves reported failure and shared Available semantics")
     func selectedStatus() throws {
         let task = try #require(roadmap().waves.first?.tasks.items[1])
         let error = ProgramStatusReport(state: .error, id: nil, kind: nil, progress: nil,
@@ -105,9 +105,9 @@ struct TaskRowMetadataTests {
         #expect(reported.tone == .failure)
         let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
-        let waiting = SessionProgramStatus(sessions: [try session("waiting", attention: .waiting)], unavailable: nil)
+        let waiting = SessionProgramStatus(sessions: [try session("waiting", attention: .available)], unavailable: nil)
         #expect(waiting.tone == .waiting)
-        #expect(waiting.label == "Waiting · inferred")
+        #expect(waiting.label == "Available · inferred")
         #expect(ProgramStatusState.working.workTone == .running)
         #expect(ProgramStatusState.blocked.workTone == .waiting)
         #expect(ProgramStatusState.done.workTone == .done)
@@ -180,16 +180,16 @@ struct TaskRowMetadataTests {
         #expect(conversationOpened)
     }
 
-    @Test("Attention includes only current Waiting or Blocked and keeps organization stable")
+    @Test("Attention includes only current Available or Blocked and keeps organization stable")
     func attentionUsesEvidence() throws {
         let snapshot = try roadmap()
-        let waiting = try session("waiting", attention: .waiting)
+        let waiting = try session("waiting", attention: .available)
         let live = try session("live")
         let blocked = try session("blocked", status: .init(seen: true, records: [
             .init(state: .blocked, id: nil, kind: .question, progress: nil, app: nil, title: nil, msg: "Choose a direction")
         ]))
-        let cleared = try session("cleared", attention: .waiting, status: .init(seen: true, records: []))
-        let closed = try session("closed", state: .closed, attention: .waiting)
+        let cleared = try session("cleared", attention: .available, status: .init(seen: true, records: []))
+        let closed = try session("closed", state: .closed, attention: .available)
         for records in [[live], [cleared], [closed]] {
             #expect(WorkProjection(roadmaps: snapshot.waves, sessions: records).attention(unavailable: nil).isEmpty)
         }
@@ -209,6 +209,15 @@ struct TaskRowMetadataTests {
         let sharedQueue = WorkProjection(roadmaps: snapshot.waves, sessions: [sharedSession]).attention(unavailable: nil)
         #expect(sharedQueue.count == 1)
         #expect(sharedQueue.first?.work == .task(id: "issue-review"))
+        shared["task_ids"] = []
+        shared["work"] = ["kind": "wave", "id": "wave-1"]
+        workspace["task_id"] = NSNull()
+        shared["workspace"] = workspace
+        shared["wave_id"] = "wave-1"
+        let waveSession = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: shared))
+        let waveProjection = WorkProjection(roadmaps: snapshot.waves, sessions: [waveSession])
+        #expect(waveProjection.waves.first?.sessions.contains { $0.id == waveSession.id } == true)
+        #expect(waveProjection.attention(unavailable: nil).isEmpty)
         let before = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         #expect(projection.waves.map(\.id) == before.waves.map(\.id))
         #expect(projection.waves.flatMap { $0.tasks.map(\.id) } == before.waves.flatMap { $0.tasks.map(\.id) })

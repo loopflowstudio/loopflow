@@ -575,8 +575,10 @@ struct DesktopPerformanceTests {
             try await sample("file_edit_refresh", population, attempt, journal, window, action: {
                 files.page = .files
                 multiplexer.show(.files(taskId: "perf-task-0", location: workspace.location))
-                try await wait(window) { files.directories[""]?.entries.first?.path == "notes.txt" }
+                try await wait(window) { files.changedPaths.first == "notes.txt" }
+                files.navigator = .dropdown
                 try pressElement("notes.txt", in: window, property: "Label")
+                files.mode = .file
                 try await wait(window) { files.selectedDocument?.snapshot != nil }
                 let document = try #require(files.selectedDocument)
                 document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
@@ -1038,8 +1040,8 @@ struct DesktopPerformanceTests {
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
             case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
             case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
-            case "task" where args.dropFirst().first == "files":
-                return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
+            case "task" where args.contains("--files"):
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
             case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
@@ -1093,7 +1095,7 @@ struct DesktopPerformanceFixtureTests {
         await store.refresh()
         await store.loadFile()
         #expect(document.text == "Preserved draft")
-        #expect(store.directories[""]?.entries.map(\.path) == ["notes.txt"])
+        #expect(store.changedPaths == ["notes.txt"])
         await #expect(throws: RegistryQueryError.self) {
             try await query.updateTaskDirective(id: "PERF-0", wave: "product", text: "denied", cwd: "/src/loopflow")
         }

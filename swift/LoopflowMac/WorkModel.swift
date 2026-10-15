@@ -817,7 +817,7 @@ final class WorkModel {
     @ObservationIgnored private var scopeFloor = 0
     @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
-    @ObservationIgnored private var checkpointWaiters: [(id: Int, resume: CheckedContinuation<Void, any Error>)] = []
+    @ObservationIgnored private var checkpointWaiters: [(id: Int, resume: CheckedContinuation<Void, any Error>, deadline: Task<Void, Never>)] = []
     private var workActivityGeneration = 0
 
     /// A launch repository taken from the saved workspace without running
@@ -1102,6 +1102,7 @@ final class WorkModel {
         let ready = checkpointWaiters.filter { $0.id <= answered }
         checkpointWaiters.removeAll { $0.id <= answered }
         for waiter in ready {
+            waiter.deadline.cancel()
             if let reason { waiter.resume.resume(throwing: RegistryQueryError(reason)) }
             else { waiter.resume.resume() }
         }
@@ -1121,7 +1122,15 @@ final class WorkModel {
             return
         }
         let id = send { .checkpoint(id: $0, replay: []) }
-        try await withCheckedThrowingContinuation { checkpointWaiters.append((id, $0)) }
+        try await withCheckedThrowingContinuation { continuation in
+            let deadline = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard let self, let index = self.checkpointWaiters.firstIndex(where: { $0.id == id }) else { return }
+                let waiter = self.checkpointWaiters.remove(at: index)
+                waiter.resume.resume(throwing: RegistryQueryError("Refresh was not confirmed within 10 seconds"))
+            }
+            checkpointWaiters.append((id, continuation, deadline))
+        }
     }
 
     private func resumePlanningWaiters(through answered: Int) {
@@ -1497,6 +1506,17 @@ final class WorkModel {
         if wasSelected, let next = registry.selectedWork { select(next.reference) }
     }
 
+    /// The sidebar represents the selected conversation once, even when its
+    /// retained surface lives in another Work's pane layout.
+    var navigatorSelection: WorkReference? {
+        let work = visibleWork
+        if let sessionID = navigation.selectedSessionId,
+           let item = work.attention(unavailable: sessions.errorMessage).first(where: { $0.session.id == sessionID }) {
+            return item.work
+        }
+        return work.breadcrumb(selection: selection, sessionId: nil)?.task?.id.work ?? selection
+    }
+
     func isSelected(_ reference: WorkReference) -> Bool {
         if selection == reference { return true }
         guard let selection, selection.kind == .task, reference.kind == .task else { return false }
@@ -1537,6 +1557,12 @@ final class WorkModel {
             navigation.content = selection == nil ? .overview : .details
         }
         setSelection(selection)
+        if let crumb = visibleWork.breadcrumb(selection: selection, sessionId: nil), let wave = crumb.wave {
+            let inAvailable = crumb.task.map { task in
+                visibleWork.attention(unavailable: sessions.errorMessage).contains { $0.work == task.id.work }
+            } ?? false
+            if !inAvailable { navigation.expandedWaves.insert(wave.id) }
+        }
         clearSelectionIfOutsideScope()
         openSelectedWorkspace(besideFocused: besideFocused)
     }
@@ -1803,15 +1829,19 @@ final class WorkModel {
         let owner = navigation
         let home = workDataDirectory
         guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
+        owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
         owner.taskRunDrafts[taskId]?.error = nil
         do {
             try await action()
+            owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
             try await confirmWorkUpdate(after: home)
             owner.taskRunDrafts[taskId] = nil
         } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
+            let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
+            owner.taskRunDrafts[taskId]?.phase = nil
+            owner.taskRunDrafts[taskId]?.error = accepted
+                ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
+                : error.localizedDescription
         }
     }
 

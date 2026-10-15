@@ -3204,10 +3204,13 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
         if task.linear_id.is_none() {
             return Err(task_error("Task publication to Linear remains pending"));
         }
-        // Independent effects do not make each other a prerequisite.
+        // State and field writes share Linear's issue revision. Finish the
+        // state attempt first so our own field acknowledgement cannot make its
+        // ownership read stale or look like an intervening reopening. Retain
+        // each result: a failed state attempt still permits the other effects.
         let work = crate::durable::WorkRef::Task(task.id.clone());
-        let (state, comments, fields) = tokio::join!(
-            super::linear_observe::deliver_task_state(&store, &task, retry_updates),
+        let state = super::linear_observe::deliver_task_state(&store, &task, retry_updates).await;
+        let (comments, fields) = tokio::join!(
             super::linear_observe::sync_task_comments(&store, &task),
             super::planning_delivery::deliver_fields(&store, repo, &work, retry_updates),
         );

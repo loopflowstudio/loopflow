@@ -83,7 +83,7 @@ and due follow-ups have been checked for selection or authorized execution.
   and reread status. Optional new work uses ordinary Task creation; no filing or
   disposition is required. Do not replay gate or re-arm a merged PR.
 - **Reviews stay in the Task conversation.** Surface the Session from
-  `lf session list --waiting --json`. Discuss feedback and preserve agreed
+  `lf session list --available --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
   Headless, required judgment is a waiting disposition.
 
@@ -201,7 +201,7 @@ reconstructed starting membership. Do not introduce competing current Projects.
 Reply in this conversation with each started Task once, grouped under these
 headings in this order, omitting an empty group:
 
-1. **Waiting on you** — each review, decision or merge, with what to open.
+1. **Available** — each review, decision or merge, with what to open.
 2. **Moving** — live work left alone, and what this pass acted on with its result.
 3. **Stuck** — waiting on a dependency or capacity, paused, or unknown, with
    the named cause or missing evidence.

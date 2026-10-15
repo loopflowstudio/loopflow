@@ -39,15 +39,20 @@ the Machine. Durations and command names only; the files stay on this machine.
 
 Navigation starts closed, with the repository selected in the Session workspace
 header. Click the location control or press **⌘K** to drop the full navigator over
-your panes. It keeps the same Needs you queue, Wave/Task rows and Find Work field
-as the sidebar. Choosing a repository, Wave, Task or Session closes the dropdown. Escape or a click outside dismisses it and restores your previous focus.
-
+your panes. Choosing a repository, Wave, Task or Session closes the dropdown.
+Escape or a click outside dismisses it and restores your previous focus.
 Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
-Open a Wave to enter its conversation and fill the sidebar with its Tasks.
-The **Repo / Wave** path returns to either conversation. Each Wave keeps its
-Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
-including **Needs you**. The queue opens the exact waiting conversation, using
-shared Waiting or reported Blocked evidence.
+
+Open a Wave conversation without moving its row. Its Tasks appear underneath;
+other expanded Waves stay open. Click the Task count to fold a branch without
+navigating. The repository stays at the top. Search filters both sections without
+changing selection. Burgundy fill marks one selected destination.
+
+**Available** shows full-size Tasks with their Wave context and opens the exact
+available conversation. Those Tasks are omitted from the Wave branches, so each
+appears once. Wave conversations stay in the hierarchy. Availability comes from
+shared Session evidence or a reported Blocked state; the CLI exposes it through
+`lf session list --available --json`.
 
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
@@ -64,7 +69,7 @@ Task rows show a title above reported program status, stored Task/PR links and t
 recorded remote Machine. Local Machine names stay hidden. The title opens the
 conversation; links open separately and underline on hover or keyboard focus.
 Unknown activity and live clients without program reports show no activity label
-or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
+or dot. Shared availability is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
@@ -124,14 +129,26 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
+Return / Shift-Return select the next / previous match; Escape closes Find.
+Search and terminal state stay with their retained pane when switching Work.
 
 Task workspaces start with the Session on the left and Files on the right,
 at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
 **Shell**, and **lf process**. Hidden shells keep running and file drafts stay
-retained. The file tree can be collapsed. Sidebar selection switches the whole
+retained. Files starts with its chooser closed. Click the selected path or press
+Command-P in the file pane to search **scratch** and files changed from the
+branch's recorded parent commit. Selection closes the dropdown; pin it to keep
+the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
+Sidebar selection switches the whole
 Task workspace; selections inside a Task can focus its companion.
 Resizing or closing the browser is remembered while the window stays open;
 layouts are not yet restored after quitting the app.
+
+Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
+description and change totals. Expand **Files changed** and individual files to
+read published patches. Refresh updates GitHub data using the signed-in GitHub
+CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
+local uncommitted edits stay in Files.
 
 Hover over or click **Task** in the compact workspace header to reveal Complete,
 Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
@@ -140,8 +157,6 @@ alternate right/down. The main Session's menu switches between **Claude**,
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains
 available. Switching or resetting replaces the current provider process.
-Return / Shift-Return select the next / previous match; Escape closes Find.
-Search and terminal state stay with their retained pane when switching Work.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red
@@ -658,6 +673,11 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+
+Task actions distinguish the running command from confirmation of its updated
+reading. Confirmation expires after ten seconds even while heartbeats arrive;
+an accepted command is never automatically repeated. Refresh readings requests
+fresh observation without repeating the Task action.
 
 The reader's pipes drain off the main actor. Ten seconds without a frame ends
 the reading; cancellation closes stdin, then terminates and reaps only the

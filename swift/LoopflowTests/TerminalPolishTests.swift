@@ -1,9 +1,24 @@
 #if os(macOS)
+import Foundation
 import Testing
+@testable import Loopflow
 @testable import LoopflowMac
 
 @Suite("Terminal polish")
 struct TerminalPolishTests {
+    #if canImport(GhosttyKit)
+    @Test("An unused terminal releases without constructing Find during deinitialization")
+    @MainActor
+    func unusedTerminalRelease() {
+        weak var released: GhosttyMetalView?
+        autoreleasepool {
+            let terminal = GhosttyMetalView(terminal: .shell("unused", machineId: "fixture"))
+            released = terminal
+        }
+        #expect(released == nil)
+    }
+    #endif
+
     @Test("Copy confirmation counts empty lines and ignores the final line ending")
     func copyConfirmation() {
         #expect(terminalCopyMessage("") == nil)

@@ -272,7 +272,7 @@ Session for interactive and Run for headless work. AgentSession is the provider-
 conversation, represented by an opaque AgentSessionId used for resume, native
 turn keys and account attribution. An LfSession selects one AgentSession at a
 time; replacement preserves earlier selections in immutable history. It is not
-an OS process and has no separate table. Waiting is the one attention
+an OS process and has no separate table. Available is the one attention
 state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session

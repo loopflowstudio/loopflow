@@ -1,6 +1,6 @@
-//! What a provider's own stream says about a conversation waiting on a person.
+//! What a provider's own stream says about a conversation available for a person.
 //! Each attached LfProcess that owns a stream keeps one tracker and saves its reading; the
-//! Waiting rule itself is read from that row by the Session inventory.
+//! Available rule itself is read from that row by the Session inventory.
 
 use std::collections::BTreeSet;
 
@@ -285,7 +285,7 @@ mod tests {
     }
 
     const START: i64 = 1_000;
-    const QUIET: i64 = crate::session::WAITING_QUIET_SECONDS;
+    const QUIET: i64 = crate::session::AVAILABILITY_QUIET_SECONDS;
 
     #[test]
     fn automated_auth_and_permission_requests_do_not_wait_for_input() {
@@ -349,14 +349,14 @@ mod tests {
             );
         }
 
-        /// Whether the inventory calls it Waiting `quiet` seconds after the
+        /// Whether the inventory calls it Available `quiet` seconds after the
         /// last message.
-        fn waiting_after(&self, quiet: i64) -> bool {
+        fn available_after(&self, quiet: i64) -> bool {
             self.store
                 .session_summary("conversation", self.now + quiet)
                 .unwrap()
                 .unwrap()
-                .waiting
+                .available
         }
     }
 
@@ -376,40 +376,40 @@ mod tests {
     fn a_claude_turn_waits_once_its_tools_are_answered_and_it_hands_back() {
         let lines = trace("claude_multi_tool.ndjson");
         let mut interactive = Driven::new(true);
-        assert!(!interactive.waiting_after(QUIET), "nothing heard yet");
+        assert!(!interactive.available_after(QUIET), "nothing heard yet");
         for line in &lines[..lines.len() - 1] {
             interactive.hear(claude(line));
             let tool_open = line["type"] == "content_block_start";
-            assert!(!interactive.waiting_after(0));
-            assert_eq!(interactive.waiting_after(QUIET), !tool_open);
-            assert!(!interactive.waiting_after(QUIET - 1));
+            assert!(!interactive.available_after(0));
+            assert_eq!(interactive.available_after(QUIET), !tool_open);
+            assert!(!interactive.available_after(QUIET - 1));
         }
         interactive.hear(claude(lines.last().unwrap()));
         assert!(
-            interactive.waiting_after(0),
+            interactive.available_after(0),
             "a successful result hands back"
         );
         interactive.hear(claude(&json!({"type":"user","message":{"content":"next"}})));
-        assert!(!interactive.waiting_after(0), "new activity clears it");
+        assert!(!interactive.available_after(0), "new activity clears it");
 
         let mut headless = Driven::new(false);
         for line in &lines {
             headless.hear(claude(line));
         }
         assert!(
-            !headless.waiting_after(0),
+            !headless.available_after(0),
             "a Run's finished turn asks nothing"
         );
-        assert!(headless.waiting_after(QUIET));
+        assert!(headless.available_after(QUIET));
     }
 
     #[test]
-    fn a_claude_tool_left_open_never_reads_as_waiting() {
+    fn a_claude_tool_left_open_never_reads_as_available() {
         let mut session = Driven::new(true);
         for line in trace("claude_crash_mid_tool.ndjson") {
             session.hear(claude(&line));
         }
-        assert!(!session.waiting_after(QUIET * 100));
+        assert!(!session.available_after(QUIET * 100));
     }
 
     #[test]
@@ -418,8 +418,8 @@ mod tests {
         session.hear(claude(
             &json!({"type":"result","subtype":"error_during_execution","is_error":true}),
         ));
-        assert!(!session.waiting_after(QUIET - 1));
-        assert!(session.waiting_after(QUIET));
+        assert!(!session.available_after(QUIET - 1));
+        assert!(session.available_after(QUIET));
     }
 
     #[test]
@@ -428,7 +428,7 @@ mod tests {
         for rpc in trace("codex_normal_turn.jsonl") {
             let completed = rpc["method"] == "turn/completed";
             session.hear(codex(&rpc, false));
-            assert_eq!(session.waiting_after(0), completed, "{}", rpc["method"]);
+            assert_eq!(session.available_after(0), completed, "{}", rpc["method"]);
         }
         let command = json!({"type":"commandExecution","id":"call_1"});
         session.hear(codex(&json!({"method":"turn/started","params":{}}), false));
@@ -436,12 +436,15 @@ mod tests {
             &json!({"method":"item/started","params":{"item":command}}),
             false,
         ));
-        assert!(!session.waiting_after(QUIET * 100), "a command is running");
+        assert!(
+            !session.available_after(QUIET * 100),
+            "a command is running"
+        );
         session.hear(codex(
             &json!({"id":7,"method":"item/commandExecution/requestApproval","params":{"itemId":"call_1"}}),
             false,
         ));
-        assert!(session.waiting_after(0), "an approval is a question");
+        assert!(session.available_after(0), "an approval is a question");
         session
             .attention
             .apply(codex(&json!({"id":7,"result":{"decision":"accept"}}), true));
@@ -450,21 +453,21 @@ mod tests {
             false,
         ));
         assert!(
-            !session.waiting_after(QUIET * 100),
+            !session.available_after(QUIET * 100),
             "answered, still running"
         );
         session.hear(codex(
             &json!({"method":"item/completed","params":{"item":command}}),
             false,
         ));
-        assert!(!session.waiting_after(QUIET - 1));
-        assert!(session.waiting_after(QUIET));
+        assert!(!session.available_after(QUIET - 1));
+        assert!(session.available_after(QUIET));
         session.hear(codex(
             &json!({"method":"turn/completed","params":{"turn":{"status":"failed"}}}),
             false,
         ));
         assert!(
-            !session.waiting_after(0),
+            !session.available_after(0),
             "a failed turn is not a hand-back"
         );
     }
@@ -477,8 +480,8 @@ mod tests {
             session.hear(opencode(&event, "ses_trace"));
             seen.push((
                 event["type"].as_str().unwrap().to_owned(),
-                session.waiting_after(0),
-                session.waiting_after(QUIET),
+                session.available_after(0),
+                session.available_after(QUIET),
             ));
         }
         let at = |kind: &str| {
@@ -504,18 +507,18 @@ mod tests {
     fn a_reading_from_an_attachment_that_let_go_says_nothing() {
         let mut session = Driven::new(true);
         session.hear(claude(&json!({"type":"result","subtype":"success"})));
-        assert!(session.waiting_after(0));
+        assert!(session.available_after(0));
         session
             .store
             .release_session_attachment("conversation", &session.attachment)
             .unwrap();
-        assert!(!session.waiting_after(QUIET));
+        assert!(!session.available_after(QUIET));
     }
 
     #[test]
-    fn waiting_is_chosen_before_the_page_is_cut() {
+    fn availability_is_chosen_before_the_page_is_cut() {
         let mut session = Driven::new(true);
-        // Two working conversations sort ahead of the waiting one.
+        // Two working conversations sort ahead of the available one.
         session
             .store
             .test_session("a", "run_0000000000000000000000000000000a");
@@ -523,9 +526,9 @@ mod tests {
             .store
             .test_session("b", "run_0000000000000000000000000000000b");
         session.hear(claude(&json!({"type":"result","subtype":"success"})));
-        let page = |waiting: bool| {
+        let page = |available: bool| {
             let filter = crate::session::SessionFilter {
-                waiting,
+                available,
                 limit: 1,
                 after: Some(String::new()),
                 ..Default::default()

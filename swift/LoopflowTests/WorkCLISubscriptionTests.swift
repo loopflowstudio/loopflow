@@ -70,8 +70,10 @@ struct WorkCLISubscriptionTests {
         ]))
         registry.revealSession(session, in: workspace)
         workspace.presentation.selectedSessionId = session.id
+        #if canImport(GhosttyKit)
         let surfaceID = TerminalIdentity.session(session.id, machineId: machineID)
         let surface = registry.surfaces.view(for: surfaceID)
+        #endif
         workspace.multiplexer.show(.files(taskId: id))
         let files = workspace.files(taskId: id, issue: task.task.identifier, cwd: checkout.worktree, query: query)
         let draft = files.document("notes.txt")
@@ -94,7 +96,9 @@ struct WorkCLISubscriptionTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
         #expect(workspace.presentation.selectedSessionId == session.id)
+        #if canImport(GhosttyKit)
         #expect(registry.surfaces.view(for: surfaceID) === surface)
+        #endif
         #expect(files.document("notes.txt") === draft)
         #expect(draft.editor.string == "unsaved Task draft")
 
@@ -116,7 +120,9 @@ struct WorkCLISubscriptionTests {
         #expect(registry.selectedWork == workspace.key)
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == focus)
+        #if canImport(GhosttyKit)
         #expect(registry.surfaces.view(for: surfaceID) === surface)
+        #endif
         #expect(files.document("notes.txt") === draft)
         #expect(draft.editor.string == "unsaved Task draft")
         keeping.cancel()
@@ -176,6 +182,7 @@ private struct WorkCLIFixture: Sendable {
         return process
     }
 
+    @MainActor
     func json(_ args: [String]) async throws -> [String: Any] {
         try #require(JSONSerialization.jsonObject(with: Data(try await run(args).utf8)) as? [String: Any])
     }

@@ -4,7 +4,7 @@ import Loopflow
 /// Presentation of shared Session evidence; never Task completion or Workflow state.
 enum SessionProgramStatus {
     case reported(SessionRecord, ProgramStatusReport)
-    case waiting(SessionRecord)
+    case available(SessionRecord)
     case unknown
     case unavailable(String)
 
@@ -24,10 +24,10 @@ enum SessionProgramStatus {
             }
         }
         // Once a reporter clears its records, do not re-infer its old status.
-        if let waiting = ordered.first(where: {
-            $0.programStatus?.seen != true && $0.state != .closed && $0.attention == .waiting
+        if let available = ordered.first(where: {
+            $0.programStatus?.seen != true && $0.state != .closed && $0.attention == .available
         }) {
-            self = .waiting(waiting)
+            self = .available(available)
         } else { self = .unknown }
     }
 
@@ -37,7 +37,7 @@ enum SessionProgramStatus {
             let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
             let progress = report.progress.map { " · \($0)%" } ?? ""
             return "\(report.state.rawValue.capitalized)\(kind)\(progress)"
-        case .waiting: return "Waiting · inferred"
+        case .available: return "Available · inferred"
         case .unknown, .unavailable: return nil
         }
     }
@@ -46,8 +46,8 @@ enum SessionProgramStatus {
         switch self {
         case .reported(let session, let report):
             return "Program report · \(ProgramStatusReport.displaySafe(session.title)) (\(session.id))\n\(report.displayText)"
-        case .waiting(let session): return "Inferred from shared Session Waiting · \(session.id)"
-        case .unknown: return "No current program report or shared Waiting."
+        case .available(let session): return "Inferred from shared Session Available · \(session.id)"
+        case .unknown: return "No current program report or shared Available."
         case .unavailable(let reason): return "Current program status unavailable: \(reason)"
         }
     }
@@ -56,7 +56,7 @@ enum SessionProgramStatus {
         switch self {
         case .reported(_, let report):
             report.state.workTone
-        case .waiting: .waiting
+        case .available: .waiting
         case .unknown, .unavailable: nil
         }
     }

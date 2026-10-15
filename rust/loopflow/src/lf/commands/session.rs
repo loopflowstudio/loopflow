@@ -137,7 +137,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             all,
             interactive,
             history,
-            waiting,
+            available,
             limit,
             offset,
             page,
@@ -151,7 +151,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 &store,
                 *json,
                 &crate::session::SessionFilter {
-                    waiting: *waiting,
+                    available: *available,
                     repo: if *all {
                         None
                     } else {
@@ -286,7 +286,7 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
-                    _ if session.attention.is_some() => "waiting",
+                    _ if session.attention.is_some() => "available",
                     SessionState::Unknown => "unknown",
                     SessionState::Active => "active",
                     SessionState::Closed => "closed",

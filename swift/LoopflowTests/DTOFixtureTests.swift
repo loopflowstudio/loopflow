@@ -831,12 +831,12 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .unknown)
-        #expect(session.attention == .waiting)
+        #expect(session.attention == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
-        #expect(session.statusLabel == "Waiting")
+        #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"

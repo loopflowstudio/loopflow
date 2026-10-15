@@ -961,8 +961,8 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you. In Desktop,
-a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+`--available` narrows that selection to conversations available for your input. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Available,
 as does idle for an interactive Session. Working, done, error and explicit clear
 suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.

@@ -92,7 +92,7 @@ struct TaskWorkflowHeader: View {
                 workspaceActions
                 if acting {
                     ProgressView().controlSize(.small)
-                    Text("Updating Task…").foregroundStyle(palette.textSecondary)
+                    Text(draft?.progress ?? "Updating Task…").foregroundStyle(palette.textSecondary)
                 }
             }
             .lineLimit(1)
@@ -153,6 +153,8 @@ struct TaskWorkflowHeader: View {
                     .lineLimit(3)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-error")
+                Button("Refresh readings") { model.rescanWork() }
+                    .accessibilityIdentifier("task-refresh-readings")
             }
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
@@ -201,7 +203,7 @@ struct TaskWorkflowHeader: View {
 
     /// Why no edge can be started now.
     private var unavailable: String? {
-        if acting { return "Updating Task" }
+        if acting { return draft?.progress ?? "Updating Task…" }
         if task.task.isTerminal { return "Reopen the Task before starting work" }
         return readingUnavailable ?? task.runControl.unavailable
     }

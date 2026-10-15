@@ -863,6 +863,9 @@ struct WorkDestinationTests {
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
         }
+        destination.bindWorkspaces(registry, repository: "fixture-repository")
+        let selectedKey = try #require(registry.selectedWork)
+        #expect(registry.retained(selectedKey)?.location == task.reference.workspace?.identity)
         #expect(workspace.multiplexer.layout == layout)
         #expect(document.editor.string == "unsaved draft")
         #expect(throws: Never.self) {

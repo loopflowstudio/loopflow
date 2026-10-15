@@ -52,7 +52,7 @@ struct WorkCacheTests {
         #expect(returning.savedMachineId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
-        #expect(returning.selection == .task(id: "issue-now"))
+        #expect(returning.selection == nil)
         #expect(returning.task(id: "issue-now") != nil)
         #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }
@@ -230,7 +230,7 @@ struct WorkCacheTests {
 
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        #expect(returning.selection == .task(id: "issue-now"))
+        #expect(returning.selection == nil)
         await source.hold(["wave", "show"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()

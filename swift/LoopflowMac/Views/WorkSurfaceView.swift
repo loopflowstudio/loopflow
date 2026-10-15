@@ -299,14 +299,14 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
-                // Exact Waiting links preserve access to secondary conversations
+                // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
-                ForEach((sessions ?? []).filter { $0.attention == .waiting }) { session in
+                ForEach((sessions ?? []).filter { $0.attention == .available }) { session in
                     Button { onOpenSession(session) } label: {
                         Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
-                    .accessibilityIdentifier("task-waiting-\(session.id)")
+                    .accessibilityIdentifier("task-available-\(session.id)")
                 }
                 section {
                     WorkSectionHeading(title: "Description") {

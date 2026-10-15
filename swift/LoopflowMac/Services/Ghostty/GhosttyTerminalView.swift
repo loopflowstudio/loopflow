@@ -11,6 +11,19 @@ import Loopflow
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
+enum GhosttyTerminalShortcut: String {
+    case copy = "c"
+    case paste = "v"
+    case find = "f"
+
+    init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
+        let keys: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard modifiers.intersection(keys) == .command,
+              let characters else { return nil }
+        self.init(rawValue: characters.lowercased())
+    }
+}
+
 struct GhosttyTerminalView: View {
     let workingDirectory: String
     let argv: [String]
@@ -874,16 +887,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else { return super.performKeyEquivalent(with: event) }
 
         let mods = event.modifierFlags
-        // Handle Cmd+C (copy), Cmd+V (paste) ourselves
-        if mods.contains(.command) {
-            if event.charactersIgnoringModifiers == "c" {
-                return copySelection()
-            } else if event.charactersIgnoringModifiers == "v" {
-                return pasteFromClipboard()
-            } else if event.charactersIgnoringModifiers == "f" {
-                searchBar.open(needle: nil)
-                return true
-            }
+        // Only the exact host shortcuts belong here. Modified combinations
+        // retain Ghostty bindings and the application's terminal key protocol.
+        switch GhosttyTerminalShortcut(characters: event.charactersIgnoringModifiers, modifiers: mods) {
+        case .copy:
+            return copySelection()
+        case .paste:
+            return pasteFromClipboard()
+        case .find:
+            searchBar.open(needle: nil)
+            return true
+        case nil:
+            break
         }
 
         if !mods.contains(.command) { clearBlockSelection() }

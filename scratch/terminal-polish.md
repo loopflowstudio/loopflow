@@ -26,6 +26,18 @@ evidence are preserved at `8486ff005d:scratch/terminal-polish.md` and
 
 ## Demo handoff
 
+Jack Heart's demo revisions: Command-T opens and focuses a new terminal in a
+vertical split first, alternating horizontal/vertical as panes are added. The
+Codex/Shell header becomes a content menu. The main Session offers Claude,
+Codex and OpenCode provider switching; Shell, Files and lf process open as
+companion splits using the same rule, keeping the conversation in place. Reset
+starts a fresh primary conversation/process with current Work instructions and
+less conversation context; retain the previous conversation's history. Existing
+Loopflow session controls own switching and reset. Copy's cell underlining is
+too much: keep the header confirmation and remove that visual cue. Jack also
+requested a subagent to investigate and improve copy/hotkey/action interoperability
+with those TUIs; findings live in `scratch/tui-actions.md`.
+
 The interactive pursue runner completed implementation, compression, sync and
 realignment, then failed before launching its routing agent: response schemas
 require headless mode. The operator interrupted the redundant retry and inspected
@@ -45,6 +57,22 @@ Check: current merged-source Swift app build, bundled control-tool build,
 ad-hoc bundle signature verification and bundled `lf repo identity --json` PASS.
 Jack Heart's hands-on review and paired native performance measurements remain.
 
+Revision demo: `.lf/tmp/terminal-feedback/Loopflow Terminal Demo 2.app` contains
+lf7 and the pane menu, Command-T and Reset changes, with a separate bundle identity
+so the first demo's live terminals are not replaced. Keep SwiftPM build products.
+Review caught two state issues before delivery: provider preparation now returns
+the fresh workspace identity, and late reset replies update only their own Work's
+selection. Changing a pane occurrence clears its old copy/title notice.
+Check: `scripts/test_desktop.sh --filter 'MultiplexerStoreTests|SessionsStoreTests|DesktopPaneControlTests|SessionChromeProofTests|TerminalFeedbackTests|TerminalColorTests|TerminalPolishTests|GhosttyShellBlockTests' -Xswiftc -gnone --jobs 4` PASS (82 tests in eight suites; optional native diagnostics and separately run Metal check skipped); platform boundary check and revised demo signature PASS. Log: `/tmp/loo487-demo-revision-tests.log`. The first build was invalidated by concurrent source edits, then rerun against stable lf7 sources. Native agent switching/reset was not performed on Jack Heart's Sessions.
+
+Demo feedback: Jack Heart reports seeing “Copied” inside Codex after dragging
+text and pressing Command-C. This does not yet establish terminal-level selection
+or a routing defect. The host consumes Command-C only when Ghostty supplies a
+text/block selection; program clipboard writes use the separate callback without
+the host's cell cue. Ghostty routes ordinary drags to programs with mouse reporting;
+Shift-drag normally selects at the terminal layer. Verify the gesture in Loopflow
+Terminal Demo and the location of the confirmation before changing copy ownership.
+
 ## Retained design
 
 Jack wants calm confirmation for Copy, Find, focus and context return, with
@@ -63,16 +91,16 @@ selection mirror, animation loop or theme system. iOS/external hosts are unchang
 | Action | Presentation | Reduce Motion |
 |---|---|---|
 | Select/drag | Immediate native selection | Same |
-| Successful Copy | Neutral cell edge, 160 ms ease-out; header notice and accessibility announcement | Static edge until the same deadline |
+| Successful Copy | Brief header notice and accessibility announcement; no cell decoration | Same |
 | Next/previous Find | 160 ms edge on the newly selected match | Persistent active-match styling |
 | Focus/context return | Existing focus outline and `DesignAnimation.standard` | Immediate outline |
 | Reported state change | Existing semantic label/color | Immediate label/color |
 
 Copy reads bytes and an opaque surface-local receipt under one renderer lock;
-only pasteboard success confirms it. Selection replacement, reset, reflow,
-viewport changes, hiding and destruction cancel stale cues. Repeated actions
-replace the deadline; hidden panes never replay it. Clear-on-copy cancels the
-cell cue but retains the textual confirmation. OSC/custom clipboard writes do
+only pasteboard success confirms it. The receipt preserves clear-on-copy behavior
+without scheduling a Copy animation. Selection replacement, reset, reflow,
+viewport changes, hiding and destruction invalidate stale receipts. Find keeps
+its finite cue; hidden panes never replay it. OSC/custom clipboard writes do
 not claim visible cells were copied. Selection precedes search; glyphs and copied
 bytes remain unchanged. Synchronized output cancels edges without thawing text.
 Reduce Motion changes reach retained surfaces immediately.
@@ -81,8 +109,8 @@ Copy notices carry the existing surface-incarnation UUID. Each window checks
 its retained pool, rejecting another window's notice or late dismissal from a
 replaced surface. Find teardown closes only an existing bar, avoiding lazy UI
 construction during deallocation. Failure backgrounds remain red even when
-selected; the selected gutter remains neutral. Feedback wakeups recompute the
-absolute deadline after unrelated shader draws, so static cues still expire.
+selected; the selected gutter remains neutral. Find feedback wakeups recompute
+the absolute deadline after unrelated shader draws.
 
 `minimum-contrast = 3` loads before user defaults; `1` bypasses correction exactly.
 Reopen the app after configuration changes. Already-passing colors remain intact.
@@ -125,9 +153,9 @@ recursively embedding all earlier manifests.
 One implementation/PR. No production installation, provider takeover, planning
 migration, broader Workflow repair, cursor trails or notification redesign.
 Ghostty stays pinned to `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0`.
-The repaired patch is published and pinned as `GhosttyKit-a60e9e2-lf6.xcframework.zip`;
-public download SHA-256 is `28cb9cb1c0e7f195087b3a59f2023ba08e68b83237ccfd90e07f1a120a4c049b`.
-Earlier lf4/lf5 uploads remain immutable. Jack Heart's October 6 authorization
+The current patch is published and pinned as `GhosttyKit-a60e9e2-lf7.xcframework.zip`;
+public download SHA-256 is `32e1d35ca909f67191e0d85afba8b52eb93f95a37513efbbb75f2caf195b44ed`.
+Earlier lf4/lf5/lf6 uploads remain immutable. Jack Heart's October 6 authorization
 covers future artifacts through the patch README workflow.
 
 Gate owns affected suites and acceptance once; reuse identical content/commands:

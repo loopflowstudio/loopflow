@@ -188,6 +188,16 @@ public final class MultiplexerStore {
         closedState = nil
     }
 
+    /// Change this slot's content without disturbing its companions or split ratios.
+    public func replace(_ paneId: String, with content: PaneContent) {
+        guard layout.pane(for: paneId) != nil else { return }
+        layout = layout.replacingContent(of: paneId, with: content)
+        shellCommands.removeValue(forKey: paneId)
+        collapsedPaneIds.remove(paneId)
+        setFocusedPane(paneId)
+        closedState = nil
+    }
+
     @discardableResult
     public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
         _insert(.shell(location: location, execution: execution), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
@@ -231,7 +241,8 @@ public final class MultiplexerStore {
         shellCommand: [String]? = nil
     ) -> PaneState? {
         guard let target = layout.pane(for: paneId) else { return nil }
-        let axis = splitAxis ?? (target.content == .empty ? nil : .vertical)
+        let axis = splitAxis ?? (target.content == .empty ? nil :
+            (layout.allPanes.count.isMultiple(of: 2) ? .horizontal : .vertical))
         let insertedId: String
         if let axis {
             let pane = PaneState(content: content)

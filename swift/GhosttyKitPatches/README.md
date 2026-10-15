@@ -35,9 +35,9 @@ Use a new artifact version whenever the patch changes.
 
 ## Terminal feedback and contrast
 
-`Package.swift` selects `GhosttyKit-a60e9e2-lf6.xcframework.zip`. Its public
+`Package.swift` selects `GhosttyKit-a60e9e2-lf7.xcframework.zip`. Its public
 download matches SwiftPM checksum
-`28cb9cb1c0e7f195087b3a59f2023ba08e68b83237ccfd90e07f1a120a4c049b`.
+`32e1d35ca909f67191e0d85afba8b52eb93f95a37513efbbb75f2caf195b44ed`.
 The universal ReleaseFast build includes the reviewed failure-selection and
 absolute feedback-deadline repairs. Renderer cell-buffer tests keep foreground
 RGBA separate from the expanded background data. Headless checks exercise production Metal
@@ -53,10 +53,11 @@ selection and returns an opaque surface-local receipt under one lock. Confirm it
 with `ghostty_surface_confirm_copy` only after a successful clipboard write.
 Selection replacement, reset, reflow, viewport movement and hiding invalidate it.
 `ghostty_surface_set_feedback` updates visibility and Reduce Motion for retained
-surfaces. Copy/Find edges use the background pass and the existing renderer timer;
-they expire after 160 ms without changing stored text or colors. Synchronized
-output cancels cues while preserving frozen text. Clear-on-copy clears selection
-and cancels its cue; the host still announces the successful copy.
+surfaces. Copy confirmation appears only in the pane header; the receipt retains
+clear-on-copy behavior without painting cells or scheduling animation. Find edges
+use the background pass and the existing renderer timer; they expire after 160 ms
+without changing stored text or colors. Synchronized output cancels cues while
+preserving frozen text.
 
 Metal and GLSL adjust premultiplied foregrounds toward the nearest feasible
 black/white endpoint, preserving alpha, passing colors and the exact `1` bypass.

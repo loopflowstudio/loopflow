@@ -9,6 +9,20 @@ import Testing
 
 @Suite("Terminal feedback")
 struct TerminalFeedbackTests {
+    @Test("Host Copy, Paste and Find do not consume modified TUI shortcuts")
+    func shortcutOwnership() {
+        for (key, shortcut) in [("c", GhosttyTerminalShortcut.copy), ("v", .paste), ("f", .find)] {
+            #expect(GhosttyTerminalShortcut(characters: key, modifiers: .command) == shortcut)
+            #expect(GhosttyTerminalShortcut(characters: key.uppercased(), modifiers: [.command, .capsLock]) == shortcut)
+            for extra in [NSEvent.ModifierFlags.shift, .control, .option] {
+                #expect(GhosttyTerminalShortcut(characters: key, modifiers: [.command, extra]) == nil)
+            }
+            #expect(GhosttyTerminalShortcut(characters: key, modifiers: .control) == nil)
+            #expect(GhosttyTerminalShortcut(characters: key, modifiers: []) == nil)
+        }
+        #expect(GhosttyTerminalShortcut(characters: "t", modifiers: .command) == nil)
+    }
+
     @Test("Copy notices stay with the originating window and retained view")
     @MainActor
     func copyNoticeOwnership() {

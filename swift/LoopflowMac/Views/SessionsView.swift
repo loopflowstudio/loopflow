@@ -464,8 +464,14 @@ struct SessionItem: Identifiable, Equatable {
 
     var record: SessionRecord
     var state: State
+    var agentOverride: String?
+    var launchId = UUID()
 
     var id: String { record.id }
+
+    var launchArguments: [String] {
+        record.openArgv + (agentOverride.map { ["--agent", $0] } ?? [])
+    }
 
     var surface: SessionRecord? {
         switch state {
@@ -630,6 +636,48 @@ final class SessionsStore {
 
     func moveHere(_ id: String) async {
         await recover(id, replacing: true)
+    }
+
+    @discardableResult
+    func switchProvider(_ id: String, to agent: String) async throws -> SessionRecord {
+        guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+        let previous = sessions[index]
+        sessions[index].state = .opening
+        do {
+            let prepared = try await query(for: previous.record).prepareSession(id: id, takeover: true, cwd: repoPath)
+            if let reason = prepared.action(.moveHere)?.unavailableReason {
+                throw RegistryQueryError(reason)
+            }
+            guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+            if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
+            sessions[current].record = prepared
+            sessions[current].agentOverride = agent
+            sessions[current].launchId = UUID()
+            sessions[current].state = .prepared
+            return prepared
+        } catch {
+            if let current = _index(id) { sessions[current] = previous }
+            throw error
+        }
+    }
+
+    func reset(_ id: String) async throws -> SessionRecord {
+        guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+        let previous = sessions[index]
+        sessions[index].state = .opening
+        do {
+            let successor = try await query(for: previous.record).resetSession(
+                id: id, agent: previous.record.provider, cwd: repoPath)
+            if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
+            if let location = executionLocations[id] { retainLocation(location, for: successor) }
+            reconcile([successor])
+            adoptPreparation(successor)
+            if let current = _index(id) { sessions[current].state = .ended("Replaced by a fresh conversation.") }
+            return successor
+        } catch {
+            if let current = _index(id) { sessions[current] = previous }
+            throw error
+        }
     }
 
     func beginPaneLoad(_ id: String) {
@@ -1231,6 +1279,8 @@ struct SessionsContentView: View {
 
     private func _handle(_ shortcut: SessionsShortcut) {
         switch shortcut {
+        case .newTerminal:
+            newShell(in: workspace)
         case .splitRight:
             split(.vertical)
         case .splitDown:
@@ -1470,6 +1520,7 @@ private struct SplitDivider: View {
 
 private struct SessionPaneView: View {
     @State private var shellError: String?
+    @State private var changingSession = false
     @Environment(WorkModel.self) private var model
     @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1520,7 +1571,7 @@ private struct SessionPaneView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
-        .alert("Could not open shell", isPresented: Binding(
+        .alert("Could not change pane", isPresented: Binding(
             get: { shellError != nil }, set: { if !$0 { shellError = nil } }
         )) {
             Button("OK") { shellError = nil }
@@ -1543,7 +1594,7 @@ private struct SessionPaneView: View {
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
         }
-        .onChange(of: _terminalIdentity) { _, _ in
+        .onChange(of: pane.incarnation) { _, _ in
             bellRinging = false
             terminalTitle = nil
             copyConfirmation = nil
@@ -1558,11 +1609,22 @@ private struct SessionPaneView: View {
                 Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
             }
-            Label(programHeading.name, systemImage: programHeading.symbol)
-                .font(Typography.body(11)).fontWeight(.semibold)
-                .foregroundStyle(TerminalPalette.foreground)
-                .fixedSize()
-                .accessibilityIdentifier("pane-program-\(pane.id)")
+            Menu {
+                paneContentChoices
+            } label: {
+                Label(programHeading.name, systemImage: programHeading.symbol)
+                    .font(Typography.body(11)).fontWeight(.semibold)
+                    .foregroundStyle(TerminalPalette.foreground)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .disabled(changingSession)
+            .help("Choose this Session's agent or open a companion pane")
+            .accessibilityIdentifier("pane-program-\(pane.id)")
+            if let session = primarySession {
+                stripButton("arrow.clockwise", label: "Reset session", id: "pane-reset-session",
+                    help: "Start fresh with current Work context. Keeps history; discards unsent input.",
+                    disabled: changingSession) { changeSession(session, agent: nil) }
+            }
             Text(programHeading.context)
                 .font(Typography.code(11)).foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1).truncationMode(.middle)
@@ -1618,6 +1680,76 @@ private struct SessionPaneView: View {
         .onTapGesture { focusPane() }
         .contextMenu { paneActions }
         .accessibilityIdentifier("pane-strip-\(pane.id)")
+    }
+
+    @ViewBuilder
+    private var paneContentChoices: some View {
+        if let session = primarySession {
+            Section("Session agent") {
+                ForEach(["claude", "codex", "opencode"], id: \.self) { agent in
+                    Button {
+                        changeSession(session, agent: agent)
+                    } label: {
+                        Label(agent == "opencode" ? "OpenCode" : agent.capitalized,
+                              systemImage: session.record.provider == agent ? "checkmark" : "bubble.left")
+                    }
+                    .disabled(session.record.provider == agent)
+                    .help("Continue this Session with \(agent). Replaces the current process; unsent input is lost.")
+                }
+            }
+            Divider()
+        }
+        Button("Shell", systemImage: "terminal") {
+            do { try workspace.newShell(beside: pane.id) }
+            catch { shellError = error.localizedDescription }
+        }
+        if let taskId = paneTaskId {
+            Button("Files", systemImage: "folder") {
+                store.show(.files(taskId: taskId, location: pane.content.location,
+                    execution: pane.executionLocation), beside: pane.id)
+            }
+            Button("lf process", systemImage: "list.bullet.rectangle") {
+                store.show(.flowLog(taskId: taskId, location: pane.content.location,
+                    execution: pane.executionLocation), beside: pane.id)
+            }
+        }
+    }
+
+    private var primarySession: SessionItem? {
+        guard paneSessions.count == 1, let session = paneSessions.first,
+              session.record.taskPrimary || session.record.primaryScope != nil else { return nil }
+        return session
+    }
+
+    private var paneTaskId: String? {
+        switch pane.content {
+        case .files(let task, _, _), .flowLog(let task, _, _): return task
+        default:
+            if let work = primarySession?.record.work, work.kind == .task { return work.id }
+            return workspace.key.kind == .task ? workspace.key.id : nil
+        }
+    }
+
+    private func changeSession(_ session: SessionItem, agent: String?) {
+        changingSession = true
+        Task { @MainActor in
+            defer { changingSession = false }
+            do {
+                let record: SessionRecord
+                if let agent {
+                    record = try await sessions.switchProvider(session.id, to: agent)
+                } else {
+                    record = try await sessions.reset(session.id)
+                }
+                guard store.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
+                store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
+                    execution: pane.executionLocation))
+                workspace.presentation.selectedSessionId = record.id
+                if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
+                    model.navigation.selectedSessionId = record.id
+                }
+            } catch { shellError = error.localizedDescription }
+        }
     }
 
     @ViewBuilder
@@ -1901,7 +2033,7 @@ private struct SessionPaneView: View {
            let terminal = pane.terminal {
             GhosttyTerminalView(
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
-                argv: surface.openArgv,
+                argv: item.launchArguments,
                 terminal: terminal,
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
@@ -1912,7 +2044,7 @@ private struct SessionPaneView: View {
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
-            .id(surface.id)
+            .id(item.launchId)
         } else {
             Text("Session location unavailable")
         }
@@ -2043,6 +2175,7 @@ private struct PaneFocusTarget: NSViewRepresentable {
 }
 
 private enum SessionsShortcut {
+    case newTerminal
     case splitRight
     case splitDown
     case close
@@ -2112,6 +2245,9 @@ private struct SessionsShortcutMonitor: NSViewRepresentable {
             // Shift is the one modifier `charactersIgnoringModifiers` keeps, so
             // ⌘⇧D arrives as "D".
             let key = event.charactersIgnoringModifiers?.lowercased()
+            if modifiers == [.command], key == "t" {
+                return .newTerminal
+            }
             if modifiers == [.command], key == "d" {
                 return .splitRight
             }

@@ -78,6 +78,7 @@ quit. The watcher starts a ci-fix when a recorded landing fails its required
 checks; `lf ci watch --status` shows its last poll and what it started.
 
 ```text
+⌘T          new terminal; split right, then down, alternating
 ⌘D          split right
 ⌘⇧D         split down
 ⌘⌥←/→/↑/↓   focus the visual neighbor
@@ -90,6 +91,14 @@ Panes sit in rounded islands with small gutters; drag a gutter to resize.
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
+
+Click a pane's program name to add a **Shell**, the Task's **Files**, or its
+**lf process** view. New companions alternate right/down and keep the main
+conversation in place. The main Session's menu also switches between **Claude**,
+**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Reset session** starts a fresh primary conversation/process from current Work
+instructions, without replaying the previous conversation; its history remains
+available. Switching or resetting replaces the current provider process.
 Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
@@ -264,10 +273,11 @@ the focused header reveals split right, split down and close; its context menu
 and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
 
-Copy selected text with **⌘C**: its cells briefly gain a neutral edge and the
-pane header confirms the line count. Find navigation briefly emphasizes the
-current match. Both cues end after 160 ms; hiding a pane cancels them. Reduce
-Motion keeps Copy's edge static and uses Find's persistent match styling.
+Copy selected text with **⌘C**: the pane header briefly confirms the line count,
+without decorating the selected cells. Find navigation briefly emphasizes the
+current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
+Find's persistent match styling. Programs that own selection may show their own
+copy confirmation; terminal feedback describes only a terminal-owned copy.
 
 ```ini
 # In your Ghostty configuration; reopen Loopflow after editing.

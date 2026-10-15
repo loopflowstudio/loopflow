@@ -144,7 +144,7 @@ struct SessionChromeProofTests {
         try await expectEcho(draft, on: surfaces[0])
     }
 
-    @Test("⌘D, ⌘⇧D, ⌘⇧↩ and ⌘W act on the focused pane and keep its terminal")
+    @Test("⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ and ⌘W act on the focused pane and keep its terminal")
     func keybindsSplitZoomAndClose() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -184,6 +184,26 @@ struct SessionChromeProofTests {
         try #require(terminal.window === window)
         let draft = "keybind-draft"
         draft.withCString { ghostty_surface_text(surface, $0, UInt(draft.utf8.count)) }
+
+        try press("t", keyCode: 17, modifiers: [.command], in: window)
+        try await settle(window)
+        guard case .split(.vertical, _, _, _) = workspace.multiplexer.layout else {
+            Issue.record("First Command-T must split right")
+            return
+        }
+        let firstCompanion = workspace.multiplexer.focusedPaneId
+        try press("t", keyCode: 17, modifiers: [.command], in: window)
+        try await settle(window)
+        guard case .split(.vertical, _, .split(.horizontal, _, _, _), _) = workspace.multiplexer.layout else {
+            Issue.record("Second Command-T must split down")
+            return
+        }
+        #expect(workspace.multiplexer.focusedPaneId != firstCompanion)
+        try press("w", keyCode: 13, modifiers: [.command], in: window)
+        try await settle(window)
+        try press("w", keyCode: 13, modifiers: [.command], in: window)
+        try await settle(window)
+        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
 
         try press("d", keyCode: 2, modifiers: [.command], in: window)
         try await settle(window)

@@ -1336,7 +1336,6 @@ private struct WorkspacePanesView: View {
 }
 
 private struct MultiplexerView: View {
-    @Environment(\.theme) private var theme
     @Environment(\.palette) private var palette
     let layout: LayoutNode
     let focusedPaneId: String
@@ -1367,7 +1366,6 @@ private struct MultiplexerView: View {
         }
         .padding(6)
         .background(palette.surfaceMuted)
-        .environment(\.colorScheme, theme.colorScheme)
         .accessibilityIdentifier("sessions-multiplexer")
     }
 }
@@ -1509,7 +1507,6 @@ private struct SessionPaneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.terminal.background.color)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .environment(\.colorScheme, theme.colorScheme)
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.md)
@@ -1566,7 +1563,6 @@ private struct SessionPaneView: View {
                 .accessibilityIdentifier("pane-context-\(pane.id)")
             if let status = _programStatus, status.summary != nil {
                 ProgramStatusLabel(status: status)
-                    .environment(\.palette, theme.palette)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
@@ -1692,7 +1688,6 @@ private struct SessionPaneView: View {
                     _terminal(item: item, surface: surface)
                 } else {
                     _sessionPlaceholder(item)
-                        .environment(\.colorScheme, theme.colorScheme)
                 }
             } else {
                 emptyWorkspace

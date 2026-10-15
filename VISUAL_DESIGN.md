@@ -5,7 +5,8 @@ palette and typography, with separate marketing conventions below.
 
 ## Desktop semantics
 
-Select a Task: neutral tint plus edge marks selection while the title stays neutral.
+Select Work: a solid burgundy/rose fill and contrasting text mark the destination,
+including its Needs you entry. File selection keeps its neutral tint and edge.
 Tab to a control: a separate burgundy/rose outline marks keyboard focus, including
 on a selected row with an error. Ordinary controls use neutral ink; only an explicitly
 emphasized action uses burgundy. Repo identity may retain burgundy. Links use
@@ -14,7 +15,8 @@ secondary ink and underline on hover/focus in navigation and control chrome.
 | Role | Source / behavior |
 |------|-------------------|
 | Structure and text | `background`, surface ladder, `text`, `textSecondary`, `textTertiary` |
-| Selection | `selectionFill`, `selectionEdge`; independent of failure |
+| Work selection | `workSelectedFill`, `workSelectedText`, `workSelectedSecondaryText`; independent of failure |
+| File and option selection | `selectionFill`, `selectionEdge` |
 | Keyboard focus | `keyboardFocus`; visible with selection |
 | Links | `linkInk`, `linkHover`; separate from status |
 | Actions | `actionInk`, `actionHover`; `emphasisInk` for deliberate emphasis |

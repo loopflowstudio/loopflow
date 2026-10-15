@@ -94,7 +94,6 @@ final class GhosttyManager: ObservableObject {
     @Published private(set) var state: State = .uninitialized
 
     private nonisolated(unsafe) var app: ghostty_app_t?
-    private nonisolated(unsafe) var config: ghostty_config_t?
 
     static let shared = GhosttyManager()
 
@@ -118,7 +117,6 @@ final class GhosttyManager: ObservableObject {
                 ghostty_app_update_config(app, candidate)
                 ghostty_app_set_color_scheme(app, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
             }
-            config = candidate
             for id in Array(themeConfigs.keys) where id != theme.id && id != appliedID {
                 if let discarded = themeConfigs.removeValue(forKey: id) { ghostty_config_free(discarded.1) }
             }
@@ -184,6 +182,7 @@ final class GhosttyManager: ObservableObject {
             return
         }
 
+        let config: ghostty_config_t
         do {
             try GhosttyThemeConfiguration.load(Self.loopflowConfig, into: cfg)
             ghostty_config_load_default_files(cfg)
@@ -202,15 +201,13 @@ final class GhosttyManager: ObservableObject {
             try GhosttyThemeConfiguration.load(embeddedConfig + "\ntheme =\n", into: cfg)
             ghostty_config_finalize(cfg)
             self.baseline = cfg
-            self.config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
-            if let config { themeConfigs[theme.id] = (theme.terminal, config) }
+            config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
+            themeConfigs[theme.id] = (theme.terminal, config)
         } catch {
             if baseline == nil { ghostty_config_free(cfg) }
             state = .failed(error.localizedDescription)
             return
         }
-        guard let config else { return }
-
         // Create runtime config with callbacks
         var runtimeConfig = ghostty_runtime_config_s()
         runtimeConfig.userdata = Unmanaged.passUnretained(self).toOpaque()

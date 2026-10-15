@@ -3,11 +3,12 @@ import SwiftUI
 import Loopflow
 
 struct ThemeChooser: View {
-    @Bindable var appearance: AppearanceStore
+    let appearance: AppearanceStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
     var body: some View {
+        let terminal = appearance.selectedTheme.terminal
         VStack(alignment: .leading, spacing: 16) {
             Text("Choose Theme").font(Typography.sectionTitle())
             ScrollView {
@@ -38,15 +39,17 @@ struct ThemeChooser: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    Text("Selected").workSelection(true)
+                    Text("Selected Work").foregroundStyle(palette.workSelectedText)
+                        .padding(6).workDestinationSelection(true)
                     Text("Working").foregroundStyle(palette.working)
                     Text("Waiting").foregroundStyle(palette.waiting)
                     Text("Error").foregroundStyle(palette.failure)
                 }.padding(.vertical, 14)
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
-                    ForEach(appearance.selectedTheme.terminal.readabilityErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
-                    ForEach(appearance.selectedTheme.terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
+                    ForEach(terminal.readabilityErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
+                    ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
+                    ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
                     Text("Explicit colors printed by terminal applications may retain their own appearance.")
                         .foregroundStyle(palette.textSecondary)
                 }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
@@ -57,7 +60,7 @@ struct ThemeChooser: View {
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
                 Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
-                    .disabled(!appearance.selectedTheme.terminal.readabilityErrors.isEmpty)
+                    .disabled(!terminal.readabilityErrors.isEmpty)
             }.buttonStyle(WorkOutlineButtonStyle())
         }
         .padding(20).frame(minWidth: 560, minHeight: 450)

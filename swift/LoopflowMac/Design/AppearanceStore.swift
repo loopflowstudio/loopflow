@@ -13,13 +13,12 @@ private struct AppearancePreferences: Codable {
 final class AppearanceStore {
     static let shared = AppearanceStore(publish: { try GhosttyManager.shared.applyTheme($0, retaining: $1) })
     private(set) var selection = "system"
-    private(set) var previewSelection: String?
+    private var previewSelection: String?
     private(set) var imports: [ImportedTheme] = []
-    private(set) var pendingImports: [ImportedTheme] = []
+    private var pendingImports: [ImportedTheme] = []
     private(set) var effectiveTheme = ThemeDefinition.light
     private(set) var systemDark: Bool
     var notice: String?
-    var chooserOpen = false
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let publish: (ThemeDefinition, String) throws -> Void
     @ObservationIgnored private var observation: NSKeyValueObservation?
@@ -59,17 +58,23 @@ final class AppearanceStore {
     }
 
     var themes: [ThemeDefinition] { ThemeDefinition.builtins + (imports + pendingImports).map(\.definition) }
+    var chooserOpen: Bool { previewSelection != nil }
     var selectedID: String { previewSelection ?? selection }
     var selectedTheme: ThemeDefinition { resolve(selectedID) ?? systemTheme }
     var diagnostics: [String] { (imports + pendingImports).first { $0.id == selectedID }?.diagnostics ?? [] }
     private var systemTheme: ThemeDefinition { systemDark ? .dark : .light }
-    private func resolve(_ id: String) -> ThemeDefinition? { id == "system" ? systemTheme : themes.first { $0.id == id } }
+    private func resolve(_ id: String) -> ThemeDefinition? {
+        if id == "system" { return systemTheme }
+        if let builtin = ThemeDefinition.builtins.first(where: { $0.id == id }) { return builtin }
+        // Derive only the selected import; the chooser resolves the full catalogue.
+        return (imports + pendingImports).first { $0.id == id }?.definition
+    }
 
     func setSystemDark(_ dark: Bool) {
         systemDark = dark
         if selectedID == "system" || resolve(selectedID) == nil { _ = update(systemTheme) }
     }
-    func beginPreview() { if !chooserOpen { chooserOpen = true; previewSelection = selection } }
+    func beginPreview() { if !chooserOpen { previewSelection = selection } }
     func preview(_ id: String) {
         guard let theme = resolve(id) else { notice = "Theme unavailable."; return }
         previewSelection = id
@@ -87,12 +92,12 @@ final class AppearanceStore {
         guard let theme = resolve(id), update(theme) else { return }
         selection = id
         imports += pendingImports.filter { $0.id == id }
-        pendingImports = []; previewSelection = nil; chooserOpen = false
+        pendingImports = []; previewSelection = nil
         persist()
     }
     func cancel() {
         guard update(resolve(selection) ?? systemTheme) else { return }
-        previewSelection = nil; pendingImports = []; chooserOpen = false
+        previewSelection = nil; pendingImports = []
     }
     @discardableResult private func update(_ theme: ThemeDefinition) -> Bool {
         do {

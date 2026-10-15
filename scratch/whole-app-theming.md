@@ -2,20 +2,20 @@
 
 Status: **accepted for implementation through demo review**, 2026-10-15.
 Jack Heart approved the design with “looks good to me” after confirming the
-LOO-462 stack. Implement the selected approach below; native visual judgment
-remains at demo review. Approval does not authorize landing, release, installation
+LOO-462 stack. The core path and complete Ghostty readback are implemented; native visual
+judgment remains at demo review. Approval does not authorize landing, release, installation
 or restarting running apps.
 
 **Accepted stack, 2026-10-15:** Jack Heart directed LOO-488 to stack on LOO-462.
 The Task already records LOO-462's [PR #1531](https://github.com/loopflowstudio/loopflow/pull/1531)
-as its parent, with base `c9bc78904b52fdceff46959ce011a394a28fb706`.
-Keep that dependency as LOO-462 advances; land the parent first. The subsequent design approval authorizes implementation on this stack; the
-parent still lands first.
+as its parent. The checkout base is now `7d10108eaf928ee9db3a84467d23ce4b929fa0a8`,
+integrated at `ffdcf68935d85c14484f51825f1d31dc67616c56`. The subsequent design
+approval authorizes implementation on this stack; the parent still lands first.
 
 ## Problem and accepted direction
 
 Jack Heart wants one coherent Loopflow workspace: sidebar, headers, controls,
-pane surfaces and terminal content. Fixed cream/slate chrome currently surrounds
+pane surfaces and terminal content. Previously fixed cream/slate chrome surrounded
 an independently configured dark terminal. The intended experience is sustained
 coding and switching retained Repo/Wave/Task contexts with familiar colors,
 readable state and reversible changes that preserve work.
@@ -65,60 +65,27 @@ in the same menu. Repeat with a light import. Native review inspects a real
 provider's output as well as the shell; applications painting explicit truecolor
 pixels may retain their own colors.
 
-## Current architecture and risk findings
+## Architecture evidence and limits
 
-Baseline inspected: `c9bc78904b52fdceff46959ce011a394a28fb706`.
+The pre-implementation owner survey and upstream probes are preserved at
+`74ee56847ae39997fefd82e28285cca9afa876d9:scratch/whole-app-theming.md`,
+**Current architecture and risk findings**. The Appearance menu, environment
+palette, retained workspace pools and editor documents remain the existing owners.
+No new Work, Session or terminal-lifetime authority is needed.
 
-| Owner today | Finding and implication |
-|---|---|
-| `LoopflowApp.swift`, `AppearanceMode.swift`, `AppBootstrap.swift` | `@AppStorage("appearanceMode")` selects System/Light/Dark. `AppAppearance` supplies palette and native scheme to workspace, Portfolio, Open Work and Telemetry windows. There is an Appearance menu, not an existing settings pane. Extend that entry point. |
-| `Loopflow/Design/BrandColors.swift` | `LoopflowPalette` is already the SwiftUI environment contract, but semantic colors branch on `isDark`. `deepWine` has no consumers. Extend the existing palette; do not introduce a competing app color API. |
-| `WorkStyle.swift`, `FlowGraphView.swift`, `WaveLensView.swift` | Tone fill/stroke/text and some graph colors contain literal light/dark pairs. Changing only the root palette leaves them behind. |
-| `TerminalPalette.swift`, `GhosttyManager.loopflowConfig` | Fixed terminal constants and 16 ANSI colors live separately. Initialization loads them, then personal Ghostty configuration, then embedding rules. Personal colors can override the terminal without updating SwiftUI or its backing layer. |
-| `SessionsView.swift`, `GhosttyTerminalView.swift` | Pane chrome forces `.dark` in places. Backing layers, search highlight, command blocks/separators and directory headers have independent fixed colors. Each retained view owns its surface; each window owns its pool. |
-| `LoopflowZshBootstrap` | The default prompt embeds truecolor rose. Config reload cannot recolor those bytes. Use an indexed color in the Loopflow-owned prompt; preserve custom prompts and shell hooks. |
-| `TaskFilesView.swift` | Editor foreground/background already receive the environment palette; diff fills use system red/green. Recolor the retained editor without replacing its document, selection or Undo. |
-| `AppAppearanceTests`, `WorkPaletteTests` | Contrast and ViewInspector tests work headlessly. The existing native window-appearance test requires a display and is skipped by the headless runner; it cannot be the sole acceptance test. |
+Pinned GhosttyKit supports config clone, diagnostics/readback and
+app/surface updates without replacing the PTY. App updates cover existing and
+future surfaces, but return `void`: validation cannot prove an atomic renderer
+commit. Reload clears key-sequence/key-table state and preserves manually adjusted
+font size. Live rendering, unsent provider input and focus require native demo
+judgment; headless view/configuration tests do not establish them.
 
-### Live update is supported; it is not an atomic rendering transaction
-
-SwiftPM pins `GhosttyKit-a60e9e2-lf3`. At its upstream source revision
-`a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0`,
-[`ghostty.h`](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/include/ghostty.h)
-exports config clone/get/diagnostics and app/surface config updates.
-[`App.updateConfig`](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/App.zig#L177)
-iterates existing surfaces; embedded app handling copies the config for future
-surfaces. [`Surface.updateConfig`](https://github.com/ghostty-org/ghostty/blob/a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0/src/Surface.zig#L1776)
-updates renderer/terminal configuration without replacing the PTY. Use this API,
-not terminal destruction, shell commands or OSC injection.
-
-The C update returns `void`; internal failures log rather than acknowledge an
-atomic all-surface commit. Validate candidates before publication and retain the
-last applied candidate. Reload clears Ghostty key-sequence/key-table state and
-preserves manually adjusted font size. Live rendering, unsent provider input and
-focus still require native demo evidence. No runtime renderer proof was performed
-in this design edge.
-
-### Import is feasible without adopting an entire Ghostty configuration
-
-Themes use configuration syntax and may contain non-color settings. Adopting the
-whole language would expand appearance into launch/keybinding policy. Choose a
-color-only import with explicit omitted-setting diagnostics.
-[Ghostty configuration reference](https://ghostty.org/docs/config/reference#theme).
-
-Published [TokyoNight](https://raw.githubusercontent.com/mbadolato/iTerm2-Color-Schemes/master/ghostty/TokyoNight)
-and [Gruvbox Light](https://raw.githubusercontent.com/mbadolato/iTerm2-Color-Schemes/master/ghostty/Gruvbox%20Light)
-files each contain 16 indexed colors plus background, foreground, cursor and
-selection RGB values, all within the proposed subset. October 15's source-only
-probe measured default-text contrast of **10.59:1 / 10.22:1** and selection text of
-**5.64:1 / 10.22:1**, respectively. ANSI slot 8 contrasts are **1.91:1 / 3.24:1**:
-familiar terminal colors cannot promise readable arbitrary output. Deriving app
-secondary text from ANSI 8 would fail even for an ordinary dark theme.
-
-Probe source SHA-256: TokyoNight
-`40836def07238c031f7661ece8c4c2b6fa925e7f8ac2c79f720844aac27340d8`;
-Gruvbox Light `79bcb924ea79bfb563b729ee57184e729deb7648175bae97a09aedde7bfb5a80`.
-These are research examples, not selected bundled themes.
+The October 15 source-only TokyoNight/Gruvbox Light probe established that ordinary
+Ghostty files fit the bounded RGB subset. Default-text contrast was 10.59:1/10.22:1
+and selection text 5.64:1/10.22:1, but ANSI 8 was only 1.91:1/3.24:1. Therefore
+application secondary text derives independently; imported ANSI colors retain
+warnings. Exact source links and hashes are in the archived survey. These examples
+were research inputs, never selected bundled themes.
 
 ## Accepted approach
 
@@ -179,8 +146,9 @@ literals. Terminal ANSI indices remain colors, never activity enums.
 For imports, preserve terminal background/foreground and supplied indexed colors.
 Derive app surfaces from the background hue with a restrained lightness ladder;
 choose light/dark by its contrast polarity. Derive secondary text from foreground,
-neutral selection from the surface/text ramp and focus from Loopflow's burgundy/
-rose family. Keep Working blue, Waiting/Blocked amber, failure red and success
+neutral file selection from the surface/text ramp and focus from Loopflow's
+burgundy/rose family. Work destinations use the parent's accepted Ink on Paper
+fill, adjusted for contrast, with independently readable primary/secondary text. Keep Working blue, Waiting/Blocked amber, failure red and success
 green. Adjust application role lightness for readability, never use ANSI red as
 application failure authority. Labels and existing shapes preserve meaning when
 hues are similar.
@@ -285,18 +253,24 @@ native background/search/block/header decoration and shell bootstrap. Update
 remain iOS-buildable; an iOS picker, website themes, Rust preferences and wire
 changes are excluded.
 
-**Delete — do not maintain:**
+**Completed deletion cut:**
 
 - Static `TerminalPalette` colors and `GhosttyManager.loopflowConfig` color
-  literals; retain non-color defaults under their existing owner.
+  literals removed; non-color defaults retain their existing owner.
 - Hardcoded semantic light/dark branches in `LoopflowPalette`/`WorkTone`, graph/diff
   literals, fixed native decoration colors and forced `.dark` pane environments.
-  Cut consumers over together.
-- Unused `LoopflowPalette.deepWine`; preserve Light/Dark definitions.
+  Consumers now use resolved roles.
+- Unused `LoopflowPalette.deepWine` removed; Light/Dark definitions remain.
 - Desktop's old `appearanceMode` writer, obsolete `AppearanceMode.resolvedTheme`
   path and tests exclusive to that representation after preference migration.
-- `LoopflowZshBootstrap.accent` truecolor substitution; preserve custom-prompt
-  detection, header markers, shell integration and TERM behavior.
+- `LoopflowZshBootstrap.accent` truecolor substitution removed; custom-prompt
+  detection, header markers, shell integration and TERM behavior remain.
+- The lf3 unsupported-readback assertion replaced by compiled-color checks
+  and rejection coverage for every managed color key.
+- Stored `AppearanceStore.chooserOpen`; preview selection already owns the
+  transaction. Repeated window-root fixtures removed; shared-modifier assertions remain.
+- Duplicate Ghostty color mappings in overlay generation and readback validation;
+  both now consume `TerminalPalette.ghosttyColors`.
 
 Retain contrast, state-wording, shell-block and workspace/input tests, extending
 them to themes. Forbidden: static/dynamic palette split, hidden terminal-only
@@ -306,47 +280,89 @@ new Work authority, client restart or renderer correction implementation.
 No layout redesign, downloader, shader/material system, color editor, font
 preferences, execution migration, installation or release. Keep the inherited
 `scratch/workflow-loading.md` parent hold intact; this Task does not supersede it.
-LOO-462's delivered pane/search/navigation owners were integrated from `5359c2d77`
-using `lf sync --manual` on October 15; its later draft outer Work layout remains
-outside this Task.
+LOO-462's `7d10108eaf` integration adds Jack Heart's accepted Ink on Paper
+selection, drill-in navigation and outer Work layouts. Those owners remain intact.
+WorkStyle's fixed selected-color extension is removed; selected fill and text
+resolve through LoopflowPalette. ThemeWorkflowTests now uses the sidebar's
+production collapse/restore controls instead of the removed WorkBreadcrumbBar.
 
 ## Implementation and remaining review
 
-Implemented October 15 on LOO-462 `5359c2d77`: shared sRGB theme/palette,
-versioned preference migration, app-wide preview with Apply/Cancel, bounded local
-RGB imports, coherent Light/Dark terminals, and live Ghostty configuration updates.
-Native backing layers, shell blocks, search and copy feedback observe the same
-selection while hidden. The existing registry still owns native views. Default
-zsh prompts use indexed slot 5; custom prompts remain unchanged.
+Implemented October 15, integrated through LOO-462 `7d10108eaf`: theme, import,
+persistence and live preview. The existing registry owns native views;
+hidden backing layers, shell blocks, search and copy feedback observe changes.
 
 The deletion cut is complete: no static terminal color owner, forced dark pane
 palette, fixed status literals, deepWine, old Desktop preference writer or old
 appearance resolver remains. Portfolio rows and telemetry also consume the theme.
 Personal theme selectors clear before Ghostty finalization; non-color settings
 remain in the frozen baseline. The current and applied compiled candidates are
-retained so Cancel can reuse the validated configuration.
+retained so Cancel can reuse the validated configuration. The cache owns those
+configurations; initialization uses a local handle rather than a second stored alias.
 
 Review fixes: mid-gray imports exposed unreadable chip fills, so optional chip and
 shell-block tints reduce when they would break text contrast. Corrupt saved bytes
 remain intact with a recoverable notice. Invalid imports cannot publish or persist;
-non-color input never reaches Ghostty. Selection keeps a separate neutral edge,
-including Portfolio rows. The parent sync retained its pane islands and search.
+non-color input never reaches Ghostty. File and Portfolio selection keep a neutral edge; Work destination selection
+uses Ink on Paper with contrast-adjusted fill and text from the shared palette. The parent sync retained its pane islands and search.
 
-Remaining: gate's affected suites, iOS boundary and Xcode fallback build; native
-demo of actual provider input, focus, scrollback and visual coherence. Headless
-native-view identity/backing-layer evidence is not Metal rendering or PTY proof.
-No installation, running-app restart, publication or landing was performed here.
+Implementation follow-up, October 15: headless `ThemeWorkflowTests` now drives the
+production sidebar toggle, Wave/Task rows, attention entry and Back with retained
+Repo/Wave/Task owners. Both built-ins and light/dark imports exercise preview,
+Cancel, Apply and preference restoration. Session/shell native-view identities,
+file draft/selection, split layout and model focus survive. No provider or Ghostty
+surface is launched.
+The new outer Work layout is covered for preview/Apply with adjacent Task/Wave
+workspaces and hide/return; inner pane layouts survive preview/Cancel/Apply.
+`AppAppearanceTests` inspects the shared modifier and System light/dark resolution.
+Constructing seven unrelated roots repeated identical outer-modifier assertions;
+the focused test preserves those assertions without implying window-wiring proof.
+`WorkPaletteTests` checks status wording, unknown activity, selection and focus
+combinations across the four appearances. Environment modifier inspection is not
+mounted SwiftUI propagation or native rendering proof.
+
+Dim diagnostics now estimate default foreground and ANSI 0–15 at Ghostty's default
+50% faint opacity, retaining original colors and permitting Apply. The estimate is
+labeled: personal faint-opacity and per-cell backgrounds can differ. It uses the
+pinned renderer's rounded alpha (128/255), without changing terminal configuration.
+
+**Readback extension, October 15:** `0005-terminal-color-readback.patch` extends
+Ghostty's existing C getter with RGB `TerminalColor` conversion into
+`ghostty_config_color_s`. Unset and cell-relative values return false without
+writing; no union layout crosses the boundary. Production validates all ten named
+colors and all 256 indexed entries after finalization. Tests replace the lf3
+limitation assertion with compiled readback against conflicting personal colors.
+Rejection cases cover all ten named keys, indexed entry 255, and unset/cell-relative
+cursor colors. The patched universal framework and headless Desktop tests pass. Its version is
+`a60e9e2-lf3-theme-readback1`; no app release/install/restart occurred.
+This closes the earlier readback gap; Product memory now reflects the fixed-RGB
+contract and its native evidence limits. Product has no child memory directories.
+
+Simulated review: generate and validate managed Ghostty colors from one mapping;
+keep expected values independent in tests. The chooser needs no binding wrapper.
+The C getter preserves failure semantics without a new ABI layout. Native rendering
+and atomic updates remain outside compiled configuration proof.
+
+Source inspection on October 15 finds the shared AppAppearance on workspace,
+Portfolio, Open Work, Appearance and Telemetry scenes. The headless modifier test
+does not mount those scenes. Gate owns affected suites, iOS boundary and Xcode
+fallback build. Native demo owns multi-window propagation, provider input, actual
+focus, scrollback, controls/titlebars and visual coherence.
+The inherited navigator note's two WorkCacheTests failures remain gate findings.
+Exact palette/ladder values remain demo judgments.
 
 ## Done when and unattended gate
 
-`ThemeWorkflowTests` uses disposable preferences and the production owner:
-restore old Dark preference; load retained Repo/Wave/Task fixtures with file draft
+Required acceptance (headless owners/views covered; native behavior remains at demo): use disposable
+preferences and the production owner to restore old Dark preference; load
+retained Repo/Wave/Task fixtures with file draft
 and split layout; preview a light import; navigate/collapse/focus; cancel; apply a
 dark import; construct a fresh owner to simulate relaunch. Assert selection, layout,
 document and retained-view identities survive. Inspect production views for the
-resolved roles, unchanged activity wording, selection/focus distinction and all
-window roots. Compile generated config with pinned GhosttyKit and read back its
-background, foreground and 256-entry palette. App, pane/native style and terminal
+resolved roles, unchanged activity wording and selection/focus distinction;
+scene wiring is source-inspected and mounted propagation remains at native review.
+Compile generated config with pinned GhosttyKit and read back background,
+foreground, cursor, selection, search and 256 indexed colors through the patched C getter. App, pane/native style and terminal
 values must agree for preview, cancel, apply and restoration. Verify the effective
 candidate reaches existing and future terminal consumers without launch/close
 paths. Headless evidence covers owners/configuration, not Metal output.
@@ -373,4 +389,8 @@ coherence across the navigation/pane matrix. Success means Jack can apply/revert
 his chosen environment and continue the same work. Palette tests alone establish
 neither that experience nor subjective approval.
 
-Check (2026-10-15): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|GhosttyShellBlockTests' -Xswiftc -gnone` — app/test build and 18 tests PASS, including seven built-in/import contrast cases; full affected suites and fallback/iOS builds belong to gate, native rendering/input judgment to demo.
+Check (2026-10-15, reused at realign; no code changes): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests' -Xswiftc -gnone` — app/test build and 10 tests PASS (`/tmp/loo488-theme-compress-tests.log`); patched framework build remains applicable; broader gate and native demo remain.
+
+Check (2026-10-15, publication): `scripts/test_desktop.sh --filter 'AppAppearanceTests|WorkPaletteTests|GhosttyShellBlockTests|GhosttyTerminalInputTests|WaveLensTests' -Xswiftc -gnone` — build and headless checks PASS (`/tmp/loo488-publication-tests.log`); optional display diagnostics skipped; broader gate and native demo remain.
+
+Publication review: the Task base is `7d10108eaf`; the diff preserves the parent's navigation/pane owners and holds. The normalized overlay and compiled readback share one color mapping, and imports cannot inject non-color configuration. No further publication blocker found. Native rendering/input continuity and the inherited WorkCacheTests findings remain explicit review/gate limits, not claims of this headless proof.

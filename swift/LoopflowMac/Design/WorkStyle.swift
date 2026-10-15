@@ -44,12 +44,9 @@ enum WorkTone {
 
     func ink(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running: palette.working
-        case .done: palette.success
-        case .waiting: palette.waiting
-        case .failure: palette.failure
         case .stopped: palette.textSecondary
         case .neutral: palette.textTertiary
+        default: style(in: palette).ink
         }
     }
 
@@ -65,7 +62,6 @@ enum WorkTone {
     func fill(in palette: LoopflowPalette) -> Color { self == .neutral ? .clear : style(in: palette).fill }
     func stroke(in palette: LoopflowPalette) -> Color { style(in: palette).stroke }
     func text(in palette: LoopflowPalette) -> Color { style(in: palette).text }
-
 }
 
 extension TaskExecutionState {
@@ -269,12 +265,6 @@ extension ProgramStatusState {
         case .idle, .clear: .neutral
         }
     }
-}
-
-// Ink on Paper belongs to Work destinations; file selection keeps its own treatment.
-extension LoopflowPalette {
-    var workSelectedFill: Color { Color(hex: 0x7A333D) }
-    var workSelectedText: Color { Color(hex: 0xFFFAF3) }
 }
 
 extension View {

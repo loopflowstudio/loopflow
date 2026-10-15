@@ -213,7 +213,7 @@ struct WorkNavigator: View {
                 .frame(maxWidth: .infinity, alignment: .leading).allowsHitTesting(false)
             if let task = row.task {
                 Text(task.task.description).font(Typography.body(12)).lineLimit(2)
-                    .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
+                    .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                     .allowsHitTesting(false)
                 TaskRowMetadata(task: task,
                     status: SessionProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage),

@@ -21,8 +21,10 @@ public struct ThemeRGB: Codable, Equatable, Hashable, Sendable {
         return c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722
     }
     public func contrast(_ other: Self) -> Double {
-        (max(luminance, other.luminance) + 0.05) / (min(luminance, other.luminance) + 0.05)
+        let first = luminance, second = other.luminance
+        return (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }
+    var prefersLightText: Bool { contrast(Self(0xFFFFFF)) > contrast(Self(0)) }
     public func mixed(with other: Self, amount: Double) -> Self {
         let c: [UInt32] = zip(channels, other.channels).map { first, second in
             let blended = first * (1.0 - amount) + second * amount
@@ -77,6 +79,17 @@ public struct TerminalPalette: Codable, Equatable, Sendable {
         indexed.prefix(16).enumerated().compactMap { index, color in
             color.contrast(background) < 4.5 ? "ANSI \(index): \(String(format: "%.2f", color.contrast(background))):1 (original retained)" : nil
         }
+    }
+
+    /// Estimate Ghostty's default faint opacity; personal settings and cell backgrounds can differ.
+    public var dimWarnings: [String] {
+        ([("Default", foreground)] + indexed.prefix(16).enumerated().map { ("ANSI \($0.offset)", $0.element) })
+            .compactMap { name, color in
+                let ratio = color.mixed(with: background, amount: 1 - 128.0 / 255).contrast(background)
+                return ratio < 4.5
+                    ? String(format: "Dim %@: %.2f:1 at 50%% opacity (estimate; original retained)", name, ratio)
+                    : nil
+            }
     }
 }
 

@@ -27,12 +27,17 @@ struct WorkPaletteTests {
             #expect(ratio(rgb(tone.text(in: palette), environment), rgb(tone.fill(in: palette), environment)) >= 4.5)
         }
         let terminalBase = rgb(definition.terminal.background.color, environment)
+        let workSelection = rgb(palette.workSelectedFill, environment)
+        for ink in [palette.workSelectedText, palette.workSelectedSecondaryText] {
+            #expect(ratio(rgb(ink, environment), workSelection) >= 4.5)
+        }
         for fill in [palette.terminalHover, palette.terminalSelection, palette.terminalFailure] {
             #expect(ratio(rgb(definition.terminal.foreground.color, environment), composite(rgb(fill, environment), over: terminalBase)) >= 4.5)
         }
         #expect(definition.terminal.readabilityErrors.isEmpty)
         for surface in surfaces {
             let base = rgb(surface, environment)
+            #expect(ratio(workSelection, base) >= 3)
             let selected = composite(rgb(palette.selectionFill, environment), over: base)
             for background in [base, selected] {
                 for ink in text {
@@ -73,21 +78,43 @@ struct WorkPaletteTests {
         }
     }
 
-    @Test("Keyboard focus stays visible around a selected failed row", arguments: [false, true])
+    @Test("Status wording, selection and focus survive every appearance", arguments: ThemeFixture.allCases)
     @MainActor
-    func focusWithSelectedFailure(focused: Bool) throws {
-        let view = Text("Error")
-            .foregroundStyle(LoopflowPalette.light.failure)
-            .workSelection(true)
-            .keyboardFocusRing(focused)
-        let rings = try view.inspect().findAll(ViewType.Shape.self).filter {
-            (try? $0.opacity()) != nil
+    func statusWithSelectionAndFocus(theme: ThemeFixture) throws {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appearance = AppearanceStore(defaults: defaults, systemDark: false)
+        try theme.preview(in: appearance)
+        let palette = appearance.effectiveTheme.palette
+        #expect(palette.selectionEdge != palette.failure)
+        #expect(palette.keyboardFocus != palette.selectionEdge)
+        #expect(palette.keyboardFocus != palette.failure)
+        for state in [ProgramStatusState.working, .blocked, .error, .done, .idle] {
+            let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil,
+                                             app: nil, title: nil, msg: nil)
+            for selected in [false, true] {
+                for focused in [false, true] {
+                    let view = ProgramStatusLabel(status: ProgramStatusRecords(seen: true, records: [report]))
+                        .workSelection(selected)
+                        .keyboardFocusRing(focused)
+                        .modifier(AppAppearance(appearance: appearance))
+                    let inspected = try view.inspect()
+                    #expect(try inspected.environment(\.palette).keyboardFocus == palette.keyboardFocus)
+                    #expect(try inspected.find(text: state.rawValue.capitalized).string() == state.rawValue.capitalized)
+                    let shapes = inspected.findAll(ViewType.Shape.self)
+                    let ring = try #require(shapes.first { (try? $0.opacity()) != nil })
+                    #expect(try ring.opacity() == (focused ? 1 : 0))
+                    #expect(try ring.strokeStyle().lineWidth == 2)
+                    #expect(!ring.allowsHitTesting())
+                    let edges = shapes.filter { (try? $0.fixedWidth()) == 2 }
+                    #expect(edges.count == (selected ? 1 : 0))
+                }
+            }
         }
-        let ring = try #require(rings.first)
-        #expect(try ring.opacity() == (focused ? 1 : 0))
-        #expect(try ring.strokeStyle().lineWidth == 2)
-        #expect(try ring.allowsHitTesting() == false)
-        #expect(try view.inspect().find(text: "Error").string() == "Error")
+        let unknown = ProgramStatusLabel(status: ProgramStatusRecords(seen: false, records: []))
+            .modifier(AppAppearance(appearance: appearance))
+        #expect(try unknown.inspect().findAll(ViewType.Text.self).isEmpty)
     }
 
     private func rgb(_ color: Color, _ environment: EnvironmentValues) -> [Double] {

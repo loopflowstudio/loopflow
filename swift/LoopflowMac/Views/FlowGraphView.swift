@@ -373,7 +373,7 @@ struct FlowDiagram: View {
                 // Loop 1 arrives at the top-left, Loop 2 at the bottom-left.
                 for (level, span) in row.loops.enumerated() {
                     guard let from = frames[span.from], let to = frames[span.to] else { continue }
-                    let color = FlowPalette.loop(level, in: palette)
+                    let color = palette.working
                     let above = FlowLoopGeometry.returnsAbove(level)
                     let lane = above ? nodeTop - FlowLoopGeometry.laneOffset(level) : nodeBottom + FlowLoopGeometry.laneOffset(level)
                     let edge = above ? nodeTop : nodeBottom
@@ -413,7 +413,7 @@ struct FlowDiagram: View {
         let top = nodeTop - FlowLoopGeometry.above(level)
         let bottom = nodeBottom + FlowLoopGeometry.below(level)
         let width = right - left + pad * 2
-        let color = FlowPalette.loop(level, in: palette)
+        let color = palette.working
         let title = span.evidence.map { "Loop \(span.number) · \($0.traversals) \($0.traversals == 1 ? "return" : "returns")" }
             ?? "Loop \(span.number)"
         let shape = RoundedRectangle(cornerRadius: 12)
@@ -606,11 +606,6 @@ private extension String {
 }
 
 enum FlowPalette {
-    /// Loop tints alternate in authored order.
-    static func loop(_ level: Int, in palette: LoopflowPalette) -> Color {
-        level.isMultiple(of: 2) ? palette.working : palette.workingTone.text
-    }
-
     static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done

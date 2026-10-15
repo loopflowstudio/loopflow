@@ -32,3 +32,12 @@ panes and offer focus for actions. These accepted parent updates supersede the
 earlier draft holds recorded at `eb793c2b1:scratch/`; they do not expand LOO-488’s
 scope or authorize landing, installation or app restart. Native demo judgment
 remains separate from implementation authorization.
+
+Implementation follow-up, 2026-10-15: extend Ghostty's existing C getter for fixed
+RGB TerminalColor values; unresolved cell-relative values remain unavailable.
+Dim warnings estimate 50% opacity; personal settings and cell backgrounds can differ.
+
+Parent integration assumption, 2026-10-15: preserve Jack Heart’s Ink on Paper
+selection shape. Derive its burgundy/rose fill and primary/secondary text centrally
+so dark and imported appearances meet the accepted contrast thresholds. Exact
+colors remain demo judgment; fixed burgundy on dark surfaces did not meet 3:1.

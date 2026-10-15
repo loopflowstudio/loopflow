@@ -18,37 +18,27 @@ public struct ThemeTone: Sendable {
 /// The sole semantic mapping for application and native pane chrome.
 public struct LoopflowPalette: Sendable {
     public let isDark: Bool
-    private let backgroundRGB: ThemeRGB
-    public var background: Color { backgroundRGB.color }
-    private let surfaceRGB: ThemeRGB
-    public var surface: Color { surfaceRGB.color }
-    private let surfaceMutedRGB: ThemeRGB
-    public var surfaceMuted: Color { surfaceMutedRGB.color }
-    private let surfaceElementRGB: ThemeRGB
-    public var surfaceElement: Color { surfaceElementRGB.color }
-    private let borderRGB: ThemeRGB
-    public var border: Color { borderRGB.color }
-    private let borderStrongRGB: ThemeRGB
-    public var borderStrong: Color { borderStrongRGB.color }
-    private let borderActiveRGB: ThemeRGB
-    public var borderActive: Color { borderActiveRGB.color }
-    private let textRGB: ThemeRGB
-    public var text: Color { textRGB.color }
-    private let textSecondaryRGB: ThemeRGB
-    public var textSecondary: Color { textSecondaryRGB.color }
-    private let textTertiaryRGB: ThemeRGB
-    public var textTertiary: Color { textTertiaryRGB.color }
-    private let accentRGB: ThemeRGB
-    public var accent: Color { accentRGB.color }
-    private let accentHoverRGB: ThemeRGB
-    public var accentHover: Color { accentHoverRGB.color }
+    public let background: Color
+    public let surface: Color
+    public let surfaceMuted: Color
+    public let surfaceElement: Color
+    public let border: Color
+    public let borderStrong: Color
+    public let borderActive: Color
+    public let text: Color
+    public let textSecondary: Color
+    public let textTertiary: Color
+    public let accent: Color
+    public let accentHover: Color
     public let workingTone: ThemeTone
     public let waitingTone: ThemeTone
     public let failureTone: ThemeTone
     public let successTone: ThemeTone
     public let stoppedTone: ThemeTone
-    private let emphasisRGB: ThemeRGB
-    public var emphasisInk: Color { emphasisRGB.color }
+    public let emphasisInk: Color
+    public let workSelectedFill: Color
+    public let workSelectedText: Color
+    public let workSelectedSecondaryText: Color
     public var working: Color { workingTone.ink }
     public var waiting: Color { waitingTone.ink }
     public var failure: Color { failureTone.ink }
@@ -79,18 +69,18 @@ public struct LoopflowPalette: Sendable {
         accentHover: ThemeRGB,
         dark: Bool, terminalForeground: ThemeRGB? = nil
     ) {
-        backgroundRGB = background
-        surfaceRGB = surface
-        surfaceMutedRGB = surfaceMuted
-        surfaceElementRGB = surfaceElement
-        borderRGB = border
-        borderStrongRGB = borderStrong
-        borderActiveRGB = borderActive
-        textRGB = text
-        textSecondaryRGB = textSecondary
-        textTertiaryRGB = textTertiary
-        accentRGB = accent
-        accentHoverRGB = accentHover
+        self.background = background.color
+        self.surface = surface.color
+        self.surfaceMuted = surfaceMuted.color
+        self.surfaceElement = surfaceElement.color
+        self.border = border.color
+        self.borderStrong = borderStrong.color
+        self.borderActive = borderActive.color
+        self.text = text.color
+        self.textSecondary = textSecondary.color
+        self.textTertiary = textTertiary.color
+        self.accent = accent.color
+        self.accentHover = accentHover.color
 
         isDark = dark
         let surfaces = [background, surface, surfaceMuted, surfaceElement]
@@ -110,7 +100,16 @@ public struct LoopflowPalette: Sendable {
         failureTone = tone(0xBC493F)
         successTone = tone(0x438356)
         stoppedTone = tone(textSecondary.hex)
-        emphasisRGB = ThemeRGB(dark ? 0xEDB8BF : 0x722F37).readable(on: surfaces, dark: dark)
+        emphasisInk = ThemeRGB(dark ? 0xEDB8BF : 0x722F37).readable(on: surfaces, dark: dark).color
+        // Ink on Paper marks Work destinations; file selection keeps its neutral edge.
+        let selectedFill = ThemeRGB(0x7A333D).readable(on: surfaces, dark: dark, ratio: 3)
+        let selectedDark = selectedFill.prefersLightText
+        let selectedText = ThemeRGB(selectedDark ? 0xFFFAF3 : 0x2A2624)
+            .readable(on: [selectedFill], dark: selectedDark)
+        workSelectedFill = selectedFill.color
+        workSelectedText = selectedText.color
+        workSelectedSecondaryText = selectedText.mixed(with: selectedFill, amount: 0.15)
+            .readable(on: [selectedFill], dark: selectedDark).color
         func overlay(_ ink: ThemeRGB, opacity: Double) -> Color {
             let foreground = terminalForeground ?? text
             for step in stride(from: Int(opacity * 1000), through: 0, by: -1) {
@@ -127,7 +126,7 @@ public struct LoopflowPalette: Sendable {
     }
 
     public static func derived(background: ThemeRGB, foreground: ThemeRGB) -> Self {
-        let dark = background.contrast(ThemeRGB(0xFFFFFF)) > background.contrast(ThemeRGB(0))
+        let dark = background.prefersLightText
         let end = ThemeRGB(dark ? 0 : 0xFFFFFF)
         let surfaces = [background, background.mixed(with: end, amount: 0.18),
                         background.mixed(with: end, amount: 0.09), background.mixed(with: end, amount: 0.27)]

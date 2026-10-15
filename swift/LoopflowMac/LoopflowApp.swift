@@ -60,7 +60,7 @@ struct LoopflowApp: App {
                     }
                 }
             }
-                        .modifier(AppAppearance(appearance: appearance))
+            .modifier(AppAppearance(appearance: appearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -132,7 +132,7 @@ struct LoopflowApp: App {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
                 requestRepository(path, TaskLink(issue: id, repo: path).url)
             })
-                                .modifier(AppAppearance(appearance: appearance))
+                .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
@@ -152,7 +152,7 @@ struct LoopflowApp: App {
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
-                                .modifier(AppAppearance(appearance: appearance))
+                .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)

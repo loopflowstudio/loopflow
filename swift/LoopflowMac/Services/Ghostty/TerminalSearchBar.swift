@@ -57,7 +57,6 @@ final class TerminalSearchBar: NSView, NSSearchFieldDelegate {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        applyTheme(GhosttyManager.shared.theme)
     }
 
     func applyTheme(_ theme: ThemeDefinition) {

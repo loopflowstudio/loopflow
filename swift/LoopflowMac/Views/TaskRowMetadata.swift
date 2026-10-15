@@ -47,7 +47,7 @@ struct TaskRowMetadata: View {
             }
         }
         .font(Typography.body(10))
-        .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
+        .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
         .lineLimit(1)
     }
 

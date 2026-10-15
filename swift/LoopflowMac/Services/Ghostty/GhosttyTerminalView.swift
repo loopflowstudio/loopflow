@@ -459,10 +459,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = theme.terminal.background.nsColor.cgColor
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         autoresizingMask = [.width, .height]
         registerForDraggedTypes(ghosttyDropTypes)
+        applyTheme(theme)
     }
 
     private func applyTheme(_ theme: ThemeDefinition) {

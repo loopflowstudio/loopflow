@@ -28,8 +28,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf3.xcframework.zip",
-            checksum: "dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f"
+            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf3-theme-readback1.xcframework.zip",
+            checksum: "21494e4baaf632185aa7c2f4b99684d6dda0e1230da1dd89bd4f1d248aec06ca"
         ),
         .executableTarget(
             name: "LoopflowMac",

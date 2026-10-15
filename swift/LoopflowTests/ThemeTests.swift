@@ -1,9 +1,6 @@
 #if os(macOS)
-import AppKit
 import Foundation
-import SwiftUI
 import Testing
-import ViewInspector
 #if canImport(GhosttyKit)
 import GhosttyKit
 #endif
@@ -113,10 +110,33 @@ struct ThemeTests {
         try #require(GhosttyManager.libraryReady)
         let baseline = try #require(ghostty_config_new())
         defer { ghostty_config_free(baseline) }
-        try GhosttyThemeConfiguration.load("background=112233\nforeground=445566\nfont-size=19\npalette=8=123456\ntheme=light:/unread-light,dark:/unread-dark\n", into: baseline)
+        try GhosttyThemeConfiguration.load("""
+        background=112233
+        foreground=445566
+        font-size=19
+        \((0..<256).map { "palette=\($0)=123456" }.joined(separator: "\n"))
+        cursor-color=123456
+        cursor-text=654321
+        selection-background=123456
+        selection-foreground=654321
+        search-background=123456
+        search-foreground=654321
+        search-selected-background=123456
+        search-selected-foreground=654321
+        theme=light:/unread-light,dark:/unread-dark
+
+        """, into: baseline)
         try GhosttyThemeConfiguration.load("theme=\n", into: baseline)
         ghostty_config_finalize(baseline)
-        for theme in ThemeDefinition.builtins + [try imported().definition] {
+        let darkImport = try imported("""
+        background=171924
+        foreground=CAD2EF
+        cursor-color=AABBCC
+        cursor-text=222222
+        selection-background=304060
+        selection-foreground=FFFFFF
+        """).definition
+        for theme in ThemeDefinition.builtins + [darkImport, try imported("background=FFF4DF\nforeground=34291F").definition] {
             let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
             defer { ghostty_config_free(candidate) }
             try GhosttyThemeConfiguration.validate(theme, config: candidate)
@@ -124,8 +144,68 @@ struct ThemeTests {
             #expect(ghostty_config_get(candidate, &size, "font-size", 9))
             #expect(size == 19)
             #expect(ghostty_config_diagnostics_count(candidate) == 0)
+
+            let expected = ["cursor-color": theme.terminal.cursor, "cursor-text": theme.terminal.cursorText,
+                            "selection-background": theme.terminal.selectionBackground,
+                            "selection-foreground": theme.terminal.selectionForeground,
+                            "search-background": theme.terminal.selectionBackground,
+                            "search-foreground": theme.terminal.selectionForeground,
+                            "search-selected-background": theme.terminal.selectionBackground,
+                            "search-selected-foreground": theme.terminal.selectionForeground]
+            for (key, expectedColor) in expected {
+                var color = ghostty_config_color_s()
+                #expect(key.withCString { ghostty_config_get(candidate, &color, $0, UInt(key.utf8.count)) })
+                #expect(ThemeRGB(UInt32(color.r) << 16 | UInt32(color.g) << 8 | UInt32(color.b)) == expectedColor)
+            }
         }
     }
+
+    @Test(arguments: [
+        "background", "foreground", "cursor-color", "cursor-text",
+        "selection-background", "selection-foreground", "search-background", "search-foreground",
+        "search-selected-background", "search-selected-foreground", "palette",
+    ])
+    func validationRejectsEachConflictingCompiledColor(key: String) throws {
+        try #require(GhosttyManager.libraryReady)
+        let baseline = try #require(ghostty_config_new())
+        defer { ghostty_config_free(baseline) }
+        let candidate = try GhosttyThemeConfiguration.candidate(.dark, baseline: baseline)
+        defer { ghostty_config_free(candidate) }
+        let value = key == "palette" ? "255=123456" : "123456"
+        try GhosttyThemeConfiguration.load("\(key)=\(value)\n", into: candidate)
+        ghostty_config_finalize(candidate)
+        #expect(throws: ThemeError.self) { try GhosttyThemeConfiguration.validate(.dark, config: candidate) }
+    }
+
+    @Test(arguments: ["cell-foreground", "cell-background", ""])
+    func unresolvedCompiledColorCannotPassValidation(value: String) throws {
+        try #require(GhosttyManager.libraryReady)
+        let baseline = try #require(ghostty_config_new())
+        defer { ghostty_config_free(baseline) }
+        let candidate = try GhosttyThemeConfiguration.candidate(.dark, baseline: baseline)
+        defer { ghostty_config_free(candidate) }
+        try GhosttyThemeConfiguration.load("cursor-color=\(value)\n", into: candidate)
+        ghostty_config_finalize(candidate)
+        #expect(throws: ThemeError.self) { try GhosttyThemeConfiguration.validate(.dark, config: candidate) }
+    }
     #endif
+
+    @Test func dimTextWarnsWithoutChangingOrRejectingTheTheme() throws {
+        let theme = try imported("background=FFFFFF\nforeground=000000\npalette=1=000000")
+        #expect(theme.terminal.readabilityErrors.isEmpty)
+        #expect(!theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 1:") })
+        #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim Default:") })
+        #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim ANSI 1:") })
+        #expect(theme.terminal.foreground.hex == 0)
+        #expect(theme.terminal.indexed[1].hex == 0)
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: source) }
+        try Data("background=FFFFFF\nforeground=000000".utf8).write(to: source)
+        let store = AppearanceStore(defaults: defaults(), systemDark: false)
+        store.beginPreview(); store.importTheme(source); store.apply()
+        #expect(store.notice == nil)
+        #expect(store.effectiveTheme.terminal.foreground.hex == 0)
+        #expect(store.imports.count == 1)
+    }
 }
 #endif

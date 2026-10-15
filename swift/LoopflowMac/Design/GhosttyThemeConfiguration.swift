@@ -8,28 +8,31 @@ extension ThemeRGB {
     }
 }
 
+private extension TerminalPalette {
+    // Generation and readback must cover the same managed colors.
+    var ghosttyColors: [(String, ThemeRGB)] {
+        [
+            ("background", background), ("foreground", foreground),
+            ("cursor-color", cursor), ("cursor-text", cursorText),
+            ("selection-background", selectionBackground), ("selection-foreground", selectionForeground),
+            ("search-background", selectionBackground), ("search-foreground", selectionForeground),
+            ("search-selected-background", selectionBackground), ("search-selected-foreground", selectionForeground),
+        ]
+    }
+}
+
 extension ThemeDefinition {
     /// Only normalized values enter Ghostty, never imported commands or paths.
     var ghosttyOverlay: String {
-        let t = terminal
         return """
         theme =
-        background = \(t.background.css)
-        foreground = \(t.foreground.css)
-        cursor-color = \(t.cursor.css)
-        cursor-text = \(t.cursorText.css)
-        selection-background = \(t.selectionBackground.css)
-        selection-foreground = \(t.selectionForeground.css)
-        search-background = \(t.selectionBackground.css)
-        search-foreground = \(t.selectionForeground.css)
-        search-selected-background = \(t.selectionBackground.css)
-        search-selected-foreground = \(t.selectionForeground.css)
+        \(terminal.ghosttyColors.map { "\($0.0) = \($0.1.css)" }.joined(separator: "\n"))
         background-opacity = 1
         background-image =
         cursor-opacity = 1
         bold-color =
         window-colorspace = srgb
-        \(t.indexed.enumerated().map { "palette = \($0.offset)=\($0.element.css)" }.joined(separator: "\n"))
+        \(terminal.indexed.enumerated().map { "palette = \($0.offset)=\($0.element.css)" }.joined(separator: "\n"))
 
         """
     }
@@ -67,7 +70,7 @@ enum GhosttyThemeConfiguration {
     }
 
     static func validate(_ theme: ThemeDefinition, config: ghostty_config_t) throws {
-        for (key, expected) in [("background", theme.terminal.background), ("foreground", theme.terminal.foreground)] {
+        for (key, expected) in theme.terminal.ghosttyColors {
             var color = ghostty_config_color_s()
             let found = key.withCString { ghostty_config_get(config, &color, $0, UInt(key.utf8.count)) }
             guard found, ThemeRGB(UInt32(color.r) << 16 | UInt32(color.g) << 8 | UInt32(color.b)) == expected else {

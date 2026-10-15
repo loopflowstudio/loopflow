@@ -62,7 +62,8 @@ or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Selection uses a neutral fill and edge; keyboard focus has a separate outline.
+Selected Work uses a burgundy/rose fill with contrasting text, mirrored in Needs you.
+File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
 Blue means reported work, amber means supported Waiting/blocked, red means failure.
 Choose **Appearance → Choose Theme…** to preview the whole workspace. **Apply**
@@ -77,9 +78,11 @@ Use six-digit RGB for background, foreground, cursor and selection, and
 The preview lists missing defaults, repeated entries and omitted non-color
 settings. Fonts, commands, keybindings, includes and theme references are never
 imported. Application status colors derive independently from terminal ANSI.
-Unreadable default/selection text blocks Apply; ANSI shortfalls are reported with
-the original colors retained. Truecolor output and custom prompts keep their own
-colors. Personal non-color Ghostty settings still load at startup; Loopflow owns
+Unreadable default/selection/cursor text blocks Apply. ANSI shortfalls and dim-text
+estimates at Ghostty’s default 50% opacity are reported with original colors retained.
+Personal faint-opacity settings and cell backgrounds can change dim contrast.
+Truecolor output and custom prompts keep their own colors.
+Personal non-color Ghostty settings still load at startup; Loopflow owns
 terminal appearance. Imported files can move or disappear after Apply.
 
 Choose **Background progress** in the repository toolbar to enable minute

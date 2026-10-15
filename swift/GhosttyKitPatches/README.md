@@ -33,6 +33,27 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## Theme readback
+
+`0005-terminal-color-readback.patch` extends `ghostty_config_get` to read RGB
+cursor, selection and search colors into `ghostty_config_color_s`, including
+optional colors. Unset and cell-relative colors return false without writing:
+they cannot resolve to fixed RGB without a terminal cell. No union layout or new
+C type crosses the API. Plain colors and indexed palettes keep their existing API.
+
+The build includes `c_get:` tests for all eight keys and unresolved values.
+Desktop validates these compiled colors alongside background, foreground and all
+256 indexed colors before publishing appearance. Headless theme tests preserve
+personal font size, override conflicting colors/conditional theme selectors, and
+reject changes to every managed color key and unresolved cursor colors.
+
+`Package.swift` selects `GhosttyKit-a60e9e2-lf3-theme-readback1.xcframework.zip`.
+The October 15 build passed the patch tests, produced arm64 and x86_64 libraries,
+and passed the headless Desktop build and eight theme tests. The public download
+matches the tested archive; SwiftPM resolved the pinned URL and checksum. Native
+visual/input judgment remains separate. The artifact has its own name because `lf4` was already
+published by separate work; this patch extends this checkout's lf3 patch set.
+
 ## Bounded text
 
 ```sh
@@ -54,8 +75,7 @@ an invalidated command-block selection no longer releases its tracked pin:
 selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
 retain their existing unbounded API and viewport metadata.
 
-`Package.swift` selects the published `GhosttyKit-a60e9e2-lf3.xcframework.zip`.
-Its public download matches SwiftPM checksum
+The earlier `GhosttyKit-a60e9e2-lf3.xcframework.zip` public download matched checksum
 `dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
 The October 9 macOS build passed 270 patch tests (four skipped) and exported the
 bounded reader for arm64 and x86_64. Reset now releases command-block selection

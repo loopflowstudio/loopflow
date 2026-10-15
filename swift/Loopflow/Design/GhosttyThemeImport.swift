@@ -70,8 +70,7 @@ public enum GhosttyThemeImport {
         guard let background = colors["background"], let foreground = colors["foreground"] else {
             throw ThemeError("Theme requires background and foreground RGB colors.")
         }
-        let dark = background.contrast(ThemeRGB(0xFFFFFF)) > background.contrast(ThemeRGB(0))
-        var terminal = TerminalPalette.standard(dark: dark)
+        var terminal = TerminalPalette.standard(dark: background.prefersLightText)
         terminal.background = background; terminal.foreground = foreground
         terminal.cursor = colors["cursor-color"] ?? foreground
         terminal.cursorText = colors["cursor-text"] ?? background

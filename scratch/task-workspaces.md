@@ -16,6 +16,9 @@ Jack: “there needs to be one selection state”; “two distinct levels of hie
 ## Accepted direction
 
 - One active Work selection. Remembered Wave scope never paints another selection.
+- Jack requested trying a thin top selection rule on both header targets and Task
+  rows. The prototype applies it to repo, Wave and Task selection consistently;
+  this treatment remains a visual experiment pending review.
 - Search removes nonmatching Waves; Wave-name matches retain their Tasks. Search
   does not switch the active Work. Clearing it restores the navigation view.
 - Repository entry shows Needs you and a single Wave list. Clicking a Wave opens

@@ -1,11 +1,15 @@
 # Palette sources
 
-Bundled JSON is the complete Loopflow theme source of truth. These source
-Ghostty palettes were converted once with `GhosttyThemeMapping`; views never
-fill missing roles. Original background/foreground/ANSI values are retained.
+Bundled JSON is the complete Loopflow theme source of truth. Companion app palettes were
+curated from these terminal sources with independently chosen action accents and
+quiet text. Views never fill missing roles. Original companion terminal
+background/foreground/ANSI values are retained.
 
-Loopflow Light preserves the original cream design. Loopflow Dark is an authored
-warm-charcoal variant with neutral selection. Neither uses the Ghostty import mapping.
+Loopflow Light preserves the original cream design. Loopflow Dark restores slate
+surfaces with warm bronze replacing pink, keeping burgundy buttons. Linen and
+Hearth are authored quiet light and charcoal alternatives. All ship as complete
+records, independent of runtime import conversion. Frappe/Macchiato sources below
+are retained only for migration of previously assigned presets.
 
 ## Alabaster
 

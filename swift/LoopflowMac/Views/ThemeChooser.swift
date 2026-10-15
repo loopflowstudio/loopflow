@@ -4,6 +4,7 @@ import Loopflow
 
 struct ThemeChooser: View {
     let appearance: AppearanceStore
+    @State private var editing = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
 
@@ -44,9 +45,12 @@ struct ThemeChooser: View {
                     .opacity(enabled ? 1 : 0.45)
                 }
             }
-            Text("Choose your \(appearance.editingSlot.menuTitle.lowercased()) theme · previewing \(appearance.selectedTheme.name)")
+            Text("\(ThemeDefinition.slotCount) themes · Choose your \(appearance.editingSlot.menuTitle.lowercased()) theme · previewing \(appearance.selectedTheme.name)")
                 .font(.caption).foregroundStyle(palette.textSecondary)
             ScrollView {
+                if editing {
+                    ThemeEditor(appearance: appearance)
+                } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
                     ForEach(appearance.themes) { theme in
                         Button { appearance.previewTheme(theme.id) } label: {
@@ -68,6 +72,7 @@ struct ThemeChooser: View {
                         .accessibilityIdentifier("appearance-theme-\(theme.id)")
                     }
                 }
+                }
                 HStack(spacing: 12) {
                     Text("Selected Work").foregroundStyle(palette.workSelectedText)
                         .padding(6).workDestinationSelection(true)
@@ -77,7 +82,7 @@ struct ThemeChooser: View {
                 }.padding(.vertical, 14)
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
-                    ForEach(appearance.assignmentErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
+                    ForEach(appearance.libraryErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
                     DisclosureGroup("Terminal contrast details") {
                         ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
                         ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
@@ -88,7 +93,15 @@ struct ThemeChooser: View {
             }
             if let notice = appearance.notice { Text(notice).foregroundStyle(palette.failure).textSelection(.enabled) }
             HStack {
-                Button("Import Ghostty Theme…", action: importTheme)
+                Button(editing ? "Done Editing" : "Edit") { editing.toggle() }
+                    .accessibilityIdentifier("appearance-edit-theme")
+                Button("Reset") { appearance.resetTheme() }
+                    .disabled(!appearance.canReset)
+                    .help("Restore \(appearance.originalTheme.name), including its name")
+                    .accessibilityIdentifier("appearance-reset-theme")
+                Button("Import…", action: importTheme)
+                    .help("Replace this slot with a Ghostty or complete Loopflow theme")
+                    .accessibilityIdentifier("appearance-import-theme")
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
                 Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
@@ -106,10 +119,11 @@ struct ThemeChooser: View {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Import"
+        panel.prompt = "Replace Theme"
+        let slotID = appearance.selectedID
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            appearance.importTheme(url)
+            appearance.importTheme(url, replacing: slotID)
         }
     }
 }

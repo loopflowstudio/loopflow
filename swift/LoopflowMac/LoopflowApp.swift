@@ -280,7 +280,7 @@ struct AppAppearance: ViewModifier {
             .environment(\.colorScheme, theme.colorScheme)
             .environment(\.palette, theme.palette)
             .environment(\.theme, theme)
-            .tint(theme.palette.emphasisInk)
+            .tint(theme.palette.accentInk)
             .foregroundStyle(theme.palette.text)
             .background(theme.palette.background)
             .safeAreaInset(edge: .top) {

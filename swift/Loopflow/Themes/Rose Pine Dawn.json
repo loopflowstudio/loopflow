@@ -3,42 +3,48 @@
   "name": "Rose Pine Dawn",
   "palette": {
     "accent": {
-      "hex": 4552832
+      "hex": 8874864
     },
     "accentHover": {
-      "hex": 4682623
+      "hex": 7822947
+    },
+    "accentInk": {
+      "hex": 7954276
+    },
+    "accentPressed": {
+      "hex": 6771029
     },
     "accentText": {
-      "hex": 16446701
+      "hex": 16447733
     },
     "background": {
       "hex": 16446701
     },
     "border": {
-      "hex": 13749453
+      "hex": 14276048
     },
     "borderActive": {
-      "hex": 4552832
+      "hex": 7954276
     },
     "borderStrong": {
-      "hex": 11973048
+      "hex": 12565431
     },
     "emphasisInk": {
-      "hex": 4552832
+      "hex": 5592410
     },
     "failureTone": {
       "fillRGB": {
-        "hex": 16050404
+        "hex": 15985381
       },
       "inkRGB": {
-        "hex": 10114408
+        "hex": 8673894
       }
     },
     "isDark": false,
     "selectionFill": {
       "opacity": 0.72,
       "rgb": {
-        "hex": 16512752
+        "hex": 16051943
       }
     },
     "shadow": {
@@ -46,79 +52,61 @@
     },
     "stoppedTone": {
       "fillRGB": {
-        "hex": 15722981
+        "hex": 15788772
       },
       "inkRGB": {
-        "hex": 7038843
+        "hex": 6710630
       }
     },
     "successTone": {
       "fillRGB": {
-        "hex": 15329765
+        "hex": 15592165
       },
       "inkRGB": {
-        "hex": 2648451
+        "hex": 4023412
       }
     },
     "surface": {
-      "hex": 16512752
+      "hex": 16051943
     },
     "surfaceElement": {
-      "hex": 16513010
+      "hex": 15262684
     },
     "surfaceMuted": {
-      "hex": 16446959
-    },
-    "terminalFailure": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 10114408
-      }
-    },
-    "terminalHover": {
-      "opacity": 0.03,
-      "rgb": {
-        "hex": 5722745
-      }
-    },
-    "terminalSelection": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 5722745
-      }
+      "hex": 15722978
     },
     "text": {
-      "hex": 5722745
+      "hex": 5592410
     },
     "textSecondary": {
-      "hex": 7499139
+      "hex": 6710631
     },
     "textTertiary": {
-      "hex": 7499139
+      "hex": 6776166
     },
     "waitingTone": {
       "fillRGB": {
-        "hex": 16379358
+        "hex": 16248547
       },
       "inkRGB": {
-        "hex": 9593376
+        "hex": 8151355
       }
     },
     "workSelectedFill": {
-      "hex": 9407628
+      "hex": 8749181
     },
     "workSelectedSecondaryText": {
-      "hex": 2565423
+      "hex": 1579033
     },
     "workSelectedText": {
-      "hex": 2565174
+      "hex": 1579034
     },
     "workingTone": {
       "fillRGB": {
-        "hex": 15592679
+        "hex": 15789543
       },
       "inkRGB": {
-        "hex": 4354683
+        "hex": 5204590
       }
     }
   },

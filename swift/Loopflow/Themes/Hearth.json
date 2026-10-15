@@ -1,188 +1,176 @@
 {
-  "id": "bundled:Catppuccin Macchiato",
-  "name": "Catppuccin Macchiato",
+  "id": "hearth",
+  "name": "Hearth",
   "palette": {
     "accent": {
-      "hex": 9088500
+      "hex": 8482159
     },
     "accentHover": {
-      "hex": 9614068
+      "hex": 7495778
+    },
+    "accentInk": {
+      "hex": 11047572
+    },
+    "accentPressed": {
+      "hex": 6443860
     },
     "accentText": {
-      "hex": 2369338
+      "hex": 16447733
     },
     "background": {
-      "hex": 2369338
+      "hex": 2170654
     },
     "border": {
-      "hex": 4738146
+      "hex": 4342080
     },
     "borderActive": {
-      "hex": 9088500
+      "hex": 11047572
     },
     "borderStrong": {
-      "hex": 6317438
+      "hex": 6184027
     },
     "emphasisInk": {
-      "hex": 9088500
+      "hex": 15000546
     },
     "failureTone": {
       "fillRGB": {
-        "hex": 3419969
+        "hex": 2827812
       },
       "inkRGB": {
-        "hex": 15566742
+        "hex": 12421763
       }
     },
     "isDark": true,
     "selectionFill": {
       "opacity": 0.72,
       "rgb": {
-        "hex": 1974320
+        "hex": 2565412
       }
     },
     "shadow": {
-      "hex": 4803940
+      "hex": 1710102
     },
     "stoppedTone": {
       "fillRGB": {
-        "hex": 3027269
+        "hex": 2894377
       },
       "inkRGB": {
-        "hex": 10265537
+        "hex": 12171447
       }
     },
     "successTone": {
       "fillRGB": {
-        "hex": 3028289
+        "hex": 2696997
       },
       "inkRGB": {
-        "hex": 10934933
+        "hex": 9542271
       }
     },
     "surface": {
-      "hex": 1974320
+      "hex": 2565412
     },
     "surfaceElement": {
-      "hex": 1711146
+      "hex": 3223342
     },
     "surfaceMuted": {
-      "hex": 2171701
-    },
-    "terminalFailure": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 15566742
-      }
-    },
-    "terminalHover": {
-      "opacity": 0.03,
-      "rgb": {
-        "hex": 13292533
-      }
-    },
-    "terminalSelection": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 13292533
-      }
+      "hex": 2828584
     },
     "text": {
-      "hex": 13292533
+      "hex": 15000546
     },
     "textSecondary": {
-      "hex": 10265537
+      "hex": 12171447
     },
     "textTertiary": {
-      "hex": 10265537
+      "hex": 10131864
     },
     "waitingTone": {
       "fillRGB": {
-        "hex": 3421506
+        "hex": 2894118
       },
       "inkRGB": {
-        "hex": 15651999
+        "hex": 12887946
       }
     },
     "workSelectedFill": {
-      "hex": 16047062
+      "hex": 8157304
     },
     "workSelectedSecondaryText": {
-      "hex": 4407889
+      "hex": 657930
     },
     "workSelectedText": {
-      "hex": 2369338
+      "hex": 657930
     },
     "workingTone": {
       "fillRGB": {
-        "hex": 2896457
+        "hex": 2631463
       },
       "inkRGB": {
-        "hex": 9088500
+        "hex": 9279653
       }
     }
   },
   "terminal": {
     "background": {
-      "hex": 2369338
+      "hex": 2170654
     },
     "cursor": {
-      "hex": 16047062
+      "hex": 15393497
     },
     "cursorText": {
-      "hex": 2369338
+      "hex": 2170654
     },
     "foreground": {
-      "hex": 13292533
+      "hex": 15393497
     },
     "indexed": [
       {
-        "hex": 4803940
+        "hex": 1710102
       },
       {
-        "hex": 15566742
+        "hex": 13923690
       },
       {
-        "hex": 10934933
+        "hex": 9149035
       },
       {
-        "hex": 15651999
+        "hex": 13935988
       },
       {
-        "hex": 9088500
+        "hex": 8097704
       },
       {
-        "hex": 16104934
+        "hex": 10910611
       },
       {
-        "hex": 9164234
+        "hex": 8368047
       },
       {
-        "hex": 12108000
+        "hex": 13156792
       },
       {
-        "hex": 5988472
+        "hex": 8353391
       },
       {
-        "hex": 15902642
+        "hex": 15243400
       },
       {
-        "hex": 12444592
+        "hex": 11254139
       },
       {
-        "hex": 16049089
+        "hex": 15254932
       },
       {
-        "hex": 11388407
+        "hex": 10203080
       },
       {
-        "hex": 16028634
+        "hex": 13015987
       },
       {
-        "hex": 10870486
+        "hex": 10473423
       },
       {
-        "hex": 10857931
+        "hex": 16118250
       },
       {
         "hex": 0
@@ -906,10 +894,10 @@
       }
     ],
     "selectionBackground": {
-      "hex": 16047062
+      "hex": 9733497
     },
     "selectionForeground": {
-      "hex": 2369338
+      "hex": 1512724
     }
   }
 }

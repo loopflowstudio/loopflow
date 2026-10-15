@@ -1,11 +1,11 @@
 import Foundation
 
-public struct ImportedTheme: Codable, Identifiable, Equatable, Sendable {
+public struct ThemeRecord: Codable, Identifiable, Equatable, Sendable {
     public let id: String
-    public let name: String
-    public let terminal: TerminalPalette
+    public var name: String
+    public var terminal: TerminalPalette
     public let diagnostics: [String]
-    public let palette: PaletteDefinition
+    public var palette: PaletteDefinition
     public init(id: String, name: String, terminal: TerminalPalette, diagnostics: [String], palette: PaletteDefinition) {
         self.id = id; self.name = name; self.terminal = terminal; self.diagnostics = diagnostics; self.palette = palette
     }
@@ -22,18 +22,27 @@ public struct ThemeError: LocalizedError, Sendable {
     public var errorDescription: String? { message }
 }
 
-public enum GhosttyThemeImport {
+public enum ThemeImport {
     public static let maximumBytes = 256 * 1024
 
-    public static func read(_ url: URL) throws -> ImportedTheme {
+    public static func read(_ url: URL) throws -> ThemeRecord {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
         let data = try file.read(upToCount: maximumBytes + 1) ?? Data()
         return try parse(data, name: url.deletingPathExtension().lastPathComponent)
     }
 
-    public static func parse(_ data: Data, name: String) throws -> ImportedTheme {
+    public static func parse(_ data: Data, name: String) throws -> ThemeRecord {
         guard data.count <= maximumBytes else { throw ThemeError("Theme exceeds 256 KiB.") }
+        if data.first(where: { ![9, 10, 13, 32].contains($0) }) == 123 {
+            let theme = try JSONDecoder().decode(ThemeDefinition.self, from: data)
+            guard theme.terminal.indexed.count == 256 else { throw ThemeError("Theme requires 256 indexed terminal colors.") }
+            guard !theme.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ThemeError("Theme name cannot be empty.")
+            }
+            return ThemeRecord(id: UUID().uuidString, name: theme.name, terminal: theme.terminal,
+                               diagnostics: ["Imported complete Loopflow theme."], palette: theme.palette.definition)
+        }
         guard let source = String(data: data, encoding: .utf8) else { throw ThemeError("Theme must be UTF-8 text.") }
         let keys = ["background", "foreground", "cursor-color", "cursor-text", "selection-background", "selection-foreground"]
         var colors: [String: ThemeRGB] = [:]
@@ -83,6 +92,6 @@ public enum GhosttyThemeImport {
         for (index, value) in indexed { terminal.indexed[index] = value }
         diagnostics.append("Supplied: \(colors.keys.sorted().joined(separator: ", ")); \(indexed.count) indexed colors.")
         diagnostics.append("Derived: \(keys.filter { colors[$0] == nil }.joined(separator: ", ")); \(256 - indexed.count) default indexed colors; application semantic roles.")
-        return ImportedTheme(id: UUID().uuidString, name: name, terminal: terminal, diagnostics: diagnostics, palette: GhosttyThemeMapping.palette(terminal))
+        return ThemeRecord(id: UUID().uuidString, name: name, terminal: terminal, diagnostics: diagnostics, palette: GhosttyThemeMapping.palette(terminal))
     }
 }

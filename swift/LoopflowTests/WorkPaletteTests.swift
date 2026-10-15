@@ -13,7 +13,7 @@ struct WorkPaletteTests {
         if let builtin = ThemeDefinition.builtins.first(where: { $0.id == theme }) { definition = builtin }
         else {
             let pair = theme.split(separator: "/")
-            definition = try GhosttyThemeImport.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).definition
+            definition = try ThemeImport.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).definition
         }
         let dark = definition.isDark
         let palette = definition.palette
@@ -21,18 +21,14 @@ struct WorkPaletteTests {
         environment.colorScheme = dark ? .dark : .light
         let surfaces = [palette.background, palette.surface, palette.surfaceMuted, palette.surfaceElement]
         let text = [palette.text, palette.textSecondary, palette.textTertiary, palette.linkInk,
-                    palette.linkHover, palette.actionInk, palette.emphasisInk, palette.working,
+                    palette.linkHover, palette.actionInk, palette.emphasisInk, palette.accentInk, palette.working,
                     palette.waiting, palette.failure, palette.success]
         for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
             #expect(ratio(rgb(tone.text(in: palette), environment), rgb(tone.fill(in: palette), environment)) >= 4.5)
         }
-        let terminalBase = rgb(definition.terminal.background.color, environment)
         let workSelection = rgb(palette.workSelectedFill, environment)
         for ink in [palette.workSelectedText, palette.workSelectedSecondaryText] {
             #expect(ratio(rgb(ink, environment), workSelection) >= 4.5)
-        }
-        for fill in [palette.terminalHover, palette.terminalSelection, palette.terminalFailure] {
-            #expect(ratio(rgb(definition.terminal.foreground.color, environment), composite(rgb(fill, environment), over: terminalBase)) >= 4.5)
         }
         #expect(definition.terminal.readabilityErrors.isEmpty)
         for surface in surfaces {

@@ -8,6 +8,12 @@
     "accentHover": {
       "hex": 6170160
     },
+    "accentInk": {
+      "hex": 7483191
+    },
+    "accentPressed": {
+      "hex": 6170160
+    },
     "accentText": {
       "hex": 16447733
     },
@@ -68,24 +74,6 @@
     },
     "surfaceMuted": {
       "hex": 15986407
-    },
-    "terminalFailure": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 11551803
-      }
-    },
-    "terminalHover": {
-      "opacity": 0.03,
-      "rgb": {
-        "hex": 2762276
-      }
-    },
-    "terminalSelection": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 2762276
-      }
     },
     "text": {
       "hex": 2762276

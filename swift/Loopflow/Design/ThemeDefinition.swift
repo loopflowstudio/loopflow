@@ -100,6 +100,7 @@ public struct ThemeDefinition: Codable, Identifiable, Sendable {
     public let terminal: TerminalPalette
     public var isDark: Bool { palette.isDark }
     public var colorScheme: ColorScheme { isDark ? .dark : .light }
+    public static let slotCount = 24
     public static let light = builtin("light")
     public static let dark = builtin("dark")
     public static let builtins: [Self] = {
@@ -114,14 +115,24 @@ public struct ThemeDefinition: Codable, Identifiable, Sendable {
                 guard theme.readabilityErrors.isEmpty else { throw ThemeError("\(theme.name): \(theme.readabilityErrors.joined(separator: "; "))") }
                 return theme
             }
-            precondition(!themes.isEmpty, "Bundled theme catalogue is empty")
+            precondition(themes.count == slotCount && Set(themes.map(\.id)).count == slotCount, "Bundled theme library requires 24 unique slots")
             return themes.sorted { first, second in
-                let order = ["light": 0, "dark": 1]
-                if order[first.id] != order[second.id] { return (order[first.id] ?? 2) < (order[second.id] ?? 2) }
+                let order = ["light": 0, "dark": 1, "neo-light": 2, "hearth": 3]
+                if order[first.id] != order[second.id] { return (order[first.id] ?? 4) < (order[second.id] ?? 4) }
                 return first.name < second.name
             }
         } catch { preconditionFailure("Invalid bundled theme: \(error)") }
     }()
+    /// One-time migration inputs; retired entries never enlarge the catalogue.
+    public static func retiredBuiltin(_ id: String) throws -> Self? {
+        let names = ["bundled:Catppuccin Frappe": "Catppuccin Frappe", "bundled:Catppuccin Macchiato": "Catppuccin Macchiato"]
+        guard let name = names[id] else { return nil }
+        guard let directory = Bundle.loopflowResources.url(forResource: "Themes", withExtension: nil) else {
+            throw ThemeError("Bundled migration palettes are missing.")
+        }
+        return try JSONDecoder().decode(Self.self, from: Data(contentsOf: directory.appendingPathComponent("Migrations/\(name).json")))
+    }
+
     private static func builtin(_ id: String) -> Self {
         guard let theme = builtins.first(where: { $0.id == id }) else { preconditionFailure("Missing bundled theme \(id)") }
         return theme

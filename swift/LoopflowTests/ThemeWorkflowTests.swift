@@ -10,6 +10,24 @@ import ViewInspector
 @Suite("Retained work through theme preview", .serialized)
 @MainActor
 struct ThemeWorkflowTests {
+    @Test func editorRenamesTheSelectedSlotAndResetRestoresItsName() throws {
+        let suite = "theme-editor-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let appearance = AppearanceStore(defaults: defaults, systemDark: false)
+        appearance.beginPreview()
+        let editor = ThemeEditor(appearance: appearance).modifier(AppAppearance(appearance: appearance))
+        let name = try editor.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-name").textField()
+        try name.setInput("My paper")
+        #expect(appearance.selectedTheme.name == "My paper")
+        #expect(appearance.themes.count == 24)
+        let chooser = ThemeChooser(appearance: appearance).modifier(AppAppearance(appearance: appearance))
+        try chooser.inspect().find(viewWithAccessibilityIdentifier: "appearance-reset-theme").button().tap()
+        #expect(appearance.selectedTheme.name == "Loopflow Light")
+        #expect(appearance.selectedTheme.palette.definition == ThemeDefinition.light.palette.definition)
+        #expect(!appearance.canReset)
+    }
+
     #if canImport(GhosttyKit)
     @Test("Navigation and retained work survive preview, Cancel and Apply", arguments: ThemeFixture.allCases)
     func themeChangesKeepHiddenWorkAndFutureNativeViewsCoherent(theme: ThemeFixture) async throws {
@@ -54,6 +72,7 @@ struct ThemeWorkflowTests {
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         await model.refresh()
         model.bindWorkspaces(registry, repository: "repo")
+        model.navigation.pinNavigator() // Exercise Hide/Show from the explicitly pinned state.
         let repoKey = try #require(registry.selectedWork)
         let repoWork = try #require(registry.retained(repoKey))
         model.select(.wave(id: wave.wave.id))
@@ -76,10 +95,6 @@ struct ThemeWorkflowTests {
         document.editor.setSelectedRange(NSRange(location: 3, length: 2))
         let layout = work.multiplexer.layout
         let store = work.sessionStore(repoPath: wave.wave.repo, query: query)
-        let content = SessionsContentView(model: model, repoPath: wave.wave.repo, workspaces: registry,
-                                          machineId: location.machineId, repository: "repo", query: query)
-            .modifier(AppAppearance(appearance: appearance))
-
         func exerciseNavigation() throws {
             let navigator = WorkNavigator(model: model, onOpenSession: { model.openSession($0, store: store) })
                 .modifier(AppAppearance(appearance: appearance))
@@ -87,7 +102,7 @@ struct ThemeWorkflowTests {
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
             #expect(!model.navigation.showsNavigator)
             #expect(registry.selectedWork == key)
-            try content.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
             #expect(model.navigation.showsNavigator)
             #expect(model.navigation.sidebarWidth == 460)
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-\(wave.wave.id)").button().tap()
@@ -135,7 +150,7 @@ struct ThemeWorkflowTests {
         appearance.cancel()
         #expect(work.multiplexer.focusedPaneId == focusBeforeCancel)
         #expect(appearance.effectiveTheme.id == appliedID)
-        #expect(appearance.imports.isEmpty)
+        #expect(appearance.overrides.isEmpty)
         try exerciseNavigation()
         model.select(.wave(id: wave.wave.id), besideFocused: true)
         let outerLayout = registry.layout
@@ -210,8 +225,8 @@ struct ThemeWorkflowTests {
         #expect(appearance.notice?.contains("Default text") == true)
         appearance.editSlot(.light)
         #expect(try view.inspect().find(button: "Apply").isDisabled())
-        let error = try #require(appearance.assignmentErrors.first)
-        #expect(error.hasPrefix("Dark theme:"))
+        let error = try #require(appearance.libraryErrors.first)
+        #expect(error.hasPrefix(source.lastPathComponent + ":"))
         #expect(try view.inspect().find(text: error).string() == error)
     }
 }

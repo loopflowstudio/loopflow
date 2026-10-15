@@ -3,42 +3,48 @@
   "name": "Gruvbox Light",
   "palette": {
     "accent": {
-      "hex": 4028025
+      "hex": 8613720
     },
     "accentHover": {
-      "hex": 4026225
+      "hex": 7561805
+    },
+    "accentInk": {
+      "hex": 7430220
+    },
+    "accentPressed": {
+      "hex": 6575171
     },
     "accentText": {
-      "hex": 16511431
+      "hex": 16447733
     },
     "background": {
       "hex": 16511431
     },
     "border": {
-      "hex": 13814184
+      "hex": 14340526
     },
     "borderActive": {
-      "hex": 4028025
+      "hex": 7430220
     },
     "borderStrong": {
-      "hex": 11972499
+      "hex": 12564378
     },
     "emphasisInk": {
-      "hex": 4028025
+      "hex": 3749944
     },
     "failureTone": {
       "fillRGB": {
-        "hex": 16245177
+        "hex": 16049340
       },
       "inkRGB": {
-        "hex": 12919580
+        "hex": 9908782
       }
     },
     "isDark": false,
     "selectionFill": {
       "opacity": 0.72,
       "rgb": {
-        "hex": 16577745
+        "hex": 16116674
       }
     },
     "shadow": {
@@ -46,79 +52,61 @@
     },
     "stoppedTone": {
       "fillRGB": {
-        "hex": 15787711
+        "hex": 15787967
       },
       "inkRGB": {
-        "hex": 7038554
+        "hex": 6447451
       }
     },
     "successTone": {
       "fillRGB": {
-        "hex": 15985337
+        "hex": 16050878
       },
       "inkRGB": {
-        "hex": 7171091
+        "hex": 6710578
       }
     },
     "surface": {
-      "hex": 16577745
+      "hex": 16116674
     },
     "surfaceElement": {
-      "hex": 16578006
+      "hex": 15327417
     },
     "surfaceMuted": {
-      "hex": 16511692
-    },
-    "terminalFailure": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 12919580
-      }
-    },
-    "terminalHover": {
-      "opacity": 0.03,
-      "rgb": {
-        "hex": 3946550
-      }
-    },
-    "terminalSelection": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 3946550
-      }
+      "hex": 15787710
     },
     "text": {
-      "hex": 3946550
+      "hex": 3749944
     },
     "textSecondary": {
-      "hex": 7433311
+      "hex": 6578519
     },
     "textTertiary": {
-      "hex": 7433311
+      "hex": 6775639
     },
     "waitingTone": {
       "fillRGB": {
-        "hex": 16313018
+        "hex": 16247743
       },
       "inkRGB": {
-        "hex": 9069077
+        "hex": 7757619
       }
     },
     "workSelectedFill": {
-      "hex": 3946550
+      "hex": 8748904
     },
     "workSelectedSecondaryText": {
-      "hex": 14603697
+      "hex": 1512723
     },
     "workSelectedText": {
-      "hex": 16511431
+      "hex": 1447189
     },
     "workingTone": {
       "fillRGB": {
-        "hex": 15526082
+        "hex": 15788482
       },
       "inkRGB": {
-        "hex": 3829618
+        "hex": 4810858
       }
     }
   },

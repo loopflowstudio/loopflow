@@ -19,7 +19,7 @@ secondary ink and underline on hover/focus in navigation and control chrome.
 | File and option selection | `selectionFill`, `selectionEdge` |
 | Keyboard focus | `keyboardFocus`; visible with selection |
 | Links | `linkInk`, `linkHover`; separate from status |
-| Actions | `actionInk`, `actionHover`; `emphasisInk` for deliberate emphasis |
+| Actions | `actionInk`, `actionHover`; `accentInk` for emphasized actions; `emphasisInk` for headings |
 | Program activity | `working`, `waiting`, `failure`, `success`; labels and shapes retain state meaning |
 
 Unknown and client-liveness-only observations have no activity label or dot. Shared
@@ -32,11 +32,13 @@ stopped edge alone is not a red error. Read failures remain inspectable.
 overlay after personal non-color configuration. Retained surfaces update in place.
 Each bundled/imported record supplies every palette role; missing roles fail decoding.
 `GhosttyThemeMapping` converts imports once: ANSI 4/3/1/2 supply accent/Working,
-Waiting, failure and success colors, and terminal selection supplies selected Work.
+Waiting, failure and success colors. Work selection is calibrated separately.
 Application text/surfaces adjust for readability without altering terminal ANSI.
-State selects the role; color never invents activity. Focus aliases emphasis,
+Ordinary app text is desaturated independently; terminal syntax is preserved.
+State selects the role; color never invents activity. Focus aliases accent ink,
 links/actions alias text roles, and status stroke/text alias status ink.
-Optional block fills diminish when they would hide default text.
+Solid controls have distinct base/hover/pressed fills. Ghostty owns terminal cell
+fills and contrast; the app owns gutter/header chrome.
 
 Built-ins and imported Desktop appearances have explicit roles. `WorkPaletteTests`
 resolves actual SwiftUI colors and composites selection fills over each surface: ordinary text

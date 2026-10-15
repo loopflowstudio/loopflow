@@ -168,6 +168,8 @@ public struct DarkButtonStyle: ButtonStyle {
     @Environment(\.isFocused) private var focused
     @Environment(\.palette) private var palette
 
+    @State private var hovering = false
+
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -178,8 +180,9 @@ public struct DarkButtonStyle: ButtonStyle {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(configuration.isPressed ? palette.accentHover : palette.accent)
+                    .fill(configuration.isPressed ? palette.accentPressed : (hovering ? palette.accentHover : palette.accent))
             )
+            .onHover { hovering = $0 }
             .keyboardFocusRing(focused)
     }
 }

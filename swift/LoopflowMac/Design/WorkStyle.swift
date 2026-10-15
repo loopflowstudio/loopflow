@@ -125,21 +125,24 @@ struct WorkOutlineButtonStyle: ButtonStyle {
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
+    @State private var hovering = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? (emphasized ? palette.emphasisInk : palette.actionInk) : palette.textTertiary)
+            .foregroundStyle(isEnabled ? (emphasized ? palette.accentInk : palette.actionInk) : palette.textTertiary)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? palette.actionHover : palette.surface)
+                    .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled && emphasized ? palette.emphasisInk : palette.borderStrong, lineWidth: 1)
+                    .strokeBorder(isEnabled && emphasized ? palette.accentInk : palette.borderStrong, lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { hovering = $0 }
             .workFocusRing()
     }
 }

@@ -3,42 +3,48 @@
   "name": "Catppuccin Mocha",
   "palette": {
     "accent": {
-      "hex": 9024762
+      "hex": 8155236
     },
     "accentHover": {
-      "hex": 9550073
+      "hex": 7168856
+    },
+    "accentInk": {
+      "hex": 10720388
+    },
+    "accentPressed": {
+      "hex": 6182220
     },
     "accentText": {
-      "hex": 1973806
+      "hex": 16447733
     },
     "background": {
       "hex": 1973806
     },
     "border": {
-      "hex": 4474457
+      "hex": 4013644
     },
     "borderActive": {
-      "hex": 9024762
+      "hex": 10720388
     },
     "borderStrong": {
-      "hex": 6119542
+      "hex": 5724260
     },
     "emphasisInk": {
-      "hex": 9024762
+      "hex": 14014171
     },
     "failureTone": {
       "fillRGB": {
-        "hex": 3090232
+        "hex": 2827830
       },
       "inkRGB": {
-        "hex": 15961000
+        "hex": 13866406
       }
     },
     "isDark": true,
     "selectionFill": {
       "opacity": 0.72,
       "rgb": {
-        "hex": 1644838
+        "hex": 2368563
       }
     },
     "shadow": {
@@ -46,79 +52,61 @@
     },
     "stoppedTone": {
       "fillRGB": {
-        "hex": 2631993
+        "hex": 2631735
       },
       "inkRGB": {
-        "hex": 10265277
+        "hex": 11382450
       }
     },
     "successTone": {
       "fillRGB": {
-        "hex": 2698807
+        "hex": 2698039
       },
       "inkRGB": {
-        "hex": 10937249
+        "hex": 12049588
       }
     },
     "surface": {
-      "hex": 1644838
+      "hex": 2368563
     },
     "surfaceElement": {
-      "hex": 1447458
+      "hex": 3026493
     },
     "surfaceMuted": {
-      "hex": 1776426
-    },
-    "terminalFailure": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 15961000
-      }
-    },
-    "terminalHover": {
-      "opacity": 0.03,
-      "rgb": {
-        "hex": 13489908
-      }
-    },
-    "terminalSelection": {
-      "opacity": 0.06,
-      "rgb": {
-        "hex": 13489908
-      }
+      "hex": 2631735
     },
     "text": {
-      "hex": 13489908
+      "hex": 14014171
     },
     "textSecondary": {
-      "hex": 10265277
+      "hex": 11382453
     },
     "textTertiary": {
-      "hex": 10265277
+      "hex": 9803422
     },
     "waitingTone": {
       "fillRGB": {
-        "hex": 3157560
+        "hex": 2960441
       },
       "inkRGB": {
-        "hex": 16376495
+        "hex": 15786692
       }
     },
     "workSelectedFill": {
-      "hex": 16113884
+      "hex": 7960703
     },
     "workSelectedSecondaryText": {
-      "hex": 4078408
+      "hex": 657931
     },
     "workSelectedText": {
-      "hex": 1973806
+      "hex": 657930
     },
     "workingTone": {
       "fillRGB": {
-        "hex": 2566718
+        "hex": 2566202
       },
       "inkRGB": {
-        "hex": 9024762
+        "hex": 10007260
       }
     }
   },

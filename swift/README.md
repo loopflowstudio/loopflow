@@ -72,33 +72,34 @@ Selected Work uses the theme’s selection fill and contrasting text, mirrored i
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Appearance → Choose Theme…** to preview the whole workspace. **Apply**
-saves the choice for every window and the next launch; **Cancel**, Escape or closing
-the chooser restores the applied theme. Quick **System**, **Light** and **Dark**
-choices select your assigned themes. Set **Light theme** and **Dark theme** to any
-of the 24 bundled palettes or an import; **System** follows macOS using those two
-assignments. Either slot can use any palette. The defaults are Loopflow's cream
-Light and slate Dark. Choosing a slot previews it; Apply returns to your selected
-mode. The bundled catalogue works offline and includes Catppuccin, Tokyo Night,
-Rosé Pine, Gruvbox, Nord, Dracula and others. Its source/license notices and marked
-cursor/selection readability adaptations ship with the app.
-Existing panes, clients, file drafts and layouts stay in place.
+Choose **Appearance → Choose Theme…** to preview the whole workspace. Set
+**Light theme** and **Dark theme** independently; **System** follows macOS using
+those assignments. Either assignment accepts any palette. Light/Dark mode dims
+the unused assignment; System enables both.
 
-**Import Ghostty Theme…** copies colors from a local UTF-8 file (up to 256 KiB).
-Use six-digit RGB for background, foreground, cursor and selection, and
-`palette = 0=#RRGGBB` through index 255. Background and foreground are required.
-The preview lists missing defaults, repeated entries and omitted non-color
+The library has **24 slots**. **Loopflow Light** keeps the original cream/burgundy
+design; **Loopflow Dark** keeps slate surfaces with warm bronze accents. **Linen**
+and **Hearth** offer quieter light and charcoal alternatives. Companion palettes
+include Catppuccin, Tokyo Night, Rosé Pine, Gruvbox, Nord and Dracula.
+
+Select a theme, then **Edit** its name and colors. **Import…** replaces that slot
+with a Ghostty RGB file or complete Loopflow theme JSON. **Reset** restores the
+slot's original bundled name and colors. **Apply** saves the whole library and
+assignments for every window and relaunch; **Cancel**, Escape or closing discards
+all preview changes. Existing panes, clients, file drafts and layouts stay intact.
+
+Imports read one local UTF-8 file, up to 256 KiB. Ghostty input requires six-digit
+RGB background/foreground; cursor, selection and `palette = 0=#RRGGBB` through
+255 are optional. Preview explains defaults, repeats and omitted non-color
 settings. Fonts, commands, keybindings, includes and theme references are never
-imported. One conversion fills every Loopflow palette role from the imported colors:
-ANSI blue supplies accent/Working, yellow Waiting, red failure and green success.
-Selection colors supply selected Work; app text and fills adjust for readability.
-State determines which role applies; terminal colors never imply activity.
-Unreadable default/selection/cursor text blocks Apply. ANSI shortfalls and dim-text
-estimates at Ghostty’s default 50% opacity are reported with original colors retained.
-Personal faint-opacity settings and cell backgrounds can change dim contrast.
-Truecolor output and custom prompts keep their own colors.
-Personal non-color Ghostty settings still load at startup; Loopflow owns
-terminal appearance. Imported files can move or disappear after Apply.
+followed. Complete Loopflow JSON must supply every app/terminal role. Imported
+files can move or disappear after Apply; the saved slot owns the colors.
+
+Unreadable app/default/selection/cursor text prevents Apply. ANSI and dim-text
+shortfalls warn while retaining source colors. Personal faint opacity, cell
+backgrounds and application truecolor affect terminal contrast. Personal non-color
+Ghostty settings still load at startup; Loopflow owns theme colors. Source and
+license notices ship offline with the catalogue.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks

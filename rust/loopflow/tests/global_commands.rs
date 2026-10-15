@@ -3166,6 +3166,8 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
                 "first-start",
                 "--name",
                 "selected-first-checkout",
+                "-a",
+                "codex",
             ],
         )
         .output()
@@ -3174,5 +3176,6 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
     let db = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let task = db.task_by_issue(id).unwrap().unwrap();
     assert_eq!(task.workspace_slug, "selected-first-checkout");
+    assert_eq!(task.agent.as_deref(), Some("codex"));
     assert!(task.worktree.unwrap().join(".git").exists());
 }

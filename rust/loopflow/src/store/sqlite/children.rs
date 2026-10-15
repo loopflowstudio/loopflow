@@ -573,8 +573,26 @@ impl SqliteStore {
     }
 
     pub fn insert_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        insert_task_pr(&conn, pr)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(previous) = active_task_pr_on(&tx, &pr.task_id)? {
+            if previous.is_settled() && pr.sequence > previous.sequence {
+                tx.execute(
+                    "UPDATE task_prs SET historical=1 WHERE id=?1",
+                    [previous.id.as_str()],
+                )?;
+                tx.execute(
+                    "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+                    [pr.task_id.as_str()],
+                )?;
+                if super::durable::task_state_in(&tx, &pr.task_id)? == TaskState::Done {
+                    super::task_state_delivery::queue_in(&tx, &pr.task_id, "unstarted")?;
+                }
+            }
+        }
+        insert_task_pr(&tx, pr)?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {

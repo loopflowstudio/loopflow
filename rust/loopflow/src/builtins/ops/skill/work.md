@@ -12,7 +12,7 @@ the procedure. Reading this skill creates nothing and starts no work.
 
 - **Wave**: a durable objective, memory and area of responsibility.
 - **Project**: a Wave's plan, including Tasks and an optional Workflow.
-- **Task**: one intended outcome, its checkout, conversations and zero or one PR.
+- **Task**: one intended outcome, its checkout, conversations and a current PR and delivery history.
 - **Workflow**: a Task's selected graph of review nodes and Flow edges.
 - **Flow**: one execution of authored steps, with or without a Task.
 - **Session**: a conversation. **Process**: one actual lf process.
@@ -54,7 +54,8 @@ clients retain their own interaction and workflow choices.
 
 Use the selected delivery skill for publishing, reviewer handoff or landing.
 Publication, merge and Task completion are distinct. Keep additional accepted
-outcomes in separate Tasks, with links; a Task owns at most one PR. No Task is
+outcomes in separate Tasks when useful, with links. Continued publication in the
+same Task selects a new current PR and preserves earlier delivery history. No Task is
 required for ordinary PR delivery.
 
 Read the supplied brief, accepted design and relevant Wave memory. Keep working

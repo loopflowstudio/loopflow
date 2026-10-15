@@ -75,7 +75,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         }
         Some(PrCommand::Submit {
             strict,
-            create_pr,
+            create_pr: _,
             worktree,
             message,
             title,
@@ -84,7 +84,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             &LandOptions {
                 strict: *strict,
                 local: false,
-                create_pr: *create_pr,
                 wait_and_fix: false,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
@@ -114,7 +113,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             &LandOptions {
                 strict: *strict,
                 local: *local,
-                create_pr: true,
                 wait_and_fix,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
@@ -610,7 +608,20 @@ pub(crate) fn land_repo(
     let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
     if !options.local {
         if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
-            if pr.phase() == crate::work::task::PrPhase::Merged {
+            let unchanged = pr.phase() == crate::work::task::PrPhase::Merged
+                && crate::git::git_stdout(
+                    &checkout,
+                    &["status", "--porcelain", "--", ".", ":(exclude)scratch"],
+                )?
+                .trim()
+                .is_empty()
+                && (pr.head_sha() == Some(crate::git::rev_parse(&checkout, "HEAD")?.as_str())
+                    || crate::ops::landed_at(
+                        &checkout,
+                        &crate::git::integration_base(&checkout)?,
+                        "HEAD",
+                    )?);
+            if unchanged {
                 let next = match state {
                     crate::durable::TaskState::Done => {
                         format!("Task {} is complete.", task.identifier)

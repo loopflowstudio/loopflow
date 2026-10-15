@@ -544,7 +544,7 @@ fn conflict_detail(conflicts: Option<Vec<PathBuf>>) -> String {
 }
 
 /// True when merging the base into `rev` would add nothing the base lacks.
-fn landed_at(repo: &Path, base_ref: &str, rev: &str) -> OpsResult<bool> {
+pub(crate) fn landed_at(repo: &Path, base_ref: &str, rev: &str) -> OpsResult<bool> {
     let output = Command::new("git")
         .current_dir(repo)
         .args(["merge-tree", "--write-tree", base_ref, rev])
@@ -607,37 +607,72 @@ fn replay(repo: &Path, onto: &str, commits: &str) -> OpsResult<Option<String>> {
     Ok(Some(parent))
 }
 
-/// Restart a persistent branch from the default branch once its PR has merged.
-/// Commits made after the last push are carried over. Returns false and
+/// Restart a landed branch from the default branch once its PR has merged.
+/// Commits made after the delivered head are carried over. Returns false and
 /// leaves the checkout alone when nothing has landed or Git is mid-operation.
-pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<bool> {
+pub(crate) fn restart_landed_branch(repo: &Path) -> OpsResult<bool> {
+    let branch = current_branch(repo)?;
+    if branch.as_deref() == Some(get_default_branch(repo)?.as_str()) {
+        return Ok(false);
+    }
     let base = crate::git::integration_base(repo)?;
     // Offline, the last fetched base still answers for what it has seen.
     let _ = fetch_target(repo, &base);
     if rev_parse(repo, &base).is_err() {
         return Ok(false);
     }
-    if intervention_state(repo)?.is_some() || crate::git::is_ancestor(repo, "HEAD", &base)? {
+    if intervention_state(repo)?.is_some()
+        || crate::git::is_ancestor(repo, "HEAD", &base)?
+        || crate::git::is_ancestor(repo, &base, "HEAD")?
+    {
         return Ok(false);
     }
     let target = if landed(repo, &base)? {
-        Some(base.clone())
+        base.clone()
     } else {
-        // After a squash merge the pushed head is what landed; anything
-        // committed since then is still unpublished work.
-        let branch = current_branch(repo)?.unwrap_or_default();
-        match rev_parse(repo, &format!("refs/remotes/origin/{branch}")) {
-            Ok(pushed)
-                if crate::git::is_ancestor(repo, &pushed, "HEAD")?
-                    && landed_at(repo, &base, &pushed)? =>
-            {
-                replay(repo, &base, &format!("{pushed}..HEAD"))?
-            }
-            _ => None,
+        // The tracking ref can identify the delivered head unless follow-up
+        // commits were pushed or the remote branch was pruned.
+        let branch = branch.unwrap_or_default();
+        let pushed = rev_parse(repo, &format!("refs/remotes/origin/{branch}")).ok();
+        let delivered = match pushed.as_ref() {
+            Some(head) if landed_at(repo, &base, head)? => Some(head.clone()),
+            _ => crate::ops::pr::latest_merged_branch_head(repo, &branch)?,
+        };
+        let Some(delivered) = delivered else {
+            return Ok(false);
+        };
+        if rev_parse(repo, &delivered).is_err()
+            || !crate::git::is_ancestor(repo, &delivered, "HEAD")?
+            || !landed_at(repo, &base, &delivered)?
+        {
+            return Ok(false);
         }
-    };
-    let Some(target) = target else {
-        return Ok(false);
+        let Some(replayed) = replay(repo, &base, &format!("{delivered}..HEAD"))? else {
+            return Ok(false);
+        };
+        match pushed {
+            Some(pushed)
+                if pushed != delivered && crate::git::is_ancestor(repo, &pushed, "HEAD")? =>
+            {
+                // Follow-up commits may already be published. Preserve their
+                // ancestry while adopting the replayed tree, so continuing
+                // never force-pushes someone else's work.
+                git(
+                    repo,
+                    &[
+                        "commit-tree",
+                        &format!("{replayed}^{{tree}}"),
+                        "-p",
+                        "HEAD",
+                        "-p",
+                        &base,
+                        "-m",
+                        "Continue work after merged PR",
+                    ],
+                )?
+            }
+            _ => replayed,
+        }
     };
     // Reset clears staging even with --keep. Preserve the caller's index and
     // working edits through the same recovery boundary as explicit sync.
@@ -777,7 +812,7 @@ pub fn sync_strategy_name(strategy: &SyncStrategy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::restart_landed_persistent;
+    use super::restart_landed_branch;
     use std::path::Path;
 
     fn git(repo: &Path, args: &[&str]) -> String {
@@ -800,7 +835,7 @@ mod tests {
 
         // Unmerged commits: the checkout is left alone.
         let before = git(&persistent.path, &["rev-parse", "HEAD"]);
-        assert!(!restart_landed_persistent(&persistent.path).unwrap());
+        assert!(!restart_landed_branch(&persistent.path).unwrap());
         assert_eq!(git(&persistent.path, &["rev-parse", "HEAD"]), before);
 
         git(repo.path(), &["merge", "--squash", &persistent.branch]);
@@ -808,7 +843,7 @@ mod tests {
         repo.push();
         std::fs::write(persistent.path.join("memory.md"), "followup\n").unwrap();
 
-        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert!(restart_landed_branch(&persistent.path).unwrap());
         assert_eq!(
             git(&persistent.path, &["rev-parse", "HEAD"]),
             git(&persistent.path, &["rev-parse", "origin/main"])
@@ -846,7 +881,7 @@ mod tests {
         let staged = git(&persistent.path, &["diff", "--cached"]);
         let unstaged = git(&persistent.path, &["diff"]);
 
-        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert!(restart_landed_branch(&persistent.path).unwrap());
         assert_eq!(git(&persistent.path, &["diff", "--cached"]), staged);
         assert_eq!(git(&persistent.path, &["diff"]), unstaged);
         assert_eq!(
@@ -908,7 +943,7 @@ mod tests {
         std::fs::create_dir_all(persistent.path.join("scratch")).unwrap();
         std::fs::write(persistent.path.join("scratch/plan.md"), "local plan\n").unwrap();
 
-        assert!(restart_landed_persistent(&persistent.path).unwrap());
+        assert!(restart_landed_branch(&persistent.path).unwrap());
         assert_eq!(
             git(&persistent.path, &["show", "HEAD:side.md"]),
             "resolved in merge\n"

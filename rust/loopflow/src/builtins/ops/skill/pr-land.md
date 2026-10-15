@@ -35,8 +35,9 @@ A successful handoff proves neither merge nor Task completion.
 For an associated Task, verified merge leaves an open Task available for optional follow-up work. Register
 new work through ordinary Task creation when useful, then `lf task complete` when
 the outcome is satisfied. No follow-up disposition is required. `ship` runs gate
-and waited landing; the Workflow's end requests completion. Additional PR work
-needs another Task, stacked when dependent; a Task never rotates to a second PR.
+and waited landing; the Workflow's end requests completion. Recommend follow-up
+Tasks for distinct outcomes. Continued work in the same Task can publish another
+PR; earlier PRs remain history. No transition command is required.
 Taskless delivery needs no synthetic Task.
 
 If sync or CI fails, use the named recovery path in this checkout and retry.

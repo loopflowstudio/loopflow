@@ -2527,8 +2527,7 @@ fn prepare_release_in_worktree(
 
     progress.status("Enqueuing release PR for merge...");
     let pr_copy = release_pr_copy(wt_path, target, version)?;
-    let mut options = release_land_options(Some(pr_copy));
-    options.create_pr = true;
+    let options = release_land_options(Some(pr_copy));
     let pr = finish_arm_after_sync(wt_path, &options, progress, &|command| {
         lock.inherit(command);
         lease.inherit(command);
@@ -2553,7 +2552,6 @@ fn release_land_options(copy: Option<PrCopy>) -> LandOptions {
     LandOptions {
         strict: true,
         local: false,
-        create_pr: false,
         wait_and_fix: false,
         worktree: None,
         commit_message: None,

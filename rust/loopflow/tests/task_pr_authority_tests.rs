@@ -20,11 +20,10 @@ use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation
 use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard};
 
-fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
+fn land_options(pr_title: &str) -> LandOptions {
     LandOptions {
         strict: true,
         local: false,
-        create_pr,
         wait_and_fix: false,
         worktree: None,
         commit_message: None,
@@ -226,7 +225,7 @@ fn land_refuses_when_registry_inaccessible_before_any_push() {
 
     let err = land(
         repo.path(),
-        &land_options(true, "inaccessible land"),
+        &land_options("inaccessible land"),
         &NullProgress,
     )
     .expect_err("inaccessible registry must refuse before any push");
@@ -723,12 +722,8 @@ fn managed_task_submit_prepares_for_manual_merge() {
 
     let _task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
-    submit(
-        repo.path(),
-        &land_options(true, "managed submit"),
-        &NullProgress,
-    )
-    .expect("managed Task submits for review");
+    submit(repo.path(), &land_options("managed submit"), &NullProgress)
+        .expect("managed Task submits for review");
 
     assert!(
         remote_branch_exists(&repo, branch),
@@ -770,12 +765,8 @@ fn ordinary_submit_preserves_assignments() {
     repo.commit("ordinary commit");
     repo.push_new_branch(branch);
 
-    submit(
-        repo.path(),
-        &land_options(true, "ordinary submit"),
-        &NullProgress,
-    )
-    .expect("ordinary non-Task submit prepares for manual merge");
+    submit(repo.path(), &land_options("ordinary submit"), &NullProgress)
+        .expect("ordinary non-Task submit prepares for manual merge");
 
     let log = fs::read_to_string(&log_path).unwrap_or_default();
     assert!(

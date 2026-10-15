@@ -1,8 +1,10 @@
 # Delivery
 
-A Task binds durable planning to one managed checkout and zero or one PR.
-Checkout placement owns branch and base independently of publication. Historical
-multi-PR records remain read-only; new delivery never appends a successor.
+A Task binds durable planning to one managed checkout and one current PR, when
+published. Checkout placement owns branch and base independently of publication.
+Publishing after a PR settles retains it as read-only history and selects a new
+current PR. Recommend follow-up Tasks for distinct outcomes; continued work in
+the same checkout needs no special command.
 Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to continue delivery safely.
 
@@ -91,9 +93,10 @@ lf pr reconcile                        # check recorded landings once
 lf ci watch                            # repair failed landings while it runs
 ```
 
-`publish` creates or refreshes the Task's sole optional PR without integration.
-The publishing intent is durable before the remote call, so retries resolve the
-same PR. Reopening a Task or closed PR never grants a second PR slot.
+`publish` creates or refreshes the current PR. After settlement, continued work
+starts a new PR and retains the previous delivery. The publishing intent is
+durable before the remote call, so retries resolve the same PR. Already-delivered
+history is removed from the new range; unrelated upstream changes still need sync.
 
 `open` and `publish` resolve the comparison base from HEAD's current
 merge-base with the selected upstream. A reset, rebase or rewritten main cannot
@@ -359,8 +362,9 @@ cannot veto completion or cancellation; it can require retaining the checkout.
 
 - One Task has one active remote branch. A checkout tracking it identifies the
   Task; the stored worktree path is placement.
-- A Task has zero or one PR. Migrated multi-PR history is read-only; no current
-  operation adds a successor. An open or closed-unmerged PR cannot count as done.
+- A Task shows one current PR and retains earlier deliveries as read-only history.
+  Only a settled PR can be superseded. New publication clears earlier completion
+  intent and reopens a completed Task. An earlier merge cannot finish the new PR.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.

@@ -39,3 +39,24 @@ initial detail selection as completed Workflow rendering; the new interval is
 separate. Landing remains held, verified OPEN with auto-merge disabled.
 
 Checks: focused Swift 156/156 passed before timing instrumentation; final DesktopHeadless/DTO 60/60 passed after repairing the new history fixture, with the other 96 earlier passing tests unchanged. Rust stream 25 existing tests passed; the new diagnostic subscription regression passed after fixing its Wave/immutable-event/TraceId fixtures. DTO 42/42, final all-target Clippy, development CLI build, cargo fmt and diff check passed. Earlier actor-isolation instrumentation failure was repaired on MainActor. Logs: /tmp/loo462-overview-{swift-repair,history-final,dto-final,clippy-final,cli-final}.log. Native decode/application/render timings remain unmeasured pending demo restart; no native acceptance claimed.
+
+October 15 demo restart: Jack Heart requested restart. Quit PID3373 normally,
+replaced the demo's app executable and bundled lf with this checkout's checked
+builds, ad-hoc signed/verified, and launched on /Users/jack/.lf with the canonical
+Loopflow repo. CUA observed PID16133 with populated real sidebar and LOO-466's
+Workflow header (No workflow yet), without a reading loader in that snapshot.
+Its conversation was not auto-opened on restoration; the UI says to open it from
+the sidebar. This snapshot is not a latency measurement or acceptance. Landing
+remains held for Jack Heart's review and native timing.
+
+October 15 review repairs: Jack Heart reported pink outlines on every file row
+and sidebar selection disappearing during conversation opening, then highlighting
+both Wave and Task. Navigator child rows now use plain buttons: their parent owns
+keyboard focus and the selected file retains its selection edge. WorkNavigator
+now highlights only selected Work, never Session membership (which can include
+ancestors or be unavailable during opening). No membership or execution changed.
+Check: TaskFilesTests 22 PASS (optional native diagnostic skipped), WorkNavigationTests
+41 PASS, builds and diff check PASS; /tmp/loo462-{files-focus,sidebar-selection}-tests.log.
+Review: removed the legacy Session-driven selection branch rather than introducing
+loading-specific selection state. Current demo has not yet been restarted for these
+latest two visual repairs; native confirmation remains.

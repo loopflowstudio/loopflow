@@ -249,11 +249,9 @@ struct WorkNavigator: View {
     }
 
     private func isSelected(_ row: WorkOutlineRow) -> Bool {
-        // A Task row carrying the open Session inline keeps its location visible.
-        if let selected = model.navigation.selectedSessionId {
-            return row.inlineSessions.contains { $0.id == selected }
-        }
-        return row.id.work == model.selection
+        // Work selection survives conversation opening; Session membership also
+        // includes ancestors and must never select several outline rows.
+        row.id.work == model.selection
     }
 
     private func warning(_ text: String) -> some View {

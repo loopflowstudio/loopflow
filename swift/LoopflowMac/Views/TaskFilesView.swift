@@ -109,6 +109,7 @@ struct TaskFilesView: View {
         .frame(minWidth: 190, idealWidth: 230, maxWidth: 320)
     }
 
+    // The navigator owns keyboard focus; rows show selection, not inherited focus rings.
     private func directoryRows(_ path: String) -> AnyView {
         AnyView(VStack(alignment: .leading, spacing: 2) {
             if let error = store.directoryErrors[path] {
@@ -128,7 +129,7 @@ struct TaskFilesView: View {
                               systemImage: store.expandedDirectories.contains(entry.path) ? "folder.fill" : "folder")
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.vertical, 5)
-                    }.buttonStyle(WorkPlainButtonStyle())
+                    }.buttonStyle(.plain)
                     if store.expandedDirectories.contains(entry.path) {
                         directoryRows(entry.path).padding(.leading, 12)
                     }
@@ -225,7 +226,7 @@ struct TaskFilesView: View {
                 Spacer(minLength: 0)
             }.padding(.vertical, 5).contentShape(Rectangle())
         }
-        .buttonStyle(WorkPlainButtonStyle()).accessibilityLabel(title)
+        .buttonStyle(.plain).accessibilityLabel(title)
         .accessibilityValue(expanded.wrappedValue ? "Expanded" : "Collapsed")
     }
 
@@ -244,7 +245,7 @@ struct TaskFilesView: View {
             .padding(.horizontal, 4).padding(.vertical, 5)
             .workSelection(store.selection == path && store.mode == mode)
             .contentShape(Rectangle())
-        }.buttonStyle(WorkPlainButtonStyle()).help(path)
+        }.buttonStyle(.plain).help(path)
             .id("\(mode.rawValue):\(path)")
             .accessibilityLabel(path)
     }

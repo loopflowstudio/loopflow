@@ -270,3 +270,28 @@ extension ProgramStatusState {
         }
     }
 }
+
+// Ink on Paper belongs to Work destinations; file selection keeps its own treatment.
+extension LoopflowPalette {
+    var workSelectedFill: Color { Color(hex: 0x7A333D) }
+    var workSelectedText: Color { Color(hex: 0xFFFAF3) }
+}
+
+extension View {
+    func workDestinationSelection(_ selected: Bool) -> some View {
+        modifier(WorkDestinationSelection(selected: selected))
+    }
+}
+
+private struct WorkDestinationSelection: ViewModifier {
+    let selected: Bool
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
+                        in: RoundedRectangle(cornerRadius: 6))
+            .onHover { hovering = $0 }
+            .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+}

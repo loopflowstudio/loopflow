@@ -45,41 +45,43 @@ struct WorkNavigator: View {
         let matchingIDs = Set(outline.flatMap { [$0.id] + $0.ancestors.map(\.key) })
         let waves = workspace.waves.filter { matchingIDs.contains($0.id) }
         let selectedWaveID = workspace.breadcrumb(selection: model.selection, sessionId: nil)?.wave?.id
-        let displayedWave = waves.first { $0.id == selectedWaveID }
-            ?? waves.first { $0.roadmap.wave.id == navigation.navigatorWaveID }
-            ?? waves.first
+        let selectedWave = workspace.waves.first { $0.id == selectedWaveID }
+        let searching = !navigation.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let attention = workspace.attention(unavailable: model.sessions.errorMessage)
         VStack(spacing: 0) {
-            header
+            header(wave: searching ? nil : selectedWave)
             attentionQueue(attention)
             forReadErrors
-            HStack(spacing: 0) {
+            if let wave = selectedWave, !searching {
+                WorkTaskList(navigation: navigation, waveID: wave.roadmap.wave.id) {
+                    LazyVStack(alignment: .leading, spacing: 5) {
+                        sectionTitle("TASKS IN \(wave.roadmap.wave.displayName.uppercased())")
+                        let tasks = rows.filter { $0.ancestors.contains { $0.key == wave.id } }
+                        ForEach(tasks) { taskRow($0) }
+                        if tasks.isEmpty { Text("No active Tasks").foregroundStyle(palette.textSecondary).padding(12) }
+                    }.padding(10)
+                }.id(wave.id)
+            } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        Text("WAVES").font(Typography.code(10)).foregroundStyle(palette.textTertiary)
-                            .padding(.horizontal, 9).padding(.vertical, 6)
+                    LazyVStack(alignment: .leading, spacing: 5) {
+                        sectionTitle(searching ? "MATCHING WORK" : "WAVES")
                         ForEach(waves) { wave in
-                            waveRow(wave,
-                                    count: rows.filter { $0.ancestors.contains { $0.key == wave.id } }.count,
+                            let tasks = rows.filter { $0.ancestors.contains { $0.key == wave.id } }
+                            waveRow(wave, count: tasks.count,
                                     waiting: attention.filter { $0.waveID == wave.roadmap.wave.id }.count)
+                            if searching { ForEach(tasks) { taskRow($0) } }
                         }
-                    }.padding(6)
+                        if waves.isEmpty {
+                            Text(searching ? "No matching Work" : "No Waves yet")
+                                .foregroundStyle(palette.textSecondary).padding(12)
+                                .accessibilityIdentifier("work-search-empty")
+                        }
+                    }.padding(10)
                 }
                 .scrollPosition($scrollPosition)
                 .onScrollGeometryChange(for: CGFloat.self) { geometry in
                     max(0, geometry.contentOffset.y + geometry.contentInsets.top)
                 } action: { _, offset in navigation.listScrollOffset = offset }
-                .frame(width: 144)
-                Rectangle().fill(palette.border).frame(width: 1)
-                if let wave = displayedWave {
-                    taskColumn(wave, rows: rows.filter { $0.ancestors.contains { $0.key == wave.id } })
-                        .id(wave.id)
-                } else {
-                    Text(navigation.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                         ? "No Waves yet" : "No matching Work").foregroundStyle(palette.textSecondary)
-                        .accessibilityIdentifier("work-search-empty")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
             }
             HStack(spacing: Spacing.sm) {
                 Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
@@ -117,112 +119,114 @@ struct WorkNavigator: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 6) {
-            Button {
-                if let onOpenRepository { onOpenRepository() } else { model.select(nil) }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "folder")
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
-                            ?? "Choose repository").font(Typography.sectionTitle(22)).lineLimit(1)
-                        Text("Repository").font(Typography.body(10)).foregroundStyle(palette.textSecondary)
-                    }
-                    Spacer(minLength: 0)
-                }.padding(9).contentShape(Rectangle())
-            }
-            .disabled(model.repoPath == nil)
-            .workSelection(model.selection == nil)
-            .accessibilityAddTraits(model.selection == nil ? [.isSelected] : [])
-            .accessibilityIdentifier("work-open-repository")
-            Menu {
-                ForEach(repositories, id: \.self) { repo in
-                    Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
-                        .accessibilityIdentifier("work-repository-\(repo)")
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func header(wave: WaveProjection?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                Button {
+                    if let onOpenRepository { onOpenRepository() } else { model.select(nil) }
+                } label: {
+                    Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
+                         ?? "Choose repository")
+                        .font(wave == nil ? Typography.strong(21) : Typography.body(14))
+                        .foregroundStyle(model.selection == nil ? palette.workSelectedText : palette.textSecondary)
+                        .lineLimit(1).padding(9)
+                        .frame(maxWidth: wave == nil ? .infinity : nil, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
-                Divider()
-                repositoryActions()
-            } label: { Image(systemName: "ellipsis").frame(width: 24, height: 28) }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel("Choose repository").accessibilityIdentifier("work-repository")
-        }.padding(8)
+                .disabled(model.repoPath == nil)
+                .workDestinationSelection(model.selection == nil)
+                .accessibilityIdentifier("work-open-repository")
+                if let wave {
+                    Text("/").foregroundStyle(palette.textTertiary)
+                    Button { open(wave.id.work) } label: {
+                        Text(wave.roadmap.wave.displayName).font(Typography.strong(14)).lineLimit(1)
+                            .foregroundStyle(model.isSelected(wave.id.work) ? palette.workSelectedText : palette.emphasisInk)
+                            .padding(9).contentShape(Rectangle())
+                    }
+                    .workDestinationSelection(model.isSelected(wave.id.work))
+                    .accessibilityIdentifier("work-wave-conversation-\(wave.roadmap.wave.id)")
+                    Spacer(minLength: 0)
+                }
+                Menu {
+                    ForEach(repositories, id: \.self) { repo in
+                        Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
+                            .accessibilityIdentifier("work-repository-\(repo)")
+                    }
+                    Divider()
+                    repositoryActions()
+                } label: { Image(systemName: "ellipsis").frame(width: 20, height: 28) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .accessibilityLabel("Choose repository").accessibilityIdentifier("work-repository")
+                WorkGlyphButton("sidebar.left", label: "Hide sidebar", identifier: "work-toggle-sidebar") {
+                    model.navigation.showsNavigator = false
+                }
+            }
+            if let wave, !wave.roadmap.wave.goal.isEmpty {
+                Text(wave.roadmap.wave.goal).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                    .lineLimit(2).padding(.horizontal, 9)
+            }
+        }.padding(12)
     }
 
     private func waveRow(_ wave: WaveProjection, count: Int, waiting: Int) -> some View {
-        Button { model.selectWaveContext(wave) } label: {
+        Button { open(wave.id.work) } label: {
             VStack(alignment: .leading, spacing: 6) {
-                Text(wave.roadmap.wave.displayName).font(Typography.textStrong)
-                    .foregroundStyle(palette.emphasisInk).lineLimit(2)
+                Text(wave.roadmap.wave.displayName).font(Typography.strong(17))
+                    .foregroundStyle(model.isSelected(wave.id.work) ? palette.workSelectedText : palette.emphasisInk).lineLimit(2)
+                if !wave.roadmap.wave.goal.isEmpty {
+                    Text(wave.roadmap.wave.goal).font(Typography.body(12)).lineLimit(2)
+                        .foregroundStyle(model.isSelected(wave.id.work) ? palette.workSelectedText : palette.textSecondary)
+                }
                 HStack(spacing: 4) {
-                    Text("\(count) Tasks").foregroundStyle(palette.textSecondary)
+                    Text("\(count) Tasks · Open Wave conversation")
                     if waiting > 0 {
                         Spacer(minLength: 0)
-                        Label("\(waiting)", systemImage: "tray.fill").foregroundStyle(palette.waiting)
+                        Label("\(waiting)", systemImage: "tray.fill")
                     }
                 }.font(Typography.body(10))
+                    .foregroundStyle(model.isSelected(wave.id.work) ? palette.workSelectedText : palette.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(9).frame(minHeight: 64).contentShape(Rectangle())
+            .padding(14).frame(minHeight: 100).contentShape(Rectangle())
         }
-        .workSelection(model.selection == wave.id.work)
+        .workDestinationSelection(model.isSelected(wave.id.work))
         .accessibilityAddTraits(model.selection == wave.id.work ? [.isSelected] : [])
         .accessibilityLabel("\(wave.roadmap.wave.displayName), \(count) Tasks, \(waiting) need attention")
         .accessibilityIdentifier("work-wave-\(wave.roadmap.wave.id)")
-        .help("Return to your last destination in \(wave.roadmap.wave.displayName)")
+        .help("Open \(wave.roadmap.wave.displayName) conversation · Command-click to open beside current Work")
         .contextMenu {
             ForEach(wave.sessions) { session in Button("Open \(session.title)") { onOpenSession(session) } }
             subjectActions(wave.id.work, title: wave.roadmap.wave.displayName)
         }
     }
 
-    private func taskColumn(_ wave: WaveProjection, rows: [WorkOutlineRow]) -> some View {
-        VStack(spacing: 0) {
-            Button {
-                if let onOpenWave { onOpenWave(wave.id.work) } else { model.select(wave.id.work) }
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(wave.roadmap.wave.displayName).font(Typography.textStrong).foregroundStyle(palette.emphasisInk)
-                    if !wave.roadmap.wave.goal.isEmpty {
-                        Text(wave.roadmap.wave.goal).font(Typography.body(11)).lineLimit(2)
-                            .foregroundStyle(palette.textSecondary)
-                    }
-                    Label("Wave conversation", systemImage: "bubble.left").font(Typography.body(11))
-                        .foregroundStyle(palette.textSecondary)
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(12).contentShape(Rectangle())
-            }
-            .accessibilityIdentifier("work-wave-conversation-\(wave.roadmap.wave.id)")
-            WorkTaskColumn(navigation: model.navigation, waveID: wave.roadmap.wave.id) {
-                LazyVStack(alignment: .leading, spacing: 5) {
-                    ForEach(rows) { taskRow($0) }
-                    if rows.isEmpty {
-                        Text(model.navigation.search.isEmpty ? "No active Tasks" : "No matching Tasks")
-                            .foregroundStyle(palette.textSecondary).padding(12)
-                    }
-                }.padding(6)
-            }
-        }.frame(maxWidth: .infinity)
-    }
-
     private func taskRow(_ row: WorkOutlineRow) -> some View {
-        let runtimeWork = row.task?.runtime.map { WorkReference.task(id: $0.workId) }
-        let selected = model.selection.map { $0 == row.id.work || $0 == runtimeWork } ?? false
+        let selected = model.isSelected(row.id.work)
         return VStack(alignment: .leading, spacing: 7) {
-            Text(row.title).font(Typography.textStrong).lineLimit(2)
+            Text(row.title).font(Typography.strong(14)).lineLimit(2)
+                .foregroundStyle(selected ? palette.workSelectedText : palette.text)
                 .frame(maxWidth: .infinity, alignment: .leading).allowsHitTesting(false)
             if let task = row.task {
+                Text(task.task.description).font(Typography.body(12)).lineLimit(2)
+                    .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
+                    .allowsHitTesting(false)
                 TaskRowMetadata(task: task,
                     status: SessionProgramStatus(sessions: row.inlineSessions, unavailable: model.sessions.errorMessage),
-                    localMachineId: model.observingMachineId)
+                    localMachineId: model.observingMachineId, selected: selected)
             }
         }
-        .padding(10).frame(minHeight: 66, alignment: .leading)
+        .padding(14).frame(minHeight: 82, alignment: .leading)
         .background {
             Button { open(row.id.work) } label: { Color.clear.contentShape(Rectangle()) }
                 .buttonStyle(.plain).help(row.title).accessibilityLabel(row.title)
                 .accessibilityIdentifier("work-task-\(row.id.work.id)")
         }
-        .workSelection(selected)
+        .workDestinationSelection(selected)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .contextMenu {
             ForEach(row.inlineSessions) { session in Button("Open \(session.title)") { onOpenSession(session) } }
@@ -246,20 +250,30 @@ struct WorkNavigator: View {
                         .accessibilityIdentifier("work-attention-overflow")
                     }
                 }.padding(.bottom, 4)
-                ForEach(Array(items.prefix(3))) { item in
+                ForEach(visibleAttention(items)) { item in
+                    let selected = model.isSelected(item)
                     Button { openAttention(item) } label: {
                         HStack(spacing: 8) {
-                            Text(item.waveName).foregroundStyle(palette.emphasisInk).frame(width: 88, alignment: .leading)
-                            Text(item.title).frame(maxWidth: .infinity, alignment: .leading)
-                            Text(item.reason).foregroundStyle(palette.waiting)
-                        }.font(Typography.body(11)).lineLimit(1).padding(.vertical, 6).contentShape(Rectangle())
+                            Text(item.waveName).foregroundStyle(selected ? palette.workSelectedText : palette.emphasisInk).frame(width: 88, alignment: .leading)
+                            Text(item.title).foregroundStyle(selected ? palette.workSelectedText : palette.text).frame(maxWidth: .infinity, alignment: .leading)
+                            Text(item.reason).foregroundStyle(selected ? palette.workSelectedText : palette.waiting)
+                        }.font(Typography.body(11)).lineLimit(1).padding(6).contentShape(Rectangle())
                     }
+                    .workDestinationSelection(selected)
                     .help(item.detail)
                     .accessibilityIdentifier("work-attention-\(item.work.kind.rawValue)-\(item.work.id)")
                 }
             }.padding(.horizontal, 15).padding(.vertical, 10)
             Divider()
         }
+    }
+
+    private func visibleAttention(_ items: [WorkAttentionItem]) -> [WorkAttentionItem] {
+        var visible = Array(items.prefix(3))
+        if let selected = items.first(where: { model.isSelected($0) }), !visible.contains(where: { $0.id == selected.id }) {
+            visible[visible.count - 1] = selected
+        }
+        return visible
     }
 
     private func openAttention(_ item: WorkAttentionItem) {
@@ -269,7 +283,10 @@ struct WorkNavigator: View {
     }
 
     private func open(_ work: WorkReference) {
-        if work.kind == .task, let onOpenTask { onOpenTask(work) } else { model.select(work) }
+        model.navigation.search = ""
+        if work.kind == .task, let onOpenTask { onOpenTask(work) }
+        else if work.kind == .wave, let onOpenWave { onOpenWave(work) }
+        else { model.select(work) }
     }
 
     @ViewBuilder private var forReadErrors: some View {
@@ -307,8 +324,8 @@ struct WorkNavigator: View {
     }
 }
 
-/// Each Wave owns its viewport; recreating a column never resets another Wave.
-private struct WorkTaskColumn<Content: View>: View {
+/// Each Wave owns its viewport through drill-in and keyboard history.
+private struct WorkTaskList<Content: View>: View {
     let navigation: WorkNavigation
     let waveID: String
     @ViewBuilder let content: Content

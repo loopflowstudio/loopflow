@@ -1,116 +1,23 @@
 import Loopflow
 import SwiftUI
 
-/// Work ancestry and surface controls. Primary conversations need no extra crumb;
-/// explicitly opened non-primary Sessions keep their exact title and rename action.
-struct WorkBreadcrumbBar<Trailing: View>: View {
+/// Explicit secondary Sessions keep their naming and binding actions beside their panes.
+struct WorkSessionToolbar: View {
     @Bindable var model: WorkModel
     let crumb: WorkBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
-    var onTaskDetails: (() -> Void)? = nil
-    var programStatus: ProgramStatusRecords? = nil
-    var programStatusError: String? = nil
-    @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 10) {
-            WorkGlyphButton("sidebar.left", label: model.navigation.showsNavigator ? "Hide sidebar" : "Show sidebar",
-                            identifier: "work-toggle-sidebar") { model.navigation.showsNavigator.toggle() }
-                .keyboardShortcut("s", modifiers: [.command, .control])
-            WorkGlyphButton("chevron.left", label: "Back", identifier: "work-back") { model.goBack() }
-                .disabled(model.navigation.backStack.isEmpty)
-                .keyboardShortcut("[", modifiers: .command)
-            if let crumb { crumbs(crumb) }
-            Spacer(minLength: 10)
-            if let programStatus, programStatus.summary != nil {
-                ProgramStatusLabel(status: programStatus)
-                    .foregroundStyle(palette.textSecondary)
-                    .accessibilityIdentifier("workspace-program-status")
-            }
-            if let programStatusError {
-                Image(systemName: "exclamationmark.circle")
-                    .help(programStatusError).accessibilityLabel(programStatusError)
-            }
-            trailing
-            if model.navigation.content == .details {
-                WorkGlyphButton(
-                    "sidebar.right",
-                    label: model.navigation.showsActivity ? "Hide Activity" : "Show Activity",
-                    identifier: "work-toggle-activity"
-                ) { model.navigation.showsActivity.toggle() }
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .font(Typography.text)
-        .tint(palette.textSecondary)
-        .padding(.horizontal, 14)
-        .frame(height: TaskFileChrome.headerHeight)
-        .background(palette.surfaceMuted)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("work-toolbar")
-    }
-
-    private func crumbs(_ crumb: WorkBreadcrumb) -> some View {
-        HStack(spacing: 6) {
-            if let work = crumb.waveWork {
-                Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
-                    .buttonStyle(WorkPlainButtonStyle())
-                    .foregroundStyle(palette.textSecondary)
-                    .help(crumb.wave == nil ? "Wave name unavailable" : "Show Wave")
-                    .disabled(crumb.wave == nil)
-                    .accessibilityIdentifier("breadcrumb-wave")
-            }
-            if let task = crumb.task {
-                if crumb.waveWork != nil { separator }
-                // The Task overview shows its title once below; inside a
-                // Session the ancestor carries the title to navigate upward.
-                if let onTaskDetails {
-                    Button(task.task.task.name, action: onTaskDetails)
-                        .buttonStyle(WorkPlainButtonStyle()).foregroundStyle(palette.textSecondary)
-                        .lineLimit(1).truncationMode(.tail).layoutPriority(-2)
-                        .help("Task details and Flow")
-                        .accessibilityIdentifier("breadcrumb-task")
-                } else if crumb.session != nil {
-                    // The ancestor's title gives way first when the bar is narrow.
-                    Button(task.task.task.name) { model.select(task.id.work) }
-                        .buttonStyle(WorkPlainButtonStyle())
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(-2)
-                        .help(task.task.task.name)
-                        .accessibilityIdentifier("breadcrumb-task")
-                }
-                if let url = task.task.reference.issueUrl {
-                    Link(destination: url) {
-                        Text(task.task.task.identifier)
-                            .font(Typography.code(12))
-                    }
-                    .buttonStyle(WorkLinkStyle())
-                        .accessibilityIdentifier("breadcrumb-issue")
-                } else {
-                    Text(task.task.task.identifier).font(Typography.code(12)).foregroundStyle(palette.textTertiary)
-                }
-            } else if let work = crumb.taskWork {
-                if crumb.waveWork != nil { separator }
-                Text("Task \(work.id)")
-                    .font(Typography.code(12))
-                    .foregroundStyle(palette.textSecondary)
-                    .help("Task name and planning details unavailable")
-                    .accessibilityIdentifier("breadcrumb-task")
-            }
-            if let session = crumb.session, !session.taskPrimary, session.primaryScope == nil {
-                if crumb.waveWork != nil || crumb.taskWork != nil { separator }
+        if let crumb, let session = crumb.session, !session.taskPrimary, session.primaryScope == nil {
+            HStack(spacing: 8) {
                 sessionCrumb(session, siblings: crumb.siblings.filter(model.isSessionVisible), isTask: crumb.taskWork != nil)
+                Spacer(minLength: 0)
             }
+            .font(Typography.text).padding(.horizontal, 14).padding(.vertical, 6)
+            .background(palette.surfaceMuted)
+            .accessibilityIdentifier("work-session-toolbar")
         }
-        .lineLimit(1)
-    }
-
-    private var separator: some View {
-        Text("/").foregroundStyle(palette.borderStrong)
     }
 
     @ViewBuilder
@@ -252,13 +159,6 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         case .unknown(let reason):
             reason
         }
-    }
-}
-
-extension WorkBreadcrumbBar where Trailing == EmptyView {
-    init(model: WorkModel, crumb: WorkBreadcrumb?,
-         onOpenSession: @escaping (SessionRecord) -> Void) {
-        self.init(model: model, crumb: crumb, onOpenSession: onOpenSession) { EmptyView() }
     }
 }
 

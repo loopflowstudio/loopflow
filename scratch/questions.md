@@ -18,14 +18,17 @@ Remaining judgment: exact palette values and surface ladder, native coherence,
 provider input/focus continuity and comfortable sustained use at demo review.
 No blocking product choice remains before implementation.
 
-Parent integration, 2026-10-15: synced LOO-462 at 5359c2d77. Its pane islands,
-program headers, attention queue and search remain their existing owners. Parent
-exploration and review holds are historical context, not authorization to implement
-its draft outer Work multiplexer or restart/install the app. Parent details remain
-at `5359c2d77:scratch/` and the inherited workflow-loading note.
+Parent integration, 2026-10-15: synced LOO-462 through 7d10108eaf.
+Its pane islands, program headers, attention queue, search and outer Work
+multiplexer retain their existing owners. Jack Heart selected Ink on Paper and
+authorized the parent’s full Swift prototype implementation, including mirrored
+selection in Needs you. Command-click adds adjacent Work; ordinary click replaces
+the focused slot; close hides while retaining panes. The sidebar is resizable.
+See [Work multiplexer / Task workspaces](task-workspaces.md).
 
-Parent update, 2026-10-15: synced LOO-462 at eb793c2b1. Jack rejected the top-rule
-experiment. [Study 05](sidebar-prototypes/05-selection-comps.html) compares
-Notion-inspired neutral fill, Figma-inspired blue fill and solid burgundy fill.
-Choice and smaller header typography remain open; the native selection treatment
-is unchanged. These parent drafts do not change LOO-488's accepted theming scope.
+Cross-launch outer layout restoration remains outside the parent change. Its
+reader watches focused Task Workflow detail; inactive workspaces retain live
+panes and offer focus for actions. These accepted parent updates supersede the
+earlier draft holds recorded at `eb793c2b1:scratch/`; they do not expand LOO-488’s
+scope or authorize landing, installation or app restart. Native demo judgment
+remains separate from implementation authorization.

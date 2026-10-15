@@ -140,7 +140,7 @@ final class WorkModel {
         openSelectedWorkspace()
     }
 
-    func openSelectedWorkspace() {
+    func openSelectedWorkspace(besideFocused: Bool = false) {
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         let key = workspaceKey(for: selection, repository: repository)
         let location: WorkspaceIdentity?
@@ -149,7 +149,7 @@ final class WorkModel {
         } else if key.kind != .task, let machine = registry.localMachineId, let repoPath {
             location = WorkspaceIdentity(machineId: machine, worktree: repoPath)
         } else { location = nil }
-        let workspace = registry.open(key, title: workspaceTitle(key), location: location)
+        let workspace = registry.open(key, title: workspaceTitle(key), location: location, besideFocused: besideFocused)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
     }
@@ -418,19 +418,19 @@ final class WorkModel {
     }
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
-    func openSession(_ record: SessionRecord, store: SessionsStore) {
+    func openSession(_ record: SessionRecord, store: SessionsStore, besideFocused: Bool = false) {
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         if let retained = registry.key(containingSession: record.id) {
-            select(retained.reference)
+            select(retained.reference, besideFocused: besideFocused)
         } else {
             let selectedKey = workspaceKey(for: selection, repository: repository)
             if selection?.kind == .task,
                record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
-                select(selection)
+                select(selection, besideFocused: besideFocused)
             } else if selection?.kind == .wave, record.waveId == selectedKey.id {
-                select(selection)
+                select(selection, besideFocused: besideFocused)
             } else {
-                select(store.taskSubject(for: record) ?? projection.subject(for: record.id))
+                select(store.taskSubject(for: record) ?? projection.subject(for: record.id), besideFocused: besideFocused)
             }
         }
         let key = workspaceKey(for: selection, repository: repository)
@@ -1470,31 +1470,41 @@ final class WorkModel {
         }
     }
 
-    func select(_ requested: WorkReference?) {
-        select(requested, preservingOpening: false)
-    }
-
-    /// Switching Waves restores their last destination through the same Work owner.
-    func selectWaveContext(_ wave: WaveProjection) {
-        let remembered = navigation.waveDestinations[wave.roadmap.wave.id]
-        let destination = remembered.flatMap { work in
-            let belongs = work == wave.id.work || wave.tasks.contains {
-                $0.id.work == work || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == work
-            }
-            let retained = workspaceRepository.flatMap { repository in
-                workspaceRegistry?.retained(workspaceKey(for: work, repository: repository))
-            } != nil
-            return belongs || retained ? work : nil
-        } ?? wave.id.work
-        select(destination)
+    func select(_ requested: WorkReference?, besideFocused: Bool = false) {
+        select(requested, preservingOpening: false, besideFocused: besideFocused)
     }
 
     func goBack() {
         guard let previous = navigation.backStack.popLast() else { return }
+        navigation.forwardStack.append(selection)
         select(previous, preservingOpening: false, recordingHistory: false)
     }
 
-    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
+    func goForward() {
+        guard let next = navigation.forwardStack.popLast() else { return }
+        navigation.backStack.append(selection)
+        select(next, preservingOpening: false, recordingHistory: false)
+    }
+
+    func hideWorkspace(_ key: WorkWorkspaceKey) {
+        guard let registry = workspaceRegistry else { return }
+        let wasSelected = registry.selectedWork == key
+        registry.hide(key)
+        if wasSelected, let next = registry.selectedWork { select(next.reference) }
+    }
+
+    func isSelected(_ reference: WorkReference) -> Bool {
+        if selection == reference { return true }
+        guard let selection, selection.kind == .task, reference.kind == .task else { return false }
+        return task(id: selection.id)?.task.id == task(id: reference.id)?.task.id
+            && task(id: selection.id) != nil
+    }
+
+    func isSelected(_ attention: WorkAttentionItem) -> Bool {
+        isSelected(attention.work) || navigation.selectedSessionId == attention.session.id
+    }
+
+    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
@@ -1515,6 +1525,7 @@ final class WorkModel {
         } else { selection = requested }
         if recordingHistory, self.selection != selection {
             navigation.backStack.append(self.selection)
+            navigation.forwardStack = []
         }
         if workspaceRegistry == nil {
             navigation.selectedSessionId = nil
@@ -1522,7 +1533,7 @@ final class WorkModel {
         }
         setSelection(selection)
         clearSelectionIfOutsideScope()
-        openSelectedWorkspace()
+        openSelectedWorkspace(besideFocused: besideFocused)
     }
 
     private func openHistoricalReference(_ reference: String) async {
@@ -2058,16 +2069,9 @@ final class WorkModel {
 
     private func setSelection(_ selection: WorkReference?) {
         guard self.selection != selection else { return }
-        if let previous = self.selection,
-           let wave = visibleWork.breadcrumb(selection: previous, sessionId: nil)?.wave {
-            navigation.remember(previous, in: wave.roadmap.wave.id)
-        }
         workActivityGeneration &+= 1
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
-        if let selection, let wave = visibleWork.breadcrumb(selection: selection, sessionId: nil)?.wave {
-            navigation.remember(selection, in: wave.roadmap.wave.id)
-        }
         cache?.saveSelection(selection, repo: repoPath ?? "")
         if !usesFixedFixture { workActivity = .loading }
     }

@@ -14,13 +14,14 @@ struct TaskRowMetadata: View {
     let task: RoadmapTask
     let status: SessionProgramStatus
     let localMachineId: String?
+    var selected = false
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 5) {
             if let label = status.label, let tone = status.tone {
                 Text(verbatim: label)
-                    .foregroundStyle(tone.ink(in: palette))
+                    .foregroundStyle(selected ? palette.workSelectedText : tone.ink(in: palette))
                     .help(Text(verbatim: status.help))
                     .accessibilityIdentifier("work-program-status-\(task.id)")
             } else if case .unavailable = status {
@@ -46,13 +47,13 @@ struct TaskRowMetadata: View {
             }
         }
         .font(Typography.body(10))
-        .foregroundStyle(palette.textSecondary)
+        .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
         .lineLimit(1)
     }
 
     private func destination(_ title: String, url: URL, kind: String) -> some View {
         // Above the row selection target: external links never select Work.
-        Link(destination: url) { Text(verbatim: title) }
+        Link(destination: url) { Text(verbatim: title).foregroundStyle(selected ? palette.workSelectedText : palette.linkInk) }
             .buttonStyle(WorkLinkStyle())
             .help(url.absoluteString)
             .accessibilityLabel("Open \(kind == "pr" ? "PR" : "Task") \(title)")

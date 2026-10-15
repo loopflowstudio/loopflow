@@ -37,13 +37,20 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Select a Wave in the left column to return to its last Task and retained workspace.
-The adjacent column keeps its own scroll position for each Wave. **Wave conversation**
-opens that Wave's ongoing conversation; the repository heading opens the repository's.
-The compact **Needs you** queue opens the exact waiting conversation and reveals its
-Work. Back returns to the interrupted context. The queue uses current shared Waiting
-or reported Blocked evidence and never rearranges the organizational columns.
-Use the sidebar button or **⌃⌘S** to hide or restore navigation without closing panes.
+Open a Wave to enter its conversation and fill the sidebar with its Tasks.
+The **Repo / Wave** path returns to either conversation. Each Wave keeps its
+Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
+including **Needs you**. The queue opens the exact waiting conversation, using
+shared Waiting or reported Blocked evidence.
+
+**Command-click** Work to open it beside the current workspace. A normal click
+replaces the focused workspace, or focuses it if already visible. Each workspace
+keeps its own panes, drafts and focus. Close its context header to hide it without
+closing its panes. Context headers appear when multiple workspaces are visible or
+the sidebar is hidden. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
+
+Drag the sidebar edge to resize it. Its own collapse button or **⌃⌘S** hides it;
+the edge button restores it at the remembered width.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -193,8 +200,8 @@ conversations stay out of the sidebar without deleting their history.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-The outline compresses single-Wave structure automatically. Search Work names and
-identifiers. Click the repository name to return to its retained,
+Search Work names and identifiers; nonmatching Waves disappear without changing
+the selected Work. Click the repository name to return to its retained,
 configured conversation. Normal repository launches start there, whether or not
 Waves and Tasks exist; explicit Task links still open the addressed Task.
 Begin with what to work on, without creating a Wave or Task first.

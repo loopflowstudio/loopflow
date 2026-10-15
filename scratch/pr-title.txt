@@ -1,1 +1,0 @@
-Keep files and PRs beside Sessions with quieter terminal feedback

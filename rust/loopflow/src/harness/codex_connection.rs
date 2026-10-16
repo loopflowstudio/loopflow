@@ -135,6 +135,7 @@ pub struct CodexConnection {
 pub(crate) struct NativeInput {
     pub params: Option<Value>,
     pub text: Option<String>,
+    pub context: Option<crate::context_block::ContextDelivery>,
 }
 
 impl CodexConnection {
@@ -303,6 +304,17 @@ impl CodexConnection {
                                     return Err(anyhow!("Codex resumed another conversation"));
                                 }
                                 thread = Some(selected.into());
+                                if let (Some(initial), Some(attachment)) = (&initial, &self.attachment) {
+                                    let mut initial = initial.lock().await;
+                                    if let Some(context) = &initial.context {
+                                        // Hooks run on the app-server, which never inherits the
+                                        // terminal's launch file. Bind before the UI can send a turn.
+                                        self.store.with_session_attachment(&self.session_id, attachment, || {
+                                            Ok(context.bind_codex_session(selected))
+                                        })??;
+                                        initial.context = None;
+                                    }
+                                }
                                 if bind_thread {
                                     if let Some(attachment) = &self.attachment {
                                         self.store.record_session_connection(&self.session_id, attachment,
@@ -491,11 +503,110 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
 
 #[cfg(test)]
 mod tests {
-    use super::CodexConnection;
+    use super::{CodexConnection, NativeInput};
+    use crate::context_block::{codex_delivery_path, ContextDelivery};
+    use crate::id::LfProcessId;
     use crate::store::sqlite::SqliteStore;
     use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use std::sync::Arc;
     use tokio::net::{UnixListener, UnixStream};
     use tokio_tungstenite::{accept_async, client_async, tungstenite::Message};
+
+    #[tokio::test]
+    async fn native_start_and_reconnect_restore_context_before_client_receives_thread() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let database = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let process = LfProcessId::new();
+        rusqlite::Connection::open(database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let attachment = store
+            .claim_session_attachment("conversation", None, &process, true)
+            .unwrap();
+        let context = ContextDelivery {
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            references: Vec::new(),
+        };
+        let binding = codex_delivery_path(home.path(), "native-thread");
+        for resume in [false, true] {
+            let endpoint = home
+                .path()
+                .join(if resume { "resume.sock" } else { "start.sock" });
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let request = socket.next().await.unwrap().unwrap();
+                let request: serde_json::Value =
+                    serde_json::from_str(request.to_text().unwrap()).unwrap();
+                socket
+                    .send(Message::Text(
+                        json!({"id":request["id"],"result":{
+                            "thread":{"id":"native-thread","turns":[]}
+                        }})
+                        .to_string()
+                        .into(),
+                    ))
+                    .await
+                    .unwrap();
+                let _ = socket.next().await;
+            });
+            let connection = CodexConnection {
+                store: store.clone(),
+                session_id: "conversation".into(),
+                thread_id: resume.then(|| "native-thread".into()),
+                attachment: Some(attachment.clone()),
+                account_id: None,
+            };
+            let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+                params: (!resume).then(|| json!({})),
+                text: None,
+                context: Some(context.clone()),
+            }));
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay = tokio::spawn(async move {
+                connection
+                    .serve_with_input(relay, &endpoint, Some(input))
+                    .await
+            });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            terminal
+                .send(Message::Text(
+                    json!({"id":1,
+                        "method":if resume {"thread/resume"} else {"thread/start"},
+                        "params":if resume {json!({"threadId":"native-thread"})} else {json!({})}
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            let response = tokio::time::timeout(std::time::Duration::from_secs(2), terminal.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(response.to_text().unwrap().contains("native-thread"));
+            let restored: ContextDelivery =
+                serde_json::from_slice(&std::fs::read(&binding).unwrap()).unwrap();
+            assert_eq!(restored, context);
+            std::fs::remove_file(&binding).unwrap();
+            terminal.close(None).await.unwrap();
+            drop(terminal);
+            relay.await.unwrap().unwrap();
+            provider.await.unwrap();
+        }
+    }
 
     #[tokio::test]
     async fn terminal_exit_with_or_without_close_handshake_ends_the_relay_cleanly() {

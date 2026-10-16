@@ -357,6 +357,15 @@ pub struct AgentProcessReapReport {
     pub orphaned: Vec<u32>,
     pub reaped: u32,
     pub errors: Vec<String>,
+    pub records: Vec<AgentProcessCleanup>,
+}
+
+/// Exact bookkeeping disposition, including records that remain unresolved.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AgentProcessCleanup {
+    pub id: LfProcessId,
+    pub action: String,
+    pub reason: String,
 }
 
 pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
@@ -376,16 +385,57 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         |process: &LfProcessId| process_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
+        let mut record = AgentProcessCleanup {
+            id: agent.process.id.clone(),
+            action: "retained".into(),
+            reason: "provider identity is unknown; PID absence is not exit evidence".into(),
+        };
         let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
+            // A reservation never requested a launch. Serialize with launch/takeover,
+            // and require the exact owning lf to be dead before retiring it.
+            let owner = agent
+                .attached_lf_process_id
+                .as_ref()
+                .or(agent.process.parent_lf_process_id.as_ref());
+            if agent.spawn_reserved && owner.is_some_and(dead_lf) {
+                record.reason = "launch never requested and owning LfProcess is dead".into();
+                record.action = "would_settle".into();
+                if !dry_run {
+                    match store.settle_agent_process(agent, || {
+                        if !owner.is_some_and(dead_lf) {
+                            return Err(StoreError::InvalidAuthority(
+                                "reservation owner death changed".into(),
+                            ));
+                        }
+                        Ok(())
+                    }) {
+                        Ok(true) => record.action = "settled".into(),
+                        Ok(false) => {
+                            record.action = "retained".into();
+                            record.reason = "reservation changed during cleanup".into();
+                        }
+                        Err(error) => {
+                            record.action = "retained".into();
+                            record.reason = error.to_string();
+                            report
+                                .errors
+                                .push(format!("AgentProcess {}: {error}", agent.process.id));
+                        }
+                    }
+                }
+            }
+            report.records.push(record);
             continue;
         };
         let observed = match OsProcess::read(pid) {
             Ok(process) => process,
             Err(error) => {
+                record.reason = format!("cannot observe PID {pid}: {error}");
                 report.errors.push(format!(
-                    "AgentProcess {}: cannot observe PID {pid}: {error}",
-                    agent.process.id
+                    "AgentProcess {}: {}",
+                    agent.process.id, record.reason
                 ));
+                report.records.push(record);
                 continue;
             }
         };
@@ -404,7 +454,24 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
         if orphaned {
             report.orphaned.push(pid);
         }
+        record.reason = if dead {
+            "recorded OS identity is dead"
+        } else if orphaned {
+            "owned headless provider has no live attachment"
+        } else {
+            "live provider or unresolved ownership"
+        }
+        .into();
+        record.action = if dead {
+            "would_settle"
+        } else if orphaned {
+            "would_reap"
+        } else {
+            "retained"
+        }
+        .into();
         if dry_run || (!dead && !orphaned) {
+            report.records.push(record);
             continue;
         }
         let result = store.settle_agent_process(agent, || {
@@ -427,15 +494,27 @@ fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapRe
             Ok(())
         });
         match result {
-            Ok(true) => report.reaped += u32::from(orphaned),
-            Ok(false) => continue,
+            Ok(true) => {
+                report.reaped += u32::from(orphaned);
+                record.action = if orphaned { "reaped" } else { "settled" }.into();
+            }
+            Ok(false) => {
+                record.action = "retained".into();
+                record.reason = "attachment changed during cleanup".into();
+                report.records.push(record);
+                continue;
+            }
             Err(error) => {
                 report
                     .errors
                     .push(format!("AgentProcess {}: {error}", agent.process.id));
+                record.action = "retained".into();
+                record.reason = error.to_string();
+                report.records.push(record);
                 continue;
             }
         }
+        report.records.push(record);
         let Some(session) = agent.process.agent_session_id.as_deref() else {
             continue;
         };
@@ -664,6 +743,76 @@ mod tests {
                 .as_deref(),
             Some("interrupted")
         );
+    }
+
+    #[test]
+    fn prune_retires_only_unlaunched_reservations_with_dead_owners() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let database = ledger.home().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(database).unwrap();
+        let mut expected = Vec::new();
+        for (name, state, ended) in [
+            ("retired", Some("reserved"), true),
+            ("unknown", None, true),
+            ("requested", Some("spawn_requested"), true),
+            ("unresolved-owner", Some("reserved"), false),
+        ] {
+            let session = store.test_session(name, &crate::session_record::new_artifact_key());
+            let parent = LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
+                rusqlite::params![
+                    parent,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    ended.then_some(1)
+                ],
+            )
+            .unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &parent, true)
+                .unwrap();
+            sql.execute(
+                "UPDATE processes SET spawn_state=?2 WHERE id=?1",
+                rusqlite::params![attachment.agent_process_id, state],
+            )
+            .unwrap();
+            expected.push((attachment.agent_process_id, name == "retired"));
+        }
+        let preview = super::reap_in(&store, true).unwrap();
+        assert!(preview.errors.is_empty());
+        assert_eq!(
+            preview
+                .records
+                .iter()
+                .filter(|r| r.action == "would_settle")
+                .count(),
+            1
+        );
+        for (id, _) in &expected {
+            assert!(store.process(id).unwrap().unwrap().completed_at.is_none());
+        }
+        let applied = super::reap_in(&store, false).unwrap();
+        assert!(applied.errors.is_empty());
+        assert_eq!(
+            applied
+                .records
+                .iter()
+                .filter(|r| r.action == "settled")
+                .count(),
+            1
+        );
+        for (id, retired) in &expected {
+            let process = store.process(id).unwrap().unwrap();
+            assert_eq!(process.completed_at.is_some(), *retired);
+            assert!(process.outcome.is_none());
+            assert!(process.pid.is_none());
+        }
+        let retry = super::reap_in(&store, false).unwrap();
+        assert!(retry.records.iter().all(|r| r.action == "retained"));
+        assert_eq!(retry.records.len(), 3);
+        assert!(store.session("retired").unwrap().is_some());
     }
 
     #[test]

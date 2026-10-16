@@ -154,25 +154,10 @@ async fn resolve_task(
 }
 
 async fn historical_branch_task(store: &SharedStore, branch: &str) -> OpsResult<Option<Task>> {
-    let mut found = None;
-    for task in store.list_tasks(None).await.map_err(task_error)? {
-        if task.branch == branch
-            || store
-                .task_prs(&task.id)
-                .await
-                .map_err(task_error)?
-                .iter()
-                .any(|pr| pr.branch == branch)
-        {
-            if found.is_some() {
-                return Err(task_error(format!(
-                    "branch {branch:?} belongs to multiple Tasks; use an issue ID"
-                )));
-            }
-            found = Some(task);
-        }
-    }
-    Ok(found)
+    store
+        .sqlite
+        .historical_branch_task(branch)
+        .map_err(task_error)
 }
 
 pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResult<String> {

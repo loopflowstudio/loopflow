@@ -31,6 +31,9 @@ use crate::work::task::{
 
 use super::{SqliteStore, TaskCheckout};
 
+const BRANCH_TASK_IDS: &str = "SELECT id FROM tasks WHERE branch=?1
+    UNION SELECT task_id FROM task_prs WHERE branch=?1";
+
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
         "SELECT project_id,title,description,due_date FROM task_creation_intents WHERE task_id=?1",
@@ -462,6 +465,26 @@ impl SqliteStore {
             .query_map(params![branch], |row| map_task_row(&conn, row))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         resolve_current_task(branch, tasks)
+    }
+
+    /// Match current checkout or retained delivery branches without hydrating unrelated history.
+    pub(crate) fn historical_branch_task(&self, branch: &str) -> StoreResult<Option<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let ids = snapshot
+            .prepare(BRANCH_TASK_IDS)?
+            .query_map([branch], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        match ids.as_slice() {
+            [] => Ok(None),
+            [id] => task_on(
+                &snapshot,
+                &TaskId::parse(id).map_err(|error| StoreError::InvalidData(error.to_string()))?,
+            ),
+            _ => Err(StoreError::InvalidData(format!(
+                "branch {branch:?} belongs to multiple Tasks; use an issue ID"
+            ))),
+        }
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
@@ -2184,6 +2207,66 @@ mod local_planning_tests {
             .ensure_wave_project(repo.to_str().unwrap(), "inbox")
             .unwrap()
             .id
+    }
+
+    #[test]
+    fn retired_branch_lookup_preserves_history_without_full_scans() {
+        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "retired_work_lookup");
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
+            params![project.as_str(), wave],
+        )
+        .unwrap();
+        let mut first = None;
+        for n in 0..2_000 {
+            let task = TaskId::new();
+            first.get_or_insert_with(|| task.to_string());
+            let branch = format!("retired-{n}");
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,branch,workspace_slug,base_commit)
+                VALUES(?1,?2,?3,1,?3,?3,'base')", params![task.as_str(),project.as_str(),branch]).unwrap();
+            conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+                VALUES(?1,?2,1,?3,?3,'base',1,1)", params![format!("pr-{n}"),task.as_str(),branch]).unwrap();
+        }
+        let read = || {
+            let mut query = conn.prepare(super::BRANCH_TASK_IDS).unwrap();
+            let ids = query
+                .query_map(["retired-0"], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(ids, vec![first.clone().unwrap()]);
+            query.get_status(rusqlite::StatementStatus::FullscanStep)
+        };
+        let before = read();
+        conn.execute_batch(&current_draft_sql("retired_work_lookup"))
+            .unwrap();
+        let after = read();
+        eprintln!("branch full-scan steps: {before} → {after}");
+        assert!(
+            before >= 3_998,
+            "fixture did not reproduce historical scans: {before}"
+        );
+        assert_eq!(after, 0);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM task_prs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2_000
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
     }
 
     #[test]

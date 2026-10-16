@@ -754,7 +754,7 @@ impl SqliteStore {
     pub(crate) fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
-            PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive FROM processes e")))?;
+            PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e")))?;
         let rows = query
             .query_map([], |row| {
                 Ok(crate::process::AgentProcess {
@@ -763,6 +763,7 @@ impl SqliteStore {
                     attachment_token: row.get(20)?,
                     provider: row.get(21)?,
                     interactive: row.get(22)?,
+                    spawn_reserved: row.get(23)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -787,13 +788,15 @@ impl SqliteStore {
             conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM processes WHERE id=?1 AND kind='agent'
               AND pid IS ?2 AND os_started_at IS ?3 AND attached_lf_process_id IS ?4
-              AND attachment_token IS ?5 AND completed_at IS NULL)",
+              AND attachment_token IS ?5 AND completed_at IS NULL
+              AND (spawn_state IS 'reserved' AND pid IS NULL)=?6)",
                 params![
                     expected.process.id,
                     expected.process.pid,
                     expected.process.os_started_at,
                     expected.attached_lf_process_id,
-                    expected.attachment_token
+                    expected.attachment_token,
+                    expected.spawn_reserved
                 ],
                 |row| row.get(0),
             )?
@@ -804,7 +807,9 @@ impl SqliteStore {
         terminate()?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE processes SET completed_at=?2,spawn_state='exited',endpoint=NULL WHERE id=?1",
+            "UPDATE processes SET completed_at=?2,
+                spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
+                endpoint=NULL WHERE id=?1",
             params![
                 expected.process.id,
                 time::OffsetDateTime::now_utc().unix_timestamp()

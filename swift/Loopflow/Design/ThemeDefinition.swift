@@ -79,22 +79,6 @@ public struct TerminalPalette: Equatable, Sendable {
             return ratio < 4.5 ? String(format: "%@: %@ on %@ is %.2f:1; requires 4.5:1.", name, ink.css, base.css, ratio) : nil
         }
     }
-    public var ansiWarnings: [String] {
-        indexed.prefix(16).enumerated().compactMap { index, color in
-            color.contrast(background) < 4.5 ? "ANSI \(index): \(String(format: "%.2f", color.contrast(background))):1 (original retained)" : nil
-        }
-    }
-
-    /// Estimate Ghostty's default faint opacity; personal settings and cell backgrounds can differ.
-    public var dimWarnings: [String] {
-        ([("Default", foreground)] + indexed.prefix(16).enumerated().map { ("ANSI \($0.offset)", $0.element) })
-            .compactMap { name, color in
-                let ratio = color.mixed(with: background, amount: 1 - 128.0 / 255).contrast(background)
-                return ratio < 4.5
-                    ? String(format: "Dim %@: %.2f:1 at 50%% opacity (estimate; original retained)", name, ratio)
-                    : nil
-            }
-    }
 }
 
 /// A complete theme. Its name is its identity: config and files refer to it by name.

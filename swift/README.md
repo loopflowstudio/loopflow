@@ -79,8 +79,8 @@ Ordinary controls and links use text roles; the theme’s accent emphasizes deli
 Status labels and shapes retain their meaning across palettes.
 Choose **Appearance → Choose Theme…** to preview the whole workspace. Set
 **Light theme** and **Dark theme** independently; **System** follows macOS using
-both. Each picker lists only its own appearance: built-ins, then **Yours**.
-Light/Dark mode dims the other picker.
+both. System lists both pickers; Light or Dark lists only its own. Each picker
+shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
 
 ```yaml
 # ~/.lf/config.yaml
@@ -116,9 +116,8 @@ required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
 optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
 
-Unreadable app/default/selection/cursor text prevents Apply. ANSI and dim-text
-shortfalls warn while retaining source colors. Personal faint opacity, cell
-backgrounds and application truecolor affect terminal contrast. Personal non-color
+Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
+their source values. Personal non-color
 Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 

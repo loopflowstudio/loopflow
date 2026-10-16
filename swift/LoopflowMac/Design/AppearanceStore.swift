@@ -80,7 +80,9 @@ final class AppearanceStore {
     var selectedName: String { current.name(dark: picker == .dark) }
     var selectedTheme: ThemeDefinition { theme(selectedName, dark: picker == .dark, in: currentLibrary) }
     var selectedSource: ThemeEntry.Source? { currentLibrary.source(of: selectedName) }
-    var entries: (builtins: [ThemeEntry], yours: [ThemeEntry]) { currentLibrary.entries(dark: picker == .dark) }
+    func entries(for side: AppearanceMode) -> (builtins: [ThemeEntry], yours: [ThemeEntry]) {
+        currentLibrary.entries(dark: side == .dark)
+    }
     var canDelete: Bool { selectedSource == .yours }
     var deleteRevertsToBuiltin: Bool { canDelete && currentLibrary.isBuiltin(selectedName) }
     var refusal: String? { draft?.refusal }

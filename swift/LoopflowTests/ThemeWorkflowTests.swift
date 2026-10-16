@@ -188,15 +188,19 @@ struct ThemeWorkflowTests {
                 #expect(button.isDisabled() == (choice != .system && choice != slot))
             }
             #expect(appearance.picker == (choice == .dark ? .dark : .light))
+            let showsDark = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl")) != nil
+            let showsLight = (try? view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon")) != nil
+            #expect(showsDark == (choice != .light))
+            #expect(showsLight == (choice != .dark))
         }
-        #expect(appearance.entries.builtins.count == 12)
-        #expect(appearance.entries.builtins.allSatisfy { !$0.theme.isDark })
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl") }
+        #expect(appearance.entries(for: .light).builtins.count == 12)
+        #expect(appearance.entries(for: .light).builtins.allSatisfy { !$0.theme.isDark })
+        #expect(appearance.entries(for: .dark).builtins.count == 12)
+        #expect(appearance.entries(for: .dark).builtins.allSatisfy { $0.theme.isDark })
+        // System lists both sides at once; each tile assigns its own side.
         try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Celadon").button().tap()
-        try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-picker-dark").button().tap()
-        #expect(appearance.entries.builtins.count == 12)
-        #expect(appearance.entries.builtins.allSatisfy { $0.theme.isDark })
         try view.inspect().find(viewWithAccessibilityIdentifier: "appearance-theme-Night Owl").button().tap()
+        #expect(appearance.themeName(for: .light) == "Celadon")
         #expect(appearance.current.mode == .system)
         try view.inspect().find(button: "Apply").tap()
         #expect(ThemeConfig.read(paths.config) == "light:Celadon,dark:Night Owl")
@@ -212,8 +216,6 @@ struct ThemeWorkflowTests {
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         appearance.beginPreview()
         let view = ThemeChooser(appearance: appearance)
-        let dimWarning = try #require(appearance.selectedTheme.terminal.dimWarnings.first)
-        #expect(try view.inspect().find(text: dimWarning).string() == dimWarning)
         #expect(try !view.inspect().find(button: "Apply").isDisabled())
         try view.inspect().find(button: "Cancel").tap()
         #expect(!appearance.chooserOpen)

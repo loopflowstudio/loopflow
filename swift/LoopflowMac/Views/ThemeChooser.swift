@@ -9,8 +9,8 @@ struct ThemeChooser: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let terminal = appearance.selectedTheme.terminal
-        let entries = appearance.entries
+        // System shows both pickers; Light or Dark shows only its own.
+        let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
         VStack(alignment: .leading, spacing: 16) {
             Text("Choose Theme").font(Typography.sectionTitle())
             HStack(alignment: .top, spacing: 16) {
@@ -46,17 +46,21 @@ struct ThemeChooser: View {
                     .opacity(enabled ? 1 : 0.45)
                 }
             }
-            Text("\(appearance.picker.menuTitle) themes · previewing \(appearance.selectedTheme.name)")
+            Text("Previewing \(appearance.selectedTheme.name)")
                 .font(.caption).foregroundStyle(palette.textSecondary)
             ScrollView {
                 if editing, appearance.selectedSource == .yours {
                     ThemeEditor(appearance: appearance)
                 } else {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Built-in").font(.caption).foregroundStyle(palette.textSecondary)
-                        grid(entries.builtins)
-                        Text("Yours").font(.caption).foregroundStyle(palette.textSecondary)
-                        grid(entries.yours, importTile: true)
+                        ForEach(sides, id: \.self) { side in
+                            let entries = appearance.entries(for: side)
+                            if sides.count > 1 { Text("\(side.menuTitle) themes").font(Typography.strong(13)) }
+                            Text("Built-in").font(.caption).foregroundStyle(palette.textSecondary)
+                            grid(entries.builtins, side: side)
+                            Text("Yours").font(.caption).foregroundStyle(palette.textSecondary)
+                            grid(entries.yours, side: side, importTile: true)
+                        }
                     }
                 }
                 HStack(spacing: 12) {
@@ -69,12 +73,6 @@ struct ThemeChooser: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
                     ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
-                    DisclosureGroup("Terminal contrast details") {
-                        ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
-                        ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
-                    }
-                    Text("Explicit colors printed by terminal applications may retain their own appearance.")
-                        .foregroundStyle(palette.textSecondary)
                 }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
             }
             if let refusal = appearance.refusal {
@@ -100,24 +98,37 @@ struct ThemeChooser: View {
         .onDisappear { if appearance.chooserOpen { appearance.cancel() } }
     }
 
-    private func grid(_ entries: [ThemeEntry], importTile: Bool = false) -> some View {
+    private func grid(_ entries: [ThemeEntry], side: AppearanceMode, importTile: Bool = false) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], alignment: .leading, spacing: 12) {
-            ForEach(entries) { entry in tile(entry) }
-            if importTile {
-                Button("Import file…", action: importTheme)
-                    .buttonStyle(WorkOutlineButtonStyle())
-                    .frame(maxWidth: .infinity, minHeight: 60)
-                    .help("Add a Ghostty theme file to your \(appearance.picker.menuTitle.lowercased()) themes")
-                    .accessibilityIdentifier("appearance-import-theme")
-            }
+            ForEach(entries) { entry in tile(entry, side: side) }
+            if importTile { importPlaceholder(side: side) }
         }
     }
 
-    private func tile(_ entry: ThemeEntry) -> some View {
+    /// A dashed tile the same shape as a theme tile.
+    private func importPlaceholder(side: AppearanceMode) -> some View {
+        Button { importTheme(side: side) } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Import file…").foregroundStyle(palette.textSecondary)
+                Color.clear.frame(height: 8)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .contentShape(Rectangle())
+            .overlay(Rectangle().strokeBorder(palette.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        }
+        .buttonStyle(.plain)
+        .help("Add a Ghostty theme file to your \(side.menuTitle.lowercased()) themes")
+        .accessibilityIdentifier(side == .dark ? "appearance-import-theme-dark" : "appearance-import-theme")
+    }
+
+    private func tile(_ entry: ThemeEntry, side: AppearanceMode) -> some View {
         let theme = entry.theme
-        let selected = appearance.selectedName == entry.name
+        let assigned = appearance.themeName(for: side) == entry.name
+        let selected = assigned && appearance.picker == side
         return VStack(alignment: .leading, spacing: 0) {
-            Button { editing = false; appearance.previewTheme(entry.name) } label: {
+            Button { editing = false; appearance.showPicker(side); appearance.previewTheme(entry.name) } label: {
                 // The name doubles as the terminal text sample; the tile's edge shows the app surface.
                 VStack(alignment: .leading, spacing: 8) {
                     Text(theme.name).foregroundStyle(theme.terminal.foreground.color)
@@ -134,14 +145,10 @@ struct ThemeChooser: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("appearance-theme-\(entry.name)")
             if selected {
-                HStack(spacing: 6) {
-                    Button("Customize") { appearance.customize(); editing = true }
-                        .help(entry.source == .yours ? "Edit your theme" : "Make your own copy of \(entry.name)")
-                        .accessibilityIdentifier("appearance-customize-theme")
-                    if appearance.canDelete {
-                        Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
-                            .accessibilityIdentifier("appearance-delete-theme")
-                    }
+                // Labels never wrap mid-word; a narrow tile stacks the buttons instead.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { themeActions(entry) }
+                    VStack(alignment: .leading, spacing: 6) { themeActions(entry) }
                 }
                 .font(.caption).buttonStyle(WorkOutlineButtonStyle())
                 .padding([.horizontal, .bottom], 10)
@@ -149,11 +156,25 @@ struct ThemeChooser: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.palette.background)
-        .workSelection(selected)
+        .workSelection(assigned)
         .workFocusRing()
     }
 
-    private func importTheme() {
+    @ViewBuilder
+    private func themeActions(_ entry: ThemeEntry) -> some View {
+        Button("Customize") { appearance.customize(); editing = true }
+            .help(entry.source == .yours ? "Edit your theme" : "Make your own copy of \(entry.name)")
+            .accessibilityIdentifier("appearance-customize-theme")
+            .fixedSize()
+        if appearance.canDelete {
+            Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
+                .accessibilityIdentifier("appearance-delete-theme")
+                .fixedSize()
+        }
+    }
+
+    private func importTheme(side: AppearanceMode) {
+        appearance.showPicker(side)
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

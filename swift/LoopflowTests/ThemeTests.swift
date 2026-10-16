@@ -209,7 +209,7 @@ struct ThemeTests {
         #expect(saved.palette.definition.accent.hex == 0x224466)
         let relaunched = AppearanceStore(paths: paths, systemDark: false)
         #expect(relaunched.effectiveTheme.palette.definition.accent.hex == 0x224466)
-        #expect(relaunched.entries.builtins.first { $0.name == "Linen" }?.source == .yours)
+        #expect(relaunched.entries(for: relaunched.picker).builtins.first { $0.name == "Linen" }?.source == .yours)
         relaunched.beginPreview(); relaunched.deleteTheme(); relaunched.apply()
         #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Linen").path))
         #expect(relaunched.effectiveTheme.name == "Linen")
@@ -224,12 +224,12 @@ struct ThemeTests {
         #expect(store.refusal == "“Personal” is a dark theme. Import it from the Dark picker.")
         #expect(!store.canApply)
         #expect(store.effectiveTheme.name == "Loopflow Light")
-        #expect(store.entries.yours.isEmpty)
+        #expect(store.entries(for: store.picker).yours.isEmpty)
         store.showPicker(.dark)
         #expect(store.canApply)
         store.importTheme(try file("background=171924\nforeground=CAD2EF"))
         #expect(store.refusal == nil)
-        #expect(store.entries.yours.map(\.name) == ["Personal"])
+        #expect(store.entries(for: store.picker).yours.map(\.name) == ["Personal"])
         #expect(store.effectiveTheme.name == "Personal")
         store.apply()
         #expect(ThemeConfig.read(paths.config) == "light:Loopflow Light,dark:Personal")
@@ -249,7 +249,7 @@ struct ThemeTests {
         let store = AppearanceStore(paths: paths, systemDark: false)
         #expect(store.effectiveTheme.name == "Midnight")
         #expect(store.selectedSource == .ghostty)
-        #expect(store.entries.yours.map(\.name) == ["Midnight"])
+        #expect(store.entries(for: store.picker).yours.map(\.name) == ["Midnight"])
         #expect(store.library.resolve("Linen")?.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
         #expect(!store.canDelete)
         store.customize(); store.apply()
@@ -263,7 +263,7 @@ struct ThemeTests {
         try paths.write("background=FFF4DF\nforeground=34291F", theme: "Paper")
         let store = AppearanceStore(paths: paths, systemDark: false)
         #expect(store.notice?.contains("Broken") == true)
-        #expect(store.entries.yours.map(\.name) == ["Paper"])
+        #expect(store.entries(for: store.picker).yours.map(\.name) == ["Paper"])
     }
 
     @Test func unreadableEditsKeepTheLastAppearanceAndDisableApply() throws {
@@ -311,7 +311,6 @@ struct ThemeTests {
         #expect(theme.theme.terminal.indexed.count == 256)
         #expect(theme.theme.terminal.indexed[8].hex == 0x121212)
         #expect(theme.theme.terminal.indexed[255].hex == 0xABCDEF)
-        #expect(theme.theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 8:") })
         #expect(theme.diagnostics.filter { $0.contains("omitted") }.count == 3)
         #expect(theme.diagnostics.contains { $0.contains("repeated palette 8") })
         #expect(!theme.theme.ghosttyOverlay.contains("/never"))
@@ -419,12 +418,9 @@ struct ThemeTests {
     }
     #endif
 
-    @Test func dimTextWarnsWithoutChangingOrRejectingTheTheme() throws {
+    @Test func weakDimTextKeepsTheThemeAsImported() throws {
         let theme = try imported("background=FFFFFF\nforeground=000000\npalette=1=000000").theme
         #expect(theme.terminal.readabilityErrors.isEmpty)
-        #expect(!theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 1:") })
-        #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim Default:") })
-        #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim ANSI 1:") })
         #expect(theme.terminal.foreground.hex == 0)
         #expect(theme.terminal.indexed[1].hex == 0)
         let store = AppearanceStore(paths: .temporary(), systemDark: false)

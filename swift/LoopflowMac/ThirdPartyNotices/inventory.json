@@ -62,8 +62,8 @@
     "swift/Package.resolved": "a32e185b66501ba20e0fe32d6992110eb251700c9a302be88bdef48daeb46b4f",
     "swift/Package.swift": "8547328a1b959c2781da19037017b3049ec1593c11a4751dba67a1c0f8d1fb3f",
     "third_party/README.md": "ab704e7eef1524c178bc75259b58c5a96406dc2160d59d0bce20e300458a4bcb",
-    "third_party/REBUILD.md": "a453876f686c6d743ddc6f608042d094fa0db0a72a02aba50635c9c12dd48de7",
-    "third_party/manifest.json": "04c2aca4e4c56e3af31a5de78b7e35dc83fda113df9974435b5120e9743ef129",
+    "third_party/REBUILD.md": "12cbefeb54c2d3d541761bbfaae006f10b82a558ccb3bbb61060bd85fb7037b6",
+    "third_party/manifest.json": "b94e28af405a1976f2412cf43b5034282d55688a3fdc57395690f098e5892e25",
     "third_party/notices/app-fonts.txt": "17b912df78b4ed923a1b2d3a03def226afeb47279cd1e54823c13f3f0964c2e1",
     "third_party/notices/breakpad-breakpad.txt": "28fd46313ce1f83fa2716c64c5e630296849bf059758023b3df2eb1ae98557b7",
     "third_party/notices/crate-block2.txt": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
@@ -251,7 +251,14 @@
       "scope": "GhosttyKit",
       "source": {
         "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
+        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9",
+        "packaged": {
+          "sha256": "3d78b0b701e98063cd974c1d5a2009f420474bfe7a6384d40593ca728f09db07",
+          "omit_binary_fixtures": [
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashduringload",
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashInMain"
+          ]
+        }
       },
       "notices": [
         {

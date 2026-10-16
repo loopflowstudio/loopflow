@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import re
@@ -278,6 +279,28 @@ def _split_libintl(library: Path, members: list[str], output: Path) -> None:
         subprocess.run(["ranlib", str(output)], check=True)
 
 
+def _package_source(source: Path, destination: Path, specification: dict) -> None:
+    packaged = specification.get("packaged")
+    if packaged is None:
+        shutil.copyfile(source, destination)
+        return
+    omitted = set(packaged["omit_binary_fixtures"])
+    found = set()
+    with (
+        tarfile.open(source) as upstream,
+        destination.open("wb") as raw,
+        gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive,
+    ):
+        for member in upstream:
+            if member.name in omitted:
+                found.add(member.name)
+                continue
+            archive.addfile(member, upstream.extractfile(member) if member.isfile() else None)
+    if found != omitted or _sha(destination) != packaged["sha256"]:
+        raise ValueError("Packaged source differs from its audited fixture omissions")
+
+
 def _package_sources(root: Path, output: Path, inventory: dict, framework: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     cache = root / ".lf/tmp/third-party"
@@ -285,7 +308,7 @@ def _package_sources(root: Path, output: Path, inventory: dict, framework: Path)
         if "source" not in component:
             continue
         source = _download(component["source"], cache)
-        shutil.copyfile(source, output / (component["id"] + ".tar.gz"))
+        _package_source(source, output / (component["id"] + ".tar.gz"), component["source"])
     with zipfile.ZipFile(output / "GhosttyKit.zip", "w", zipfile.ZIP_DEFLATED) as original:
         for path in sorted(framework.rglob("*")):
             relative = path.relative_to(framework)
@@ -359,7 +382,8 @@ def verify(destination: Path) -> None:
     for component in inventory["components"]:
         if "source" in component:
             path = destination / "ThirdPartySources" / (component["id"] + ".tar.gz")
-            if _sha(path) != component["source"]["sha256"]:
+            source = component["source"]
+            if _sha(path) != source.get("packaged", source)["sha256"]:
                 raise ValueError(f"Source does not match inventory: {component['id']}")
     print(f"Verified {len(receipt)} third-party files in {destination}")
 

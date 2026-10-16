@@ -154,7 +154,14 @@
       "scope": "GhosttyKit",
       "source": {
         "url": "https://deps.files.ghostty.org/breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918.tar.gz",
-        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9"
+        "sha256": "6cca98943d1a990766cef61077c09aff5938063fe17a1efe1228e5412b6d6ad9",
+        "packaged": {
+          "sha256": "3d78b0b701e98063cd974c1d5a2009f420474bfe7a6384d40593ca728f09db07",
+          "omit_binary_fixtures": [
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashduringload",
+            "breakpad-b99f444ba5f6b98cac261cbb391d8766b34a5918/src/client/mac/testapp/crashInMain"
+          ]
+        }
       },
       "notices": [
         {

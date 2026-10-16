@@ -41,3 +41,8 @@ builds patched GhosttyKit with Zig 0.16.0 and macOS's Metal tools; it does not
 publish it. For MPL-covered z2d and option-ext, their original source archives
 accompany this package. Shell integration is already complete source in the app
 resources and the Loopflow source archive, with original GPL/MIT headers intact.
+
+Breakpad's packaged archive omits only its two prebuilt i386 crash-test executables,
+which Apple rejects inside notarized apps. Their source and every other upstream
+file remain unchanged. The inventory records the original archive hash, omitted
+paths and the deterministic packaged archive hash.

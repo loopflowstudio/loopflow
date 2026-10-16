@@ -239,11 +239,43 @@ writes remain rejected. Its focused Rust regression/build/Clippy passed.
 
 Jack approved this on October 15 during demo review. Build it in this Task.
 
-**On hold (October 15):** Jack doesn't love the Edit and Import UIs; as separate
-buttons they feel disconnected. He wants them tied to a slot, or slots removed.
-He wants Ghostty text config supported (`theme = light:X,dark:Y`, accepting
-Loopflow names too), without the picker fighting the config. The catalogue and
-license decisions stand. Decide the slot model and config source before building.
+**Redesign (October 15).** Jack didn't love Edit and Import as separate buttons.
+He chose **no slots**, and **Ghostty-syntax text config** in the existing
+`~/.lf/config.yaml`. Catalogue and license decisions stand.
+
+- **Built-ins are fixed.** The 24 catalogue themes (12 Light, 12 Dark) are
+  read-only and always available by name.
+- **Your themes are files.** Ghostty-format theme files in `~/.lf/themes/`
+  (writable), plus read-only `~/.config/ghostty/themes/`. Ghostty RGB keys give
+  the terminal; app roles derive via `GhosttyThemeMapping` unless the file sets
+  Loopflow app-role keys. A file named like a built-in overrides it, as Ghostty's
+  user directory does.
+- **Picker.** Two pickers, Light and Dark, each listing built-ins then Yours. The
+  selected tile carries its own actions: **Customize** (a built-in writes your
+  override copy; one of yours opens the editor in place), and **Delete** for yours
+  ("Revert to built-in" when it overrides one, which replaces Reset). **Import
+  file…** sits at the end of Yours and accepts only the picker's appearance.
+- **Config.** `theme: "light:Linen,dark:Hearth"` (Ghostty value syntax) in
+  `~/.lf/config.yaml`. Names resolve to your files first, then built-ins, then
+  Ghostty's themes folder. The repo `.lf/config.yaml` never sets the theme; a
+  repo can't recolor a multi-repo window. Absent means Loopflow Light/Dark.
+- **Picker doesn't fight config.** The file is the only store. Preview is in
+  memory; Apply rewrites only the `theme:` line and leaves the rest of the file
+  intact; Cancel writes nothing. The app watches the file and applies outside
+  edits live. An unknown name keeps the last good theme and shows the name and
+  the fix. UserDefaults `appearancePreferences` is deleted, with no migration
+  (solo dev, no compat).
+- **Ghostty's config.** It still loads for non-color settings. Its `theme =` is
+  ignored; Loopflow's config owns colors. Ghostty's file is never written.
+- **Deleted:** slots, the 24-slot editable library, slot Reset, slot migration,
+  and the UserDefaults appearance library.
+- **Open:** Mode. Ghostty's pair means "follow System" and a single name means
+  "always this one", so it can't express "Light mode, remember Hearth for dark".
+  Either the Mode control writes a single name or a pair, or a separate
+  `appearance: light|dark|system` key keeps both assignments.
+- **Separate Task candidate (not here):** Jack expects user config to override
+  repo config generally; today repo wins for scalars (`config.rs`), and some keys
+  are repo-only by design.
 
 - **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
   Flexoki Light, Noctis Lilac, Manila, Clay, Pewter, Frost, Vellum, Celadon. Dark:
@@ -256,13 +288,10 @@ license decisions stand. Decide the slot model and config source before building
   ports. Solarized Dark uses the original colors without the iTerm2 name. Update
   `Sources.md`/`Licenses/`: author license per theme, Badolato themes cite their
   terminalthemes.com MIT page, Neovim is Apache-2.0; delete notices for removed themes.
-- **Appearance split.** Every slot is Light or Dark. Each assignment picker shows
-  only its own 12; Edit/Import/Reset keep the slot's appearance. Import of the
-  wrong appearance previews an explanation naming the other picker and leaves
-  Apply disabled. Delete "either assignment accepts any palette" from code and README.
-- **Migration.** Assigned retired themes keep the existing one-time conversion.
-  Customized (edited or imported) slots survive; untouched retired slots become
-  the new companions. Never add visible slots beyond 24.
+- **Appearance split.** Every theme is Light or Dark. Each picker shows only its
+  own; Import of the wrong appearance previews an explanation naming the other
+  picker and leaves Apply disabled. Delete "either assignment accepts any
+  palette" from code and README.
 - **Not in scope:** Liquid Glass, keyboard browsing/search and theme export
   (Ghostty comparison ideas, undecided).
 

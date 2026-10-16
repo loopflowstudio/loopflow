@@ -571,6 +571,12 @@ The shared `Loopflow` target contains models, queries, and reusable views. The
 platform behavior. The shared library remains iOS-compatible; there is no iOS
 application target.
 
+## Open Source Licenses
+
+Open **About Loopflow → Open Source Licenses** to read and search bundled notices
+offline. Matching source and rebuild instructions ship inside the app under
+`Contents/Resources/ThirdPartySources`. See [packaging and updates](../third_party/README.md).
+
 ## Build system
 
 `./dev` uses Swift Package Manager and installs to a stable application path

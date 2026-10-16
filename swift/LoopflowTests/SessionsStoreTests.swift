@@ -120,7 +120,8 @@ struct SessionsStoreTests {
         await store.select("native")
 
         #expect(item(store, "native")?.surface == nil)
-        #expect(item(store, "native")?.error?.contains("active in another terminal") == true)
+        #expect(item(store, "native")?.state == .elsewhere)
+        #expect(item(store, "native")?.error == nil)
     }
 
     @Test("Selecting an active Session leaves its other terminal running until Move here")

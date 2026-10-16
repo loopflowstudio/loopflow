@@ -480,6 +480,11 @@ an earlier Flow step. Actual build/test failures still need repair. Keep scratch
 check results to one line with command, result and any deferred owner.
 Do not rerun broader checks because another lifecycle phase began.
 
+Headless Swift view tests inspect production leaf views directly when a parent
+requires `@Environment` Observation objects; ViewInspector cannot inject those
+objects. Keep existing leaf views internal for `@testable` access rather than
+adding test-only constructors or mounting a window.
+
 ## When to Mock
 
 Mock to isolate your code from things that shouldn't be part of unit tests:

@@ -30,12 +30,14 @@ License: `Licenses/Noctis.txt`
 
 Upstream terminal.* colors; selection is editor.selectionBackground (#b4adeb77) composited on the terminal background.
 
-## Manila
+## Verdigris
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Yngwie%27s%20Strat
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Safety%20Glass
 License: `Licenses/Badolato.txt`
 
-Renamed from Yngwie's Strat.
+Loopflow-authored muted jade light. Terminal colors from Safety Glass on a new
+background (#e1ede4) with a deeper selection (#bcd6c4); app roles from the
+import mapping seeded by ANSI green.
 
 ## Clay
 

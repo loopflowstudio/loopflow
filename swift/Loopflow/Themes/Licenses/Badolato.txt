@@ -1,6 +1,6 @@
-Manila, Clay, Frost, Vellum, Celadon, Onyx, Rosewood, Aubergine, Moss and
-Phosphor are Mark Badolato's own themes, published as MIT on their
-terminalthemes.com pages (for example https://terminalthemes.com/themes/desert-rose).
+Clay, Frost, Vellum, Celadon, Onyx, Rosewood, Aubergine, Moss and Phosphor are
+Mark Badolato's own themes, and Verdigris uses Safety Glass's terminal colors.
+His themes are published as MIT on their terminalthemes.com pages (for example https://terminalthemes.com/themes/desert-rose).
 Ports bundled from the iTerm2-Color-Schemes collection also carry the
 collection license below; each theme keeps its author's license in this folder.
 

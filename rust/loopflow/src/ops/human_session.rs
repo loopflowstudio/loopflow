@@ -701,6 +701,7 @@ pub(crate) async fn open(
                 crate::config::agent_override().as_deref(),
             ) {
                 mode.require_action(surface(store, session).await?.state)?;
+                drop(progress);
                 import(store, &session.id, &agent).await?;
                 let session = store
                     .session(&session.id)

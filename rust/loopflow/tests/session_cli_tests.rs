@@ -1541,6 +1541,113 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         .any(|event| event.payload["evidence"]["provider_session_id"] == "ses_retained"));
 }
 
+#[cfg(unix)]
+#[test]
+fn provider_switch_stops_startup_output_before_codex_opens() {
+    use std::fs;
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let home = tempfile::tempdir().unwrap();
+    let (id, input, _) = prepare_conversation(
+        home.path(),
+        home.path(),
+        "claude",
+        "Continue this conversation",
+    );
+    let native = uuid::Uuid::new_v4().to_string();
+    record_native(home.path(), &id, &input, &native);
+    let transcripts = home.path().join("claude/projects/fixture");
+    fs::create_dir_all(&transcripts).unwrap();
+    fs::write(
+        transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"Keep the original request"}}"#,
+    )
+    .unwrap();
+    install_codex_fixture(home.path(), None);
+    let provider = home.path().join("bin/codex");
+    let script = fs::read_to_string(&provider).unwrap().replace(
+        "#!/bin/sh\n",
+        "#!/bin/sh\ncase \" $* \" in *' --remote '*) printf 'NATIVE_TERMINAL_READY\\n' >&2; sleep 1;; esac\n",
+    );
+    fs::write(&provider, script).unwrap();
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: valid output pointers; null selects default PTY settings.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: openpty returned independently owned descriptors.
+    let mut master = unsafe { fs::File::from_raw_fd(master) };
+    // SAFETY: the fresh slave descriptor is owned only by this File.
+    let slave = unsafe { fs::File::from_raw_fd(slave) };
+    let mut launch = command(home.path(), &["session", "connect", &id, "-a", "codex"]);
+    launch
+        .process_group(0)
+        .env_clear()
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+        .env("CODEX_HOME", home.path().join("codex"))
+        .env(
+            "PATH",
+            format!("{}/bin:/usr/bin:/bin", home.path().display()),
+        )
+        .env("TERM", "xterm-256color")
+        .env("RUST_LOG", "off")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(slave));
+    let mut child = launch.spawn().unwrap();
+    drop(launch);
+    let reader = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        // Linux reports EIO when the last slave closes; retain the captured bytes.
+        let _ = master.read_to_end(&mut output);
+        String::from_utf8_lossy(&output).into_owned()
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if child.try_wait().unwrap().is_none() {
+        // SAFETY: only this fixture's newly created process group is signaled.
+        unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+    }
+    let status = child.wait().unwrap();
+    let terminal = reader.join().unwrap();
+    assert!(status.success(), "{terminal:?}");
+    let (_, native_output) = terminal.split_once("NATIVE_TERMINAL_READY").unwrap();
+    assert!(
+        !native_output.contains("Preparing conversation") && !native_output.contains("\x1b[2K"),
+        "launcher wrote into the native terminal: {native_output:?}"
+    );
+    assert!(fs::read_to_string(
+        home.path()
+            .join("runs")
+            .join(&input[4..6])
+            .join(input)
+            .join("conversation.md")
+    )
+    .unwrap()
+    .contains("Keep the original request"));
+}
+
 fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     db.execute(

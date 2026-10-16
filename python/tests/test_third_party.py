@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
+import io
 import json
 import shutil
 import subprocess
@@ -16,6 +18,40 @@ from scripts import third_party
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value))
+
+
+def _source_archive(path: Path, files: dict[str, bytes]) -> None:
+    with (
+        path.open("wb") as raw,
+        gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as archive,
+    ):
+        for name, content in files.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
+
+
+def test_packaged_source_retains_source_and_notices_without_prebuilt_fixtures(
+    tmp_path: Path,
+) -> None:
+    files = {"breakpad/crash.c": b"int main(void) { return 1; }", "breakpad/LICENSE": b"notice"}
+    upstream, expected, packaged = (
+        tmp_path / name for name in ["upstream.gz", "expected.gz", "packaged.gz"]
+    )
+    _source_archive(upstream, files | {"breakpad/crash": b"prebuilt executable"})
+    _source_archive(expected, files)
+    specification = {
+        "packaged": {
+            "omit_binary_fixtures": ["breakpad/crash"],
+            "sha256": third_party._sha(expected),
+        }
+    }
+    third_party._package_source(upstream, packaged, specification)
+    assert packaged.read_bytes() == expected.read_bytes()
+    specification["packaged"]["omit_binary_fixtures"] = ["breakpad/missing"]
+    with pytest.raises(ValueError, match="audited fixture omissions"):
+        third_party._package_source(upstream, packaged, specification)
 
 
 def _packaged_materials(root: Path) -> Path:
@@ -91,6 +127,29 @@ def test_packaging_receipt_cannot_omit_required_sources(tmp_path: Path) -> None:
     del data["ThirdPartySources/example.tar.gz"]
     _write_json(receipt, data)
     with pytest.raises(ValueError, match="Incomplete"):
+        third_party.verify(bundle)
+
+
+def test_final_bundle_checks_the_pinned_packaged_source_hash(tmp_path: Path) -> None:
+    bundle = _packaged_materials(tmp_path)
+    source = bundle / "ThirdPartySources/example.tar.gz"
+    inventory_path = bundle / "ThirdPartyNotices/inventory.json"
+    inventory = json.loads(inventory_path.read_text())
+    inventory["components"][0]["source"]["packaged"] = {
+        "sha256": third_party._sha(source),
+        "omit_binary_fixtures": ["prebuilt-fixture"],
+    }
+    inventory["components"][0]["source"]["sha256"] = hashlib.sha256(b"upstream archive").hexdigest()
+    _write_json(inventory_path, inventory)
+    receipt_path = bundle / "ThirdPartyNotices/contents.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["ThirdPartyNotices/inventory.json"] = third_party._sha(inventory_path)
+    _write_json(receipt_path, receipt)
+    third_party.verify(bundle)
+    source.write_bytes(b"upstream archive")
+    receipt["ThirdPartySources/example.tar.gz"] = third_party._sha(source)
+    _write_json(receipt_path, receipt)
+    with pytest.raises(ValueError, match="Source does not match inventory"):
         third_party.verify(bundle)
 
 

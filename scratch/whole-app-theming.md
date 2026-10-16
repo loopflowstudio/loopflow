@@ -5,11 +5,11 @@ Jack Heart approved implementation, subsequently requested the palette redesign,
 and authorized launching a separate preview. Native visual judgment remains open;
 no landing, installation or replacement of running clients is implied.
 
-**Stack:** Jack's latest direction is LOO-487 / [PR #1559](https://github.com/loopflowstudio/loopflow/pull/1559), superseding direct stacking on LOO-462/#1531.
-The Task records that parent; source `d6743d844fbac89693e1e25ad3e9c2a98fe9fe02`
-is integrated at `ba55df3415`. Its renderer/navigation/pane contract is summarized
-in [terminal polish](terminal-polish.md). Parent lands first; the separate
-[Workflow-loading hold](workflow-loading.md) survives.
+**Base:** parent LOO-487 / [PR #1559](https://github.com/loopflowstudio/loopflow/pull/1559)
+merged to main October 15 and is contained in this branch (main `4426b0b423`
+merged at `11b5d18d5e`); PR #1560 now targets main directly. Its renderer/
+navigation/pane contract is summarized in [terminal polish](terminal-polish.md).
+The separate [Workflow-loading hold](workflow-loading.md) survives.
 
 ## Problem and live decisions
 

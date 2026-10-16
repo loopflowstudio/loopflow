@@ -653,6 +653,15 @@ Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
 Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
 acceptance. Cross-launch layout restoration remains excluded.
 
+October 15, LOO-492: Jack Heart clarified that nested corner curves need even
+clearance; text padding alone does not satisfy the defect. The implementation
+derives workspace radius from pane radius plus inset. Terminal clearance sits
+outside Ghostty's measurement; native grid padding remains because block hit
+testing shares it. Focused headless checks cover radius/inset relationships,
+not the conditional outer stroke or native frames. Geometry proof with visible
+workspace borders and visual acceptance remain pending. AGENTS.md records the
+ViewInspector Observation limitation; fallback builds do not prove Ghostty behavior.
+
 LOO-298/299/300 retain their historical allocations; the archive does not close
 them. Rust owns grouping and binding; September 30's primary repo conversation
 supersedes deferring waveless entry. Trace removed features through state and
@@ -847,8 +856,9 @@ no new store-cleanup or installation authority.
 The accepted start, not the summer draft, is frozen at
 [the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
 (23 September–21 October). Gate 2 accepted planning, not publication. The later
-September 24 hierarchy decisions govern. Historical KR counts and dated review
-mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
+September 24 hierarchy decisions govern. Historical KR counts and review mechanics:
+`b1e3f623a:wave/product/MEMORY.md`; planning-review lessons:
+`4a84d93b59:.lf/wave/product/MEMORY.md`, this heading.
 
 - Product value is human-selected external progress in any three of Cube,
   Etude, Kata and Hootro. Sessions, planning churn and Loopflow self-hosting
@@ -857,12 +867,6 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 - Product's dogfood revealed execution work: Infrastructure now owns execution,
   Intelligence evidence, and Product the external experience. Finish validated
   foundations instead of restarting them.
-- Freeze the exact Project/KR union before review; recompute totals from rows.
-  Definitions and KRs are separate verdicts, and current rosters cannot prove
-  historical completeness. Missing duration evidence stays unknown.
-- Keep observations beside beneficiary and consequence. Carry, learned, not
-  prioritized and misplaced are different findings. Review proposes; accepted
-  start applies. A report plus execution settlement establishes completion.
 - PM's overwritten snapshot cannot recover KR history. The start ledger is a
   forward boundary; retain later wording as dated evidence. Append-only provider
   revisions remain an option when a real review needs unavailable lineage.
@@ -942,20 +946,12 @@ the target machine's `lf`; observation grants no execution authority. The retire
 lfd and resident-cron contracts remain in
 [git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
 
-## Shared planning and runtime vocabulary
-
-Wave → Task is public planning; Chapter/Project identity stays internal and
-historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
-together. LfSession owns interactive Session/headless Run continuity and
-history; Process owns an lf invocation; FlowProcess records one Flow process's graph
-and steps. A Task run may start several Flow processes. No separate Run owner is
-restored because identifiers happen to coincide.
-
 ## Swift data path — RegistryQuery is the single reader
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. Migration detail: `92d95edfe:wave/product/MEMORY.md`,
-this heading.
+Unknown wire status stays explicit. AGENTS.md owns shared runtime vocabulary;
+earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
+`92d95edfe:wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 

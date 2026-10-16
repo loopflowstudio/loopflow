@@ -963,6 +963,9 @@ struct SessionsContentView: View {
                         WorkLayoutView(layout: layout, registry: workspaces) { key in
                             workspacePanel(key).id(key)
                         }
+                        .padding([.horizontal, .bottom], PaneGeometry.windowInset)
+                        .background(palette.surfaceMuted)
+                        .accessibilityIdentifier("work-layout")
                     } else {
                         ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
                             description: Text("Open a repository, Wave or Task from the sidebar."))
@@ -1205,9 +1208,9 @@ struct SessionsContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius))
         .overlay {
-            if context { RoundedRectangle(cornerRadius: 8).strokeBorder(active ? palette.borderActive : palette.border, lineWidth: 1).allowsHitTesting(false) }
+            if context { RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(active ? palette.borderActive : palette.border, lineWidth: 1).allowsHitTesting(false) }
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
@@ -1434,8 +1437,8 @@ private struct WorkLayoutView<Content: View>: View {
                 let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 stack {
                     WorkLayoutView(layout: first, registry: registry, content: content)
-                        .frame(width: vertical ? max(0, extent * displayedRatio - 3) : nil,
-                               height: vertical ? nil : max(0, extent * displayedRatio - 3))
+                        .frame(width: vertical ? max(0, extent * displayedRatio - sizing.divider / 2) : nil,
+                               height: vertical ? nil : max(0, extent * displayedRatio - sizing.divider / 2))
                     SplitDivider(axis: effectiveAxis, ratio: displayedRatio, sizing: sizing, update: { value in
                         if let firstKey = first.keys.first, let secondKey = second.keys.first {
                             registry.resize(between: firstKey, and: secondKey, ratio: value)
@@ -1478,6 +1481,15 @@ private struct WorkspacePanesView: View {
     }
 }
 
+enum PaneGeometry {
+    // Keep pane outlines inside the native window's larger lower corners.
+    static let windowInset: CGFloat = 10
+    static let spacing: CGFloat = 6
+    static let cornerRadius = CornerRadius.md
+    // Nested curves share a center at the workspace's lower corners.
+    static let workspaceCornerRadius = cornerRadius + spacing
+}
+
 private struct MultiplexerView: View {
     @Environment(\.palette) private var palette
     let layout: LayoutNode
@@ -1507,7 +1519,7 @@ private struct MultiplexerView: View {
                 )
             }
         }
-        .padding(6)
+        .padding(PaneGeometry.spacing)
         .background(palette.surfaceMuted)
         .accessibilityIdentifier("sessions-multiplexer")
     }
@@ -1583,9 +1595,9 @@ extension LayoutNode {
         case .split(let axis, let first, let second, _):
             let a = first.minimumPaneSize, b = second.minimumPaneSize
             if axis == .vertical {
-                return CGSize(width: a.width + b.width + 6, height: max(a.height, b.height))
+                return CGSize(width: a.width + b.width + PaneGeometry.spacing, height: max(a.height, b.height))
             } else {
-                return CGSize(width: max(a.width, b.width), height: a.height + b.height + 6)
+                return CGSize(width: max(a.width, b.width), height: a.height + b.height + PaneGeometry.spacing)
             }
         }
     }
@@ -1595,7 +1607,7 @@ struct SplitSizing {
     let extent: CGFloat
     let firstMinimum: CGFloat
     let secondMinimum: CGFloat
-    var divider: CGFloat { min(6, max(0, extent)) }
+    var divider: CGFloat { min(PaneGeometry.spacing, max(0, extent)) }
 
     func constrain(_ ratio: Double) -> Double {
         guard extent > 0 else { return 0.5 }
@@ -1694,14 +1706,16 @@ struct SessionPaneView: View {
                 Rectangle().fill(theme.palette.border).frame(height: 1)
             }
             content
+                // Reserve the rounded edge before Ghostty measures its surface.
+                .padding(pane.terminal == nil ? 0 : PaneGeometry.cornerRadius)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.terminal.background.color)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.md)
+            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
                 .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
                 .allowsHitTesting(false)
         }

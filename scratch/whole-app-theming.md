@@ -108,8 +108,8 @@ fill is calibrated independently from terminal selection: 3:1 distinction and
 4.5:1 selected text. File selection keeps its neutral tint/edge. Ordinary text
 requires 4.5:1 across app surfaces and actual selection composites; meaningful
 focus/selection/status indicators require 3:1. Default terminal/cursor/selection
-text requires 4.5:1. ANSI/dim shortfalls warn without altering source colors;
-personal faint opacity and truecolor output limit those estimates.
+text requires 4.5:1 and blocks Apply. ANSI colors keep their source values without
+per-color warnings; faint opacity and truecolor output are review judgment.
 
 ## Concrete risk findings and alternatives
 

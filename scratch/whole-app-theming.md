@@ -239,6 +239,12 @@ writes remain rejected. Its focused Rust regression/build/Clippy passed.
 
 Jack approved this on October 15 during demo review. Build it in this Task.
 
+**On hold (October 15):** Jack doesn't love the Edit and Import UIs; as separate
+buttons they feel disconnected. He wants them tied to a slot, or slots removed.
+He wants Ghostty text config supported (`theme = light:X,dark:Y`, accepting
+Loopflow names too), without the picker fighting the config. The catalogue and
+license decisions stand. Decide the slot model and config source before building.
+
 - **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
   Flexoki Light, Noctis Lilac, Manila, Clay, Pewter, Frost, Vellum, Celadon. Dark:
   Loopflow Dark, Hearth, Catppuccin Mocha, Gruvbox Dark, Solarized Dark, Flexoki

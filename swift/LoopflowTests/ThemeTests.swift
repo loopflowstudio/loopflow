@@ -8,16 +8,46 @@ import GhosttyKit
 @testable import Loopflow
 @testable import LoopflowMac
 
+extension ThemePaths {
+    /// A private `~/.lf` and Ghostty theme folder for one test.
+    static func temporary() -> Self {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("loo488-\(UUID().uuidString)", isDirectory: true)
+        return Self(config: root.appendingPathComponent("lf/config.yaml"),
+                    themes: root.appendingPathComponent("lf/themes", isDirectory: true),
+                    ghostty: root.appendingPathComponent("ghostty/themes", isDirectory: true))
+    }
+
+    func write(_ text: String, theme name: String, ghostty: Bool = false) throws {
+        let directory = ghostty ? self.ghostty! : themes
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: directory.appendingPathComponent(name))
+    }
+
+    func configText() -> String? { try? String(contentsOf: config, encoding: .utf8) }
+
+    func writeConfig(_ text: String) throws {
+        try FileManager.default.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: config)
+    }
+}
+
 @Suite("Whole-app themes", .serialized)
 @MainActor
 struct ThemeTests {
-    private func defaults() -> UserDefaults { UserDefaults(suiteName: "theme-test-\(UUID().uuidString)")! }
-    private func imported(_ text: String = "background = #171924\nforeground = #CAD2EF") throws -> ThemeRecord {
-        try ThemeImport.parse(Data(text.utf8), name: "Personal")
+    private func imported(_ text: String = "background = #171924\nforeground = #CAD2EF") throws -> ThemeFile {
+        try ThemeFile.parse(Data(text.utf8), name: "Personal")
+    }
+    private func file(_ text: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("Personal")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+        return url
     }
 
     @Test func loopflowLightRetainsItsOriginalDesign() {
         let light = ThemeDefinition.light.palette.definition
+        #expect(ThemeDefinition.light.name == "Loopflow Light")
         #expect(light.background.hex == 0xFAF8F5)
         #expect(light.surface.hex == 0xFFFDF9)
         #expect(light.surfaceMuted.hex == 0xF3EEE7)
@@ -30,6 +60,7 @@ struct ThemeTests {
         #expect(light.workSelectedFill.hex == 0x7A333D)
         #expect(light.workSelectedText.hex == 0xFFFAF3)
         let dark = ThemeDefinition.dark.palette.definition
+        #expect(ThemeDefinition.dark.name == "Loopflow Dark")
         #expect(dark.background.hex == 0x2B3036)
         #expect(dark.surface.hex == 0x343B44)
         #expect(dark.accent.hex == 0x722F37)
@@ -40,12 +71,14 @@ struct ThemeTests {
         #expect(dark != GhosttyThemeMapping.palette(ThemeDefinition.dark.terminal))
     }
 
-    @Test func linenIsASeparateChoiceAndCompanionsKeepOrdinaryTextQuiet() throws {
-        let linen = try #require(ThemeDefinition.builtins.first { $0.id == "neo-light" })
-        #expect(linen.name == "Linen")
-        #expect(!linen.isDark)
-        #expect(linen.palette.definition != ThemeDefinition.light.palette.definition)
-        for theme in ThemeDefinition.builtins where !["light", "dark"].contains(theme.id) {
+    @Test func catalogueIsTwelveLightAndTwelveDarkWithQuietCompanions() throws {
+        let light = ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name)
+        let dark = ThemeDefinition.builtins.filter(\.isDark).map(\.name)
+        #expect(light == ["Loopflow Light", "Linen", "Catppuccin Latte", "Celadon", "Clay", "Flexoki Light", "Frost",
+                          "Gruvbox Light", "Manila", "Noctis Lilac", "Pewter", "Vellum"])
+        #expect(dark == ["Loopflow Dark", "Hearth", "Aubergine", "Catppuccin Mocha", "Flexoki Dark", "Gruvbox Dark",
+                         "Moss", "Night Owl", "Onyx", "Phosphor", "Rosewood", "Solarized Dark"])
+        for theme in ThemeDefinition.builtins where !["Loopflow Light", "Loopflow Dark"].contains(theme.name) {
             let palette = theme.palette.definition
             #expect(palette.emphasisInk == palette.text)
             #expect(palette.accentInk != palette.text)
@@ -53,105 +86,194 @@ struct ThemeTests {
             #expect(palette.accentHover != palette.accentPressed)
             // Terminal syntax may stay colorful; ordinary UI text should not look selected.
             let channels = palette.text.channels
-            #expect(channels.max()! - channels.min()! < 0.09)
+            #expect(channels.max()! - channels.min()! < 0.09, "\(theme.name)")
             if theme.isDark { #expect(palette.surfaceElement.luminance > palette.background.luminance) }
+            #expect(theme.readabilityErrors.isEmpty, "\(theme.name)")
         }
-        let defaults = defaults()
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        store.beginPreview(); store.previewTheme(linen.id); store.apply()
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).effectiveTheme.id == linen.id)
-        store.beginPreview(); store.previewTheme("light"); store.cancel()
-        #expect(store.effectiveTheme.id == linen.id)
     }
 
-    @Test func versionThreePreservesImportedPaletteAndAssignments() throws {
-        let defaults = defaults()
-        let theme = try imported()
-        var record = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(theme)) as? [String: Any])
-        var palette = try #require(record["palette"] as? [String: Any])
-        palette.removeValue(forKey: "accentInk"); palette.removeValue(forKey: "accentPressed")
-        for key in ["terminalHover", "terminalSelection", "terminalFailure"] {
-            palette[key] = ["rgb": ["hex": 0], "opacity": 0]
-        }
-        record["palette"] = palette
-        let choice = AppearanceSelection(mode: .dark, lightThemeID: "light", darkThemeID: theme.id)
-        defaults.set(try JSONSerialization.data(withJSONObject: ["version": 3,
-            "selection": JSONSerialization.jsonObject(with: JSONEncoder().encode(choice)), "imports": [record]]),
-            forKey: "appearancePreferences")
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(store.notice == nil)
-        #expect(store.selection.mode == choice.mode)
-        #expect(store.selection.lightThemeID == "light")
-        #expect(store.effectiveTheme.terminal == theme.terminal)
-        let restored = store.effectiveTheme.palette.definition
-        #expect(restored.accentInk == theme.palette.emphasisInk)
-        #expect(restored.accentPressed == theme.palette.accentHover)
-        #expect(restored.workSelectedFill == theme.palette.workSelectedFill)
-        #expect(restored.text == theme.palette.text)
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).effectiveTheme.palette.definition == restored)
-    }
-
-    @Test func completePalettesRejectMissingRolesAndKeepExplicitValues() throws {
+    @Test func builtinFilesAreCompleteAndRoundTrip() throws {
         for theme in ThemeDefinition.builtins {
-            let data = try JSONEncoder().encode(theme)
-            let restored = try JSONDecoder().decode(ThemeDefinition.self, from: data)
+            let text = ThemeFile.text(theme)
+            let restored = try ThemeFile.parse(Data(text.utf8), name: theme.name, complete: true).theme
             #expect(restored.palette.definition == theme.palette.definition)
-            #expect(restored.readabilityErrors.isEmpty)
-            let record = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-            let palette = try #require(record["palette"] as? [String: Any])
-            for key in palette.keys {
-                var incomplete = palette
-                incomplete.removeValue(forKey: key)
-                var changed = record
-                changed["palette"] = incomplete
-                let invalid = try JSONSerialization.data(withJSONObject: changed)
-                #expect(throws: (any Error).self) { try JSONDecoder().decode(ThemeDefinition.self, from: invalid) }
+            #expect(restored.terminal == theme.terminal)
+            let lines = text.split(separator: "\n").filter { !$0.hasPrefix("#") }
+            for index in [0, 7, lines.count - 5, lines.count - 1] {
+                var incomplete = lines
+                incomplete.remove(at: index)
+                #expect(throws: ThemeError.self) {
+                    try ThemeFile.parse(Data(incomplete.joined(separator: "\n").utf8), name: theme.name, complete: true)
+                }
             }
         }
     }
 
     @Test func ghosttyMappingUsesAnsiAndSelectionBeyondBackgroundAndForeground() throws {
-        let first = try imported("background=ffffff\nforeground=000000\npalette=4=000088\npalette=1=880000\nselection-background=222222\nselection-foreground=ffffff")
-        let second = try imported("background=ffffff\nforeground=000000\npalette=4=006600\npalette=1=880066\nselection-background=444444\nselection-foreground=ffffff")
-        #expect(first.palette.background == second.palette.background)
-        #expect(first.palette.accent != second.palette.accent)
-        #expect(first.palette.emphasisInk == second.palette.emphasisInk)
-        #expect(first.palette.accentInk != second.palette.accentInk)
-        #expect(first.palette.workingTone != second.palette.workingTone)
-        #expect(first.palette.failureTone != second.palette.failureTone)
-        #expect(first.palette.workSelectedFill != second.palette.workSelectedFill)
-        #expect(first.definition.readabilityErrors.isEmpty)
-        #expect(second.definition.readabilityErrors.isEmpty)
+        let first = try imported("background=ffffff\nforeground=000000\npalette=4=000088\npalette=1=880000\nselection-background=222222\nselection-foreground=ffffff").theme.palette.definition
+        let second = try imported("background=ffffff\nforeground=000000\npalette=4=006600\npalette=1=880066\nselection-background=444444\nselection-foreground=ffffff").theme.palette.definition
+        #expect(first.background == second.background)
+        #expect(first.accent != second.accent)
+        #expect(first.emphasisInk == second.emphasisInk)
+        #expect(first.accentInk != second.accentInk)
+        #expect(first.workingTone != second.workingTone)
+        #expect(first.failureTone != second.failureTone)
+        #expect(first.workSelectedFill != second.workSelectedFill)
+        #expect(first.readabilityErrors.isEmpty)
+        #expect(second.readabilityErrors.isEmpty)
     }
 
-    @Test func previousImportsConvertOnceAndIncompleteCurrentRecordsStayRecoverable() throws {
-        let defaults = defaults()
-        let theme = try imported()
-        var old = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(theme)) as? [String: Any])
-        old.removeValue(forKey: "palette")
-        let selection = AppearanceSelection(mode: .system, lightThemeID: theme.id, darkThemeID: theme.id)
-        let data = try JSONSerialization.data(withJSONObject: ["version": 2, "selection": JSONSerialization.jsonObject(with: JSONEncoder().encode(selection)), "imports": [old]])
-        defaults.set(data, forKey: "appearancePreferences")
-        let migrated = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(migrated.selection.mode == selection.mode)
-        #expect(migrated.selection.lightThemeID == migrated.selection.darkThemeID)
-        #expect(migrated.overrides.first?.palette == theme.palette)
-        #expect(migrated.overrides.first?.terminal == theme.terminal)
-        let saved = try #require(defaults.data(forKey: "appearancePreferences"))
-        #expect(saved != data)
-        #expect(AppearanceStore(defaults: defaults, systemDark: true).overrides == migrated.overrides)
-        var invalid = try #require(JSONSerialization.jsonObject(with: saved) as? [String: Any])
-        invalid["overrides"] = [old]
-        let broken = try JSONSerialization.data(withJSONObject: invalid)
-        defaults.set(broken, forKey: "appearancePreferences")
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).notice != nil)
-        #expect(defaults.data(forKey: "appearancePreferences") == broken)
-        var terminal = try #require(old["terminal"] as? [String: Any])
-        terminal["indexed"] = []
-        old["terminal"] = terminal
-        invalid["version"] = 2; invalid["imports"] = [old]
-        defaults.set(try JSONSerialization.data(withJSONObject: invalid), forKey: "appearancePreferences")
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).notice != nil)
+    @Test func loopflowKeysOverrideDerivedAppRoles() throws {
+        let derived = try imported().theme.palette.definition
+        let theme = try imported("background=171924\nforeground=CAD2EF\nloopflow-accent = #224466\nloopflow-working-ink=#99CCFF\nloopflow-selection-opacity=0.5").theme
+        #expect(theme.palette.definition.accent.hex == 0x224466)
+        #expect(theme.palette.definition.workingTone.inkRGB.hex == 0x99CCFF)
+        #expect(theme.palette.definition.selectionFill.opacity == 0.5)
+        #expect(theme.palette.definition.surface == derived.surface)
+        #expect(theme.isDark)
+        #expect(try imported("background=171924\nforeground=CAD2EF\nloopflow-appearance=light").theme.isDark == false)
+        #expect(throws: ThemeError.self) { try imported("background=171924\nforeground=CAD2EF\nloopflow-accent=blue") }
+    }
+
+    @Test func applyWritesOnlyTheThemeLineInEachModesFormat() throws {
+        let paths = ThemePaths.temporary()
+        try paths.writeConfig("agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
+        let store = AppearanceStore(paths: paths, systemDark: false)
+        #expect(store.selection.mode == .dark)
+        #expect(store.effectiveTheme.name == "Hearth")
+        store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Linen")
+        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
+        store.cancel()
+        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
+        #expect(store.effectiveTheme.name == "Hearth")
+        store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Linen"); store.apply()
+        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: \"light:Linen,dark:Hearth\"\nyolo: true\n")
+        store.beginPreview(); store.previewMode(.light); store.apply()
+        #expect(paths.configText() == "agent: claude\n# keep me\ntheme: \"Linen\"\nyolo: true\n")
+        // Returning to System restores the dark side remembered in this session.
+        store.applyMode(.system)
+        #expect(ThemeConfig.read(paths.config) == "light:Linen,dark:Hearth")
+        store.applyMode(.dark)
+        #expect(ThemeConfig.read(paths.config) == "Hearth")
+        let relaunched = AppearanceStore(paths: paths, systemDark: false)
+        #expect(relaunched.selection.mode == .dark)
+        #expect(relaunched.effectiveTheme.name == "Hearth")
+        relaunched.applyMode(.system)
+        #expect(ThemeConfig.read(paths.config) == "light:Loopflow Light,dark:Hearth")
+    }
+
+    @Test func absentConfigMeansLoopflowLightAndDarkAndIsCreatedOnApply() throws {
+        let paths = ThemePaths.temporary()
+        let store = AppearanceStore(paths: paths, systemDark: true)
+        #expect(store.selection == AppearanceSelection())
+        #expect(store.effectiveTheme.name == "Loopflow Dark")
+        #expect(paths.configText() == nil)
+        store.applyMode(.light)
+        #expect(paths.configText() == "theme: \"Loopflow Light\"\n")
+    }
+
+    @Test func outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() throws {
+        let paths = ThemePaths.temporary()
+        try paths.writeConfig("theme: light:Linen,dark:Night Owl\n")
+        let store = AppearanceStore(paths: paths, systemDark: true)
+        #expect(store.effectiveTheme.name == "Night Owl")
+        try paths.writeConfig("theme: 'light:Linen,dark:Onyx' # by hand\n")
+        store.reload()
+        #expect(store.effectiveTheme.name == "Onyx")
+        #expect(store.notice == nil)
+        try paths.writeConfig("theme: Onxy\n")
+        store.reload()
+        #expect(store.effectiveTheme.name == "Onyx")
+        #expect(store.notice?.contains("No theme named “Onxy”") == true)
+        #expect(store.notice?.contains(paths.config.path) == true)
+        try paths.writeConfig("theme: Vellum\n")
+        store.reload()
+        #expect(store.effectiveTheme.name == "Vellum")
+        #expect(store.selection.mode == .light)
+        #expect(store.notice == nil)
+    }
+
+    @Test func customizingABuiltinWritesYourCopyAndDeletingRevertsIt() throws {
+        let paths = ThemePaths.temporary()
+        let store = AppearanceStore(paths: paths, systemDark: false)
+        store.beginPreview(); store.previewTheme("Linen")
+        #expect(store.selectedSource == .builtin)
+        #expect(!store.canDelete)
+        store.editTheme { palette, _ in palette.accent = ThemeRGB(0x224466) }
+        #expect(store.selectedSource == .yours)
+        #expect(store.deleteRevertsToBuiltin)
+        #expect(store.effectiveTheme.palette.definition.accent.hex == 0x224466)
+        #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Linen").path))
+        store.apply()
+        let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Linen"), complete: true).theme
+        #expect(saved.palette.definition.accent.hex == 0x224466)
+        let relaunched = AppearanceStore(paths: paths, systemDark: false)
+        #expect(relaunched.effectiveTheme.palette.definition.accent.hex == 0x224466)
+        #expect(relaunched.entries.builtins.first { $0.name == "Linen" }?.source == .yours)
+        relaunched.beginPreview(); relaunched.deleteTheme(); relaunched.apply()
+        #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Linen").path))
+        #expect(relaunched.effectiveTheme.name == "Linen")
+        #expect(relaunched.effectiveTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
+    }
+
+    @Test func importAcceptsOnlyThePickersAppearance() throws {
+        let paths = ThemePaths.temporary()
+        let store = AppearanceStore(paths: paths, systemDark: false)
+        store.beginPreview(); store.showPicker(.light)
+        store.importTheme(try file("background=171924\nforeground=CAD2EF"))
+        #expect(store.refusal == "“Personal” is a dark theme. Import it from the Dark picker.")
+        #expect(!store.canApply)
+        #expect(store.effectiveTheme.name == "Loopflow Light")
+        #expect(store.entries.yours.isEmpty)
+        store.showPicker(.dark)
+        #expect(store.canApply)
+        store.importTheme(try file("background=171924\nforeground=CAD2EF"))
+        #expect(store.refusal == nil)
+        #expect(store.entries.yours.map(\.name) == ["Personal"])
+        #expect(store.effectiveTheme.name == "Personal")
+        store.apply()
+        #expect(ThemeConfig.read(paths.config) == "light:Loopflow Light,dark:Personal")
+        let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Personal"), complete: true).theme
+        #expect(saved.terminal.background.hex == 0x171924)
+        store.beginPreview(); store.showPicker(.dark); store.deleteTheme()
+        #expect(store.current.dark == "Loopflow Dark")
+        store.apply()
+        #expect(store.library.yours.isEmpty)
+    }
+
+    @Test func ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() throws {
+        let paths = ThemePaths.temporary()
+        try paths.write("background=101010\nforeground=EEEEEE", theme: "Midnight", ghostty: true)
+        try paths.write("background=FFFFFF\nforeground=000000", theme: "Linen", ghostty: true)
+        try paths.writeConfig("theme: Midnight\n")
+        let store = AppearanceStore(paths: paths, systemDark: false)
+        #expect(store.effectiveTheme.name == "Midnight")
+        #expect(store.selectedSource == .ghostty)
+        #expect(store.entries.yours.map(\.name) == ["Midnight"])
+        #expect(store.library.resolve("Linen")?.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
+        #expect(!store.canDelete)
+        store.customize(); store.apply()
+        #expect(FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Midnight").path))
+        #expect(store.selectedSource == .yours)
+    }
+
+    @Test func invalidFilesAreReportedAndDoNotHideOtherThemes() throws {
+        let paths = ThemePaths.temporary()
+        try paths.write("background=red\nforeground=000000", theme: "Broken")
+        try paths.write("background=FFF4DF\nforeground=34291F", theme: "Paper")
+        let store = AppearanceStore(paths: paths, systemDark: false)
+        #expect(store.notice?.contains("Broken") == true)
+        #expect(store.entries.yours.map(\.name) == ["Paper"])
+    }
+
+    @Test func unreadableEditsKeepTheLastAppearanceAndDisableApply() throws {
+        let store = AppearanceStore(paths: .temporary(), systemDark: false)
+        store.beginPreview(); store.previewTheme("Linen")
+        store.editTheme { _, terminal in terminal.foreground = terminal.background }
+        #expect(!store.canApply)
+        #expect(store.draftErrors.first?.hasPrefix("Linen:") == true)
+        #expect(store.effectiveTheme.terminal.foreground != store.effectiveTheme.terminal.background)
+        #expect(store.notice?.contains("Default text") == true)
     }
 
     @Test func unchangedDiffRecolorsWithoutReplacingSelection() throws {
@@ -174,233 +296,6 @@ struct ThemeTests {
         }
     }
 
-    @Test func assignedThemesFollowModeAndRestoreTogether() throws {
-        let defaults = defaults()
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(store.themes.count == 24)
-        #expect(Set(store.themes.map(\.id)).count == 24)
-        let night = "bundled:TokyoNight"
-        let day = "bundled:Gruvbox Light"
-        store.beginPreview()
-        store.editSlot(.light); store.previewTheme(night)
-        store.editSlot(.dark); store.previewTheme(day)
-        #expect(store.current.mode == .system)
-        #expect(store.effectiveTheme.id == day)
-        store.apply()
-        #expect(store.effectiveTheme.id == night)
-        let restored = AppearanceStore(defaults: defaults, systemDark: true)
-        #expect(restored.selection.lightThemeID == night)
-        #expect(restored.selection.darkThemeID == day)
-        #expect(restored.effectiveTheme.id == day)
-        restored.applyMode(.light)
-        restored.setSystemDark(true)
-        #expect(restored.effectiveTheme.id == night)
-        restored.applyMode(.dark)
-        restored.setSystemDark(false)
-        #expect(restored.effectiveTheme.id == day)
-        restored.applyMode(.system)
-        #expect(restored.effectiveTheme.id == night)
-        restored.beginPreview(); restored.previewTheme("dark"); restored.previewMode(.dark)
-        restored.cancel()
-        #expect(restored.selection == store.selection)
-        #expect(restored.effectiveTheme.id == night)
-    }
-
-    @Test func bothImportedAssignmentsPersistAndPreviousSelectionMigrates() throws {
-        let defaults = defaults()
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: path) }
-        store.beginPreview()
-        var ids: [String] = []
-        for slot in [AppearanceMode.light, .dark] {
-            store.editSlot(slot)
-            try Data("background=171924\nforeground=CAD2EF".utf8).write(to: path)
-            store.importTheme(path)
-            ids.append(store.selectedID)
-        }
-        store.apply()
-        let restored = AppearanceStore(defaults: defaults, systemDark: true)
-        #expect(restored.overrides.count == 2)
-        #expect(restored.selection.lightThemeID == ids[0])
-        #expect(restored.selection.darkThemeID == ids[1])
-        #expect(restored.effectiveTheme.id == ids[1])
-        let legacy = try imported()
-        let previous = try JSONSerialization.data(withJSONObject: [
-            "version": 1, "selection": legacy.id,
-            "imports": JSONSerialization.jsonObject(with: JSONEncoder().encode([legacy])),
-        ])
-        defaults.set(previous, forKey: "appearancePreferences")
-        let migrated = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(migrated.selection.mode == .dark)
-        #expect(migrated.effectiveTheme.name == legacy.name)
-        #expect(migrated.effectiveTheme.terminal == legacy.terminal)
-        #expect(migrated.overrides.first?.palette == legacy.palette)
-        let saved = try #require(defaults.data(forKey: "appearancePreferences"))
-        #expect((try JSONSerialization.jsonObject(with: saved) as? [String: Any])?["version"] as? Int == 5)
-    }
-
-    @Test func migrationPreviewCancelApplyAndRestore() throws {
-        let defaults = defaults()
-        defaults.set("dark", forKey: "appearanceMode")
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(store.selection.mode == .dark)
-        #expect(defaults.object(forKey: "appearanceMode") == nil)
-        #expect(store.effectiveTheme.terminal == ThemeDefinition.dark.terminal)
-        store.beginPreview(); store.previewMode(.light)
-        #expect(store.effectiveTheme.id == "light")
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).selection.mode == .dark)
-        store.cancel()
-        #expect(store.effectiveTheme.id == "dark")
-        store.beginPreview(); store.previewMode(.light); store.apply()
-        #expect(AppearanceStore(defaults: defaults, systemDark: true).effectiveTheme.id == "light")
-        store.applyMode(.system); store.setSystemDark(true)
-        #expect(store.effectiveTheme.id == "dark")
-        store.setSystemDark(false)
-        #expect(store.effectiveTheme.id == "light")
-    }
-
-    @Test func snapshotImportAndFailedPublicationPreservePreferences() throws {
-        let defaults = defaults()
-        var reject = false
-        let store = AppearanceStore(defaults: defaults, systemDark: false, publish: { _, _ in
-            if reject { throw ThemeError("Allocation failed") }
-        })
-        store.applyMode(.dark)
-        let saved = defaults.data(forKey: "appearancePreferences")
-        reject = true; store.beginPreview(); store.previewMode(.light); store.apply()
-        #expect(store.effectiveTheme.id == "dark")
-        #expect(defaults.data(forKey: "appearancePreferences") == saved)
-        #expect(store.notice == "Allocation failed")
-        reject = false; store.cancel()
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: path) }
-        try Data("background=171924\nforeground=CAD2EF\ncommand=touch /never\n".utf8).write(to: path)
-        store.beginPreview(); store.importTheme(path)
-        let id = store.selectedID
-        #expect(store.overrides.isEmpty)
-        #expect(store.diagnostics.contains { $0.contains("omitted command") })
-        store.apply()
-        try FileManager.default.removeItem(at: path)
-        let restored = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(restored.selection.darkThemeID == id)
-        #expect(restored.effectiveTheme.terminal.background.hex == 0x171924)
-        #expect(restored.overrides.count == 1)
-    }
-
-    @Test func editingImportAndResetStayInsideTwentyFourSlots() throws {
-        let defaults = defaults()
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        let original = ThemeDefinition.light
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent("replacement-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: path) }
-        store.beginPreview()
-        for theme in ThemeDefinition.builtins {
-            store.previewTheme(theme.id)
-            store.editTheme { $0.name = "My " + theme.name }
-        }
-        #expect(store.themes.count == 24)
-        store.previewTheme("light")
-        store.editTheme { $0.palette.accentInk = ThemeRGB(0x4C665B) }
-        #expect(store.effectiveTheme.palette.keyboardFocus == ThemeRGB(0x4C665B).color)
-        store.editSlot(.dark); store.previewTheme("light")
-        try Data("background=171924\nforeground=CAD2EF".utf8).write(to: path)
-        store.importTheme(path)
-        #expect(store.selectedID == "light")
-        #expect(store.themes.count == 24)
-        #expect(store.current.lightThemeID == store.current.darkThemeID)
-        store.apply()
-        let restored = AppearanceStore(defaults: defaults, systemDark: true)
-        #expect(restored.themes.count == 24)
-        #expect(restored.overrides.count == 24)
-        #expect(restored.effectiveTheme.terminal.background.hex == 0x171924)
-        #expect(restored.effectiveTheme.name == path.lastPathComponent)
-        restored.beginPreview(); restored.resetTheme()
-        #expect(restored.selectedTheme.name == original.name)
-        #expect(restored.selectedTheme.palette.definition == original.palette.definition)
-        #expect(restored.selectedTheme.terminal == original.terminal)
-        restored.cancel()
-        #expect(restored.effectiveTheme.terminal.background.hex == 0x171924)
-        restored.beginPreview(); restored.resetTheme(); restored.apply()
-        let reset = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(reset.effectiveTheme.name == original.name)
-        #expect(reset.effectiveTheme.palette.definition == original.palette.definition)
-        #expect(reset.themes.count == 24)
-        #expect(reset.overrides.count == 23)
-    }
-
-    @Test func invalidEditsAndFailedImportsCannotReplaceSavedLibrary() throws {
-        let defaults = defaults()
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        store.applyMode(.light)
-        let saved = defaults.data(forKey: "appearancePreferences")
-        store.beginPreview(); store.editTheme { $0.name = "" }
-        #expect(!store.canApply)
-        store.apply()
-        #expect(defaults.data(forKey: "appearancePreferences") == saved)
-        store.editTheme { $0.name = "Mine"; $0.palette.text = $0.palette.background }
-        #expect(!store.canApply)
-        #expect(store.effectiveTheme.palette.definition == ThemeDefinition.light.palette.definition)
-        store.cancel()
-        #expect(store.selectedTheme.name == "Loopflow Light")
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: path) }
-        try JSONEncoder().encode(ThemeDefinition.dark).write(to: path)
-        store.beginPreview(); store.importTheme(path)
-        #expect(store.selectedID == "light")
-        #expect(store.selectedTheme.palette.definition == ThemeDefinition.dark.palette.definition)
-        try Data("broken".utf8).write(to: path)
-        store.importTheme(path)
-        #expect(store.notice != nil)
-        #expect(store.selectedTheme.name == "Loopflow Dark")
-        store.cancel()
-        #expect(defaults.data(forKey: "appearancePreferences") == saved)
-    }
-
-    @Test func retiredAssignmentsMigrateWithoutAddingSlotsOrLosingColors() throws {
-        let defaults = defaults()
-        let oldID = "bundled:Catppuccin Frappe"
-        let old = try #require(try ThemeDefinition.retiredBuiltin(oldID))
-        let selection = AppearanceSelection(mode: .system, lightThemeID: oldID, darkThemeID: "dark")
-        defaults.set(try JSONSerialization.data(withJSONObject: ["version": 4,
-            "selection": JSONSerialization.jsonObject(with: JSONEncoder().encode(selection)), "imports": []]),
-            forKey: "appearancePreferences")
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(store.notice == nil)
-        #expect(store.themes.count == 24)
-        #expect(store.effectiveTheme.terminal == old.terminal)
-        #expect(store.effectiveTheme.palette.definition == old.palette.definition)
-        #expect(store.selection.darkThemeID == "dark")
-        #expect(AppearanceStore(defaults: defaults, systemDark: false).effectiveTheme.name == old.name)
-    }
-
-    @Test func oversizedLegacyLibraryIsRetainedWithoutDroppingThemes() throws {
-        let defaults = defaults()
-        let records = try (0..<25).map { _ in try imported() }
-        let data = try JSONSerialization.data(withJSONObject: ["version": 4,
-            "selection": JSONSerialization.jsonObject(with: JSONEncoder().encode(AppearanceSelection())),
-            "imports": JSONSerialization.jsonObject(with: JSONEncoder().encode(records))])
-        defaults.set(data, forKey: "appearancePreferences")
-        let store = AppearanceStore(defaults: defaults, systemDark: false)
-        #expect(store.notice?.contains("cannot fit in 24 slots") == true)
-        #expect(defaults.data(forKey: "appearancePreferences") == data)
-        #expect(store.themes.count == 24)
-        #expect(store.overrides.isEmpty)
-    }
-
-    @Test func corruptAndUnavailablePreferencesRemainRecoverable() throws {
-        for data in [Data("broken".utf8), Data(#"{"version":99,"selection":"dark","imports":[]}"#.utf8),
-                     Data(#"{"version":1,"selection":"missing","imports":[]}"#.utf8)] {
-            let defaults = defaults(); defaults.set(data, forKey: "appearancePreferences")
-            let store = AppearanceStore(defaults: defaults, systemDark: true)
-            #expect(store.effectiveTheme.id == "dark")
-            #expect(store.notice != nil)
-            #expect(defaults.data(forKey: "appearancePreferences") == data)
-            store.applyMode(.light)
-            #expect(AppearanceStore(defaults: defaults, systemDark: true).notice == nil)
-        }
-    }
-
     @Test func boundedImportRetainsColorsAndReportsOmissions() throws {
         let theme = try imported("""
         # concrete RGB snapshot
@@ -413,21 +308,20 @@ struct ThemeTests {
         config-file=/never
         theme=light:foo,dark:bar
         """)
-        #expect(theme.terminal.indexed.count == 256)
-        #expect(theme.terminal.indexed[8].hex == 0x121212)
-        #expect(theme.terminal.indexed[255].hex == 0xABCDEF)
-        #expect(theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 8:") })
+        #expect(theme.theme.terminal.indexed.count == 256)
+        #expect(theme.theme.terminal.indexed[8].hex == 0x121212)
+        #expect(theme.theme.terminal.indexed[255].hex == 0xABCDEF)
+        #expect(theme.theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 8:") })
         #expect(theme.diagnostics.filter { $0.contains("omitted") }.count == 3)
         #expect(theme.diagnostics.contains { $0.contains("repeated palette 8") })
-        #expect(!theme.definition.ghosttyOverlay.contains("/never"))
-        #expect(try imported().id != imported().id)
+        #expect(!theme.theme.ghosttyOverlay.contains("/never"))
         for source in ["foreground=ffffff", "background=red\nforeground=ffffff", "background=000000\nforeground=ffffff\npalette=256=ffffff", "background=000000\nforeground=ffffff\npalette=-1=ffffff", "background=000000\nforeground='ffffff'"] {
             #expect(throws: ThemeError.self) { try imported(source) }
         }
-        #expect(throws: ThemeError.self) { try ThemeImport.parse(Data([0xFF]), name: "Invalid") }
-        #expect(throws: ThemeError.self) { try ThemeImport.parse(Data(repeating: 32, count: 262145), name: "Huge") }
-        #expect(try imported("background=777777\nforeground=888888").terminal.readabilityErrors.first?.contains("Default text") == true)
-        #expect(try imported("background=000000\nforeground=ffffff\nselection-background=888888\nselection-foreground=999999").terminal.readabilityErrors.first?.contains("Selection text") == true)
+        #expect(throws: ThemeError.self) { try ThemeFile.parse(Data([0xFF]), name: "Invalid") }
+        #expect(throws: ThemeError.self) { try ThemeFile.parse(Data(repeating: 32, count: 262145), name: "Huge") }
+        #expect(try imported("background=777777\nforeground=888888").theme.terminal.readabilityErrors.first?.contains("Default text") == true)
+        #expect(try imported("background=000000\nforeground=ffffff\nselection-background=888888\nselection-foreground=999999").theme.terminal.readabilityErrors.first?.contains("Selection text") == true)
     }
 
     #if canImport(GhosttyKit)
@@ -438,7 +332,7 @@ struct ThemeTests {
         manager.initialize()
         #expect(manager.state == .ready)
         try manager.applyTheme(.dark)
-        #expect(manager.theme.id == "dark")
+        #expect(manager.theme.name == "Loopflow Dark")
     }
 
     @Test func compiledOverlayOverridesPersonalColors() throws {
@@ -470,8 +364,8 @@ struct ThemeTests {
         cursor-text=222222
         selection-background=304060
         selection-foreground=FFFFFF
-        """).definition
-        for theme in ThemeDefinition.builtins + [darkImport, try imported("background=FFF4DF\nforeground=34291F").definition] {
+        """).theme
+        for theme in ThemeDefinition.builtins + [darkImport, try imported("background=FFF4DF\nforeground=34291F").theme] {
             let candidate = try GhosttyThemeConfiguration.candidate(theme, baseline: baseline)
             defer { ghostty_config_free(candidate) }
             try GhosttyThemeConfiguration.validate(theme, config: candidate)
@@ -526,21 +420,18 @@ struct ThemeTests {
     #endif
 
     @Test func dimTextWarnsWithoutChangingOrRejectingTheTheme() throws {
-        let theme = try imported("background=FFFFFF\nforeground=000000\npalette=1=000000")
+        let theme = try imported("background=FFFFFF\nforeground=000000\npalette=1=000000").theme
         #expect(theme.terminal.readabilityErrors.isEmpty)
         #expect(!theme.terminal.ansiWarnings.contains { $0.hasPrefix("ANSI 1:") })
         #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim Default:") })
         #expect(theme.terminal.dimWarnings.contains { $0.hasPrefix("Dim ANSI 1:") })
         #expect(theme.terminal.foreground.hex == 0)
         #expect(theme.terminal.indexed[1].hex == 0)
-        let source = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: source) }
-        try Data("background=FFFFFF\nforeground=000000".utf8).write(to: source)
-        let store = AppearanceStore(defaults: defaults(), systemDark: false)
-        store.beginPreview(); store.importTheme(source); store.apply()
+        let store = AppearanceStore(paths: .temporary(), systemDark: false)
+        store.beginPreview(); store.importTheme(try file("background=FFFFFF\nforeground=000000")); store.apply()
         #expect(store.notice == nil)
         #expect(store.effectiveTheme.terminal.foreground.hex == 0)
-        #expect(store.overrides.count == 1)
+        #expect(store.library.yours.count == 1)
     }
 }
 #endif

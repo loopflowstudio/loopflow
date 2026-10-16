@@ -8,14 +8,8 @@ struct ThemeEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            TextField("Theme name", text: Binding(get: { appearance.selectedRecord.name }, set: { name in
-                appearance.editTheme { $0.name = name }
-            }))
-            .textFieldStyle(.roundedBorder)
-            .accessibilityIdentifier("appearance-theme-name")
-            Toggle("Dark appearance for native controls", isOn: Binding(get: { appearance.selectedRecord.palette.isDark }, set: { dark in
-                appearance.editTheme { $0.palette.isDark = dark }
-            }))
+            Text(appearance.selectedName).font(Typography.sectionTitle())
+                .accessibilityIdentifier("appearance-theme-name")
             colors("Surfaces", fields: [
                 ("Background", \.background), ("Surface", \.surface), ("Muted surface", \.surfaceMuted),
                 ("Raised surface", \.surfaceElement), ("Border", \.border), ("Strong border", \.borderStrong),
@@ -34,8 +28,8 @@ struct ThemeEditor: View {
             ])
             HStack {
                 Text("File selection opacity").foregroundStyle(palette.textSecondary)
-                Slider(value: Binding(get: { appearance.selectedRecord.palette.selectionFill.opacity }, set: { value in
-                    appearance.editTheme { $0.palette.selectionFill.opacity = value }
+                Slider(value: Binding(get: { appearance.selectedTheme.palette.definition.selectionFill.opacity }, set: { value in
+                    appearance.editTheme { palette, _ in palette.selectionFill.opacity = value }
                 }), in: 0...1)
             }
             colors("Activity", fields: [
@@ -49,14 +43,14 @@ struct ThemeEditor: View {
                 colorGrid {
                     ForEach(Array(terminalFields.enumerated()), id: \.offset) { _, field in
                         ThemeColorPicker(title: field.0, rgb: Binding(get: {
-                            appearance.selectedRecord.terminal[keyPath: field.1]
-                        }, set: { value in appearance.editTheme { $0.terminal[keyPath: field.1] = value } }))
+                            appearance.selectedTheme.terminal[keyPath: field.1]
+                        }, set: { value in appearance.editTheme { _, terminal in terminal[keyPath: field.1] = value } }))
                     }
                 }
                 DisclosureGroup("ANSI colors (0–15)") { indexedColors(0..<16) }
                 DisclosureGroup("Extended colors (16–255)") { indexedColors(16..<256) }
             }
-            Text("Reset restores this slot’s original \(appearance.originalTheme.name) name and colors. Apply saves the whole library; Cancel discards your edits.")
+            Text("Apply writes \(appearance.paths.themes.appendingPathComponent(appearance.selectedName).path); Cancel discards your edits.")
                 .font(.caption).foregroundStyle(palette.textSecondary)
         }
         .accessibilityIdentifier("appearance-theme-editor")
@@ -72,8 +66,8 @@ struct ThemeEditor: View {
             colorGrid {
                 ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
                     ThemeColorPicker(title: field.0, rgb: Binding(get: {
-                        appearance.selectedRecord.palette[keyPath: field.1]
-                    }, set: { value in appearance.editTheme { $0.palette[keyPath: field.1] = value } }))
+                        appearance.selectedTheme.palette.definition[keyPath: field.1]
+                    }, set: { value in appearance.editTheme { palette, _ in palette[keyPath: field.1] = value } }))
                 }
             }
         }
@@ -83,8 +77,8 @@ struct ThemeEditor: View {
         colorGrid {
             ForEach(indices, id: \.self) { index in
                 ThemeColorPicker(title: "ANSI \(index)", rgb: Binding(get: {
-                    appearance.selectedRecord.terminal.indexed[index]
-                }, set: { value in appearance.editTheme { $0.terminal.indexed[index] = value } }))
+                    appearance.selectedTheme.terminal.indexed[index]
+                }, set: { value in appearance.editTheme { _, terminal in terminal.indexed[index] = value } }))
             }
         }
     }

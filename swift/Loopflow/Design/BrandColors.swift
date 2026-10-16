@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A complete theme record. Every field is required when decoding; no view defaults.
-public struct PaletteDefinition: Codable, Equatable, Sendable {
+public struct PaletteDefinition: Equatable, Sendable {
     public var isDark: Bool
     public var background: ThemeRGB
     public var surface: ThemeRGB
@@ -31,13 +31,13 @@ public struct PaletteDefinition: Codable, Equatable, Sendable {
     public var stoppedTone: ThemeTone
 }
 
-public struct ThemePaint: Codable, Equatable, Sendable {
+public struct ThemePaint: Equatable, Sendable {
     public var rgb: ThemeRGB
     public var opacity: Double
     public var color: Color { rgb.color.opacity(opacity) }
 }
 
-public struct ThemeTone: Codable, Equatable, Sendable {
+public struct ThemeTone: Equatable, Sendable {
     public var inkRGB: ThemeRGB
     public var fillRGB: ThemeRGB
     public var ink: Color { inkRGB.color }
@@ -47,11 +47,9 @@ public struct ThemeTone: Codable, Equatable, Sendable {
 }
 
 /// SwiftUI projection of a complete theme. Aliases deliberately share one role.
-public struct LoopflowPalette: Codable, Sendable {
+public struct LoopflowPalette: Sendable {
     public let definition: PaletteDefinition
     public init(_ definition: PaletteDefinition) { self.definition = definition }
-    public init(from decoder: any Decoder) throws { definition = try PaletteDefinition(from: decoder) }
-    public func encode(to encoder: any Encoder) throws { try definition.encode(to: encoder) }
     public var isDark: Bool { definition.isDark }
     public var background: Color { definition.background.color }
     public var surface: Color { definition.surface.color }

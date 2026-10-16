@@ -10,6 +10,7 @@ struct ThemeChooser: View {
 
     var body: some View {
         let terminal = appearance.selectedTheme.terminal
+        let entries = appearance.entries
         VStack(alignment: .leading, spacing: 16) {
             Text("Choose Theme").font(Typography.sectionTitle())
             HStack(alignment: .top, spacing: 16) {
@@ -24,54 +25,39 @@ struct ThemeChooser: View {
                     .accessibilityIdentifier("appearance-mode")
                 }
                 .frame(width: 180)
-                ForEach([AppearanceMode.light, .dark], id: \.self) { slot in
-                    let enabled = appearance.current.mode == .system || appearance.current.mode == slot
+                ForEach([AppearanceMode.light, .dark], id: \.self) { side in
+                    let enabled = appearance.current.mode == .system || appearance.current.mode == side
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(slot.menuTitle) theme").font(.caption).foregroundStyle(palette.textSecondary)
-                        Button { appearance.editSlot(slot) } label: {
-                            Text(appearance.themeName(for: slot))
+                        Text("\(side.menuTitle) theme").font(.caption).foregroundStyle(palette.textSecondary)
+                        Button { editing = false; appearance.showPicker(side) } label: {
+                            Text(appearance.themeName(for: side))
                                 .lineLimit(1).truncationMode(.tail)
                                 .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
-                        .workSelection(enabled && appearance.editingSlot == slot)
+                        .workSelection(enabled && appearance.picker == side)
                         .disabled(!enabled)
-                        .accessibilityLabel("\(slot.menuTitle) theme")
-                        .accessibilityValue(appearance.themeName(for: slot))
-                        .accessibilityIdentifier("appearance-slot-\(slot.rawValue)")
-                        .help(enabled ? "Choose your \(slot.menuTitle.lowercased()) theme" : "Used in \(slot.menuTitle) or System mode")
+                        .accessibilityLabel("\(side.menuTitle) theme")
+                        .accessibilityValue(appearance.themeName(for: side))
+                        .accessibilityIdentifier("appearance-picker-\(side.rawValue)")
+                        .help(enabled ? "Choose your \(side.menuTitle.lowercased()) theme" : "Used in \(side.menuTitle) or System mode")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .opacity(enabled ? 1 : 0.45)
                 }
             }
-            Text("\(ThemeDefinition.slotCount) themes · Choose your \(appearance.editingSlot.menuTitle.lowercased()) theme · previewing \(appearance.selectedTheme.name)")
+            Text("\(appearance.picker.menuTitle) themes · previewing \(appearance.selectedTheme.name)")
                 .font(.caption).foregroundStyle(palette.textSecondary)
             ScrollView {
-                if editing {
+                if editing, appearance.selectedSource == .yours {
                     ThemeEditor(appearance: appearance)
                 } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
-                    ForEach(appearance.themes) { theme in
-                        Button { appearance.previewTheme(theme.id) } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(theme.name).foregroundStyle(theme.palette.text)
-                                HStack(spacing: 3) {
-                                    ForEach(0..<8) { i in Rectangle().fill(theme.terminal.indexed[i].color).frame(height: 8) }
-                                }
-                                Text("❯ Work stays here").font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(theme.terminal.foreground.color)
-                                    .padding(5).background(theme.terminal.background.color)
-                            }
-                            .padding(10).frame(maxWidth: .infinity)
-                            .background(theme.palette.background)
-                        }
-                        .buttonStyle(.plain)
-                        .workSelection(appearance.selectedID == theme.id)
-                        .workFocusRing()
-                        .accessibilityIdentifier("appearance-theme-\(theme.id)")
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Built-in").font(.caption).foregroundStyle(palette.textSecondary)
+                        grid(entries.builtins)
+                        Text("Yours").font(.caption).foregroundStyle(palette.textSecondary)
+                        grid(entries.yours, importTile: true)
                     }
-                }
                 }
                 HStack(spacing: 12) {
                     Text("Selected Work").foregroundStyle(palette.workSelectedText)
@@ -82,7 +68,7 @@ struct ThemeChooser: View {
                 }.padding(.vertical, 14)
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(appearance.diagnostics, id: \.self) { Text($0) }
-                    ForEach(appearance.libraryErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
+                    ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
                     DisclosureGroup("Terminal contrast details") {
                         ForEach(terminal.ansiWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
                         ForEach(terminal.dimWarnings, id: \.self) { Text($0).foregroundStyle(palette.textSecondary) }
@@ -91,17 +77,16 @@ struct ThemeChooser: View {
                         .foregroundStyle(palette.textSecondary)
                 }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
             }
+            if let refusal = appearance.refusal {
+                Text(refusal).foregroundStyle(palette.failure).accessibilityIdentifier("appearance-import-refusal")
+            }
             if let notice = appearance.notice { Text(notice).foregroundStyle(palette.failure).textSelection(.enabled) }
             HStack {
-                Button(editing ? "Done Editing" : "Edit") { editing.toggle() }
-                    .accessibilityIdentifier("appearance-edit-theme")
-                Button("Reset") { appearance.resetTheme() }
-                    .disabled(!appearance.canReset)
-                    .help("Restore \(appearance.originalTheme.name), including its name")
-                    .accessibilityIdentifier("appearance-reset-theme")
-                Button("Import…", action: importTheme)
-                    .help("Replace this slot with a Ghostty or complete Loopflow theme")
-                    .accessibilityIdentifier("appearance-import-theme")
+                if editing, appearance.selectedSource == .yours {
+                    Button("Done Editing") { editing = false }
+                }
+                Text("Apply writes theme: in \(appearance.paths.config.path)")
+                    .font(.caption).foregroundStyle(palette.textSecondary).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
                 Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
@@ -111,19 +96,68 @@ struct ThemeChooser: View {
         .padding(20).frame(minWidth: 620, minHeight: 560)
         .foregroundStyle(palette.text).background(palette.background)
         .onAppear { appearance.beginPreview() }
-        .onChange(of: appearance.chooserOpen) { _, open in if !open { dismiss() } }
+        .onChange(of: appearance.chooserOpen) { _, open in if !open { editing = false; dismiss() } }
         .onDisappear { if appearance.chooserOpen { appearance.cancel() } }
+    }
+
+    private func grid(_ entries: [ThemeEntry], importTile: Bool = false) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], alignment: .leading, spacing: 12) {
+            ForEach(entries) { entry in tile(entry) }
+            if importTile {
+                Button("Import file…", action: importTheme)
+                    .buttonStyle(WorkOutlineButtonStyle())
+                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .help("Add a Ghostty theme file to your \(appearance.picker.menuTitle.lowercased()) themes")
+                    .accessibilityIdentifier("appearance-import-theme")
+            }
+        }
+    }
+
+    private func tile(_ entry: ThemeEntry) -> some View {
+        let theme = entry.theme
+        let selected = appearance.selectedName == entry.name
+        return VStack(alignment: .leading, spacing: 8) {
+            Button { editing = false; appearance.previewTheme(entry.name) } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(theme.name).foregroundStyle(theme.palette.text)
+                    HStack(spacing: 3) {
+                        ForEach(0..<8) { i in Rectangle().fill(theme.terminal.indexed[i].color).frame(height: 8) }
+                    }
+                    Text("❯ Work stays here").font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.terminal.foreground.color)
+                        .padding(5).background(theme.terminal.background.color)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("appearance-theme-\(entry.name)")
+            if selected {
+                HStack(spacing: 6) {
+                    Button("Customize") { appearance.customize(); editing = true }
+                        .help(entry.source == .yours ? "Edit your theme" : "Make your own copy of \(entry.name)")
+                        .accessibilityIdentifier("appearance-customize-theme")
+                    if appearance.canDelete {
+                        Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
+                            .accessibilityIdentifier("appearance-delete-theme")
+                    }
+                }
+                .font(.caption).buttonStyle(WorkOutlineButtonStyle())
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.palette.background)
+        .workSelection(selected)
+        .workFocusRing()
     }
 
     private func importTheme() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Replace Theme"
-        let slotID = appearance.selectedID
+        panel.prompt = "Import Theme"
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            appearance.importTheme(url, replacing: slotID)
+            appearance.importTheme(url)
         }
     }
 }

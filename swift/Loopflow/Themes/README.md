@@ -1,30 +1,26 @@
 # Bundled themes
 
-Choose **Loopflow Light** for original cream/burgundy, **Loopflow Dark** for the
-original slate design with bronze instead of pink, **Linen** for a quiet light
-green/neutral palette, or **Hearth** for warm charcoal. The other 20 slots span
-rose, violet, amber, green, teal and blue accents. Ordinary headings stay quiet.
+`Catalogue/` holds the 24 fixed built-ins, 12 light and 12 dark. **Loopflow
+Light** is the original cream/burgundy; **Loopflow Dark** the original slate
+with bronze; **Linen** and **Hearth** are quiet light and charcoal alternatives.
+Companions span amber, rose, violet, green, teal and blue actions with quiet text.
 
-All 24 slots support Edit, rename, import replacement and Reset. Reset restores
-the original bundled record, including its name. Apply/Cancel covers all slots
-and both assignments together. Complete replacements live in appearance
-preferences; source JSON remains the Reset baseline. `Migrations/` holds only
-retired selected presets for one-time conversion, never extra catalogue slots.
+Every file is Ghostty theme syntax plus `loopflow-` app roles:
 
-Every JSON file supplies a complete Loopflow and terminal palette. Missing roles
-fail decoding; unreadable roles fail validation. `Sources.md` records original
-terminal colors and marked cursor/selection adaptations. `LICENSE` and `Licenses/`
-retain upstream notices. App palettes are independently curated complete records.
-No source Ghostty file or authoring conversion runs during catalogue loading.
+```
+background = #fffcf0
+foreground = #100f0f
+palette = 4=#205ea6
+loopflow-appearance = light
+loopflow-accent = #8a6f2e
+```
 
-`GhosttyThemeMapping` converts imports once: ANSI 4 seeds action/focus and Working,
-3 Waiting, 1 failure and 2 success. It quiets app text, builds lighter dark
-component surfaces and derives Work selection separately from terminal selection.
-It never changes imported terminal colors or infers state. Near middle gray,
-contrast may limit the surface or text hierarchy.
+Built-ins must state every terminal color, ANSI 0–15 and every app role; your
+theme files may state any subset. Missing app roles derive once through
+`GhosttyThemeMapping`: ANSI 4 seeds action/focus and Working, 3 Waiting,
+1 failure, 2 success. Colors are seeds, never activity. Missing ANSI colors come
+from the matching Loopflow preset; 16–255 default to xterm's.
 
-`LoopflowPalette` aliases focus to accent ink, ordinary links/actions to text,
-and status stroke/text to status ink. Solid buttons own distinct base/hover/pressed
-fills. Ghostty derives terminal cell fills from the same record's terminal colors;
-Swift owns gutter/header decoration. Every current field is required. Both
-SwiftPM and Xcode ship the catalogue offline.
+`Sources.md` records upstream terminal colors and marked adaptations;
+`Licenses/` keeps each author's notice. Both SwiftPM and Xcode ship the
+catalogue offline.

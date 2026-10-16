@@ -89,69 +89,34 @@ remain. System changes choose Light/Dark assignments, not a palette's brightness
 Live provider output and visual comfort belong to review; truecolor output can
 retain its own colors. No test substitutes for that judgment.
 
-**Current preview:** `/tmp/Loopflow Palette Library Preview.app` was rebuilt
-after syncing main v0.13.17 (#1559 landed; the 0.13.15 `lf` could not open the
-0.13.16-migrated database), signature-verified and relaunched at Jack's request. It starts in restored Loopflow
-Dark and contains the 24-slot editor. Its separate preview preferences assign Linen
-to Light and Loopflow Dark to Dark. Source copies were hash-verified before signing
-(`/tmp/loo488-library-package-proof.json`); process liveness was observed. No native
-rendering or hands-on editor acceptance is claimed. Earlier previews remain intact.
-
-```sh
-open -n "/tmp/Loopflow Palette Library Preview.app" --args --repo /Users/jack/src/loopflow
-```
+**Preview:** earlier `/tmp` previews predate theme files; a fresh preview needs
+a rebuild at review.
 
 ## Chosen architecture and source of truth
 
-`ThemeDefinition` contains identity/name, complete `PaletteDefinition` and a
-`TerminalPalette` with all 256 indexed colors. SwiftUI/AppKit colors and Ghostty
-config derive from these explicit sRGB values. `LoopflowPalette` is the projection,
-not another color source. `ThemeRecord` is a complete editable/imported snapshot.
+`ThemeDefinition` is a name, complete `PaletteDefinition` and 256-color
+`TerminalPalette`; the name is its identity. `LoopflowPalette` projects it.
+`ThemeFile` is the one format and parser: Ghostty theme syntax plus optional
+`loopflow-<role>` keys, `loopflow-appearance` and `loopflow-selection-opacity`.
+Built-ins (`Themes/Catalogue/`) must state every value; your files may state any
+subset, the rest deriving once through `GhosttyThemeMapping`.
 
-The 24 bundled JSON records define fixed slot identities and Reset baselines.
-`AppearanceStore` persists one versioned `appearancePreferences` value: Mode,
-Light/Dark slot IDs, and complete replacements for modified slots. There is no
-appendable custom-theme catalogue. Lookup chooses one saved replacement or its
-bundled baseline. Current preference decoding requires every field and rejects
-unknown/duplicate slots. No per-Task/repository palette, Rust DTO or database change.
-
-One transient draft holds assignments and all replacement records. Edit and import
-replace the selected slot without changing its ID, so both assignments continue
-following that slot. Reset removes its replacement. Apply validates the complete
-draft library and writes it once; Cancel/close/Escape discard the whole draft.
-Quick Mode changes discard preview and retain applied slot contents. New windows
-share preview; relaunch reads only applied preferences.
-
-Version 5 migrates old preferences once. Versions 1/2 derive missing app palettes;
-version 3 preserves explicit colors while splitting accentInk/pressed roles;
-version 4 preserves complete imported snapshots. Old imports occupy available
-slots while preserving assigned built-ins and remapping both assignments. Selected
-retired Catppuccin records become replacements from `Themes/Migrations/`; current
-preferences never read those files. If old records cannot fit without loss, keep
-original bytes and show recovery instead of silently discarding themes. Missing,
-corrupt or unsupported saved data likewise remains available until a valid Apply.
+`ThemeLibrary` reads `~/.lf/themes/` (honoring `LF_HOME`) and Ghostty's theme
+folder (`XDG_CONFIG_HOME`). Names resolve yours → built-ins → Ghostty's.
+`ThemeConfig` reads/writes only the top-level `theme:` line of `~/.lf/config.yaml`.
+`AppearanceStore` holds Mode plus both names in memory and one transient draft of
+selection and staged file writes/deletes. Apply writes the files, then the line;
+Cancel discards. A one-second fingerprint poll reloads outside edits. No
+UserDefaults, Rust DTO or database change; Rust ignores the `theme` key.
 
 ### Editor and import boundary
 
-Edit exposes name, native light/dark appearance, app surfaces/text/actions/focus,
-Work/file selection, status ink/fill, terminal named colors and indexed colors.
-Native ColorPicker owns color input; displayed RGB values are selectable text.
-Alpha is supported only for the existing file-selection paint. Tone stroke/text
-remain explicit ink aliases. Reset restores the entire original record, including
-name. Invalid names or unreadable edited colors disable Apply; the last valid
-appearance remains visible while the draft explains the failure.
-
-Import replaces the selected slot, never adds one. One local UTF-8 file, at most
-256 KiB. A complete Loopflow JSON record must decode every palette/terminal field;
-its incoming ID cannot replace the destination slot identity. Ghostty input accepts
-blank lines/full-line comments and `key=value`, requiring six-digit RGB background
-and foreground. Optional cursor/selection colors and decimal palette indices
-0–255 retain their supplied values. Repeated keys use the final value with notices.
-Missing values derive from the polarity's Loopflow preset and foreground/background.
-Named/quoted/conditional/cell-relative colors fail with line/key. Commands, fonts,
-includes, keybindings and theme references are reported and never followed.
-Read/parse failures preserve the draft and applied library. Saved files are never
-reread. Export, online discovery/sync and a freeform shader editor remain excluded.
+Edit exposes app surfaces/text/actions/focus, Work/file selection, status
+ink/fill, terminal named and indexed colors via native ColorPicker. The filename
+is the name; appearance is fixed per file. Import reads one local UTF-8 file of at
+most 256 KiB in Ghostty syntax, requiring six-digit RGB background and foreground.
+Named/quoted/conditional colors fail with line/key; commands, fonts, includes,
+keybindings and theme references are reported and never followed.
 
 ### Palette hierarchy and readability
 
@@ -222,111 +187,42 @@ Keep existing AppearanceStore/AppAppearance, Work selection, workspace/pane pool
 file documents and Ghostty owners. No client recreation, theme-keyed view identity,
 new Work authority, status inference, installation or execution migration.
 
-Completed removal: static terminal colors; hardcoded semantic light/dark branches;
-unused burgundy helpers/StatusColors; runtime Ghostty catalogue; old appearanceMode
-writer; truecolor default zsh prompt; diff text-only recolor guard; duplicate
-Ghostty overlay/readback maps. Native text/caret/selection/link and unchanged diffs
-consume the palette without losing selection. Custom prompts stay owned by shells.
+Completed removal (earlier passes): static terminal colors; hardcoded semantic
+branches; runtime Ghostty catalogue; old appearanceMode writer; duplicate Ghostty
+overlay/readback maps; `terminalHover/Selection/Failure` fields.
 
-Current deletion: `terminalHover/Selection/Failure` palette fields and JSON values,
-GhosttyCommandBlockStyle/Swift cell-fill assertions, old copy overlay, append-only
-import/pending-import arrays, and the obsolete chooser-only single-theme path.
-Preserve renderer, clipboard, retained Work, name/assignment migration and import
-error tests. Frappe/Macchiato records are bounded migration inputs only.
+Removed in the theme-file cut (October 15): 24-slot library, slot Reset, slot and
+version 1–5 preference migration, `appearancePreferences` UserDefaults, JSON theme
+records and `ThemeRecord`, `Themes/Migrations/`, the rename/appearance editor
+fields, and 15 retired catalogue entries with their license notices.
 
 The explicit stack-parent repair replaces refusal to change a Task parent with
-CAS against the observed parent; Task/PR/checkout/history survive, cycles and stale
-writes remain rejected. Its focused Rust regression/build/Clippy passed.
+CAS against the observed parent; its focused Rust regression/build/Clippy passed.
 
-## Next: approved catalogue and 12 Light / 12 Dark pickers
+## Decisions for theme files (October 15)
 
-Jack approved this on October 15 during demo review. Build it in this Task.
-
-**Redesign (October 15).** Jack didn't love Edit and Import as separate buttons.
-He chose **no slots**, and **Ghostty-syntax text config** in the existing
-`~/.lf/config.yaml`. Catalogue and license decisions stand.
-
-- **Built-ins are fixed.** The 24 catalogue themes (12 Light, 12 Dark) are
-  read-only and always available by name.
-- **Your themes are files.** Ghostty-format theme files in `~/.lf/themes/`
-  (writable), plus read-only `~/.config/ghostty/themes/`. Ghostty RGB keys give
-  the terminal; app roles derive via `GhosttyThemeMapping` unless the file sets
-  Loopflow app-role keys. A file named like a built-in overrides it, as Ghostty's
-  user directory does.
-- **Picker.** Two pickers, Light and Dark, each listing built-ins then Yours. The
-  selected tile carries its own actions: **Customize** (a built-in writes your
-  override copy; one of yours opens the editor in place), and **Delete** for yours
-  ("Revert to built-in" when it overrides one, which replaces Reset). **Import
-  file…** sits at the end of Yours and accepts only the picker's appearance.
-- **Config.** `theme: "light:Linen,dark:Hearth"` (Ghostty value syntax) in
-  `~/.lf/config.yaml`. Names resolve to your files first, then built-ins, then
-  Ghostty's themes folder. The repo `.lf/config.yaml` never sets the theme; a
-  repo can't recolor a multi-repo window. Absent means Loopflow Light/Dark.
-- **Picker doesn't fight config.** The file is the only store. Preview is in
-  memory; Apply rewrites only the `theme:` line and leaves the rest of the file
-  intact; Cancel writes nothing. The app watches the file and applies outside
-  edits live. An unknown name keeps the last good theme and shows the name and
-  the fix. UserDefaults `appearancePreferences` is deleted, with no migration
-  (solo dev, no compat).
-- **Ghostty's config.** It still loads for non-color settings. Its `theme =` is
-  ignored; Loopflow's config owns colors. Ghostty's file is never written.
-- **Deleted:** slots, the 24-slot editable library, slot Reset, slot migration,
-  and the UserDefaults appearance library.
-- **Mode writes the format** (Jack, October 15). System writes the pair; Light
-  or Dark writes only that side's name, dropping the other side from the file.
-  The other picker is dimmed in Light or Dark mode. Returning to System restores
-  the other side from this session when known, otherwise Loopflow Light/Dark.
-- **Separate Task candidate (not here):** Jack expects user config to override
-  repo config generally; today repo wins for scalars (`config.rs`), and some keys
-  are repo-only by design.
+Jack chose no slots, fixed 12/12 built-ins, theme files in `~/.lf/themes` and
+Ghostty-syntax `theme:` in `~/.lf/config.yaml`; Mode writes a pair (System) or one
+name (Light/Dark). Each picker lists only its appearance in System mode too
+(Jack, October 15); Light/Dark mode dims the other. Implementation choices are in
+[questions](questions.md).
 
 - **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
   Flexoki Light, Noctis Lilac, Manila, Clay, Pewter, Frost, Vellum, Celadon. Dark:
   Loopflow Dark, Hearth, Catppuccin Mocha, Gruvbox Dark, Solarized Dark, Flexoki
-  Dark, Night Owl, Onyx, Rosewood, Aubergine, Moss, Phosphor. Upstream sources and
-  reasons are in `scratch/theme-catalogue/index.html` (`build_page.py` table).
-  Each new theme gets a complete hand-curated app palette that passes WorkPaletteTests.
-- **Sources.** Take Night Owl and Noctis Lilac terminal colors from their MIT
-  upstreams (sdras/night-owl-vscode-theme, liviuschera/noctis), not catalogue
-  ports. Solarized Dark uses the original colors without the iTerm2 name. Update
-  `Sources.md`/`Licenses/`: author license per theme, Badolato themes cite their
-  terminalthemes.com MIT page, Neovim is Apache-2.0; delete notices for removed themes.
-- **Appearance split.** Every theme is Light or Dark. Each picker shows only its
-  own; Import of the wrong appearance previews an explanation naming the other
-  picker and leaves Apply disabled. Delete "either assignment accepts any
-  palette" from code and README.
-- **Not in scope:** Liquid Glass, keyboard browsing/search and theme export
-  (Ghostty comparison ideas, undecided).
+  Dark, Night Owl, Onyx, Rosewood, Aubergine, Moss, Phosphor. Night Owl and
+  Noctis Lilac use their MIT upstream colors. `Sources.md`/`Licenses/` updated.
+- **Separate Task candidate (not here):** Jack expects user config to override
+  repo config generally; today repo wins for scalars (`config.rs`).
+- **Not in scope:** Liquid Glass, keyboard browsing/search and theme export.
 
-## This slice and Done when
+## Remaining
 
-Deliver the approved catalogue, appearance-split pickers, theme files and
-`theme:` config together, deleting slots, Reset, slot migration and the
-UserDefaults library in the same diff. Update sources/license notices and
-Desktop usage beside code.
+Native review judges the 15 new companion palettes (generated from upstream
+terminal colors with a chosen accent family each), tile actions, editor
+usability and live outside-edit reload. Gate runs `uv run python scripts/test.py
+--swift --loopflow` once with multiplatform/Xcode resource checks. Two inherited
+WorkCacheTests expectation failures remain open gate findings. Product KRs still
+require real sustained-use evidence.
 
-Headless focused acceptance:
-`scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests' -Xswiftc -gnone --jobs 4`.
-Expect 12 built-ins per picker; your files override and revert by name;
-appearance-mismatched import is refused with its explanation; Apply writes
-only the `theme:` line in the expected format for each Mode; Cancel writes
-nothing; outside edits reload; unknown names keep the last good theme; repo
-config never sets the theme; unchanged native text and retained
-Work/layout/drafts survive color changes.
-
-Gate runs `uv run python scripts/test.py --swift --loopflow` once, with parent
-feedback/pane/navigation suites and multiplatform boundary checks. Two inherited
-WorkCacheTests expectation failures remain open gate findings. Unavailable native
-checks belong to capable demo/CI, never an earlier-step permission dialog.
-Product KRs still require real sustained-use evidence; no timing target or external
-project progress is inferred from these checks.
-
-Review repairs: capture the slot ID before mutating its draft to avoid Swift
-exclusivity failure during import/reset; reject malformed JSON terminal lengths
-before preview indexing; validate actual file-selection composites; clamp native
-picker colors to sRGB. The editor uses platform color entry instead of maintaining
-a second partially valid hex draft. A headless view test exercises rename and Reset;
-full-library tests cover repeated replacement, both assignments, Cancel, relaunch,
-retired presets and over-capacity legacy data without silent deletion.
-
-Check (2026-10-15): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests' -Xswiftc -gnone --jobs 4` PASS (30 tests, `/tmp/loo488-library-tests.log`); combined Ghostty/public checksum, 9 Python artifact/dev tests, platform boundaries, 24-slot/source-color audit and preview signature/launch PASS. Broader gate and native editor judgment remain open.
+Check (2026-10-15): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|AppAppearanceTests' -Xswiftc -gnone --jobs 4` PASS (31 tests); gate and native judgment deferred.

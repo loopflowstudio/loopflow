@@ -11,12 +11,10 @@ import ViewInspector
 struct AppAppearanceTests {
     @Test("The window modifier follows preview, Cancel and Apply", arguments: ThemeFixture.allCases)
     func windowModifier(theme: ThemeFixture) throws {
-        let suite = "window-theme-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let appearance = AppearanceStore(defaults: defaults, systemDark: false)
-        let appliedID = theme == .dark ? "light" : "dark"
-        appearance.applyMode(AppearanceMode(rawValue: appliedID)!)
+        let paths = ThemePaths.temporary()
+        let appearance = AppearanceStore(paths: paths, systemDark: false)
+        let applied: AppearanceMode = theme == .dark ? .light : .dark
+        appearance.applyMode(applied)
         let root = Text("Work").modifier(AppAppearance(appearance: appearance))
         func inspectAppearance() throws {
             let view = try root.inspect()
@@ -31,24 +29,21 @@ struct AppAppearanceTests {
         try theme.preview(in: appearance)
         try inspectAppearance()
         appearance.cancel()
-        #expect(appearance.effectiveTheme.id == appliedID)
+        #expect(appearance.effectiveTheme.isDark == (applied == .dark))
         try inspectAppearance()
         try theme.preview(in: appearance)
         appearance.apply()
         try inspectAppearance()
-        #expect(AppearanceStore(defaults: defaults, systemDark: true).effectiveTheme.id == appearance.effectiveTheme.id)
+        #expect(AppearanceStore(paths: paths, systemDark: true).effectiveTheme.id == appearance.effectiveTheme.id)
     }
 
     @Test("System light/dark changes reach the window integration", arguments: [false, true])
     func systemAppearance(dark: Bool) throws {
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let appearance = AppearanceStore(defaults: defaults, systemDark: !dark)
+        let appearance = AppearanceStore(paths: .temporary(), systemDark: !dark)
         appearance.setSystemDark(dark)
         let root = Text("Work").modifier(AppAppearance(appearance: appearance))
         #expect(try root.inspect().environment(\.colorScheme) == (dark ? .dark : .light))
-        #expect(try root.inspect().environment(\.theme).id == (dark ? "dark" : "light"))
+        #expect(try root.inspect().environment(\.theme).name == (dark ? "Loopflow Dark" : "Loopflow Light"))
     }
 }
 
@@ -60,8 +55,7 @@ struct NativeAppAppearanceTests {
     func paletteFollowsWindow(mode: String, system: ColorScheme) async throws {
         _ = NSApplication.shared
         var observed: (ColorScheme, Color)?
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        let appearance = AppearanceStore(defaults: defaults, systemDark: system == .dark)
+        let appearance = AppearanceStore(paths: .temporary(), systemDark: system == .dark)
         appearance.applyMode(AppearanceMode(rawValue: mode)!)
         let view = AppearanceProbe { observed = ($0, $1) }
             .modifier(AppAppearance(appearance: appearance))

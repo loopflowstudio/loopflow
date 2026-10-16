@@ -1,120 +1,138 @@
 # Palette sources
 
-Bundled JSON is the complete Loopflow theme source of truth. Companion app palettes were
-curated from these terminal sources with independently chosen action accents and
-quiet text. Views never fill missing roles. Original companion terminal
-background/foreground/ANSI values are retained.
-
-Loopflow Light preserves the original cream design. Loopflow Dark restores slate
-surfaces with warm bronze replacing pink, keeping burgundy buttons. Linen and
-Hearth are authored quiet light and charcoal alternatives. All ship as complete
-records, independent of runtime import conversion. Frappe/Macchiato sources below
-are retained only for migration of previously assigned presets.
-
-## Alabaster
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Alabaster
-
-Loopflow: cursor-text #bfdbfe → #000000 for readable text.
-
-## Atom One Dark
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Atom%20One%20Dark
-
-## Atom One Light
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Atom%20One%20Light
-
-Loopflow: cursor-text #ffffff → #000000 for readable text.
-
-## Catppuccin Frappe
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Catppuccin%20Frappe
+Loopflow Light, Loopflow Dark, Linen and Hearth are Loopflow's own designs.
+Companion terminal colors below are retained from their sources except marked
+adaptations. Every app palette is authored with the theme: the import mapping
+with an accent family chosen per theme (`loopflow-` keys in `Catalogue/`).
 
 ## Catppuccin Latte
 
 Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Catppuccin%20Latte
+License: `Licenses/Catppuccin.txt`
 
 Loopflow: cursor-text #eff1f5 → #000000 for readable text.
-
 Loopflow: selection-foreground #eff1f5 → #000000 for readable text.
-
-## Catppuccin Macchiato
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Catppuccin%20Macchiato
-
-## Catppuccin Mocha
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Catppuccin%20Mocha
-
-## Dracula
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Dracula
-
-## Everforest Dark Med
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Everforest%20Dark%20Med
-
-Loopflow: cursor-text #543a48 → #000000 for readable text.
-
-## Everforest Light Med
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Everforest%20Light%20Med
-
-Loopflow: cursor-text #eaedc8 → #000000 for readable text.
-
-## GitHub Dark Default
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/GitHub%20Dark%20Default
-
-Loopflow: cursor-text #6fc1ff → #000000 for readable text.
-
-## GitHub Light Default
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/GitHub%20Light%20Default
-
-Loopflow: cursor-text #3c9cff → #ffffff for readable text.
-
-## Gruvbox Dark
-
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Gruvbox%20Dark
 
 ## Gruvbox Light
 
 Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Gruvbox%20Light
+License: `Licenses/Gruvbox.txt`
 
-## Nord
+## Flexoki Light
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Nord
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Flexoki%20Light
+License: `Licenses/Flexoki.txt`
 
-## Rose Pine Dawn
+## Noctis Lilac
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Rose%20Pine%20Dawn
+Source: https://github.com/liviuschera/noctis/blob/4a82370b2c064e36726c23e94f27ed3782bd6ecd/themes/lilac.json
+License: `Licenses/Noctis.txt`
 
-## Rose Pine Moon
+Upstream terminal.* colors; selection is editor.selectionBackground (#b4adeb77) composited on the terminal background.
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Rose%20Pine%20Moon
+## Manila
 
-## Rose Pine
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Yngwie%27s%20Strat
+License: `Licenses/Badolato.txt`
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Rose%20Pine
+Renamed from Yngwie's Strat.
 
-## TokyoNight Day
+## Clay
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/TokyoNight%20Day
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Desert%20Morning
+License: `Licenses/Badolato.txt`
 
-Loopflow: selection-foreground #3760bf → #000000 for readable text.
+Renamed from Desert Morning.
 
-## TokyoNight Storm
+## Pewter
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/TokyoNight%20Storm
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Nvim%20Light
+License: `Licenses/Neovim.txt`
 
-## TokyoNight
+Renamed from Nvim Light.
 
-Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/TokyoNight
+## Frost
 
-## iTerm2 Solarized Dark
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Icy%20Glacier
+License: `Licenses/Badolato.txt`
+
+Renamed from Icy Glacier.
+
+## Vellum
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Paper%20Tiger
+License: `Licenses/Badolato.txt`
+
+Renamed from Paper Tiger.
+
+## Celadon
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Safety%20Glass
+License: `Licenses/Badolato.txt`
+
+Renamed from Safety Glass.
+
+## Catppuccin Mocha
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Catppuccin%20Mocha
+License: `Licenses/Catppuccin.txt`
+
+## Gruvbox Dark
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Gruvbox%20Dark
+License: `Licenses/Gruvbox.txt`
+
+## Solarized Dark
 
 Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/iTerm2%20Solarized%20Dark
+License: `Licenses/Solarized.txt`
 
+Original Solarized colors, renamed without the iTerm2 product name.
 Loopflow: cursor-text #073642 → #000000 for readable text.
+
+## Flexoki Dark
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Flexoki%20Dark
+License: `Licenses/Flexoki.txt`
+
+## Night Owl
+
+Source: https://github.com/sdras/night-owl-vscode-theme/blob/cc291eba7976b20d7c66bde6883c27b902196b07/themes/Night%20Owl-color-theme.json
+License: `Licenses/Night Owl.txt`
+
+Upstream terminal.ansi* colors with editor background, foreground, cursor and selection.
+
+## Onyx
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Black%20Box%20Recorder
+License: `Licenses/Badolato.txt`
+
+Renamed from Black Box Recorder.
+
+## Rosewood
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Desert%20Rose
+License: `Licenses/Badolato.txt`
+
+Renamed from Desert Rose.
+
+## Aubergine
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Witching%20Hour
+License: `Licenses/Badolato.txt`
+
+Renamed from Witching Hour.
+
+## Moss
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Cholla
+License: `Licenses/Badolato.txt`
+
+Renamed from Cholla.
+
+## Phosphor
+
+Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Green%20Screen
+License: `Licenses/Badolato.txt`
+
+Renamed from Green Screen.

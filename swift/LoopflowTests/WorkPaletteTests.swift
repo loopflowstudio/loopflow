@@ -13,7 +13,7 @@ struct WorkPaletteTests {
         if let builtin = ThemeDefinition.builtins.first(where: { $0.id == theme }) { definition = builtin }
         else {
             let pair = theme.split(separator: "/")
-            definition = try ThemeImport.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).definition
+            definition = try ThemeFile.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).theme
         }
         let dark = definition.isDark
         let palette = definition.palette
@@ -77,10 +77,7 @@ struct WorkPaletteTests {
     @Test("Status wording, selection and focus survive every appearance", arguments: ThemeFixture.allCases)
     @MainActor
     func statusWithSelectionAndFocus(theme: ThemeFixture) throws {
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let appearance = AppearanceStore(defaults: defaults, systemDark: false)
+        let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         try theme.preview(in: appearance)
         let palette = appearance.effectiveTheme.palette
         #expect(palette.selectionEdge != palette.failure)

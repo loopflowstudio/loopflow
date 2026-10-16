@@ -257,14 +257,26 @@ fn render_block(
         let path = repo_root.join(path);
         files.push(ContextFile {
             source: path.display().to_string(),
-            bytes: fs::read(&path)?.len(),
+            bytes: fs::read(&path)
+                .map_err(|error| {
+                    CoreError::IoError(format!(
+                        "Read context reference {}: {error}",
+                        path.display()
+                    ))
+                })?
+                .len(),
             path,
         });
     }
     let skill = match (moment, skill_file) {
         (ContextMoment::Compact, Some(path)) => {
             let path = repo_root.join(path);
-            let text = fs::read_to_string(&path)?;
+            let text = fs::read_to_string(&path).map_err(|error| {
+                CoreError::IoError(format!(
+                    "Read saved active skill {}: {error}",
+                    path.display()
+                ))
+            })?;
             files.push(ContextFile {
                 source: "Active skill (saved at launch)".into(),
                 path,

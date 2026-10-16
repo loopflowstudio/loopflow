@@ -1177,8 +1177,12 @@ uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py 
 Use a native Codex binary supporting app-server and `--remote`. The headless PTY
 fixture uses disposable provider and Loopflow homes, a loopback model endpoint, and an
 independently authored wrapper supplying trust plus SessionStart/Stop hooks.
-It verifies exact native capture, both launch hooks, a typed reconnect follow-up,
-two retained completed turns, provider cleanup, and preserved user settings.
+It explicitly trusts the fixture's Loopflow hooks, verifies context reaches the
+model, and checks successful startup, prompt, tool and stop callback receipts.
+It deletes the native context binding before reconnect to prove restoration from
+the saved Session, then checks fresh scratch context, two retained completed
+turns, provider cleanup, and preserved user settings. Provider output alone is
+not hook evidence: untrusted hooks do not run.
 It uses no account or login. This proves protocol
 launch composition; actual cmux tab tracking remains a separate acceptance check.
 

@@ -745,6 +745,7 @@ async fn serve_codex_native(
         crate::harness::codex_connection::NativeInput {
             params: Some(params),
             text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
+            context: launch.conversation_context.clone(),
         },
     ));
     let directory = tempfile::tempdir()?;

@@ -158,6 +158,17 @@ or branch activity in the last seven days also prevents cleanup. Use
 `lf wt delete NAME --force` only when intentionally discarding a worktree.
 
 ```bash
+lf monitor prune --dry-run --json       # inspect exact process cleanup candidates
+lf monitor prune --json                 # recheck and apply
+```
+
+Pruning reports each AgentProcess it settles or retains, including the reason.
+An unlaunched reservation can be retired when its owning LfProcess is proven
+dead. A missing PID, a completed Task, or an old Session does not prove provider
+exit: unresolved records continue to protect their checkouts. Cleanup retains
+Task outcomes, provider history and unknown exit results.
+
+```bash
 lf sync
 ```
 

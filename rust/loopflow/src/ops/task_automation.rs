@@ -80,9 +80,8 @@ pub(crate) fn task_execution_blockers(
     store: &SqliteStore,
     task: &crate::durable::TaskId,
 ) -> OpsResult<Vec<String>> {
-    let open = store.open_processes().map_err(error)?;
-    let work = store.task_open_work(task, &open).map_err(error)?;
-    execution_blockers(store, &work.processes)
+    let processes = store.task_open_processes(task).map_err(error)?;
+    execution_blockers(store, &processes)
 }
 
 pub(crate) async fn repository_tasks(

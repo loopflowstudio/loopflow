@@ -143,4 +143,5 @@ pub(crate) struct AgentProcess {
     pub attachment_token: Option<crate::id::AttachmentToken>,
     pub provider: Option<String>,
     pub interactive: bool,
+    pub spawn_reserved: bool,
 }

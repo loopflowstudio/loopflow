@@ -1698,8 +1698,7 @@ private struct SessionPaneView: View {
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.md)
-                .strokeBorder(isFocused ? theme.palette.selectionEdge : theme.palette.border,
-                              lineWidth: isFocused ? 1.5 : 1)
+                .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
                 .allowsHitTesting(false)
         }
         .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)

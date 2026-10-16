@@ -116,18 +116,20 @@ struct ThemeChooser: View {
     private func tile(_ entry: ThemeEntry) -> some View {
         let theme = entry.theme
         let selected = appearance.selectedName == entry.name
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 0) {
             Button { editing = false; appearance.previewTheme(entry.name) } label: {
+                // The name doubles as the terminal text sample; the tile's edge shows the app surface.
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(theme.name).foregroundStyle(theme.palette.text)
+                    Text(theme.name).foregroundStyle(theme.terminal.foreground.color)
                     HStack(spacing: 3) {
                         ForEach(0..<8) { i in Rectangle().fill(theme.terminal.indexed[i].color).frame(height: 8) }
                     }
-                    Text("❯ Work stays here").font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(theme.terminal.foreground.color)
-                        .padding(5).background(theme.terminal.background.color)
                 }
+                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.terminal.background.color)
+                .padding(10)
+                .contentShape(Rectangle()) // The whole tile, gaps included, selects the theme.
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("appearance-theme-\(entry.name)")
@@ -142,9 +144,10 @@ struct ThemeChooser: View {
                     }
                 }
                 .font(.caption).buttonStyle(WorkOutlineButtonStyle())
+                .padding([.horizontal, .bottom], 10)
             }
         }
-        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(theme.palette.background)
         .workSelection(selected)
         .workFocusRing()

@@ -48,7 +48,8 @@ let package = Package(
                 "dmg-background.png",
             ],
             resources: [
-                .copy("GhosttyResources")
+                .copy("GhosttyResources"),
+                .copy("ThirdPartyNotices")
             ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),

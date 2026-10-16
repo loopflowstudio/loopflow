@@ -375,6 +375,15 @@ def release() -> int:
     for bundle in build_dir.glob("*.bundle"):
         shutil.copytree(bundle, app_dir / "Resources" / bundle.name)
 
+    run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/third_party.py"),
+            "package",
+            str(app_dir / "Resources"),
+        ]
+    )
+
     print(f"Created dist/{app_name}.app", flush=True)
 
     # Codesign

@@ -57,8 +57,11 @@ remain. System changes choose Light/Dark assignments, not a palette's brightness
 Live provider output and visual comfort belong to review; truecolor output can
 retain its own colors. No test substitutes for that judgment.
 
-**Preview:** earlier `/tmp` previews predate theme files; a fresh preview needs
-a rebuild at review.
+**Preview:** `/tmp/Loopflow Theme Files Preview.app` (commit `873cb138`, lf
+0.14.0) was built, ad-hoc signed and launched at Jack's request. It reads and
+writes the real `theme:` line in `~/.lf/config.yaml` and `~/.lf/themes/`; the
+installed lf ignores that key. Native rendering and editor use are Jack's review.
+`open -n "/tmp/Loopflow Theme Files Preview.app" --args --repo /Users/jack/src/loopflow`
 
 ## Chosen architecture and source of truth
 

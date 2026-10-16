@@ -19,14 +19,21 @@ def record_readiness(output: Path, row: dict) -> None:
         )
 
 
-def prepare_session(lf: Path, home: Path, repo: Path, output: Path, provider: str) -> str:
+def prepare_session(
+    lf: Path,
+    home: Path,
+    repo: Path,
+    output: Path,
+    provider: str,
+    message: str = "Reply only OK. Do not call tools.",
+) -> str:
     before = read_session_ids(home)
     output.mkdir(parents=True, exist_ok=True)
     if provider == "codex":
         # Codex needs one persisted turn before native reconnect is possible.
         with (output / "seed.private").open("wb") as log:
             seed = subprocess.run(
-                [str(lf), "-b", "-a", "codex", ":", "Reply only OK. Do not call tools."],
+                [str(lf), "-b", "-a", "codex", ":", message],
                 cwd=repo,
                 env=build_environment(home, lf),
                 stdout=log,

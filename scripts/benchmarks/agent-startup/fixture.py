@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -21,7 +22,7 @@ def read_session_ids(home: Path) -> set[str]:
         return {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
 
 
-def prepare(source: Path, home: Path, apply_drafts: bool) -> dict:
+def prepare(source: Path, home: Path, apply_drafts: bool, receipts: int = 0) -> dict:
     home.mkdir(mode=0o700, parents=True, exist_ok=False)
     destination = home / "loopflow.db"
     with sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True) as original:
@@ -53,11 +54,27 @@ def prepare(source: Path, home: Path, apply_drafts: bool) -> dict:
             table: copy.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in ("agent_sessions", "processes", "session_events", "provider_accounts")
         }
+    root = home / "runtime/exec-processes"
+    root.mkdir(parents=True)
+    for index in range(receipts):
+        identity = str(uuid.UUID(int=index + 1))
+        (root / f"{identity}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "trace_id": "synthetic-startup-benchmark",
+                    "exec_id": identity,
+                    "pid": 2147483647,
+                    "started_at": 1,
+                }
+            )
+        )
     receipt = {
         "counts": counts,
         "drafts": [draft.name for draft in drafts],
         "credential_files_copied": False,
         "managed_account_routes_removed": True,
+        "synthetic_process_receipts": receipts,
     }
     (home / "startup-fixture.json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
@@ -68,9 +85,10 @@ def main() -> None:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--home", type=Path, required=True)
     parser.add_argument("--apply-drafts", action="store_true")
+    parser.add_argument("--receipts", type=int, default=0)
     args = parser.parse_args()
     os.umask(0o077)
-    print(json.dumps(prepare(args.source, args.home, args.apply_drafts)))
+    print(json.dumps(prepare(args.source, args.home, args.apply_drafts, args.receipts)))
 
 
 if __name__ == "__main__":

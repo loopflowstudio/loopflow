@@ -37,11 +37,11 @@ Explicit experiments initialize the embedded schema in a fresh directory.
 Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
-On an active Machine, promotion fences the old runtime generation, checkpoints and
-drains exact Wave/Project/Task containment, advances the store, restarts the
-same keeper, then reconciles every enabled open Work onto a new Run. `lf install`
-prints the terminal upgrade result directly; no manual zero-Run window is
-required.
+Full installation restarts the replaced Desktop app and its bundled helpers.
+Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
+stopping Desktop and its clients. Promotion advances the shared store through
+the published migration boundary and retains the prior published artifacts;
+it does not restart Tasks or Flows.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.

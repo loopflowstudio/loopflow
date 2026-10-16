@@ -94,7 +94,7 @@ and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
 Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** slate with warm bronze; **Linen** and **Hearth**
+cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
 are quieter light and charcoal alternatives.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
@@ -117,8 +117,7 @@ optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
 
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
-their source values. Personal non-color
-Ghostty settings still load; its `theme =` is ignored and its file never written.
+their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
 Choose **Background progress** in the repository toolbar to enable minute

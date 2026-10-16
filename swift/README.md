@@ -342,6 +342,11 @@ conversation or terminal title, directory and current reported status. Hovering
 the focused header reveals split right, split down and close; its context menu
 and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
+Terminal surfaces sit inside the rounded edge, so text wraps before the border
+in both single and split panes.
+The enclosing workspace curve follows the pane radius plus its inset, keeping
+the gap even around nested corners.
+The workspace also leaves clearance from the native window's larger lower corners.
 
 Copy selected text with **⌘C**: the pane header briefly confirms the line count,
 without decorating the selected cells. Find navigation briefly emphasizes the

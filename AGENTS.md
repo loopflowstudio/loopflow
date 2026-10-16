@@ -484,6 +484,7 @@ Headless Swift view tests inspect production leaf views directly when a parent
 requires `@Environment` Observation objects; ViewInspector cannot inject those
 objects. Keep existing leaf views internal for `@testable` access rather than
 adding test-only constructors or mounting a window.
+Keep mounted terminal frame checks in `.requiresDisplay` suites.
 
 ## When to Mock
 

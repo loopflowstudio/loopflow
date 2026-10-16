@@ -22,16 +22,11 @@ struct AppearanceSelection: Equatable {
     }
 }
 
-/// A pending change to one of your theme files.
-enum ThemeChange {
-    case write(ThemeDefinition)
-    case delete
-}
-
+/// The chooser's preview. `changed` names your files to rewrite from `library.yours`, or delete when absent there.
 private struct AppearanceDraft {
     var selection: AppearanceSelection
     var library: ThemeLibrary
-    var changes: [String: ThemeChange] = [:]
+    var changed: Set<String> = []
     var refusal: String?
 }
 
@@ -90,9 +85,9 @@ final class AppearanceStore {
     var deleteRevertsToBuiltin: Bool { canDelete && currentLibrary.isBuiltin(selectedName) }
     var refusal: String? { draft?.refusal }
     var draftErrors: [String] {
-        (draft?.changes ?? [:]).sorted { $0.key < $1.key }.flatMap { name, change -> [String] in
-            guard case let .write(theme) = change else { return [] }
-            return theme.readabilityErrors.map { "\(name): \($0)" }
+        guard let draft else { return [] }
+        return draft.changed.sorted().flatMap { name in
+            (draft.library.yours[name]?.readabilityErrors ?? []).map { "\(name): \($0)" }
         }
     }
     var canApply: Bool { refusal == nil && draftErrors.isEmpty }
@@ -128,18 +123,19 @@ final class AppearanceStore {
             ThemeError("No theme named “\(name)”: keeping \(effectiveTheme.name). Fix theme: in \(config) with a built-in name or a file in \(paths.themes.path).")
         }
         var choice = selection
-        if let name = value.single {
+        switch value {
+        case let .single(name):
             guard let theme = library.resolve(name) else { return .failure(unknown(name)) }
             choice.mode = theme.isDark ? .dark : .light
             if theme.isDark { choice.dark = name } else { choice.light = name }
-            return .success(choice)
+        case let .pair(light, dark):
+            for name in [light, dark].compactMap({ $0 }) where library.resolve(name) == nil {
+                return .failure(unknown(name))
+            }
+            choice.mode = .system
+            choice.light = light ?? ThemeDefinition.light.name
+            choice.dark = dark ?? ThemeDefinition.dark.name
         }
-        for name in [value.light, value.dark].compactMap({ $0 }) where library.resolve(name) == nil {
-            return .failure(unknown(name))
-        }
-        choice.mode = .system
-        choice.light = value.light ?? ThemeDefinition.light.name
-        choice.dark = value.dark ?? ThemeDefinition.dark.name
         return .success(choice)
     }
 
@@ -202,7 +198,7 @@ final class AppearanceStore {
     func customize() {
         beginPreview()
         guard selectedSource != .yours else { return }
-        stage(.write(selectedTheme), for: selectedName)
+        stage(selectedTheme, for: selectedName)
     }
 
     func editTheme(_ edit: (inout PaletteDefinition, inout TerminalPalette) -> Void) {
@@ -210,7 +206,7 @@ final class AppearanceStore {
         var palette = selectedTheme.palette.definition
         var terminal = selectedTheme.terminal
         edit(&palette, &terminal)
-        stage(.write(ThemeDefinition(name: selectedName, palette: LoopflowPalette(palette), terminal: terminal)), for: selectedName)
+        stage(ThemeDefinition(name: selectedName, palette: LoopflowPalette(palette), terminal: terminal), for: selectedName)
     }
 
     /// Delete your file. One that overrides a built-in reverts to it; otherwise the side returns to Loopflow's.
@@ -218,7 +214,7 @@ final class AppearanceStore {
         guard canDelete else { return }
         let name = selectedName
         let builtin = currentLibrary.isBuiltin(name)
-        stage(.delete, for: name)
+        stage(nil, for: name)
         if !builtin {
             if picker == .dark { draft?.selection.dark = ThemeDefinition.dark.name } else { draft?.selection.light = ThemeDefinition.light.name }
         }
@@ -237,19 +233,18 @@ final class AppearanceStore {
                 return
             }
             draft?.refusal = nil
-            stage(.write(file.theme), for: file.theme.name)
+            stage(file.theme, for: file.theme.name)
             if dark { draft?.selection.dark = file.theme.name } else { draft?.selection.light = file.theme.name }
             diagnostics = file.diagnostics
             update(file.theme)
         } catch { notice = error.localizedDescription }
     }
 
-    private func stage(_ change: ThemeChange, for name: String) {
-        draft?.changes[name] = change
-        switch change {
-        case let .write(theme): draft?.library.yours[name] = theme; update(theme)
-        case .delete: draft?.library.yours[name] = nil
-        }
+    /// Stage your file `name`: a theme to write, or nil to delete.
+    private func stage(_ theme: ThemeDefinition?, for name: String) {
+        draft?.changed.insert(name)
+        draft?.library.yours[name] = theme
+        if let theme { update(theme) }
     }
 
     // MARK: Writing
@@ -269,14 +264,13 @@ final class AppearanceStore {
     func apply() {
         guard let draft, canApply else { return }
         do {
-            for (name, change) in draft.changes.sorted(by: { $0.key < $1.key }) {
+            for name in draft.changed.sorted() {
                 let url = paths.themes.appendingPathComponent(name)
-                switch change {
-                case let .write(theme):
+                if let theme = draft.library.yours[name] {
                     try FileManager.default.createDirectory(at: paths.themes, withIntermediateDirectories: true)
                     try Data(ThemeFile.text(theme).utf8).write(to: url, options: .atomic)
-                case .delete:
-                    if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+                } else if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
                 }
             }
             try ThemeConfig.write(draft.selection.configValue, to: paths.config)

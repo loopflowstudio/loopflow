@@ -11,66 +11,34 @@ is integrated at `ba55df3415`. Its renderer/navigation/pane contract is summariz
 in [terminal polish](terminal-polish.md). Parent lands first; the separate
 [Workflow-loading hold](workflow-loading.md) survives.
 
-## Problem and accepted decisions
+## Problem and live decisions
 
 Jack wants a coherent workspace across navigation, headers, controls, file/diff
 editors and terminal panes. Themes must preserve readable selection, focus, actions
 and activity while switching retained Repo/Wave/Task contexts without losing
 clients, drafts, focus ownership or layout.
 
-October 15 decisions, in order:
+Live October 15 decisions (the slot library, Edit + Reset and per-slot import that
+preceded them are superseded; history at `3d05e621c4` and `b2a728f8eb`):
 
-- Complete themes control every LoopflowPalette role; explicit aliases are allowed.
-  Ghostty RGB imports convert once into the full application contract. No hardcoded
-  burgundy survives outside an authored preset.
-- Independently assign any theme to Light and Dark; Mode is Light, Dark or System.
-  One header row shows Mode with small label, then Light/Dark assignments. Explicit
-  Light/Dark mode dims and disables the inactive assignment; System enables both.
-- Keep **Loopflow Light** as the accepted original cream/burgundy design.
-  Jack requested returning the old slate **Loopflow Dark**, replacing pink with a
-  burgundy-related color. It keeps burgundy buttons; warm bronze now supplies
-  heading/focus ink (`#CEBFA9`) and Work selection (`#AB9B86`). Exact new values
-  remain review judgment.
-- The quieter redesigned pair is **Linen** (warm neutral/green) and **Hearth**
-  (warm charcoal). Jack accepted these names after rejecting Neo/Modern Loopflow
-  branding. Linen retains its previously previewed `neo-light` internal ID so
-  saved selections survive the display-name change.
-- Jack then capped the library at **24 slots**, superseding 26 choices and unlimited
-  appended imports. Keep the four themes above plus 20 companion palettes. Remove
-  the near-duplicate Catppuccin Frappe/Macchiato catalogue entries; preserve selected
-  old entries through one-time migration, not additional visible slots.
-- Jack asked for a wider, more diverse companion search (draft proposal under
-  review; 24 slots unchanged). Naming: keep a popular upstream theme's name where
-  reuse is clearly permitted; otherwise use one consistent scheme and prefer
-  simple, short names. No product/trademark names (GitHub, iTerm2, Atom, Ubuntu).
-  Renamed themes take one-word material names like Linen and Hearth.
-- Jack proposed **12 Light + 12 Dark** (Loopflow Light, Linen + 10; Loopflow Dark,
-  Hearth + 10) so each assignment picker lists only its own appearance. This
-  supersedes "either assignment accepts any palette". Draft companion set and
-  bench: `scratch/theme-catalogue/index.html`. Import must match the slot's
-  appearance (Jack, October 15): a dark file in a light slot previews an
-  explanation pointing to the Dark picker, and Apply stays disabled.
-- Jack: bias toward excluding anything not 100% clearly licensed. The
-  iTerm2-Color-Schemes MIT covers the collection only; each theme keeps its
-  author's license. Excluded: Modus (GPL-3.0), Monokai (no license), Man Page
-  (Apple), Ubuntu (Canonical), Solarized Higher Contrast (unlicensed gist).
-  Ship Night Owl and Noctis from their MIT upstream colors, not catalogue ports.
-  Mark Badolato's own themes are MIT on their terminalthemes.com pages.
-- Jack: Loopflow can target macOS 26 (October 15). Liquid Glass (a Solid/Glass
-  material axis tinted by the theme, chrome only) is separate work, not LOO-488;
-  Jack sees no reason to pursue it now, so no Task is filed.
-- Jack approved the license-clean 12 Light / 12 Dark choices in
-  `scratch/theme-catalogue/index.html` (October 15).
-- **Edit + Reset**, no separate Duplicate. Any slot can be renamed, recolored or
-  replaced by importing a theme. Reset restores its original bundled name and
-  colors. All these changes participate in the chooser's existing Apply/Cancel
-  transaction. Reset-to-original-slot is the reversible implementation choice
-  resolving what “reset” means after an import.
-
-The earlier owner survey, alternatives and readback evidence live at
-`94d687d00:scratch/whole-app-theming.md`; the complete-palette implementation and
-source audit are at `b413b95bf2:scratch/whole-app-theming.md`. Uncommitted prior
-palette-review evidence was preserved in `/tmp/loo488-plan-before-neo.md`.
+- Every theme controls every LoopflowPalette role. Ghostty RGB imports convert once
+  into the full app contract. No hardcoded burgundy survives outside an authored preset.
+- **Loopflow Light** keeps the original cream/burgundy design. **Loopflow Dark** is
+  the old slate with burgundy buttons and warm bronze heading/focus ink (`#CEBFA9`)
+  and Work selection (`#AB9B86`); exact values remain review judgment. The quieter
+  pair is **Linen** and **Hearth**.
+- Fixed **12 Light + 12 Dark** built-ins (listed below). Naming: keep an upstream
+  name where reuse is clearly permitted, otherwise one-word material names; no
+  product/trademark names.
+- Licensing: exclude anything not 100% clearly licensed (each theme keeps its
+  author's license; the iTerm2-Color-Schemes MIT covers the collection only).
+  Night Owl and Noctis ship from their MIT upstream colors. Jack approved the
+  license-clean catalogue in `scratch/theme-catalogue/index.html`.
+- Mode is Light, Dark or System. One header row: Mode, then Light/Dark pickers.
+  Each picker lists only its appearance, in System mode too; Light or Dark mode
+  dims the other. Never one mixed list. Import into the wrong picker explains
+  itself and Apply stays disabled.
+- Liquid Glass is separate work Jack sees no reason to pursue now; no Task filed.
 
 ## Demo
 
@@ -155,8 +123,7 @@ A selection edge could permit subtler fills, but it changes Jack's accepted
 geometry. Keep 3:1 filled selection. A universal blue→green replacement would
 repeat the same problem; curate several hue families instead. Runtime catalogue
 conversion, separate app/terminal selectors and live source-file rereads were
-rejected in favor of complete saved records. The fixed library supersedes
-Duplicate plus an unlimited custom section, without a second preference writer.
+rejected in favor of complete theme files with one writer.
 
 Pinned Ghostty supports config clone, compiled RGB readback and app/surface updates
 without replacing PTYs. Updates return void: no atomic renderer-wide commit proof.
@@ -177,8 +144,8 @@ renderer or local-only dependency pin is acceptable.
 
 Success means a person edits/imports a favorite palette once and the entire
 retained workspace follows comfortably. Failure would be unreadable role pairs,
-accidental loss while overwriting slots, or colors changing only after editor/text
-recreation. Complete records, reversible drafts, Reset and retained-view checks
+accidental loss of your edits, or colors changing only after editor/text
+recreation. Complete theme files, reversible drafts and retained-view checks
 address these mechanisms; native review still determines comfort.
 
 ## Integration and deletion cut
@@ -187,14 +154,10 @@ Keep existing AppearanceStore/AppAppearance, Work selection, workspace/pane pool
 file documents and Ghostty owners. No client recreation, theme-keyed view identity,
 new Work authority, status inference, installation or execution migration.
 
-Completed removal (earlier passes): static terminal colors; hardcoded semantic
-branches; runtime Ghostty catalogue; old appearanceMode writer; duplicate Ghostty
-overlay/readback maps; `terminalHover/Selection/Failure` fields.
-
-Removed in the theme-file cut (October 15): 24-slot library, slot Reset, slot and
-version 1–5 preference migration, `appearancePreferences` UserDefaults, JSON theme
-records and `ThemeRecord`, `Themes/Migrations/`, the rename/appearance editor
-fields, and 15 retired catalogue entries with their license notices.
+Deleted: static terminal colors, hardcoded semantic branches, runtime Ghostty
+catalogue, old appearanceMode writer, duplicate overlay/readback maps, the slot
+library with Reset and migrations, `appearancePreferences` UserDefaults, JSON theme
+records and 15 retired catalogue entries. Nothing remains to delete.
 
 The explicit stack-parent repair replaces refusal to change a Task parent with
 CAS against the observed parent; its focused Rust regression/build/Clippy passed.
@@ -203,9 +166,7 @@ CAS against the observed parent; its focused Rust regression/build/Clippy passed
 
 Jack chose no slots, fixed 12/12 built-ins, theme files in `~/.lf/themes` and
 Ghostty-syntax `theme:` in `~/.lf/config.yaml`; Mode writes a pair (System) or one
-name (Light/Dark). Each picker lists only its appearance in System mode too
-(Jack, October 15); Light/Dark mode dims the other. Implementation choices are in
-[questions](questions.md).
+name (Light/Dark). Implementation choices are in [questions](questions.md).
 
 - **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
   Flexoki Light, Noctis Lilac, Manila, Clay, Pewter, Frost, Vellum, Celadon. Dark:
@@ -225,4 +186,4 @@ usability and live outside-edit reload. Gate runs `uv run python scripts/test.py
 WorkCacheTests expectation failures remain open gate findings. Product KRs still
 require real sustained-use evidence.
 
-Check (2026-10-15): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|AppAppearanceTests' -Xswiftc -gnone --jobs 4` PASS (31 tests); gate and native judgment deferred.
+Check (2026-10-15, after compress): `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests|AppAppearanceTests' -Xswiftc -gnone --jobs 4` PASS (31 tests); gate and native judgment deferred.

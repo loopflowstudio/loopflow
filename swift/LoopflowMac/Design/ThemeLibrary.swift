@@ -80,27 +80,24 @@ struct ThemeLibrary {
 
 /// `theme:` in `~/.lf/config.yaml`, in Ghostty's value syntax: `light:A,dark:B` or one name.
 enum ThemeConfig {
-    struct Value: Equatable {
-        var light: String?
-        var dark: String?
-        var single: String?
+    enum Value: Equatable {
+        case single(String)
+        case pair(light: String?, dark: String?)
     }
 
     static func parse(_ text: String) -> Value? {
         let text = text.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return nil }
-        guard text.contains(":") else { return Value(single: text) }
-        var value = Value()
+        var light: String?, dark: String?
         for part in text.split(separator: ",") {
             let pair = part.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard pair.count == 2 else { return Value(single: text) }
-            switch pair[0] {
-            case "light": value.light = pair[1]
-            case "dark": value.dark = pair[1]
-            default: return Value(single: text)
+            switch (pair.first, pair.count) {
+            case ("light", 2): light = pair[1]
+            case ("dark", 2): dark = pair[1]
+            default: return .single(text)
             }
         }
-        return value
+        return .pair(light: light, dark: dark)
     }
 
     /// The raw `theme:` value from the top level of a YAML file, or nil when absent.

@@ -74,11 +74,14 @@ palette-review evidence was preserved in `/tmp/loo488-plan-before-neo.md`.
 
 ## Demo
 
-Open Appearance → Choose Theme. Compare Loopflow Light, the restored Dark, Linen
-and Hearth with the same conversation, shell and unsaved file open. Edit a name
-and colors, import over that slot, then Reset: original name and colors return.
-Cancel restores the previously applied library and both assignments. Repeat and
-Apply; relaunch restores all changes in exactly 24 slots.
+Open Appearance → Choose Theme with the same conversation, shell and unsaved file
+open. The Light picker lists 12 light built-ins, the Dark picker 12 dark ones.
+Customize Linen and change a color: your copy overrides it. Delete the copy and
+Linen returns. Import a Ghostty theme file into the matching picker; a dark file
+in the Light picker explains itself and can't be applied. Apply System: `theme:`
+in `~/.lf/config.yaml` reads `light:…,dark:…`. Apply Light: it reads one name.
+Edit `theme:` by hand and the app follows; a misspelled name keeps the last theme
+and names the problem. Cancel writes nothing. Relaunch restores the file's choice.
 
 Switch Work, open temporary/pinned navigation, inspect Needs you, split/focus panes
 and revisit unchanged diff text throughout. Clients, drafts, selections and layouts
@@ -269,10 +272,10 @@ He chose **no slots**, and **Ghostty-syntax text config** in the existing
   ignored; Loopflow's config owns colors. Ghostty's file is never written.
 - **Deleted:** slots, the 24-slot editable library, slot Reset, slot migration,
   and the UserDefaults appearance library.
-- **Open:** Mode. Ghostty's pair means "follow System" and a single name means
-  "always this one", so it can't express "Light mode, remember Hearth for dark".
-  Either the Mode control writes a single name or a pair, or a separate
-  `appearance: light|dark|system` key keeps both assignments.
+- **Mode writes the format** (Jack, October 15). System writes the pair; Light
+  or Dark writes only that side's name, dropping the other side from the file.
+  The other picker is dimmed in Light or Dark mode. Returning to System restores
+  the other side from this session when known, otherwise Loopflow Light/Dark.
 - **Separate Task candidate (not here):** Jack expects user config to override
   repo config generally; today repo wins for scalars (`config.rs`), and some keys
   are repo-only by design.
@@ -297,17 +300,19 @@ He chose **no slots**, and **Ghostty-syntax text config** in the existing
 
 ## This slice and Done when
 
-Deliver the combined parent integration, 24-slot library, palette redesign and
-Edit/Reset/import cutover together. No partial infinite-import or uneditable custom
-store remains. Update sources/license notices and Desktop usage beside code.
+Deliver the approved catalogue, appearance-split pickers, theme files and
+`theme:` config together, deleting slots, Reset, slot migration and the
+UserDefaults library in the same diff. Update sources/license notices and
+Desktop usage beside code.
 
 Headless focused acceptance:
 `scripts/test_desktop.sh --filter 'ThemeTests|ThemeWorkflowTests|WorkPaletteTests' -Xswiftc -gnone --jobs 4`.
-Expect exact 24 slots after repeated edit/rename/import/reset; both assignments
-follow stable slot IDs; preview/cancel/apply/relaunch preserve full records;
-invalid input preserves saved bytes; removed assigned presets migrate without
-extra slots; original Light and restored Dark remain available; unchanged native
-text and retained Work/layout/drafts survive color changes.
+Expect 12 built-ins per picker; your files override and revert by name;
+appearance-mismatched import is refused with its explanation; Apply writes
+only the `theme:` line in the expected format for each Mode; Cancel writes
+nothing; outside edits reload; unknown names keep the last good theme; repo
+config never sets the theme; unchanged native text and retained
+Work/layout/drafts survive color changes.
 
 Gate runs `uv run python scripts/test.py --swift --loopflow` once, with parent
 feedback/pane/navigation suites and multiplatform boundary checks. Two inherited

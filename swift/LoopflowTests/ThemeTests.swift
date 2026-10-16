@@ -75,7 +75,7 @@ struct ThemeTests {
         let light = ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name)
         let dark = ThemeDefinition.builtins.filter(\.isDark).map(\.name)
         #expect(light == ["Loopflow Light", "Linen", "Catppuccin Latte", "Celadon", "Clay", "Flexoki Light", "Frost",
-                          "Gruvbox Light", "Noctis Lilac", "Pewter", "Vellum", "Verdigris"])
+                          "Gruvbox Light", "Noctis Lilac", "Pewter", "Sea Glass", "Vellum"])
         #expect(dark == ["Loopflow Dark", "Hearth", "Aubergine", "Catppuccin Mocha", "Flexoki Dark", "Gruvbox Dark",
                          "Moss", "Night Owl", "Onyx", "Phosphor", "Rosewood", "Solarized Dark"])
         for theme in ThemeDefinition.builtins where !["Loopflow Light", "Loopflow Dark"].contains(theme.name) {

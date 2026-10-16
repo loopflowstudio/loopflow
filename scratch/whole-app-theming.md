@@ -172,7 +172,7 @@ Ghostty-syntax `theme:` in `~/.lf/config.yaml`; Mode writes a pair (System) or o
 name (Light/Dark). Implementation choices are in [questions](questions.md).
 
 - **Catalogue.** Light: Loopflow Light, Linen, Catppuccin Latte, Gruvbox Light,
-  Flexoki Light, Noctis Lilac, Verdigris, Clay, Pewter, Frost, Vellum, Celadon. Dark:
+  Flexoki Light, Noctis Lilac, Sea Glass, Clay, Pewter, Frost, Vellum, Celadon. Dark:
   Loopflow Dark, Hearth, Catppuccin Mocha, Gruvbox Dark, Solarized Dark, Flexoki
   Dark, Night Owl, Onyx, Rosewood, Aubergine, Moss, Phosphor. Night Owl and
   Noctis Lilac use their MIT upstream colors. `Sources.md`/`Licenses/` updated.

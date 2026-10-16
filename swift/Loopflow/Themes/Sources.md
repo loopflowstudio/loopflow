@@ -30,7 +30,7 @@ License: `Licenses/Noctis.txt`
 
 Upstream terminal.* colors; selection is editor.selectionBackground (#b4adeb77) composited on the terminal background.
 
-## Verdigris
+## Sea Glass
 
 Source: https://github.com/mbadolato/iTerm2-Color-Schemes/blob/21f281d0834846eef984f75774638e7d16bac068/ghostty/Safety%20Glass
 License: `Licenses/Badolato.txt`

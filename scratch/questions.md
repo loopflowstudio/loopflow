@@ -1,0 +1,2 @@
+- Jack Heart directed shipping on October 15 after discussing OFL: retain the font and fulfill its terms, without changing Loopflow's license. MIT/OFL labels alone are not proof of incompatibility. Audit the complete composite and preserve upstream attribution.
+- Remote GhosttyKit binary publication remains out of scope. Implement packaging for future archives and the current app without replacing the published object.

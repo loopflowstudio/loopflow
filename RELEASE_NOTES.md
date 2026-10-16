@@ -33,6 +33,8 @@ Retired checkout deletion now looks up matching current and historical branch ow
 
 - **About Loopflow** now opens an offline, searchable and selectable third-party license viewer. Packaging includes notices, pinned source archives, application source and build inputs, libintl libraries for both architectures, and a tested rebuild/relink recipe.
 - App assembly and future GhosttyKit archive creation reject missing or mismatched materials before signing or publication. Source materials add approximately 217 MiB before compression; existing remote GhosttyKit archives remain unchanged.
+- Release preparation refreshes the third-party inventory after version changes, preventing a stale inventory from blocking checks and Desktop packaging.
+- The Breakpad source bundle omits two prebuilt unsigned i386 crash-test executables that caused the first v0.14.1 notarization rejection. All 921 remaining file payloads are unchanged, with notices and rebuild materials retained. Packaging records the omissions and verifies the deterministic archive hash; successful release notarization remains unverified in the supplied evidence.
 - Live-state cleanup remains a post-install operation; shipping the cleanup changes does not establish that existing state has been cleaned.
 - Headless tests cover theme colors and transfer preparation. Native visual coherence, live terminal input and focus during theme changes, and end-to-end client handoff remain unverified in the supplied release evidence.
 

@@ -69,6 +69,67 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test("Task entry exposes Move here without taking over the external terminal", arguments: [false, true])
+    func taskConversationActiveElsewhere(explicitSession: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = try #require(task.runtime?.workId)
+        var record = try renameFixtureRecord("external-primary", title: "Task conversation",
+            work: .task(id: taskID))
+        record.workspace = SessionWorkspace(machineId: "machine-local", worktree: "/src/task",
+            taskId: taskID, unavailable: nil)
+        let encoded = try JSONEncoder().encode(record)
+        let active = String(decoding: encoded, as: UTF8.self)
+        var wire = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        // Preparation supplies a takeover command; the external client is still active.
+        wire["open_argv"] = ["lf", "session", "connect", record.id, "--takeover"]
+        let prepared = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+        let owner = ExternalConversationOwner(active: active, prepared: prepared)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["wave", "show"]) { return data }
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
+            if args.starts(with: ["session", "connect"]) { return try await owner.prepare(args) }
+            throw RegistryQueryError("Unexpected Task conversation operation")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        if explicitSession {
+            await model.openTaskLink(try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id).url))
+        } else {
+            await model.openTaskConversation(task.id)
+        }
+        let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
+        let store = registry.sessionStore(repository: "repo", repoPath: wave.wave.repo, query: query)
+        #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
+        #expect(workspace.conversationError == nil)
+        #expect(model.taskOpening?.status == .usable)
+        #expect(store.sessions.first?.state == .elsewhere)
+        #expect(await !owner.takeoverPrepared)
+        // Inspect the production placeholder directly: ViewInspector cannot resolve
+        // Observation environment objects while descending the workspace tree.
+        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
+            sessions: store, store: workspace.multiplexer, hover: workspace.hover)
+            ._sessionPlaceholder(try #require(store.sessions.first))
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-retry-\(record.id)")
+        }
+        let move = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(record.id)").button()
+        #expect(!move.isDisabled())
+        #expect(throws: Never.self) {
+            try view.inspect().find(text: "Moving stops the other client. Unsent text typed there is lost.")
+        }
+        try move.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.surface?.id == record.id)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "connect", record.id, "--takeover"])
+        #expect(await owner.takeoverPrepared)
+        #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
+    }
+
     @Test(arguments: [false, true])
     func openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared: Bool) async throws {
         let data = try fixture()
@@ -1812,5 +1873,26 @@ private actor LinkedDestinationBarrier {
 private actor DestinationReadCounter {
     private var count = 0
     func next() -> Int { count += 1; return count }
+}
+private actor ExternalConversationOwner {
+    let active: String
+    let prepared: String
+    private(set) var takeoverPrepared = false
+
+    init(active: String, prepared: String) {
+        self.active = active
+        self.prepared = prepared
+    }
+
+    func prepare(_ args: [String]) throws -> String {
+        if args.contains("--takeover") {
+            takeoverPrepared = true
+            return prepared
+        }
+        guard args.contains("--try") else {
+            throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
+        }
+        return active
+    }
 }
 #endif

@@ -537,7 +537,6 @@ final class WorkModel {
         } else {
             switch item.state {
             case .failed(let message), .ended(let message): reason = message
-            case .elsewhere: reason = "Session is open elsewhere; use Move here explicitly."
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."
             default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError
@@ -545,7 +544,7 @@ final class WorkModel {
         }
         if let reason {
             taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
-        } else if item.state == .live,
+        } else if item.state == .live || item.state == .elsewhere,
                   !destination.showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false) {
             taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
         }

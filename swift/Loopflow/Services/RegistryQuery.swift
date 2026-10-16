@@ -432,9 +432,10 @@ public struct RegistryQuery: Sendable {
 
     /// The Task's one ongoing conversation: the one already chosen, else its
     /// only or most recently used one, else a new one in its checkout. The
-    /// choice is remembered as the Task's primary.
+    /// choice is remembered as the Task's primary. External ownership is returned
+    /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json"], cwd)
+        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -444,8 +445,7 @@ public struct RegistryQuery: Sendable {
         takeover: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "connect", id, "--prepare", "--json"]
-        if takeover { args.append("--takeover") }
+        let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }

@@ -676,7 +676,9 @@ final class SessionsStore {
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
-                if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
+                if !replacing, surface.action(.moveHere) != nil {
+                    sessions[latest].state = .elsewhere
+                } else if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
                     sessions[latest].state = .failed(reason)
                 } else {
                     sessions[latest].state = .prepared
@@ -693,7 +695,9 @@ final class SessionsStore {
         switch sessions[index].state {
         case .pending, .failed, .ended:
             sessions[index].record = record
-            if let reason = record.action(.open)?.unavailableReason {
+            if record.action(.moveHere) != nil {
+                sessions[index].state = .elsewhere
+            } else if let reason = record.action(.open)?.unavailableReason {
                 sessions[index].state = .failed(reason)
             } else {
                 sessions[index].state = .prepared
@@ -1654,7 +1658,7 @@ private struct SplitDivider: View {
     }
 }
 
-private struct SessionPaneView: View {
+struct SessionPaneView: View {
     @Environment(\.theme) private var theme
     @State private var shellError: String?
     @State private var changingSession = false
@@ -2059,7 +2063,7 @@ private struct SessionPaneView: View {
     /// The pane a Session occupies before its terminal exists here. Each state
     /// explains itself and carries its one explicit next action.
     @ViewBuilder
-    private func _sessionPlaceholder(_ item: SessionItem) -> some View {
+    func _sessionPlaceholder(_ item: SessionItem) -> some View {
         switch item.state {
         case .elsewhere:
             _elsewherePlaceholder(item)

@@ -430,10 +430,10 @@ include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-Selecting a Session active in another client opens a pane that explains the situation; nothing is
-stopped until its explicit **Move here**, which stops the other client and
-resumes the Session in that pane. Unsent text typed in the other client is
-lost, and the pane says so before you commit.
+Opening a Task or selecting a Session active in another client shows its conversation
+pane with **Move here**. Clicking it stops the other client and resumes the Session
+in that pane. Unsent text typed in the other client is lost; the pane warns before
+the click. Opening or selecting the Session leaves the other client running.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
 the view: the terminal and its provider client keep running and reopen as left.

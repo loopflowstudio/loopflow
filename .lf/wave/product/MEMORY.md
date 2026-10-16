@@ -970,27 +970,25 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 `ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
 `scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
-## Sessions projection and native resume (reconciled 2026-09-24)
+## Sessions projection and native resume (reconciled 2026-10-15)
 
-The older Ask/Ready/Complete and Task-review control contract is superseded by
-October 4's Task conversation correction. Details remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
-under this heading. Retain:
+October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
+`16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
 
 - `lf session list --json` owns the shared Session projection; Desktop owns no
   second queue, title store, liveness model or resolution state.
-- Provider history owns native resume. Row selection focuses the retained
-  terminal; **Move here** explicitly replaces an exact Loopflow-owned client
-  using PID and birth evidence. Resume preserves history, not unsent TUI input.
-  `session open --json --replace` prepares argv without stopping the old client.
-  Closing a pane or provider exit resolves nothing.
+- LOO-491: Jack Heart requested Task entry expose **Move here**, never a failing
+  Retry loop. `session connect --prepare --json --try` returns external ownership;
+  Desktop installs its pane and treats `.elsewhere` as usable. Fresh preparation
+  can discover ownership absent from the cached record. Only the explicit click
+  prepares `--takeover`; preparation does not stop the client. Resume preserves
+  provider history, not unsent input. Closing a pane resolves nothing.
 - Desktop retains terminals across selection, with explicit splits and reversible
   Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
   Canonical Git common-directory identity keeps Task checkouts out of repo roots.
-- Configured provider continuation and native focus/pane reconciliation remain
-  unproven by mocks, launch screenshots or empty inventories. The deleted review
-  handshake is no longer an acceptance requirement.
-- LOO-251/284/291 retain native, shared-action and planning proof obligations;
-  the archived reconciliation establishes neither completion nor new follow-ups.
+- LOO-491's headless tests cover Task entry/link placement, warning, click and
+  prepared argv, not native transfer or interactive provider readiness.
+  LOO-251/284/291 retain native, shared-action and planning proof obligations.
 
 ### Task observation and retired Watch
 

@@ -7,7 +7,9 @@ uv run python scripts/loopflow-dev.py ghostty-build
 Requires Zig 0.16.0, `glslangValidator`, and a macOS Metal device. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
-publish the artifact. Packaging normalizes the upstream static archive to
+publish the artifact. Packaging includes the audited notices, matching source,
+and standalone libintl libraries; missing material fails the build. See
+[third-party packaging](../../third_party/README.md). Packaging normalizes the upstream static archive to
 `libghostty.a` and updates its plist paths so SwiftPM links it.
 
 The patch makes the terminal the owner of command blocks:

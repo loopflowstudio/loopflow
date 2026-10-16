@@ -72,6 +72,10 @@ struct LoopflowApp: App {
         .windowStyle(.automatic)
         .defaultSize(width: 1280, height: 800)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Loopflow") { openWindow(id: "about-loopflow") }
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("Open Repo…") { openRepoPanel() }
                     .keyboardShortcut("n", modifiers: .command)
@@ -130,6 +134,16 @@ struct LoopflowApp: App {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
+
+        Window("About Loopflow", id: "about-loopflow") {
+            AboutLoopflowView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Open Source Licenses", id: "open-source-licenses") {
+            OpenSourceLicensesView()
+        }
+        .defaultSize(width: 760, height: 600)
 
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService, openTask: { path, id in

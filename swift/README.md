@@ -73,11 +73,52 @@ or dot. Shared availability is labeled as inferred; report Blocked and Error rem
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Work selection uses burgundy fill and cream text; keyboard focus has a separate outline.
-Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
-Blue means reported work, amber means Available/blocked, red means failure.
-The same roles apply in light and dark appearances without changing terminal ANSI
-colors or replacing retained panes and drafts.
+Selected Work uses the theme’s selection fill and contrasting text, mirrored in Needs you.
+File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
+Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
+Status labels and shapes retain their meaning across palettes.
+Choose **Appearance → Choose Theme…** to preview the whole workspace. Set
+**Light theme** and **Dark theme** independently; **System** follows macOS using
+both. System lists both pickers; Light or Dark lists only its own. Each picker
+shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
+
+```yaml
+# ~/.lf/config.yaml
+theme: "light:Linen,dark:Hearth"   # System
+theme: "Hearth"                    # Dark (or Light) mode: one name
+```
+
+**Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
+Edit it by hand and every window follows; a misspelled name keeps the last theme
+and names the fix. Absent means Loopflow Light/Dark. A repository's
+`.lf/config.yaml` never sets the theme.
+
+Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
+cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
+are quieter light and charcoal alternatives.
+
+Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
+is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
+A file named like a built-in overrides it. **Customize** on a built-in writes your
+copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
+for an override). **Import file…** copies a theme into Yours, accepting only the
+picker's appearance; a dark file in the Light picker explains itself instead.
+
+```
+background = #171924
+foreground = #cad2ef
+palette = 4=#7aa2f7
+loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+```
+
+Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
+required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
+optional. Preview explains defaults, repeats and omitted settings. Fonts,
+commands, keybindings, includes and theme references are never followed.
+
+Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
+their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
+Source and license notices ship offline with the catalogue.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks

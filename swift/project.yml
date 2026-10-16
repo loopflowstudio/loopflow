@@ -25,7 +25,11 @@ targets:
         excludes:
           - Info.plist
           - Fonts
+          - Themes
       - path: Loopflow/Fonts
+        buildPhase: resources
+        type: folder
+      - path: Loopflow/Themes
         buildPhase: resources
         type: folder
     settings:

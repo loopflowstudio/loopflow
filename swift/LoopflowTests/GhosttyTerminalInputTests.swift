@@ -244,11 +244,11 @@ struct GhosttyShellBlockTests {
         func accent(exit: Int?, selected: Bool = false, hovered: Bool = false) -> NSColor {
             ghosttyCommandBlockAccent(
                 block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
-                hovered: hovered
+                hovered: hovered, palette: .light
             )
         }
         func isRed(_ color: NSColor) -> Bool {
-            color.alphaComponent > 0 && color.redComponent > 0.8 && color.greenComponent < 0.4
+            color.alphaComponent > 0 && color.redComponent > color.greenComponent * 1.5
         }
 
         // Selection uses a neutral gutter; the renderer preserves the failure background.

@@ -22,7 +22,7 @@ struct LoopflowApp: App {
     @State private var taskChoices: [[TaskWindowChoice]] = []
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
-    @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
+    @State private var appearance: AppearanceStore
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -35,12 +35,12 @@ struct LoopflowApp: App {
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
+        // Ghostty borrows the process environment when appearance initializes it.
+        // Finish environment changes before publishing the initial theme.
+        _appearance = State(initialValue: AppearanceStore.shared)
     }
 
     var body: some Scene {
-        let resolvedAppearance = AppTestMode.forcesLightAppearance
-            ? AppearanceMode.light.rawValue
-            : appearanceMode
         let launchRepoURL = LaunchArguments.repoURL()
         let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
@@ -63,8 +63,7 @@ struct LoopflowApp: App {
                     }
                 }
             }
-            .tint(.loopflowBurgundy)
-            .modifier(AppAppearance(mode: resolvedAppearance))
+            .modifier(AppAppearance(appearance: appearance))
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -79,15 +78,20 @@ struct LoopflowApp: App {
             }
             CommandGroup(after: .appSettings) {
                 Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
-                Picker("Appearance", selection: Binding(
-                    get: { appearanceMode },
-                    set: { appearanceMode = $0 }
-                )) {
+                Menu("Appearance") {
                     ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.menuTitle).tag(mode.rawValue)
+                        Button { appearance.applyMode(mode) } label: {
+                            if appearance.selection.mode == mode {
+                                Label(mode.menuTitle, systemImage: "checkmark")
+                            } else { Text(mode.menuTitle) }
+                        }
+                    }
+                    Divider()
+                    Button("Choose Theme…") {
+                        appearance.beginPreview()
+                        openWindow(id: "appearance")
                     }
                 }
-                .pickerStyle(.radioGroup)
             }
 
             CommandGroup(after: .saveItem) {
@@ -131,8 +135,7 @@ struct LoopflowApp: App {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
                 requestRepository(path, TaskLink(issue: id, repo: path).url)
             })
-                .tint(.loopflowBurgundy)
-                .modifier(AppAppearance(mode: resolvedAppearance))
+                .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
@@ -140,14 +143,19 @@ struct LoopflowApp: App {
         Window("Open Work", id: "open-work") {
             WorkspaceOpeningFeedback(error: $openingError, choices: $taskChoices,
                                      openRepository: requestRepository)
-                .modifier(AppAppearance(mode: resolvedAppearance))
+                .modifier(AppAppearance(appearance: appearance))
         }
         .defaultSize(width: 480, height: 240)
 
+        Window("Appearance", id: "appearance") {
+            ThemeChooser(appearance: appearance)
+                .modifier(AppAppearance(appearance: appearance))
+        }
+        .defaultSize(width: 620, height: 560)
+
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
-                .tint(.loopflowBurgundy)
-                .modifier(AppAppearance(mode: resolvedAppearance))
+                .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)
@@ -260,18 +268,34 @@ struct LoopflowApp: App {
     }
 }
 
-/// Resolve system appearance inside the window, where SwiftUI supplies its
-/// effective color scheme. An App-level environment read cannot supply it.
+/// Resolve every window from the app-owned theme, including native controls.
 struct AppAppearance: ViewModifier {
-    let mode: String
-    @Environment(\.colorScheme) private var systemScheme
+    let appearance: AppearanceStore
+    @Environment(\.openWindow) private var openWindow
 
     func body(content: Content) -> some View {
-        let theme = AppearanceMode.resolvedTheme(rawValue: mode, systemScheme: systemScheme)
+        let theme = appearance.effectiveTheme
         content
-            .preferredColorScheme(theme.preferredScheme)
-            .environment(\.colorScheme, theme.preferredScheme ?? systemScheme)
+            .preferredColorScheme(theme.colorScheme)
+            .environment(\.colorScheme, theme.colorScheme)
             .environment(\.palette, theme.palette)
+            .environment(\.theme, theme)
+            .tint(theme.palette.accentInk)
+            .foregroundStyle(theme.palette.text)
+            .background(theme.palette.background)
+            .safeAreaInset(edge: .top) {
+                if let notice = appearance.notice, !appearance.chooserOpen {
+                    HStack {
+                        Text(notice).font(.caption)
+                        Button("Choose Theme…") {
+                            appearance.beginPreview()
+                            openWindow(id: "appearance")
+                        }
+                    }
+                    .padding(8).foregroundStyle(theme.palette.text)
+                    .background(theme.palette.surface)
+                }
+            }
     }
 }
 

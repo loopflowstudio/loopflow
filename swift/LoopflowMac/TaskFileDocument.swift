@@ -238,7 +238,7 @@ final class TaskFileTextView: NSTextView {
     }
 }
 
-struct TaskPatchLine: Sendable {
+struct TaskPatchLine: Equatable, Sendable {
     let range: NSRange
     let added: Bool
 

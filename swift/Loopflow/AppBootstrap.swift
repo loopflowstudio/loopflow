@@ -1,27 +1,6 @@
 import SwiftUI
 import CoreText
 
-extension AppearanceMode {
-    public static func resolvedTheme(
-        rawValue: String,
-        systemScheme: ColorScheme
-    ) -> (preferredScheme: ColorScheme?, palette: LoopflowPalette) {
-        let mode = AppearanceMode(rawValue: rawValue) ?? .system
-        let palette: LoopflowPalette
-
-        switch mode {
-        case .light:
-            palette = .light
-        case .dark:
-            palette = .dark
-        case .system:
-            palette = systemScheme == .dark ? .dark : .light
-        }
-
-        return (mode.colorScheme, palette)
-    }
-}
-
 public enum AppRuntime {
     public static var isAutomatedTest: Bool {
         let environment = ProcessInfo.processInfo.environment

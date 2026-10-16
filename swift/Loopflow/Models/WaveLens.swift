@@ -14,13 +14,13 @@ public enum WaveLensColor: String, Sendable, Hashable {
     /// The lit glass tone. Restrained, not a generic health palette — the HAL
     /// allusion stays implicit. Black is near-black glass rather than a bright dot;
     /// unknown is a dim amber so unproven never reads as off.
-    public var glow: Color {
+    public func ink(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .green: Color(hex: 0x3FA96A)
-        case .red: Color(hex: 0xC0392B)
-        case .blue: Color(hex: 0x3578C8)
-        case .black: Color(hex: 0x2A2A2A)
-        case .unknown: Color(hex: 0xB0862B)
+        case .green: palette.success
+        case .red: palette.failure
+        case .blue: palette.working
+        case .black: palette.surfaceElement
+        case .unknown: palette.waiting
         }
     }
 

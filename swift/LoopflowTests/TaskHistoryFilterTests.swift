@@ -144,7 +144,7 @@ struct TaskHistoryFilterTests {
 
     @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {
         var applied = TaskHistoryFilter()
-        let view = TaskHistoryInlineView(filter: applied, onChange: { applied = $0 })
+        let view = TaskHistoryInlineView(filter: applied, palette: .light, onChange: { applied = $0 })
         #expect(view.number.string == "Completed")
         view.activateLabel()
         #expect(applied.showCompleted && applied.days == 7)
@@ -206,7 +206,7 @@ struct TaskHistoryFilterTests {
             var filter = TaskHistoryFilter()
             filter.showCompleted = true
             filter.editDays(days)
-            let view = TaskHistoryInlineView(filter: filter, onChange: { _ in })
+            let view = TaskHistoryInlineView(filter: filter, palette: .light, onChange: { _ in })
             view.layoutSubtreeIfNeeded()
             let text = view.number
             let layout = try #require(text.layoutManager)
@@ -288,7 +288,7 @@ struct TaskHistoryFilterTests {
         _ = try view.inspect().find(text: "Canceled")
         #expect(try rows() == ["LOO-309", "LOO-316", "LOO-312", "LOO-306", "reopened", "unresolved"])
         let control = try view.inspect().find(TaskHistoryInlineControl.self).actualView()
-        let native = TaskHistoryInlineView(filter: control.filter, onChange: { control.filter = $0 })
+        let native = TaskHistoryInlineView(filter: control.filter, palette: control.palette, onChange: { control.filter = $0 })
         native.activateLabel()
         model.taskHistoryNow = now
         #expect(try rows().contains("recent"))

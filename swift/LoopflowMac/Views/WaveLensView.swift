@@ -12,15 +12,17 @@ struct WaveLensView: View {
     var diameter: CGFloat = 11
     var accessibilityId: String = "wave-lens"
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
-        let color = lens.color.glow
+        let color = lens.color.ink(in: palette)
         let lit = lens.color.isLit
         Circle()
             .fill(
                 RadialGradient(
                     colors: lit
-                        ? [color, color.opacity(0.55), Color.black.opacity(0.85)]
-                        : [Color(hex: 0x2A2A2A), Color.black.opacity(0.9)],
+                        ? [color, color.opacity(0.55), palette.background]
+                        : [palette.surfaceElement, palette.background],
                     center: UnitPoint(x: 0.38, y: 0.34),
                     startRadius: 0,
                     endRadius: diameter * 0.75
@@ -29,14 +31,14 @@ struct WaveLensView: View {
             .overlay(
                 // Faint specular highlight — glass, not a flat dot.
                 Circle()
-                    .fill(Color.white.opacity(lit ? 0.5 : 0.18))
+                    .fill(palette.text.opacity(lit ? 0.5 : 0.18))
                     .frame(width: diameter * 0.26, height: diameter * 0.26)
                     .blur(radius: 0.5)
                     .offset(x: -diameter * 0.2, y: -diameter * 0.22)
             )
             .overlay(
                 // Recessed rim.
-                Circle().strokeBorder(Color.black.opacity(0.55), lineWidth: 0.75)
+                Circle().strokeBorder(palette.borderStrong, lineWidth: 0.75)
             )
             .frame(width: diameter, height: diameter)
             .shadow(color: lit ? color.opacity(0.6) : .clear, radius: lit ? 2.5 : 0)

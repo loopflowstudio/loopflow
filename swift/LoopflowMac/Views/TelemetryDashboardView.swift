@@ -547,7 +547,7 @@ private struct IcicleNode: View {
     }
 
     private var depthColor: Color {
-        let ramp: [Color] = [.loopflowBurgundy, palette.working, palette.success, palette.waiting]
+        let ramp: [Color] = [palette.emphasisInk, palette.working, palette.success, palette.waiting]
         return ramp[min(depth, ramp.count - 1)]
     }
 }

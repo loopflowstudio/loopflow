@@ -327,8 +327,8 @@ private struct TaskDocumentView: NSViewRepresentable {
             document.scroll.autoresizingMask = [.width, .height]
             host.addSubview(document.scroll)
         }
-        document.editor.backgroundColor = NSColor(palette.background)
-        document.editor.textColor = NSColor(palette.text)
+        document.editor.applyPalette(palette)
+        document.scroll.backgroundColor = NSColor(palette.background)
     }
 }
 
@@ -338,7 +338,7 @@ private struct TaskPatchView: NSViewRepresentable {
     @Environment(\.palette) private var palette
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        let text = NSTextView(usingTextLayoutManager: true)
+        let text = TaskPatchTextView(usingTextLayoutManager: true)
         text.isEditable = false
         text.isRichText = false
         text.usesFindBar = true
@@ -351,19 +351,36 @@ private struct TaskPatchView: NSViewRepresentable {
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let text = scroll.documentView as? NSTextView else { return }
-        let display = patch.isEmpty ? "No textual changes." : patch
-        guard text.string != display else { return }
-        let attributed = NSMutableAttributedString(string: display, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-            .foregroundColor: NSColor(palette.text),
-        ])
-        for line in lines {
-            let color = (line.added ? NSColor.systemGreen : NSColor.systemRed).withAlphaComponent(0.10)
-            attributed.addAttribute(.backgroundColor, value: color, range: line.range)
-        }
-        text.textStorage?.setAttributedString(attributed)
-        text.backgroundColor = NSColor(palette.background)
+        guard let text = scroll.documentView as? TaskPatchTextView else { return }
+        text.update(patch: patch, lines: lines, palette: palette)
+        scroll.backgroundColor = NSColor(palette.background)
     }
 }
+
+final class TaskPatchTextView: NSTextView {
+    private var renderedPalette: PaletteDefinition?
+    private var renderedLines: [TaskPatchLine] = []
+
+    func update(patch: String, lines: [TaskPatchLine], palette: LoopflowPalette) {
+        let display = patch.isEmpty ? "No textual changes." : patch
+        guard string != display || renderedPalette != palette.definition || renderedLines != lines else { return }
+        if string != display { string = display }
+        let storage = textStorage
+        storage?.beginEditing()
+        storage?.setAttributes([
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor(palette.text),
+        ], range: NSRange(location: 0, length: (display as NSString).length))
+        for line in lines {
+            storage?.addAttribute(.backgroundColor,
+                                  value: NSColor(line.added ? palette.successTone.fill : palette.failureTone.fill),
+                                  range: line.range)
+        }
+        storage?.endEditing()
+        applyPalette(palette)
+        renderedPalette = palette.definition
+        renderedLines = lines
+    }
+}
+
 #endif

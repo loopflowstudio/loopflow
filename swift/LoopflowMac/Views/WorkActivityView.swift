@@ -196,7 +196,7 @@ struct WorkActivityView: View {
         case .prMergeRequested: ("arrow.triangle.merge", palette.working)
         case .prMerged: ("checkmark.seal.fill", palette.success)
         case .prAbandoned: ("xmark", palette.waiting)
-        case .steerIssued: ("arrow.turn.down.right", Color.loopflowBurgundy)
+        case .steerIssued: ("arrow.turn.down.right", palette.emphasisInk)
         }
     }
 

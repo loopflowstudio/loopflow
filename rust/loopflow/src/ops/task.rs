@@ -1126,20 +1126,20 @@ async fn select_existing_stack_parent(
         .await
         .map_err(|error| task_error(error.to_string()))?
         .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
-    // A retry retains the recorded parent, including migrated PR history.
-    let parent = match &task.parent_pr_id {
-        Some(id) => store.get_task_pr(id).await,
-        None => store.active_task_pr(&parent_task.id).await,
+    // Retrying the same parent retains its historical PR identity. An explicit
+    // different Task selects that Task's active PR; the store checks the graph.
+    if let Some(id) = &task.parent_pr_id {
+        if let Some(parent) = store.get_task_pr(id).await.map_err(task_error)? {
+            if parent.task_id == parent_task.id {
+                return Ok(parent);
+            }
+        }
     }
-    .map_err(|error| task_error(error.to_string()))?
-    .ok_or_else(|| task_error("stack parent PR is missing"))?;
-    if parent.task_id != parent_task.id {
-        return Err(task_error(format!(
-            "Task {} already selects parent PR {}; changing an existing dependency requires explicit reparenting",
-            task.identifier, parent.id
-        )));
-    }
-    Ok(parent)
+    store
+        .active_task_pr(&parent_task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("stack parent PR is missing"))
 }
 
 #[derive(Debug)]
@@ -6107,11 +6107,48 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("cycle"));
-        assert_eq!(store.get_task_pr(&parent.id).await.unwrap(), Some(parent));
+        assert_eq!(
+            store.get_task_pr(&parent.id).await.unwrap(),
+            Some(parent.clone())
+        );
         assert_eq!(
             store.get_task_pr(&child.id).await.unwrap(),
             Some(published_child)
         );
+
+        let current = store.get_task(&fixture.task.id).await.unwrap().unwrap();
+        let mut next_task = parent_task.clone();
+        next_task.id = TaskId::new();
+        next_task.identifier = "STACK-3".into();
+        next_task.linear_id = None;
+        next_task.branch = "test/next-parent".into();
+        next_task.workspace_slug = "next-parent".into();
+        next_task.worktree = Some(repo.path().join("next-parent"));
+        let mut next = store.get_task_pr(&parent.id).await.unwrap().unwrap();
+        next.id = TaskPrId::new();
+        next.task_id = next_task.id.clone();
+        next.branch = next_task.branch.clone();
+        next.slug = next_task.workspace_slug.clone();
+        store.seed_task(&next_task, &next).await.unwrap();
+        let selected = super::select_existing_stack_parent(store, &current, "STACK-3")
+            .await
+            .unwrap();
+        store
+            .stack_task_placement(&current, &selected.id)
+            .await
+            .unwrap();
+        let moved = store.get_task_pr(&child.id).await.unwrap().unwrap();
+        assert_eq!(moved.parent_pr_id, Some(next.id));
+        assert_eq!(moved.base_commit, child.base_commit);
+        assert_eq!(moved.id, child.id);
+        assert_eq!(
+            store.task_events_after(&fixture.task.id, 0).await.unwrap(),
+            events
+        );
+        assert!(store
+            .stack_task_placement(&current, &parent.id)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

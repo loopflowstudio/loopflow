@@ -23,13 +23,14 @@ let package = Package(
             path: "Loopflow",
             exclude: ["Info.plist"],
             resources: [
-                .copy("Fonts")
+                .copy("Fonts"),
+                .copy("Themes")
             ]
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7.xcframework.zip",
-            checksum: "32e1d35ca909f67191e0d85afba8b52eb93f95a37513efbbb75f2caf195b44ed"
+            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
+            checksum: "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9"
         ),
         .executableTarget(
             name: "LoopflowMac",

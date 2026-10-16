@@ -214,7 +214,7 @@ struct WorkNavigator: View {
             }
             if let task = row.task {
                 Text(task.task.description).font(Typography.body(12)).lineLimit(2)
-                    .foregroundStyle(selected ? palette.workSelectedText.opacity(0.85) : palette.textSecondary)
+                    .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                     .allowsHitTesting(false)
                 TaskRowMetadata(task: task,
                     status: SessionProgramStatus(sessions: attention.map { [$0.session] } ?? row.inlineSessions, unavailable: model.sessions.errorMessage),

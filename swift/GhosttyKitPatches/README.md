@@ -33,11 +33,31 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## Theme readback
+
+`0005-terminal-color-readback.patch` extends `ghostty_config_get` to read RGB
+cursor, selection and search colors into `ghostty_config_color_s`, including
+optional colors. Unset and cell-relative colors return false without writing:
+they cannot resolve to fixed RGB without a terminal cell. No union layout or new
+C type crosses the API. Plain colors and indexed palettes keep their existing API.
+
+The build includes `c_get:` tests for all eight keys and unresolved values.
+Desktop validates these compiled colors alongside background, foreground and all
+256 indexed colors before publishing appearance. Headless theme tests preserve
+personal font size, override conflicting colors/conditional theme selectors, and
+reject changes to every managed color key and unresolved cursor colors.
+
+## Combined artifact
+
+`Package.swift` selects `GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip`,
+combining lf7 feedback/contrast with fixed-RGB theme readback. The public download
+matches SHA-256 `19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9`.
+October 15's build passed the combined patch/parser/ABI/color getter suites,
+324 offscreen Metal cases and GLSL compilation, producing both architectures.
+The earlier lf3-theme-readback1 and lf7 artifacts remain immutable.
+
 ## Terminal feedback and contrast
 
-`Package.swift` selects `GhosttyKit-a60e9e2-lf7.xcframework.zip`. Its public
-download matches SwiftPM checksum
-`32e1d35ca909f67191e0d85afba8b52eb93f95a37513efbbb75f2caf195b44ed`.
 The universal ReleaseFast build includes the reviewed failure-selection and
 absolute feedback-deadline repairs. Renderer cell-buffer tests keep foreground
 RGBA separate from the expanded background data. Headless checks exercise production Metal

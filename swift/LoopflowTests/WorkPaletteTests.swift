@@ -7,17 +7,33 @@ import ViewInspector
 
 @Suite("Desktop semantic colors")
 struct WorkPaletteTests {
-    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: [false, true])
-    func contrast(dark: Bool) {
-        let palette: LoopflowPalette = dark ? .dark : .light
+    @Test("Text and indicators retain contrast on actual composited surfaces", arguments: ThemeDefinition.builtins.map(\.id) + ["171924/CAD2EF", "FFF4DF/34291F", "330909/FFEEDD", "747474/FFFFFF", "888888/000000"])
+    func contrast(theme: String) throws {
+        let definition: ThemeDefinition
+        if let builtin = ThemeDefinition.builtins.first(where: { $0.id == theme }) { definition = builtin }
+        else {
+            let pair = theme.split(separator: "/")
+            definition = try ThemeFile.parse(Data("background=\(pair[0])\nforeground=\(pair[1])".utf8), name: theme).theme
+        }
+        let dark = definition.isDark
+        let palette = definition.palette
         var environment = EnvironmentValues()
         environment.colorScheme = dark ? .dark : .light
         let surfaces = [palette.background, palette.surface, palette.surfaceMuted, palette.surfaceElement]
         let text = [palette.text, palette.textSecondary, palette.textTertiary, palette.linkInk,
-                    palette.linkHover, palette.actionInk, palette.emphasisInk, palette.working,
+                    palette.linkHover, palette.actionInk, palette.emphasisInk, palette.accentInk, palette.working,
                     palette.waiting, palette.failure, palette.success]
+        for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
+            #expect(ratio(rgb(tone.text(in: palette), environment), rgb(tone.fill(in: palette), environment)) >= 4.5)
+        }
+        let workSelection = rgb(palette.workSelectedFill, environment)
+        for ink in [palette.workSelectedText, palette.workSelectedSecondaryText] {
+            #expect(ratio(rgb(ink, environment), workSelection) >= 4.5)
+        }
+        #expect(definition.terminal.readabilityErrors.isEmpty)
         for surface in surfaces {
             let base = rgb(surface, environment)
+            #expect(ratio(workSelection, base) >= 3)
             let selected = composite(rgb(palette.selectionFill, environment), over: base)
             for background in [base, selected] {
                 for ink in text {
@@ -58,21 +74,40 @@ struct WorkPaletteTests {
         }
     }
 
-    @Test("Keyboard focus stays visible around a selected failed row", arguments: [false, true])
+    @Test("Status wording, selection and focus survive every appearance", arguments: ThemeFixture.allCases)
     @MainActor
-    func focusWithSelectedFailure(focused: Bool) throws {
-        let view = Text("Error")
-            .foregroundStyle(LoopflowPalette.light.failure)
-            .workSelection(true)
-            .keyboardFocusRing(focused)
-        let rings = try view.inspect().findAll(ViewType.Shape.self).filter {
-            (try? $0.opacity()) != nil
+    func statusWithSelectionAndFocus(theme: ThemeFixture) throws {
+        let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
+        try theme.preview(in: appearance)
+        let palette = appearance.effectiveTheme.palette
+        #expect(palette.selectionEdge != palette.failure)
+        #expect(palette.keyboardFocus != palette.selectionEdge)
+        #expect(palette.keyboardFocus != palette.failure)
+        for state in [ProgramStatusState.working, .blocked, .error, .done, .idle] {
+            let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil,
+                                             app: nil, title: nil, msg: nil)
+            for selected in [false, true] {
+                for focused in [false, true] {
+                    let view = ProgramStatusLabel(status: ProgramStatusRecords(seen: true, records: [report]))
+                        .workSelection(selected)
+                        .keyboardFocusRing(focused)
+                        .modifier(AppAppearance(appearance: appearance))
+                    let inspected = try view.inspect()
+                    #expect(try inspected.environment(\.palette).keyboardFocus == palette.keyboardFocus)
+                    #expect(try inspected.find(text: state.rawValue.capitalized).string() == state.rawValue.capitalized)
+                    let shapes = inspected.findAll(ViewType.Shape.self)
+                    let ring = try #require(shapes.first { (try? $0.opacity()) != nil })
+                    #expect(try ring.opacity() == (focused ? 1 : 0))
+                    #expect(try ring.strokeStyle().lineWidth == 2)
+                    #expect(!ring.allowsHitTesting())
+                    let edges = shapes.filter { (try? $0.fixedWidth()) == 2 }
+                    #expect(edges.count == (selected ? 1 : 0))
+                }
+            }
         }
-        let ring = try #require(rings.first)
-        #expect(try ring.opacity() == (focused ? 1 : 0))
-        #expect(try ring.strokeStyle().lineWidth == 2)
-        #expect(try ring.allowsHitTesting() == false)
-        #expect(try view.inspect().find(text: "Error").string() == "Error")
+        let unknown = ProgramStatusLabel(status: ProgramStatusRecords(seen: false, records: []))
+            .modifier(AppAppearance(appearance: appearance))
+        #expect(try unknown.inspect().findAll(ViewType.Text.self).isEmpty)
     }
 
     private func rgb(_ color: Color, _ environment: EnvironmentValues) -> [Double] {

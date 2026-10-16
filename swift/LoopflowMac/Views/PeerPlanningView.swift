@@ -5,6 +5,8 @@ import SwiftUI
 struct PeerPlanningView: View {
     let reading: WorkReading<[PeerPlanningStatus]>
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         DisclosureGroup("Git planning") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -25,7 +27,7 @@ struct PeerPlanningView: View {
                 }
             }
             .font(Typography.body(12))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

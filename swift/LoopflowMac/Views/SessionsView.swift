@@ -889,6 +889,7 @@ struct SessionsView: View {
 
 /// Unified Work navigation around the existing retained native workspace.
 struct SessionsContentView: View {
+    @Environment(\.theme) private var theme
     let machineId: String
     private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
     let repository: String
@@ -1184,8 +1185,8 @@ struct SessionsContentView: View {
                                     else if let work = key.reference { openWaveConversation(work) }
                                     else { openRepositoryConversation() }
                                 }
-                            }.foregroundStyle(TerminalPalette.foreground)
-                                .padding(8).background(TerminalPalette.background)
+                            }.foregroundStyle(theme.palette.text)
+                                .padding(8).background(theme.terminal.background.color)
                         }
                     }
             } else if active {
@@ -1504,7 +1505,6 @@ private struct MultiplexerView: View {
         }
         .padding(6)
         .background(palette.surfaceMuted)
-        .environment(\.colorScheme, .dark)
         .accessibilityIdentifier("sessions-multiplexer")
     }
 }
@@ -1655,6 +1655,7 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
+    @Environment(\.theme) private var theme
     @State private var shellError: String?
     @State private var changingSession = false
     @Environment(WorkModel.self) private var model
@@ -1686,23 +1687,21 @@ private struct SessionPaneView: View {
         VStack(spacing: 0) {
             if showsStrip {
                 strip
-                Rectangle().fill(TerminalPalette.divider).frame(height: 1)
+                Rectangle().fill(theme.palette.border).frame(height: 1)
             }
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TerminalPalette.background)
+        .background(theme.terminal.background.color)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .environment(\.colorScheme, .dark)
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.md)
-                .strokeBorder(isFocused ? LoopflowPalette.dark.selectionEdge : TerminalPalette.divider,
-                              lineWidth: isFocused ? 1.5 : 1)
+                .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
+        .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -1742,7 +1741,7 @@ private struct SessionPaneView: View {
     private var strip: some View {
         HStack(spacing: 8) {
             if let tone = programTone {
-                Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
+                Circle().fill(tone.ink(in: theme.palette)).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
             }
             Menu {
@@ -1750,7 +1749,7 @@ private struct SessionPaneView: View {
             } label: {
                 Label(programHeading.name, systemImage: programHeading.symbol)
                     .font(Typography.body(11)).fontWeight(.semibold)
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             }
             .menuStyle(.borderlessButton).fixedSize()
             .disabled(changingSession)
@@ -1762,13 +1761,12 @@ private struct SessionPaneView: View {
                     disabled: changingSession) { changeSession(session, agent: nil) }
             }
             Text(programHeading.context)
-                .font(Typography.code(11)).foregroundStyle(TerminalPalette.dim)
+                .font(Typography.code(11)).foregroundStyle(theme.palette.textSecondary)
                 .lineLimit(1).truncationMode(.middle)
                 .help(programHeading.detail)
                 .accessibilityIdentifier("pane-context-\(pane.id)")
             if let status = _programStatus, status.summary != nil {
                 ProgramStatusLabel(status: status)
-                    .environment(\.palette, LoopflowPalette.dark)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
@@ -1778,7 +1776,7 @@ private struct SessionPaneView: View {
             if let copyConfirmation {
                 Text(copyConfirmation)
                     .font(Typography.body(11))
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
                     .lineLimit(1)
                     .allowsHitTesting(false)
                     .accessibilityIdentifier("terminal-copy-confirmation")
@@ -1786,7 +1784,7 @@ private struct SessionPaneView: View {
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(LoopflowPalette.dark.waiting)
+                    .foregroundStyle(theme.palette.waiting)
                     .accessibilityLabel("Session ready")
             }
             if isFocused && hovering {
@@ -1928,7 +1926,7 @@ private struct SessionPaneView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 11))
-                .foregroundStyle(TerminalPalette.dim)
+                .foregroundStyle(theme.palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
@@ -1978,7 +1976,6 @@ private struct SessionPaneView: View {
                     _terminal(item: item, surface: surface)
                 } else {
                     _sessionPlaceholder(item)
-                        .environment(\.colorScheme, .dark)
                 }
             } else {
                 emptyWorkspace
@@ -2026,25 +2023,25 @@ private struct SessionPaneView: View {
     private var emptyWorkspace: some View {
         if workspace.openingConversation {
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
             ContentUnavailableView {
                 Label("No Task conversation open", systemImage: "bubble.left")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text(workspace.conversationError == nil
                     ? "Open this Task from the sidebar to return to its conversation."
                     : "The conversation could not open. Retry the opening above.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             }
         } else {
             ContentUnavailableView {
                 Label("No session open", systemImage: "terminal")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text("Open a conversation or a shell in this Work.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 Button {
                     do { try workspace.newShell() }
@@ -2053,7 +2050,7 @@ private struct SessionPaneView: View {
                     Label("New shell", systemImage: "terminal")
                 }
                 .buttonStyle(.bordered)
-                .tint(TerminalPalette.foreground)
+                .tint(theme.palette.text)
                 .accessibilityIdentifier("sessions-empty-new-shell")
             }
         }
@@ -2068,14 +2065,14 @@ private struct SessionPaneView: View {
             _elsewherePlaceholder(item)
         case .opening, .prepared:
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Session terminal ended").foregroundStyle(TerminalPalette.foreground)
+                Text("Session terminal ended").foregroundStyle(theme.palette.text)
                 ScrollView {
                     Text(output).font(.system(.body, design: .monospaced))
-                        .foregroundStyle(TerminalPalette.foreground).textSelection(.enabled)
+                        .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 openButton(item, retrying: true)
@@ -2083,24 +2080,24 @@ private struct SessionPaneView: View {
         case .failed(let message):
             ContentUnavailableView {
                 Label("Session failed to open", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text(message)
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 openButton(item, retrying: true)
             }
         case .pending where workspace.openingConversation:
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
             ContentUnavailableView {
                 Label("Not running here", systemImage: "terminal")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text("This Session has no live terminal in this pane yet.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 openButton(item, retrying: false)
             }
@@ -2118,8 +2115,8 @@ private struct SessionPaneView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .tint(TerminalPalette.foreground)
-            .foregroundStyle(TerminalPalette.foreground)
+            .tint(theme.palette.text)
+            .foregroundStyle(theme.palette.text)
             .disabled(action.unavailableReason != nil)
             .help(action.unavailableReason ?? action.help)
             .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
@@ -2132,7 +2129,7 @@ private struct SessionPaneView: View {
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
         ContentUnavailableView {
             Label("Active in another terminal", systemImage: "rectangle.on.rectangle")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
         } description: {
             Text(
                 """
@@ -2141,7 +2138,7 @@ private struct SessionPaneView: View {
                 It keeps running there until you move it.
                 """
             )
-            .foregroundStyle(TerminalPalette.dim)
+            .foregroundStyle(theme.palette.textSecondary)
         } actions: {
             if let action = item.record.action(.moveHere) {
                 VStack(spacing: Spacing.sm) {
@@ -2152,8 +2149,8 @@ private struct SessionPaneView: View {
                         Label(action.label, systemImage: "arrow.down.forward.square")
                     }
                     .buttonStyle(.bordered)
-                    .tint(TerminalPalette.foreground)
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .tint(theme.palette.text)
+                    .foregroundStyle(theme.palette.text)
                     .disabled(action.unavailableReason != nil)
                     .help(action.unavailableReason ?? action.help)
                     .accessibilityLabel("Move session here")
@@ -2161,7 +2158,7 @@ private struct SessionPaneView: View {
                     .accessibilityIdentifier("session-move-here-\(item.id)")
                     Text("Moving stops the other client. Unsent text typed there is lost.")
                         .font(Typography.caption(9))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
             }
         }

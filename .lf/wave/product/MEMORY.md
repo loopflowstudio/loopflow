@@ -309,23 +309,16 @@ October 6 gate failures and outstanding native/provider/migration proof:
 
 ## Session and operate pairs (2026-10-05)
 
-Jack Heart, [LOO-383](https://linear.app/loopflow/issue/LOO-383): the Wave
-conversation operates; keep started Tasks moving, leave unstarted backlog alone,
-and inline the operate procedure in each session skill. `task/session` stays
-plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
-and requested PR-linked reports grouped as waiting on him, moving and stuck.
-Leaving unarmed merges to Jack is unreviewed.
-
-Stopped-Flow continuation, retry-policy and cron history:
-`87f275c282:.lf/wave/product/MEMORY.md`, this heading. Current Workflow contracts
-govern; stopped execution is history, not permission to resume.
-
-An operator once reported `next_move.owner: wave` as someone else's handoff:
-name the reader's own responsibility explicitly. Nothing re-invokes a
-conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
-launching again. The [review](../../../docs/reviews/session-operate-prompts.md) has
-simulations and two read-only model runs, not installed proof. Open conversations
-keep old instructions until `lf session replace`.
+Jack Heart (LOO-383) selected operating Wave conversations: move started Tasks,
+leave unstarted backlog alone, and report PR-linked work as waiting, moving or
+stuck. Leaving unarmed merges to Jack remained unreviewed. Current session/operate
+skills and Work APIs supersede the old wrapper and process-inspection recipe.
+Stopped execution is history, not permission to resume; an open conversation
+schedules nothing. Naming the Wave as next owner must not evade its own duty.
+Original decisions, continuation history and evidence limits:
+`28588f8910:.lf/wave/product/MEMORY.md`, this heading.
+The [review](../../../docs/reviews/session-operate-prompts.md) established simulations
+and read-only model runs, not installed behavior.
 
 ## Capture and work-first entry (October 1–14)
 
@@ -389,13 +382,24 @@ Saved Session pages strip reports and Waiting with liveness: restoring them revi
 stale status. Focused tests pass; native link dispatch and density remain unproved.
 No new polling or authority.
 
-October 14, LOO-462: Jack Heart selected semantic roles in both existing appearances,
-preserving palette, ANSI and retained clients/drafts. Neutral selection, separate
-focus outline, quiet links and restrained action emphasis follow VISUAL_DESIGN.md.
-Omit unknown/client-only activity without calling it idle. Preserve report provenance:
-Working blue, Waiting/Blocked amber with distinct wording, Error red. Stopped edges
-alone are not errors. Use the supplied palette; native appearance can disagree.
-Composited contrast checks pass; native focus/appearance/input judgment remains.
+October 14–15, LOO-462: Jack Heart selected semantic roles, then Ink on Paper
+Work selection mirrored in Needs you, drill-in navigation and nested Work/pane
+layouts. Work fill/text resolve through the theme; file selection stays neutral.
+Keep focus separate, links quiet and actions restrained. Preserve report provenance:
+Working blue, Waiting/Blocked amber, Error red; unknown is not idle and stopped
+edges alone are not errors. Contrast checks do not establish native acceptance.
+
+October 15, LOO-488: Jack Heart approved whole-app themes through demo review,
+stacked on LOO-462: cream Light/slate Dark terminals and local RGB import snapshots.
+App semantics derive independently of ANSI, whose shortfalls retain warnings.
+Preview clones frozen non-color config, clearing Ghostty's theme selector before
+finalization. The patched C getter now exposes fixed RGB cursor/selection/search
+colors; unset or cell-relative values return false without writing. Production
+validates all ten named colors and 256 indexed entries against the chosen theme;
+compiled tests cover conflicting personal settings. Readback and unmounted views
+prove neither PTY continuity nor atomic renderer success (update returns void).
+Input/focus/coherence await native review; per-cell correction stays separate.
+No landing/install authority follows.
 
 October 14 rendering: Jack Heart approved the ownership cut with cmux research.
 Model-owned pane installation now precedes ending preparation; exact links share
@@ -598,9 +602,9 @@ operation a prerequisite for independent Tasks.
 
 ## Named participants and review feedback (curated 2026-09-25)
 
-Original attribution/continuation sources and dated gate receipts:
+Attribution and receipts:
 `35e759aaf:wave/product/MEMORY.md`, this heading. AGENTS.md owns the naming rule;
-curation changes no ownership or acceptance.
+curation changes neither.
 
 - Personal `user.name`, the current participant and each request's original
   author are different facts. Repository config cannot name every caller.
@@ -646,9 +650,8 @@ Command-click adds adjacent Work; ordinary click replaces the focused slot;
 close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
 Back/Forward replace persistent adjacent columns and visible history buttons.
 Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
-The parent implementation is integrated at `77ff8e8eb8`; headless navigation
-checks do not establish mounted focus, provider continuity or visual acceptance.
-Cross-launch outer layout restoration remains outside this change.
+Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
+acceptance. Cross-launch layout restoration remains excluded.
 
 LOO-298/299/300 retain their historical allocations; the archive does not close
 them. Rust owns grouping and binding; September 30's primary repo conversation
@@ -724,12 +727,11 @@ September 30 desktop discovery operation ensures primary repo/Wave conversations
 ordinary list/status reads remain read-only. Wave detail holds its
 objective, Current KRs and complete Task plan, including unstarted Tasks.
 
-The accepted visual direction is D: sidebar A, center structure B, mood C.
-Use warm cream/burgundy, light selected-row tint/edge, serif page titles, sans
-body and literal lowercase mono Flow skills. Task title appears once; its issue
-ID in the breadcrumb links to Linear. Use Description; collapse real Comments
-with their count below it. Dated updates belong in comments, current scope and
-blockers in Description. Omit ELSEWHERE, Local work evidence and preview jargon.
+October 15's Work navigation/selection and themes supersede September's D
+composition (`ffdcf68935:.lf/wave/product/MEMORY.md`, this heading).
+Retain serif titles, sans body, lowercase mono Flow skills and one Task title.
+Description holds current scope/blockers; collapsed Comments hold dated updates.
+Omit ELSEWHERE, Local work evidence and preview jargon.
 
 The September 25 pinned-Flow, Resume and Stop & restart presentation is retired
 by October 4's correction. Its details remain at

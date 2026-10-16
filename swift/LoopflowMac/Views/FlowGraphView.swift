@@ -373,7 +373,7 @@ struct FlowDiagram: View {
                 // Loop 1 arrives at the top-left, Loop 2 at the bottom-left.
                 for (level, span) in row.loops.enumerated() {
                     guard let from = frames[span.from], let to = frames[span.to] else { continue }
-                    let color = FlowPalette.loop(level, in: palette)
+                    let color = palette.working
                     let above = FlowLoopGeometry.returnsAbove(level)
                     let lane = above ? nodeTop - FlowLoopGeometry.laneOffset(level) : nodeBottom + FlowLoopGeometry.laneOffset(level)
                     let edge = above ? nodeTop : nodeBottom
@@ -413,7 +413,7 @@ struct FlowDiagram: View {
         let top = nodeTop - FlowLoopGeometry.above(level)
         let bottom = nodeBottom + FlowLoopGeometry.below(level)
         let width = right - left + pad * 2
-        let color = FlowPalette.loop(level, in: palette)
+        let color = palette.working
         let title = span.evidence.map { "Loop \(span.number) · \($0.traversals) \($0.traversals == 1 ? "return" : "returns")" }
             ?? "Loop \(span.number)"
         let shape = RoundedRectangle(cornerRadius: 12)
@@ -523,12 +523,13 @@ enum FlowLoopGeometry {
 /// A 2 s highlight sweeping across the running chip: the one thing that moves
 /// at rest. Callers skip it under reduce-motion, leaving the running tone still.
 private struct RunningShimmer: View {
+    @Environment(\.palette) private var palette
     let width: CGFloat
     @State private var sweeping = false
 
     var body: some View {
         LinearGradient(
-            colors: [.clear, .white.opacity(0.45), .clear],
+            colors: [.clear, palette.text.opacity(0.45), .clear],
             startPoint: .leading, endPoint: .trailing
         )
         .frame(width: width * 0.7)
@@ -606,12 +607,6 @@ private extension String {
 }
 
 enum FlowPalette {
-    /// Loop tints alternate in authored order.
-    static func loop(_ level: Int, in palette: LoopflowPalette) -> Color {
-        let colors: [UInt] = palette.isDark ? [0x86B0EA, 0xB4CDEF] : [0x3A74C4, 0x24508F]
-        return Color(hex: colors[level % colors.count])
-    }
-
     static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done

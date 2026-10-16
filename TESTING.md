@@ -23,6 +23,12 @@ content, so repositories retaining it must define their own candidate policy.
 A new PR update cancels the previous CI run for that PR. Main and merge-group
 runs remain independent.
 
+After changing `Cargo.lock`, including a release version bump, run
+`uv run python scripts/third_party.py refresh` and
+`uv run pytest python/tests/test_third_party.py`. Release preparation refreshes
+the inventory after bumping versions. Gate must check the resulting release
+tree: stale inventory fails both Python tests and Desktop packaging.
+
 Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
 auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
 from Doppler, with repository Contents and Pull requests write access. Renew

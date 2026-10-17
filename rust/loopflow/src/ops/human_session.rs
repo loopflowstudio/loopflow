@@ -1,3 +1,4 @@
+pub(crate) use primary::admit_workspace;
 mod connection;
 pub(crate) use connection::explain_connect;
 pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
@@ -216,6 +217,7 @@ pub enum SessionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionActionKind {
+    Reconnect,
     Open,
     MoveHere,
 }
@@ -383,7 +385,7 @@ pub(crate) fn publish_prepared_input(
             work: None,
         },
         session.caller_artifact_key.clone(),
-        session.artifact_key.clone(),
+        session.input_key()?.clone(),
     )?;
     store.publish_capture(&session.id, session.captured)?;
     store
@@ -563,7 +565,7 @@ struct NativeSession<'a> {
 impl<'a> NativeSession<'a> {
     fn of(session: &'a LfSession) -> Result<Self> {
         Ok(Self {
-            dir: local_capture_dir(&session.artifact_key).ok_or_else(|| {
+            dir: local_capture_dir(session.input_key()?).ok_or_else(|| {
                 anyhow!("Session {} has an invalid capture reference", session.id)
             })?,
             provider: session
@@ -589,7 +591,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await?);
-    let mut child = spawn_session_process(&mut command, &session.artifact_key).await?;
+    let mut child = spawn_session_process(&mut command, session.input_key()?).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
     let status = child.wait().await.context("wait for session agent")?;
@@ -689,9 +691,12 @@ pub(crate) async fn open(
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
     if resume
-        && store
-            .sqlite
-            .input_provider_session(&session.artifact_key)?
+        && session
+            .artifact_key
+            .as_deref()
+            .map(|key| store.sqlite.input_provider_session(key))
+            .transpose()?
+            .flatten()
             .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
@@ -730,7 +735,7 @@ pub(crate) async fn open(
                         .process(&owner)?
                         .is_some_and(|p| p.completed_at.is_none())
                 {
-                    crate::transport::attach(&owner, false)?;
+                    crate::transport::attach(&owner, false, true)?;
                     return surface(store, session).await;
                 }
             }
@@ -739,8 +744,14 @@ pub(crate) async fn open(
             return surface(store, session).await;
         }
     }
+    if session.captured.is_none() {
+        if resume {
+            open_waiting(store, &session.id).await?;
+        }
+        return surface(store, session).await;
+    }
     let native = NativeSession::of(session)?;
-    let provider_session = store.sqlite.input_provider_session(&session.artifact_key)?;
+    let provider_session = store.sqlite.input_provider_session(session.input_key()?)?;
     if resume {
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
         transition_headless_to_native(store, session, provider_session.as_ref()).await?;
@@ -758,7 +769,7 @@ pub(crate) async fn open(
     let mut result = surface(store, session).await?;
     mode.require_action(result.state)?;
     if resume {
-        crate::lf::commands::util::resume_session(&session.artifact_key, &provider_session)?;
+        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     } else {
         match mode {
             OpenMode::Takeover => result.open_argv.push("--takeover".to_string()),
@@ -839,14 +850,19 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
+    let session = if session.captured.is_none() {
+        append_input(store, session).await?
+    } else {
+        session
+    };
     let token = session_token(&session);
-    if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
+    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
-    let session = if capture_is_prepared(&session.artifact_key)? {
+    let session = if capture_is_prepared(session.input_key()?)? {
         session
     } else {
         if session.input_published {
@@ -894,7 +910,7 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
 async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
-    next.artifact_key = crate::session_record::new_artifact_key();
+    next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;
     let next = store.replace_session_input(replaced, next).await?;
     publish_prepared_input(
@@ -910,6 +926,51 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session input"),
     }
+}
+
+/// Read an existing execution without preparing input or resuming provider history.
+pub(crate) async fn prepare_attachment(
+    store: &SharedStore,
+    id: &str,
+    observe: bool,
+    if_free: bool,
+) -> Result<SessionRecord> {
+    crate::data_clone::require_writable_session(id)?;
+    let session = session_by_id(store, id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    let unavailable_reason = match store.sqlite.session_transport(&session.id)? {
+        None => Some(
+            "Session has no retained execution; resume explicitly to open saved history".into(),
+        ),
+        Some(owner)
+            if store
+                .sqlite
+                .process(&owner)?
+                .is_some_and(|process| process.completed_at.is_some()) =>
+        {
+            Some("Session execution ended; resume explicitly to open saved history".into())
+        }
+        Some(_) => None,
+    };
+    let mut record = surface(store, &session).await?;
+    record.open_argv = human_session_argv(&session.id, "attach")?;
+    if observe {
+        record.open_argv.push("--observe".into());
+    }
+    if if_free {
+        record.open_argv.push("--if-free".into());
+    }
+    record.actions.insert(
+        0,
+        SessionAction {
+            kind: SessionActionKind::Reconnect,
+            label: "Reconnect".into(),
+            help: "Attach to retained execution without restarting or replaying input".into(),
+            unavailable_reason,
+        },
+    );
+    Ok(record)
 }
 
 /// A Session as its row and its current input describe it.
@@ -1200,7 +1261,7 @@ pub(crate) fn resume_native_session(
         return Ok(false);
     };
     crate::data_clone::require_writable_session(&session.id)?;
-    if session.artifact_key != *artifact_key {
+    if session.artifact_key.as_ref() != Some(artifact_key) {
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
@@ -1223,7 +1284,7 @@ pub(crate) fn resume_native_session(
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::agent_input_timing::record("native_resume_selected", &session.id);
     crate::lf::commands::util::resume_session_with_env(
-        &session.artifact_key,
+        session.input_key()?,
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
@@ -1232,6 +1293,10 @@ pub(crate) fn resume_native_session(
 }
 
 fn human_open_argv(id: &str) -> Result<Vec<String>> {
+    human_session_argv(id, "connect")
+}
+
+fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
     crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
@@ -1243,7 +1308,7 @@ fn human_open_argv(id: &str) -> Result<Vec<String>> {
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
         "session".to_string(),
-        "connect".to_string(),
+        command.to_string(),
         id.to_string(),
     ])
 }
@@ -1529,7 +1594,7 @@ mod tests {
                 let args = std::fs::read_to_string(home.join("client-args"))?;
                 let flag = if provider_name == "claude" { "--resume" } else { "--session" };
                 assert!(args.contains(&format!("{flag}\nsaved-thread\n")), "{args}");
-                assert_eq!(store.sqlite.input_provider_session(&session.artifact_key)?.unwrap()
+                assert_eq!(store.sqlite.input_provider_session(session.input_key()?)?.unwrap()
                     .agent_session.as_str(), "saved-thread");
                 Ok::<_, anyhow::Error>(())
             })
@@ -1599,7 +1664,7 @@ mod tests {
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             title: "Retained conversation".into(),
             title_source: crate::session::TitleSource::Human,
             ready_summary: None,
@@ -1760,6 +1825,17 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_action_fixture_preserves_attach_only_intent() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/session_reconnect_action.json"
+        ))
+        .unwrap();
+        let action: super::SessionAction = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(action.kind, super::SessionActionKind::Reconnect);
+        assert_eq!(serde_json::to_value(action).unwrap(), value);
+    }
+
+    #[test]
     fn session_action_fixtures_match_the_shared_boundary() {
         #[derive(serde::Deserialize)]
         struct Case {
@@ -1900,7 +1976,7 @@ mod tests {
             captured: None,
             caller_artifact_key: None,
             id: "conversation".into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             input_published: true,
             cwd: directory.path().into(),
             skill: None,

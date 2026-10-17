@@ -216,7 +216,7 @@ mod tests {
         let before = store.process(&detached.agent_process_id).unwrap();
         let session = store.session("resume").unwrap().unwrap();
         let mut next = session.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         assert!(store
             .claim_session_input(next, Some(&detached), &LfProcessId::new(), || {

@@ -111,8 +111,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();
-    let message = if session.provider.as_deref()
-        != Some(crate::config::parse_agent(resolved.agent()).0.as_str())
+    let message = if session.captured.is_some()
+        && session.provider.as_deref()
+            != Some(crate::config::parse_agent(resolved.agent()).0.as_str())
     {
         let request = crate::ops::human_session::conversation_log::continuation(&store, &session)?;
         format!("{request}\n\n{message}")

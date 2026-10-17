@@ -1094,7 +1094,7 @@ mod tests {
             crate::session::LfSession {
                 captured: None,
                 id: uuid::Uuid::new_v4().to_string(),
-                artifact_key: crate::session_record::new_artifact_key(),
+                artifact_key: Some(crate::session_record::new_artifact_key()),
                 caller_artifact_key: caller,
                 input_published: true,
                 cwd: directory.path().to_path_buf(),
@@ -1133,7 +1133,7 @@ mod tests {
         let helper = store
             .create_session(session(
                 Some(task.id.clone()),
-                Some(worker.artifact_key.clone()),
+                Some(worker.input_key().unwrap().clone()),
             ))
             .await
             .unwrap();
@@ -1175,20 +1175,20 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(worker.artifact_key.as_str()),
+                Some(worker.input_key().unwrap().as_str()),
                 0,
                 false,
             )
             .unwrap();
         assert_eq!(
             children[0].artifact_key.as_deref(),
-            Some(helper.artifact_key.as_str())
+            Some(helper.input_key().unwrap().as_str())
         );
         for _ in 0..55 {
             store
                 .create_session(session(
                     Some(task.id.clone()),
-                    Some(worker.artifact_key.clone()),
+                    Some(worker.input_key().unwrap().clone()),
                 ))
                 .await
                 .unwrap();
@@ -1199,7 +1199,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(worker.artifact_key.as_str()),
+                Some(worker.input_key().unwrap().as_str()),
                 0,
                 false,
             )
@@ -1212,7 +1212,7 @@ mod tests {
         assert!(children
             .iter()
             .all(|snapshot| snapshot.caller_artifact_key.as_deref()
-                == Some(worker.artifact_key.as_str())
+                == Some(worker.input_key().unwrap().as_str())
                 && snapshot.task_id.as_ref() == Some(&task.id)));
         store.sqlite.assert_no_historical_runs();
     }

@@ -90,7 +90,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["wave", "show"]) { return data }
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
-            if args.starts(with: ["session", "connect"]) { return try await owner.prepare(args) }
+            if ["connect", "ensure", "attach"].contains(args.dropFirst().first), args.first == "session" { return try await owner.prepare(args) }
             throw RegistryQueryError("Unexpected Task conversation operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -146,7 +146,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "connect", "--task"]) { await barrier.wait("prepare"); return encoded }
+            if args.starts(with: ["session", "ensure", "--task"]) { await barrier.wait("prepare"); return encoded }
             if args.starts(with: ["wave", "show"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -371,7 +371,7 @@ struct WorkDestinationTests {
                 ]]), as: UTF8.self)
             }
             if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if command.starts(with: ["session", "connect"]) { return encoded }
+            if ["connect", "ensure", "attach"].contains(command.dropFirst().first), command.first == "session" { return encoded }
             throw RegistryQueryError("No checkout, provider launch or transfer permitted")
         }
         let (model, workspaceRegistry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -773,7 +773,7 @@ struct WorkDestinationTests {
         let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if args.starts(with: ["session", "connect"]) {
+            if ["connect", "ensure", "attach"].contains(args.dropFirst().first), args.first == "session" {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
@@ -800,7 +800,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.starts(with: ["session", "connect", "--task"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            guard args.starts(with: ["session", "ensure", "--task"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
             await barrier.wait("ensure")
             return encoded
         }, repoPath: wave.wave.repo)
@@ -1934,7 +1934,7 @@ private actor ExternalConversationOwner {
             takeoverPrepared = true
             return prepared
         }
-        guard args.contains("--try") else {
+        guard args.contains("--try") || args.contains("--if-free") || args.contains("ensure") else {
             throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
         }
         return active

@@ -265,6 +265,11 @@ across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
+Task creation also saves its primary conversation. Wave admission saves the Wave
+and repository conversations. These Sessions survive the creating command without
+starting a provider or marking a Task Started. `lf session ensure --task ISSUE`
+prepares its checkout; explicit `lf connect SESSION` reserves the first input.
+
 `lf resume` is short for `lf session resume`. It selects the active Task’s conversation,
 or the most recent interactive Session in this worktree. From the main checkout,
 it searches all worktrees of the repository. `--task ISSUE` or `--wave NAME`

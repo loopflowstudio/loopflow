@@ -765,7 +765,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let mut template = store.test_session("seed", "run_000000000000000000000000000000ff");
         template.captured = None;
-        template.caller_artifact_key = Some(template.artifact_key.clone());
+        template.caller_artifact_key = Some(template.input_key().unwrap().clone());
         let attached = crate::id::LfProcessId::new();
         store
             .conn
@@ -779,7 +779,7 @@ mod tests {
         for at in 1..=60 {
             let mut session = template.clone();
             session.id = format!("conversation-{at}");
-            session.artifact_key = format!("run_{at:032x}");
+            session.artifact_key = Some(format!("run_{at:032x}"));
             session.created_at = at;
             let session = store
                 .create_session(session, (at == 1).then_some(&attached))
@@ -811,7 +811,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(template.artifact_key.as_str()),
+                Some(template.input_key().unwrap().as_str()),
                 0,
                 false,
             )
@@ -876,7 +876,7 @@ mod tests {
                 None,
                 None,
                 None,
-                Some(template.artifact_key.as_str()),
+                Some(template.input_key().unwrap().as_str()),
                 0,
                 false
             )
@@ -892,7 +892,7 @@ mod tests {
                 store.test_session("seed", &crate::session_record::new_artifact_key());
             session.id = "conversation".into();
             session.captured = None;
-            session.artifact_key = crate::session_record::new_artifact_key();
+            session.artifact_key = Some(crate::session_record::new_artifact_key());
             let process = crate::id::LfProcessId::new();
             let creator = crate::id::LfProcessId::new();
             {
@@ -1382,7 +1382,7 @@ mod tests {
             )
             .unwrap();
         let mut replacement = session.clone();
-        replacement.artifact_key = crate::session_record::new_artifact_key();
+        replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
@@ -1415,7 +1415,7 @@ mod tests {
                 && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
         ));
         assert!(store
-            .summary_for_input(&session.id, &replacement.artifact_key)
+            .summary_for_input(&session.id, replacement.input_key().unwrap())
             .unwrap()
             .is_empty());
         let old = store.input_history(&first_input).unwrap();
@@ -1459,7 +1459,7 @@ mod tests {
             )
             .unwrap();
         assert!(store
-            .summary_for_input(&session.id, &replacement.artifact_key)
+            .summary_for_input(&session.id, replacement.input_key().unwrap())
             .unwrap()
             .is_empty());
         assert_eq!(
@@ -1483,7 +1483,7 @@ mod tests {
             )
             .unwrap();
         let partial = store
-            .input_history(replacement.artifact_key.as_str())
+            .input_history(replacement.input_key().unwrap().as_str())
             .unwrap();
         assert_eq!(partial.usage.total_input_tokens, Some(10));
         assert_eq!(partial.usage.output_tokens, Some(5));
@@ -1495,7 +1495,7 @@ mod tests {
                     "last":{"inputTokens":last,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         }
         let decreased = store
-            .input_history(replacement.artifact_key.as_str())
+            .input_history(replacement.input_key().unwrap().as_str())
             .unwrap();
         assert_eq!(
             decreased.usage.total_input_tokens,
@@ -1520,7 +1520,7 @@ mod tests {
                 "last":{"inputTokens":10,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0}})).unwrap();
         assert_eq!(
             store
-                .input_history(replacement.artifact_key.as_str())
+                .input_history(replacement.input_key().unwrap().as_str())
                 .unwrap()
                 .usage
                 .total_input_tokens,

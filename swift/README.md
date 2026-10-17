@@ -64,6 +64,13 @@ Desktop quits. Reopening a known repository shows retained content immediately,
 even while repository resolution waits or fails. Errors remain visible; new Task
 links wait for resolution before delivery. Unknown repositories need an initial lookup.
 
+Selecting a retained Session reuses its surface. When a surface needs reconnecting,
+Desktop attaches to the recorded execution without starting a provider, replaying
+input or taking control from another viewer. A failed connection stays visible.
+**Reconnect** retries attachment; **Resume conversation** explicitly opens saved
+provider history. Repository, Wave and Task conversation entry share metadata-only
+preparation; only a newly admitted conversation offers its first launch.
+
 Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
 it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
 across selections.

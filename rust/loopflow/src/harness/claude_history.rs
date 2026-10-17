@@ -142,7 +142,7 @@ mod tests {
             )));
         let original = store.session("conversation").unwrap().unwrap();
         let mut next = original.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
             .replace_session_input(original.captured, next)
             .unwrap();
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(events[1].kind, SessionEventKind::Output);
         assert_eq!(events[1].payload["value"], value);
         assert!(store
-            .input_final_answer(&next.artifact_key)
+            .input_final_answer(next.input_key().unwrap())
             .unwrap()
             .is_none());
         let answer = store

@@ -16,3 +16,14 @@ operation is disabled; CI watcher is not running. Prior operator evidence is
 preserved in [the archive](evidence/lifecycle-handoff-before-pursue.txt).
 
 Jack Heart subsequently authorized opening and starting dependency LOO-415 in the current cmux window. Its LF-managed checkout is `/Users/jack/src/loopflow.loo-415-reattach-to-a`; `scratch/loo-415-transport-handoff.md` there carries the accepted architecture and copied research. LOO-416 retains its existing implementation and waits for the shared transport contract; no duplicate 416 Flow is authorized by this launch.
+
+## Continue on the transport stack — October 17
+
+Jack Heart instructed: “you can stack on 415 and continue now.” LOO-416 now selects
+LOO-415 PR #1581 as parent and integrates its published commit through `7bfa10fa72`.
+Prior changes are checkpointed in `172ce48a39`. Continue pursue through demo/review;
+do not restart LOO-415 or implement a competing owner. Read the current plan and
+transport summaries. Parent tests establish transport fixtures, not Desktop proof.
+LOO-497/489 still own pane/draft records and native persistence respectively;
+coordinate concrete handoffs while implementing independent attachment/readiness.
+No merge authorization. Task automation is disabled; CI watcher is not running.

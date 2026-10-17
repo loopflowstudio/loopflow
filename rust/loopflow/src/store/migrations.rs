@@ -2893,6 +2893,57 @@ mod tests {
     }
 
     #[test]
+    fn conversation_admission_preserves_started_history_and_starts_only_on_input() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "session_transport");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/conversation_admission_released.sql"
+        ))
+        .unwrap();
+        let started = || {
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='started'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let first = started();
+        conn.execute_batch(&current_draft_sql("session_transport"))
+            .unwrap();
+        assert_eq!(started(), first);
+        let retained: (String, String) = conn.query_row("SELECT t.primary_session_id,c.receipt_key FROM tasks t JOIN agent_sessions s ON s.id=t.primary_session_id JOIN session_events c ON c.seq=s.current_capture WHERE t.id='started'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(
+            retained,
+            ("history".into(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into())
+        );
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,interactive,created_at,repo,task_id,wave_id,work_source,cwd,input_published) VALUES('admitted','Future conversation','human',1,3,'/repo',NULL,'wave','declared','/repo',0)", []).unwrap();
+        let backlog = || {
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='backlog'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(backlog(), None);
+        conn.execute("UPDATE agent_sessions SET task_id='backlog',work_source='bound',bound_at=6 WHERE id='admitted'", []).unwrap();
+        assert_eq!(
+            backlog(),
+            None,
+            "binding an uncaptured conversation is metadata admission"
+        );
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('admitted','captured','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',7,'{}')", []).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET current_capture=?1 WHERE id='admitted'",
+            [conn.last_insert_rowid()],
+        )
+        .unwrap();
+        assert_eq!(backlog(), Some(7));
+        assert_eq!(started(), first);
+    }
+
+    #[test]
     fn repository_relocation_upgrade_retains_released_work() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "repository_relocation");

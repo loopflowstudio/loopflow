@@ -27,16 +27,32 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Attach { id, observe } => {
+        SessionCommand::Attach {
+            id,
+            observe,
+            if_free,
+            prepare,
+            json,
+        } => {
             let store = open_shared_store().await?;
             let session = crate::ops::human_session::session_by_id(&store, id)
                 .await?
                 .context("Session not found")?;
+            if *prepare {
+                let record = crate::ops::human_session::prepare_attachment(
+                    &store,
+                    &session.id,
+                    *observe,
+                    *if_free,
+                )
+                .await?;
+                return report_primary(&record, *json);
+            }
             let owner = store
                 .sqlite
                 .session_transport(&session.id)?
                 .context("Session has no retained execution")?;
-            crate::transport::attach(&owner, *observe)
+            crate::transport::attach(&owner, *observe, !*if_free)
         }
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
@@ -357,10 +373,11 @@ async fn connect(
     .await?;
     drop(progress);
     if let Some(message) = message {
-        let id = crate::ops::human_session::session_by_id(&store, &id)
+        let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
-            .context("Session not found")?
-            .id;
+            .context("Session not found")?;
+        let session = crate::ops::human_session::admit_workspace(&store, session).await?;
+        let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }
     let session = crate::ops::human_session::open(&store, &id, mode, !*prepare).await?;

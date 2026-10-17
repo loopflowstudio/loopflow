@@ -320,7 +320,7 @@ mod tests {
         };
         let session = store.session("session").unwrap().unwrap();
         let mut replacement = session.clone();
-        replacement.artifact_key = crate::session_record::new_artifact_key();
+        replacement.artifact_key = Some(crate::session_record::new_artifact_key());
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
@@ -391,7 +391,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .input_history(replacement.artifact_key.as_str())
+                .input_history(replacement.input_key().unwrap().as_str())
                 .unwrap()
                 .usage
                 .input_tokens,

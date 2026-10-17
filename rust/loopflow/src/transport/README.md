@@ -2,6 +2,7 @@
 
 ```sh
 lf session attach SESSION
+lf session attach SESSION --if-free
 lf session attach SESSION --observe
 lf --machine build session attach SESSION
 lf transport start --terminal -- /bin/bash -l
@@ -11,7 +12,13 @@ lf transport attach PROCESS
 Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
 program. Closing a terminal leaves execution, provider requests and capture
 settlement with the detached owner. Observing takes no input claim; a controlling
-attachment revokes the previous viewer's input token.
+attachment revokes the previous viewer's input token. `--if-free` refuses when
+another viewer controls input. Desktop uses it for restoration; it never displaces
+a viewer just because a pane becomes visible. `session attach --prepare --json`
+returns an attach-only command without opening a socket or starting a provider.
+Repository, Wave and Task ensure prepare metadata without launching execution;
+existing executions return this same attach-only command. Ended execution needs
+explicit resume.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

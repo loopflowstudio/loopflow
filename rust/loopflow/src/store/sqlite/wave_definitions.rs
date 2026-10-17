@@ -74,6 +74,10 @@ impl SqliteStore {
             };
             seed_wave_files(&directory, &wave, &prefix)?;
             save_imported_workflows(&tx, wave.as_str(), &workflows)?;
+            super::sessions::admit_work_conversation_in(
+                &tx,
+                &crate::session::PrimaryScope::Wave(wave.clone()),
+            )?;
             parent = Some(wave);
         }
         tx.commit()?;

@@ -40,7 +40,7 @@ pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<S
     let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
     let reference = store
-        .input_provider_session(&session.artifact_key)?
+        .input_provider_session(session.input_key()?)?
         .ok_or_else(|| anyhow!("Session {id} has no native conversation to continue"))?;
     let thread = reference.agent_session.as_str();
     let entries = match from {
@@ -61,7 +61,7 @@ pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<S
         _ => bail!("Session {id} has no {from} history another provider can read"),
     };
     let log = render(&entries);
-    let path = super::local_capture_dir(&session.artifact_key)
+    let path = super::local_capture_dir(session.input_key()?)
         .ok_or_else(|| anyhow!("Session {id} has an invalid capture reference"))?
         .join("conversation.md");
     fs::create_dir_all(path.parent().expect("a capture file has a directory"))?;

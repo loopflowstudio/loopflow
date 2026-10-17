@@ -61,6 +61,10 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
                 "creation identity already belongs to a different request".into(),
             ));
         }
+        super::sessions::admit_work_conversation_in(
+            conn,
+            &crate::session::PrimaryScope::Task(input.id.clone()),
+        )?;
         return task_on(conn, &input.id)?.ok_or(StoreError::NotFound);
     }
     if input.title.trim().is_empty() {
@@ -136,6 +140,10 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
             input.description,
             input.due_date
         ],
+    )?;
+    super::sessions::admit_work_conversation_in(
+        conn,
+        &crate::session::PrimaryScope::Task(task.id.clone()),
     )?;
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }
@@ -2292,7 +2300,7 @@ mod local_planning_tests {
         ] {
             let mut session = template.clone();
             session.id = id.into();
-            session.artifact_key = crate::session_record::new_artifact_key();
+            session.artifact_key = Some(crate::session_record::new_artifact_key());
             session.captured = None;
             session.task_id = Some(task.id.clone());
             session.wave_id = Some(task.wave_id.clone());

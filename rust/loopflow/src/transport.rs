@@ -63,6 +63,7 @@ pub enum TransportCommand {
 enum Request {
     Attach {
         control: bool,
+        replace: bool,
         rows: u16,
         cols: u16,
     },
@@ -102,6 +103,7 @@ enum Response {
         code: u8,
     },
     Detached,
+    Busy,
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
@@ -142,7 +144,7 @@ pub fn run(command: &TransportCommand) -> Result<()> {
         }
         TransportCommand::Serve { terminal, argv } => serve(argv, *terminal),
         TransportCommand::Attach { process, observe } => {
-            attach(&LfProcessId::parse(process)?, *observe)
+            attach(&LfProcessId::parse(process)?, *observe, true)
         }
     }
 }
@@ -168,7 +170,7 @@ pub fn delegate_current() -> Result<bool> {
             &std::env::current_dir()?,
             &|_| {},
         )?;
-        attach(&owner, false)?;
+        attach(&owner, false, true)?;
         Ok(true)
     }
 }
@@ -466,9 +468,18 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         }
                         Request::Attach {
                             control: wants_control,
+                            replace,
                             rows,
                             cols,
                         } => {
+                            if wants_control
+                                && !replace
+                                && control.is_some()
+                                && viewer.token != control
+                            {
+                                viewer.queue(&Response::Busy)?;
+                                continue;
+                            }
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
                                 let token = uuid::Uuid::new_v4().to_string();
@@ -543,6 +554,9 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let detached = !viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == control);
+        if detached {
+            control = None;
+        }
         if let Some(response) = output.take_reports() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
@@ -685,7 +699,7 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     Ok(())
 }
 
-pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
+pub fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;
@@ -696,6 +710,7 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
         &mut socket,
         &Request::Attach {
             control: !observe,
+            replace,
             rows,
             cols,
         },
@@ -770,6 +785,7 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
                         }
                     }
                     Response::Detached => return Ok(()),
+                    Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                 }
             }
         }

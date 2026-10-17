@@ -25,8 +25,9 @@ remaining questions. These choices limit acceptance;
 the draft preserves them rather than silently reducing the requested outcome.
 
 Implementation assumption: keep application-lifetime retention independent of the
-pending LOO-497 storage contract. LOO-415 has no delivered attach-only API;
-transport-dependent implementation remains blocked, without launching that Task.
+LOO-497 native integration. LOO-415 PR #1581 is now integrated; use its attach-only
+API and preserve its honest terminal-state limits. LOO-497's shared pane/draft
+contract has a local implementation awaiting supported published handoff.
 
 October 16 implementation resolves the operator's reopening finding:
 `openRepository` presents retained content before lookup. Its proven-locator index
@@ -41,3 +42,11 @@ October 17, 2026: use a fixed five-second acknowledgement deadline after connect
 to the local owner socket. This bounds the identified silent-owner wait without a
 new configuration knob; it does not bound SSH startup or an established attachment.
 Cancellation uses the existing CLI signal handler and closes only the viewer.
+
+October 17: operator steer 1482 authorizes uncaptured admission within LOO-416.
+Task creation and explicit Wave admission now commit primary Session identities;
+ensure prepares location, and explicit execution reserves the first input. No
+provider warming policy was selected. Reconnect remains attach-only, with separate
+explicit recovery. Full restoration/readiness acceptance remains in the plan.
+Shared reads and naming recovered with released lf 0.14.4 pinned through LF_BIN;
+installation routing, not authentication, caused the initial read gap.

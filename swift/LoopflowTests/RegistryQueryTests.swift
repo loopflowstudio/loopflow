@@ -499,7 +499,7 @@ struct RegistryQueryTests {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
             case ["session", "connect", session.id, "--prepare", "--json", "--try"],
-                 ["session", "connect", "--task", "INF-123", "--prepare", "--json", "--try"]:
+                 ["session", "ensure", "--task", "INF-123", "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")

@@ -279,7 +279,11 @@ A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
 Task or planning provider. `lf session ensure` finds or admits it and prepares
-its first input; `lf session connect` owns the foreground launch.
+its workspace; `lf session connect` reserves the first input and owns launch.
+Task creation atomically admits its primary conversation; explicit Wave admission
+also admits the repository conversation. A Session may have no current capture:
+metadata admission does not mark a Task Started, prepare a prompt or start a provider.
+The first captured input, or binding a previously captured conversation, starts work.
 `lf session new` stops the predecessor's provider, then
 completes it and admits the successor in one transaction, so a scope never has
 two or none midway. Primary grants no Flow, review or process authority, and

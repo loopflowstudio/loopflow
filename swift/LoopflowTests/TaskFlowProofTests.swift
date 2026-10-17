@@ -175,7 +175,7 @@ struct TaskFlowTests {
         #expect(FlowLoopGeometry.below(1) > FlowLoopGeometry.below(0))
     }
 
-    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions")
+    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions", .requiresDisplay)
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -213,8 +213,10 @@ struct TaskFlowTests {
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
-            case ("session", "connect"):
+            case ("session", "ensure") where args.contains("--task"):
                 return try await reader.ensure(issue: args[3])
+            case ("session", "attach"):
+                return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
             case ("session", "list"): return try await reader.inventory()
             case ("wave", "show"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
@@ -260,14 +262,14 @@ struct TaskFlowTests {
         let panes = registry.workspace(for: key, title: task.task.name, location: identity).multiplexer
         try await settle()
         #expect(panes.focusedPane.sessionId == nil)
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "ensure", "--task"]) })
 
         // A separate explicit link opens the known conversation, not bare navigation.
         let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
         let link = try #require(TaskLink(issue: task.task.identifier, repo: repo, session: record.id).url)
         await model.openTaskLink(link)
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "ensure", "--task"]) })
 
         // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
@@ -336,7 +338,7 @@ private final class ScriptedReader {
         }, cancel: { continuation.finish() })
     }
 
-    /// `lf connect --task --prepare`: the Task gets one conversation, its primary.
+    /// `lf session ensure --task`: the Task gets one conversation, its primary.
     func ensure(issue: String) throws -> String {
         let roadmap = try JSONDecoder().decode(
             RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: try #require(planning["roadmap"])))

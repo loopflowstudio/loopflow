@@ -893,6 +893,14 @@ pub enum SessionCommand {
         id: String,
         #[arg(long)]
         observe: bool,
+        /// Refuse to replace another viewer's input control
+        #[arg(long, conflicts_with = "observe")]
+        if_free: bool,
+        /// Return an attach-only terminal command without acquiring control
+        #[arg(long)]
+        prepare: bool,
+        #[arg(long, requires = "prepare")]
+        json: bool,
     },
     /// Save a steer for this Session without starting a turn
     Steer { id: String, message: String },

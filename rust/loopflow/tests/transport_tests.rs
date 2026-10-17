@@ -89,7 +89,7 @@ impl Fixture {
             socket: BufReader::new(socket),
             token: None,
         };
-        viewer.send(json!({"kind":"attach","control":control,"rows":24,"cols":80}));
+        viewer.send(json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}));
         let attached = viewer.read();
         assert_eq!(attached["kind"], "attached");
         viewer.token = attached["token"].as_str().map(str::to_owned);
@@ -166,7 +166,7 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     assert!(observer.token.is_none());
     observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
     let old = first.token.clone();
-    first.send(json!({"kind":"attach","control":true,"rows":24,"cols":80}));
+    first.send(json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80}));
     let claimed = loop {
         let frame = first.read();
         if frame["kind"] == "attached" {
@@ -180,7 +180,7 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     drop(second); // zero viewers while the same read remains pending
     let mut replacement = fixture.viewer(&owner, true);
     let mut passive = fixture.viewer(&owner, false);
-    passive.send(json!({"kind":"attach","control":false,"rows":24,"cols":80}));
+    passive.send(json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80}));
     loop {
         if passive.read()["kind"] == "attached" {
             break;
@@ -197,6 +197,60 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
             fixture.home.path().display()
         )
     );
+}
+
+#[test]
+fn automatic_attachment_preserves_an_existing_viewers_control() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    let mut controller = fixture.viewer(&owner, true);
+    let mut waiting = fixture.viewer(&owner, false);
+    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    loop {
+        if waiting.read()["kind"] == "busy" {
+            break;
+        }
+    }
+    controller.input("original-controller\n");
+    controller.finish();
+    assert_eq!(fixture.wait_file("answer"), "original-controller");
+}
+
+#[test]
+fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    let controller = fixture.viewer(&owner, true);
+    let token = controller.token.clone();
+    // SHUT_WR lets the owner observe EOF before it accepts the next viewer.
+    controller
+        .socket
+        .get_ref()
+        .shutdown(std::net::Shutdown::Both)
+        .unwrap();
+    drop(controller);
+    let mut waiting = fixture.viewer(&owner, false);
+    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    loop {
+        let frame = waiting.read();
+        assert_ne!(frame["kind"], "busy");
+        if frame["kind"] == "attached" {
+            waiting.token = frame["token"].as_str().map(str::to_owned);
+            break;
+        }
+    }
+    assert_ne!(waiting.token, token);
+    waiting.input("reconnected\n");
+    waiting.finish();
+    assert_eq!(fixture.wait_file("answer"), "reconnected");
 }
 
 #[test]
@@ -408,6 +462,30 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
         )
         .unwrap();
     let attachment: (String, String) = sql.query_row("SELECT id,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    let prepared = fixture
+        .command(&[
+            "session",
+            "attach",
+            &session,
+            "--if-free",
+            "--prepare",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let argv = prepared["open_argv"].as_array().unwrap();
+    assert_eq!(
+        &argv[argv.len() - 4..],
+        &[
+            json!("session"),
+            json!("attach"),
+            json!(session),
+            json!("--if-free")
+        ]
+    );
+    assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
     drop(first);
     if let Some(cancel) = silent_owner {

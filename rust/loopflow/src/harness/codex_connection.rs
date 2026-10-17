@@ -326,7 +326,7 @@ impl CodexConnection {
                                     let session = self.store.session(&self.session_id)?
                                         .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
                                     crate::session_record::write_provider_session(
-                                        &crate::session_record::capture_dir(&session.artifact_key)?, thread, self.account_id.clone())?;
+                                        &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_id.clone())?;
                                 }
                             }
                             super::dispatch::off_reactor(|| {

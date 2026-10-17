@@ -40,6 +40,11 @@ impl CanonicalRepo {
         Ok(Self(canonical))
     }
 
+    /// A previously canonicalized registry locator remains a scope while offline.
+    pub(crate) fn from_recorded(path: PathBuf) -> Self {
+        Self(path)
+    }
+
     pub fn as_path(&self) -> &Path {
         &self.0
     }

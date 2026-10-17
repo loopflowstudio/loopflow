@@ -147,7 +147,12 @@ async fn read_connection(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    let provider = store.sqlite.input_provider_session(&session.artifact_key)?;
+    let provider = session
+        .artifact_key
+        .as_deref()
+        .map(|key| store.sqlite.input_provider_session(key))
+        .transpose()?
+        .flatten();
     // A metadata read does not acquire viewer control or probe the endpoint.
     let connection = store.sqlite.session_transport(&session.id)?;
     let intent = if !prepare_only && connection.is_some() {

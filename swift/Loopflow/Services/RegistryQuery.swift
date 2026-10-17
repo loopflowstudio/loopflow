@@ -440,8 +440,14 @@ public struct RegistryQuery: Sendable {
     /// choice is remembered as the Task's primary. External ownership is returned
     /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
+        let stdout = try await run(["session", "ensure", "--task", issue, "--json"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Reattach only; neither preparation nor the returned command can resume execution.
+    public func prepareSessionAttachment(id: String, cwd: String? = nil) async throws -> SessionRecord {
+        try Self.decode(SessionRecord.self, from: await run(
+            ["session", "attach", id, "--if-free", "--prepare", "--json"], cwd))
     }
 
     /// Prepare one Session’s terminal command without starting its provider.

@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -66,8 +67,8 @@ struct SessionsStoreTests {
         #expect(item(store, "a")?.state == .pending)
     }
 
-    @Test("selecting one available Task recovers only that terminal")
-    func opensOnlyTheSelectedSession() async throws {
+    @Test("Explicit resume opens only the requested terminal")
+    func resumesOnlyTheSelectedSession() async throws {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
@@ -81,7 +82,7 @@ struct SessionsStoreTests {
             session(id: "second", state: "available"),
         ]))
 
-        await store.select("second")
+        await store.resume("second")
 
         #expect(item(store, "first")?.state == .pending)
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
@@ -102,7 +103,7 @@ struct SessionsStoreTests {
         }
         store.adoptPreparation(prepared)
 
-        await store.select(prepared.id)
+        await store.resume(prepared.id)
 
         #expect(item(store, prepared.id)?.state == .prepared)
         #expect(item(store, prepared.id)?.surface?.openArgv == prepared.openArgv)
@@ -117,7 +118,7 @@ struct SessionsStoreTests {
         )
         store.reconcile(try records([session(id: "native", state: "available")]))
 
-        await store.select("native")
+        await store.resume("native")
 
         #expect(item(store, "native")?.surface == nil)
         #expect(item(store, "native")?.state == .elsewhere)
@@ -137,7 +138,7 @@ struct SessionsStoreTests {
             session(id: "native", state: "active"),
         ]))
 
-        await store.select("native")
+        await store.resume("native")
         #expect(item(store, "native")?.surface == nil)
         #expect(item(store, "native")?.state == .elsewhere)
 
@@ -158,7 +159,7 @@ struct SessionsStoreTests {
         store.reconcile(try records([blocked]))
         #expect(item(store, "native")?.record.action(.open)?.unavailableReason == reason)
 
-        await store.select("native")
+        await store.resume("native")
 
         if result == "available" {
             #expect(item(store, "native")?.state == .prepared)
@@ -184,7 +185,7 @@ struct SessionsStoreTests {
         if replacing {
             await store.moveHere("native")
         } else {
-            await store.select("native")
+            await store.resume("native")
         }
         let prepared = try #require(item(store, "native")?.surface)
         #expect(prepared.openArgv.contains("--takeover") == replacing)
@@ -231,14 +232,14 @@ struct SessionsStoreTests {
         let record = session(id: "native", state: "closed")
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in record })
         store.reconcile(try records([record]))
-        await store.select("native")
+        await store.resume("native")
         store.recordPaneLive("native")
         store.noteSurfaceClosed(.session("native", machineId: fixtureMachineId),
             output: "Error: Previous AgentProcess has no observed exit")
         store.reconcile(try records([record]))
         #expect(item(store, "native")?.state == .ended("Error: Previous AgentProcess has no observed exit"))
         #expect(item(store, "native")?.surface == nil)
-        await store.select("native")
+        await store.resume("native")
         #expect(item(store, "native")?.state == .prepared)
     }
 
@@ -255,7 +256,7 @@ struct SessionsStoreTests {
             session(id: "native", state: "closed"),
         ]))
 
-        await store.select("native")
+        await store.resume("native")
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
@@ -306,6 +307,143 @@ struct SessionsStoreTests {
                 == main.resolvingSymlinksInPath().path
         )
     }
+}
+
+@Suite("Workspace Session lifecycle")
+@MainActor
+struct WorkspaceSessionLifecycleTests {
+    @Test("Restoring twelve Sessions prepares only attachments, then switches without preparation")
+    func twelveRetainedAttachments() async throws {
+        let calls = AttachmentReads()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            await calls.append(args)
+            guard args == ["session", "attach", args[2], "--if-free", "--prepare", "--json"] else {
+                throw RegistryQueryError("Restoration must not start or resume a provider")
+            }
+            return attachment(id: args[2])
+        })
+        let ids = (0..<12).map { "session-\($0)" }
+        store.reconcile(try records(ids.map { session(id: $0, state: "active") }))
+        for id in ids { await store.select(id) }
+        let prepared = store.sessions
+        #expect(prepared.allSatisfy { $0.state == .prepared })
+        #expect(prepared.allSatisfy { $0.launchArguments == ["lf", "session", "attach", $0.id, "--if-free"] })
+        for _ in 0..<20 {
+            for id in ids.reversed() { await store.select(id) }
+        }
+        #expect(store.sessions == prepared)
+        #expect(await calls.count == 12)
+    }
+
+    @Test("An ensured active primary consumes its attach-only command")
+    func ensuredActivePrimary() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            throw RegistryQueryError("The ensured command needs no second preparation")
+        })
+        store.reconcile(try records([session(id: "primary", state: "active")]))
+        let prepared = try #require(records([attachment(id: "primary")]).first)
+        store.adoptPreparation(prepared)
+        await store.select(prepared.id)
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "attach", "primary", "--if-free"])
+    }
+
+    @Test("Unavailable attachment preserves the pane identity and never falls through to resume")
+    func attachmentFailureIsStable() async throws {
+        let calls = AttachmentReads()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            await calls.append(args)
+            throw RegistryQueryError("Execution owner is unavailable")
+        })
+        let record = try #require(records([session(id: "retained", state: "closed")]).first)
+        store.reconcile([record])
+        let incarnation = try #require(store.sessions.first?.launchId)
+        await store.select(record.id)
+        store.reconcile([record])
+        #expect(store.sessions.first?.id == record.id)
+        #expect(store.sessions.first?.launchId == incarnation)
+        #expect(store.sessions.first?.surface == nil)
+        #expect(store.sessions.first?.error == "Execution owner is unavailable")
+        #expect(await calls.count == 1)
+    }
+
+    @Test("Reconnect and Resume use distinct production buttons", arguments: [false, true])
+    func recoveryButtons(ended: Bool) async throws {
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["session", "attach"]) {
+                return attachment(id: "retained").replacingOccurrences(
+                    of: "\"unavailable_reason\":null", with: "\"unavailable_reason\":\"Execution ended\"")
+            }
+            return session(id: "retained", state: "closed")
+        }
+        let store = SessionsStore(repoPath: "/tmp/repo", query: query)
+        store.reconcile(try records([session(id: "retained", state: "closed")]))
+        store.adoptPreparation(try #require(store.sessions.first?.record))
+        if ended {
+            store.recordPaneLive("retained")
+            store.noteSurfaceClosed(.session("retained", machineId: fixtureMachineId), output: "Execution ended")
+        } else {
+            store.recordPaneFailure("retained", reason: "Owner unavailable")
+        }
+        let workspace = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+            .workspace(for: WorkWorkspaceKey(repository: "repo", kind: .task, id: "task"), title: "Task", location: nil)
+        workspace.multiplexer.load(sessionId: "retained")
+        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
+            sessions: store, store: workspace.multiplexer, hover: workspace.hover)
+        let placeholder = view._sessionPlaceholder(try #require(store.sessions.first))
+        let reconnect = try placeholder.inspect().find(button: "Reconnect")
+        try reconnect.tap()
+        let attachmentDeadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.error != "Execution ended", ContinuousClock.now < attachmentDeadline {
+            await Task.yield()
+        }
+        #expect(store.sessions.first?.surface == nil)
+        #expect(store.sessions.first?.error == "Execution ended")
+        let recovery = view._sessionPlaceholder(try #require(store.sessions.first))
+        let resume = try recovery.inspect().find(button: "Resume conversation")
+        #expect(!resume.isDisabled())
+        try resume.tap()
+        let resumeDeadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .prepared, ContinuousClock.now < resumeDeadline {
+            await Task.yield()
+        }
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "connect", "retained"])
+    }
+
+    @Test("Cancellation after preparation cannot create a late viewer")
+    func canceledAttachment() async throws {
+        let started = AsyncStream<Void>.makeStream(), release = AsyncStream<Void>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            started.continuation.yield(())
+            for await _ in release.stream { break }
+            return attachment(id: "retained")
+        })
+        store.reconcile(try records([session(id: "retained", state: "closed")]))
+        let selection = Task { await store.select("retained") }
+        for await _ in started.stream { break }
+        selection.cancel()
+        release.continuation.finish()
+        await selection.value
+        started.continuation.finish()
+        #expect(store.sessions.first?.surface == nil)
+        #expect(store.sessions.first?.error != nil)
+    }
+}
+
+private actor AttachmentReads {
+    private var commands: [[String]] = []
+    var count: Int { commands.count }
+    func append(_ command: [String]) { commands.append(command) }
+}
+
+private func attachment(id: String) -> String {
+    let actions = sessionActionFixtureJSON(state: "closed")
+    let reconnect = #"{"kind":"reconnect","label":"Reconnect","help":"Attach only","unavailable_reason":null},"#
+    return session(id: id, state: "closed").replacingOccurrences(
+        of: "[\"lf\", \"session\", \"connect\", \"\(id)\"]",
+        with: "[\"lf\", \"session\", \"attach\", \"\(id)\", \"--if-free\"]")
+        .replacingOccurrences(of: actions, with: "[" + reconnect + actions.dropFirst())
 }
 
 @MainActor

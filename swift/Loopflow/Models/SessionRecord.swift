@@ -18,6 +18,7 @@ public enum SessionAttention: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
+    case reconnect
     case open
     case moveHere = "move_here"
 }

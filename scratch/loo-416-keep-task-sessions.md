@@ -165,8 +165,8 @@ The draft does not waive a stronger interpretation of accepted behavior.
 - Remove `WorkSnapshot.Repository.selection` and `WorkCache.saveSelection` as
   persistence owners once callers use the durable store; keep cached wire reads
   with unknown liveness. Any one-time seed is discarded after durable creation.
-- Replace saved-live-Session startup through `SessionsStore.recover`/generic
-  `connect` with attach-only restoration. Preserve explicit resume, takeover,
+- Removed saved-live-Session startup through `SessionsStore.recover`/generic
+  `connect`; selection now uses attach-only restoration. Preserve explicit resume, takeover,
   reset and provider-switch behavior and authority tests.
 - LOO-489/497 reshape `SessionsWorkspaceRegistry.revealSession` relocation where
   container projection would remove the Task's own pane. They own membership;
@@ -221,45 +221,17 @@ One integrated LOO-416 outcome; serialization alone cannot complete it.
    transition and retained Work state. Native proof checks input echo, scroll
    position, same surface incarnation, unsent text and tile→Task→tile mounting.
 
-**Gate once after integration:**
-
-```sh
-cargo build -p loopflow --bin lf
-scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkspaceRestorationTests|WorkspaceSessionLifecycleTests|SessionsStoreTests|SessionsPolishTests|WorkNavigationTests|WorkCacheTests|SessionControlsTests|TaskFilesTests|DTOFixtureTests'
-uv run python scripts/test_network.py cargo test -p loopflow --test session_lifecycle_tests < /dev/null
-uv run python scripts/test.py --loopflow
-```
-
-New suite names are planned, not existing passes. The Rust network wrapper clears
-inherited `LF_*`; fixtures pin candidate `LF_BIN` inside that boundary. If Rust or
-schema changes are needed, use draft materialization and released-frontier
-fixtures, never the installed store. Rust edits require fmt/clippy. SwiftPM and
-Xcode both matter because the latter builds the terminal fallback. Shared DTO
-changes update Rust/Swift fixtures without wire defaults.
-
-The lifecycle scenario consumes the real Session projection and durable layout,
-then inspects the same restored registry exposed to LOO-497's `state --json`.
-Assert IDs, owners, hidden state and errors through that projection and production
-leaf views. A serialization-only test or recorded fake status does not satisfy it.
-
-Required gates are headless. Native draw/capacity proof runs on a capable
-unattended display host through the extended runner, deferred when unavailable:
-
-```sh
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/loo-416-baseline
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/loo-416-after --baseline /tmp/loo-416-baseline
-```
-
-Use identical twelve-Session fixtures/measurement source across baseline and
-candidate, at least twenty warm attempts per scenario. Report p50/p95 selection
-to input-ready, native capture/OCR overhead separately, app plus holder RSS,
-surface/launch counts and hidden/visible CPU. Retain failed/incomplete attempts.
-This is not compositor-paint measurement. Old numeric budgets were retired;
-propose a Wave-owned warm-switch signal with baseline, coverage and candidate
-target for sponsorship rather than silently reinstating them. Start with twelve
-retained surfaces and existing off-window display-link behavior; add no paused or
-thumbnail mode without evidence of need. Unavailable native evidence is neither
-a block to earlier slices nor a capacity pass.
+**Verification:** build changed code and run focused behavioral suites. Gate owns
+affected Desktop/session/control/file/DTO suites plus the candidate CLI transport
+integration under `scripts/test_network.py` with inherited LF variables unset and
+stdin closed. Rust changes require fmt/clippy and migration frontier/DTO fixtures.
+Headless checks must exercise production restored registries, not serialization
+alone. Native display/provider/capacity proof remains demo evidence and cannot be
+claimed from fake status or three cat PTYs. Compare baseline/candidate twelve actual
+Sessions (then 24/48), twenty warm attempts, p50/p95 input-ready latency, RSS/CPU,
+owner/surface/launch counts, failed attempts and wasted warming. No new caching
+policy without evidence. Prior detailed proposed commands and display runner plans
+are preserved in `evidence/loo-416-plan-before-stack-compression.txt`.
 
 **Done when:** twelve opened Tasks retain text/scrollback/input on warm switching
 without loading or relaunch; last-viewer close/quit/crash leaves the original
@@ -274,38 +246,65 @@ Review finding: retaining generic connect fallback could make restart tests pass
 while replacing execution. Require attach-only results and preserve explicit
 resume; prove surface reuse separately from provider survival.
 
-## Implementation boundary — October 16, 2026
+## Implementation boundary — October 17, 2026
 
-Application-lifetime retention is implemented; full LOO-416 acceptance remains open.
+Full LOO-416 acceptance remains open. Jack Heart authorized stacking on LOO-415;
+parent `2523534b29` is integrated by `7bfa10fa72`, with prior retention checkpointed
+in `172ce48a39`. Application retention and immediate known-repository presentation
+remain; pending Task links retain fresh-validation boundaries.
 
-October 16 implementation reads confirm LOO-415 has no checkout or current PR. Its brief
-still specifies transparent repaint and exempts existing multiplexers; it does
-not supply the accepted independent owner/attach-only API for every caller.
-That contract must be reconciled before attachment, caller-death and shell
-continuity can be implemented here without taking over transport ownership.
+Desktop selection now uses `session attach --if-free --prepare --json`; it cannot
+resume history or displace another viewer's input claim. Reconnect is a typed
+Session action; explicit Open/Move actions remain available when attachment is
+unavailable. Cancellation discards late preparation. Repository/Wave/Task ensure
+share preparation, and existing executions return attach-only commands. Task filing
+now commits its primary Session; Wave admission commits its own and repository
+Sessions without capture, provider effects or Started reservation. No warming
+policy was selected.
 
-October 16 readback finds LOO-497 publishing, with no current PR recorded.
-Its `saved_selections.sql` stores
-expressions and outer arrangements, not native pane snapshots or file drafts.
-Its coordination plan now explicitly assigns pane/draft records to LOO-497 and
-save/restore callers to LOO-489. That agreed boundary remains unimplemented. Durable
-recovery, attachment, uniform readiness and native capacity remain incomplete;
-no startup policy was selected.
+Shared reads recovered using released lf 0.14.4 after discovering inherited
+LF_BIN pinned 0.14.3. October 17 status confirms this implement step belongs to
+live Flow `53d045e1-9dc6-44ea-b4f5-a2345446478a`; LOO-497 has a live implementation.
+Latest shared status reconfirms its live implement step and published #1580 head
+`d9141c282f`, containing earlier foundations, not the current
+pane/draft integration. LOO-489/497 retain native persistence and shared record
+ownership; no sibling dirty code was copied. Their supported handoff is still
+needed for restoration, shell Process identity and draft recovery.
 
-Headless retention tests cover window-model release, twelve Work layouts/drafts,
-all-hidden Work and learned identity. Repository entry now mounts known scenes
-before stalled/failed lookup, including proven worktree locators and restored
-scenes. Early presentation reuses the router's focus/delivery path with no new
-link; entry tests cover routing while retention tests cover pane/draft preservation.
-The router retains resolved identity/path; the view holds only resolution errors
-and validated request IDs. Link delivery still requires fresh validation. Pending Task links survive
-workspace binding instead of losing selection. Unknown locators wait. Native
-remount and twelve live providers remain unproved.
+Remaining: bounded CLI preparation/cancellation beyond
+the transport handshake; nested caller-death boundary proof; durable restoration;
+twelve actual providers and 24/48 capacity measurements; display/native remount;
+exact post-crash terminal state and cross-installation interpretation. Model
+switching tests do not establish native/provider readiness. Infrastructure memory
+remains read-only; its 209-token overage belongs to its owning Flow.
 
-Infrastructure memory now records the accepted lifetime boundary and Release's
-operation-entry lesson. Product's September 22 window-owned registry guidance
-needs the same correction in its owning Flow; application retention does not
-establish app-death survival. Infrastructure and its immediate Release child's
-memory were read completely; Product coverage was limited to relevant sections.
+### Admission revision — accepted internal repair, October 17
 
-Checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkspaceRetentionTests|WorkDestinationTests'` — prior Desktop build/62-test pass retained, no code changed by realign; `git diff --check` passed; gate owns remaining suites/Xcode fallback, display host owns native proof.
+The predecessor always captured input on conversation insertion and irreversibly
+marked its Task Started. The initial attempt and counterexample are archived in
+`evidence/metadata-admission-counterexample.patch`. They explain the required
+nullable-input cut; the patch is evidence, not a second implementation.
+
+Operator steer 1482 confirms this is an authorized internal repair, not a new
+approval boundary. Admit the Session with no capture; Task filing commits its
+primary identity atomically. Explicit Wave admission shares the owner and admits
+its repository conversation. Prepare resolves the Work checkout; requested
+execution reserves input and marks Started. Passive reads do neither. Preserve
+existing Session/history identities and prospective attribution.
+
+Deleted: mandatory `LfSession.artifact_key`; unconditional conversation-insert/bind
+Task-start triggers; metadata admission's unconditional capture. Preserve actual
+input reservation, immutable capture history, explicit bind semantics and the
+released-schema upgrade. The existing `session_transport.sql` draft now moves
+Started authority to first capture or binding previously captured work. Historical
+start times remain immutable. Readers accept uncaptured Sessions; execution reserves
+input on the same identity, after resolving the Task checkout. Both terminal and
+headless explicit connection use that owner. Concurrent ensure reuses the primary.
+Focused checks now cover terminal and headless first start, concurrent ensure,
+uncaptured bind, retained history and the creator-exit transport boundary.
+
+Review findings resolved: generic reconnect fallback; reconnect labels dispatching
+resume; active-provider metadata preventing safe free-viewer attachment. The
+production button tests cover unavailable and ended viewers with distinct recovery.
+
+Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, network-isolated Rust admission/readiness/migration/primary/creator-exit tests, and `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkspaceSessionLifecycleTests|SessionsStoreTests'` passed (20 Swift tests); unchanged Registry/destination/DTO checks also passed. Gate owns remaining affected suites and full acceptance; the display host owns native/provider/capacity demonstration.

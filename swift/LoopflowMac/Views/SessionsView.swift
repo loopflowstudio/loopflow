@@ -49,6 +49,7 @@ final class SessionsWorkspace {
         do {
             let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
+            store.adoptPreparation(record)
             registry.revealSession(record, in: self)
             presentation.content = .terminals
             presentation.selectedSessionId = record.id
@@ -644,16 +645,16 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private func recover(_ id: String, replacing: Bool = false) async {
-        guard let index = _index(id),
-              let action = sessions[index].record.action(replacing ? .moveHere : .open) else { return }
-        // A cached observation failure can outlive the client that caused it.
-        // An explicit open revalidates through connect; it never replaces a client.
-        if replacing, action.unavailableReason != nil { return }
+    private enum Opening { case attach, resume, move }
+
+    private func prepare(_ id: String, opening: Opening) async {
+        guard let index = _index(id) else { return }
+        let replacing = opening == .move
+        if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed, .ended:
             sessions[index].state = .opening
-        case .elsewhere where replacing:
+        case .elsewhere where opening != .resume:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
@@ -667,17 +668,19 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
-            Perf.agentInput("connect_prepare_begin", session: id)
-            let surface = try await executionQuery.prepareSession(
-                id: id,
-                takeover: replacing,
-                cwd: repoPath
-            )
-            Perf.agentInput("connect_prepare_returned", session: id)
+            let stage = opening == .attach ? "attach_prepare" : "connect_prepare"
+            Perf.agentInput("\(stage)_begin", session: id)
+            let surface = try await opening == .attach
+                ? executionQuery.prepareSessionAttachment(id: id, cwd: repoPath)
+                : executionQuery.prepareSession(id: id, takeover: replacing, cwd: repoPath)
+            try Task.checkCancellation()
+            Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
-                if !replacing, surface.action(.moveHere) != nil {
+                if let attachment = surface.action(.reconnect), opening == .attach {
+                    sessions[latest].state = attachment.unavailableReason.map(SessionItem.State.failed) ?? .prepared
+                } else if !replacing, surface.action(.moveHere) != nil {
                     sessions[latest].state = .elsewhere
                 } else if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
                     sessions[latest].state = .failed(reason)
@@ -694,16 +697,18 @@ final class SessionsStore {
     func adoptPreparation(_ record: SessionRecord) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended:
+        case .pending, .failed, .ended, .elsewhere:
             sessions[index].record = record
-            if record.action(.moveHere) != nil {
+            if let attachment = record.action(.reconnect) {
+                sessions[index].state = attachment.unavailableReason.map(SessionItem.State.failed) ?? .prepared
+            } else if record.action(.moveHere) != nil {
                 sessions[index].state = .elsewhere
             } else if let reason = record.action(.open)?.unavailableReason {
                 sessions[index].state = .failed(reason)
             } else {
                 sessions[index].state = .prepared
             }
-        case .elsewhere, .opening, .prepared, .live:
+        case .opening, .prepared, .live:
             break
         }
     }
@@ -718,11 +723,15 @@ final class SessionsStore {
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         }
-        await recover(id)
+        await prepare(id, opening: .attach)
+    }
+
+    func resume(_ id: String) async {
+        await prepare(id, opening: .resume)
     }
 
     func moveHere(_ id: String) async {
-        await recover(id, replacing: true)
+        await prepare(id, opening: .move)
     }
 
     @discardableResult
@@ -791,11 +800,8 @@ final class SessionsStore {
         sessions[index].state = .failed(reason)
     }
 
-    /// A retained surface's child ended — provider exit or an external
-    /// takeover. Reclassify at once so the pane swaps to its placeholder
-    /// instead of presenting a dead terminal until the next poll. A window
-    /// whose own pool still holds a live surface for this Session (it just
-    /// took the client over) is unaffected.
+    /// Viewer exit does not establish provider exit. Keep its output and require
+    /// a deliberate retry; inventory refresh must not resume execution.
     func noteSurfaceClosed(_ terminal: TerminalIdentity, output: String? = nil) {
         guard case .session(let id, let machineId) = terminal,
               !surfaces.hasSurface(terminal),
@@ -2088,7 +2094,7 @@ struct SessionPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Session terminal ended").foregroundStyle(theme.palette.text)
+                Text("Session viewer disconnected").foregroundStyle(theme.palette.text)
                 ScrollView {
                     Text(output).font(.system(.body, design: .monospaced))
                         .foregroundStyle(theme.palette.text).textSelection(.enabled)
@@ -2125,19 +2131,25 @@ struct SessionPaneView: View {
 
     @ViewBuilder
     private func openButton(_ item: SessionItem, retrying: Bool) -> some View {
+        if retrying {
+            Button("Reconnect") {
+                Task { @MainActor in await sessions.select(item.id) }
+            }
+            .help("Attach to the existing execution without restarting it")
+        }
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            Button(action.kind == .open && retrying ? "Try again" : action.label) {
+            Button(action.kind == .open ? "Resume conversation" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
                     if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.select(item.id) }
+                    else { await sessions.resume(item.id) }
                 }
             }
             .buttonStyle(.bordered)
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
-            .disabled(action.unavailableReason != nil)
-            .help(action.unavailableReason ?? action.help)
+            .disabled(action.kind == .moveHere && action.unavailableReason != nil)
+            .help(action.kind == .open ? "Explicitly start a client on this conversation’s saved history" : action.unavailableReason ?? action.help)
             .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
         }
     }

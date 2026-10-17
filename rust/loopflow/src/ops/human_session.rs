@@ -149,12 +149,9 @@ pub(crate) async fn connection_scope(
             }
         }
     }
-    let name = repo
-        .as_path()
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    bail!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  lf --repo {name} connect  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation")
+    let path = repo.to_string();
+    let command = shlex::try_join(["lf", "--repo", path.as_str(), "connect"])?;
+    bail!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation")
 }
 
 pub(crate) async fn select_connection(

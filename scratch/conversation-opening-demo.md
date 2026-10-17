@@ -50,3 +50,12 @@ Observed by the reviewing agent:
 No native provider behavior or user judgment is yet established. Record Jack
 Heart's observations separately from agent interpretation. Resolve demonstrated
 defects before recommending acceptance; this demo starts no further Flow.
+
+## Final polish and shipping direction
+
+Jack Heart authorized shipping and landing LOO-499 after review on October 17.
+The recovery-hint defect above is repaired: the command uses the canonical
+absolute path through shlex. The contextual connect/resume/fresh regression
+executes the printed hint with a same-name repository under the lookup root
+and passes; formatting and Clippy pass. Live-provider acceptance is still not
+established by that test. Gate owns the remaining automated affected checks.

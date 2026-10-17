@@ -1143,6 +1143,16 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
         })
         .unwrap()
     };
+    // A same-name repository under the configured lookup root must not steal
+    // the recovery command printed for this unrelated linked checkout.
+    let other = TestRepo::new();
+    let lookup_root = fixture.home.path().join("src");
+    fs::create_dir_all(&lookup_root).unwrap();
+    std::os::unix::fs::symlink(
+        other.path(),
+        lookup_root.join(fixture.repo.path().file_name().unwrap()),
+    )
+    .unwrap();
     let before = count();
     for verb in ["connect", "resume"] {
         let output = fixture
@@ -1152,16 +1162,20 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
             .output()
             .unwrap();
         assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr)
-            .contains("This worktree has no associated work conversation"));
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("This worktree has no associated work conversation"));
         assert_eq!(count(), before);
-        assert_eq!(
-            prepare(
-                &linked,
-                &["--repo", fixture.repo.path().to_str().unwrap(), verb]
-            )["id"],
-            id
-        );
+        let recovery = error
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("lf --repo "))
+            .unwrap()
+            .split("  ")
+            .next()
+            .unwrap();
+        let argv = shlex::split(recovery).unwrap();
+        let args: Vec<&str> = argv.iter().skip(1).map(String::as_str).collect();
+        assert_eq!(prepare(&linked, &args)["id"], id);
         assert_eq!(prepare(&linked, &[verb, id])["id"], id);
     }
     let explanation = fixture

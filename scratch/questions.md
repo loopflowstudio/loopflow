@@ -18,3 +18,10 @@ Removal checks: cargo fmt; two focused cargo tests (Task primary selection and
 contextual connect/resume/fresh); cargo clippy --all-targets -- -D warnings — passed.
 Review: exact Session opening preserves the existing Task primary; removing the
 CLI override leaves automatic selection and its store owner necessary.
+
+Jack Heart authorized final polish, ship and landing LOO-499 on October 17.
+The unassociated-checkout recovery hint now uses a shell-quoted canonical
+absolute repository path. The contextual connect/resume/fresh test executes
+the printed recovery command with a same-name repository under the lookup root;
+it and cargo clippy --all-targets -- -D warnings passed after cargo fmt.
+LOO-506 owns canonical ID storage and is separately authorized for autonomous execution.

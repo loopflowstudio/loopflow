@@ -309,23 +309,16 @@ October 6 gate failures and outstanding native/provider/migration proof:
 
 ## Session and operate pairs (2026-10-05)
 
-Jack Heart, [LOO-383](https://linear.app/loopflow/issue/LOO-383): the Wave
-conversation operates; keep started Tasks moving, leave unstarted backlog alone,
-and inline the operate procedure in each session skill. `task/session` stays
-plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
-and requested PR-linked reports grouped as waiting on him, moving and stuck.
-Leaving unarmed merges to Jack is unreviewed.
-
-Stopped-Flow continuation, retry-policy and cron history:
-`87f275c282:.lf/wave/product/MEMORY.md`, this heading. Current Workflow contracts
-govern; stopped execution is history, not permission to resume.
-
-An operator once reported `next_move.owner: wave` as someone else's handoff:
-name the reader's own responsibility explicitly. Nothing re-invokes a
-conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
-launching again. The [review](../../../docs/reviews/session-operate-prompts.md) has
-simulations and two read-only model runs, not installed proof. Open conversations
-keep old instructions until `lf session replace`.
+Jack Heart (LOO-383) selected operating Wave conversations: move started Tasks,
+leave unstarted backlog alone, and report PR-linked work as waiting, moving or
+stuck. Leaving unarmed merges to Jack remained unreviewed. Current session/operate
+skills and Work APIs supersede the old wrapper and process-inspection recipe.
+Stopped execution is history, not permission to resume; an open conversation
+schedules nothing. Naming the Wave as next owner must not evade its own duty.
+Original decisions, continuation history and evidence limits:
+`28588f8910:.lf/wave/product/MEMORY.md`, this heading.
+The [review](../../../docs/reviews/session-operate-prompts.md) established simulations
+and read-only model runs, not installed behavior.
 
 ## Capture and work-first entry (October 1–14)
 
@@ -389,13 +382,24 @@ Saved Session pages strip reports and Waiting with liveness: restoring them revi
 stale status. Focused tests pass; native link dispatch and density remain unproved.
 No new polling or authority.
 
-October 14, LOO-462: Jack Heart selected semantic roles in both existing appearances,
-preserving palette, ANSI and retained clients/drafts. Neutral selection, separate
-focus outline, quiet links and restrained action emphasis follow VISUAL_DESIGN.md.
-Omit unknown/client-only activity without calling it idle. Preserve report provenance:
-Working blue, Waiting/Blocked amber with distinct wording, Error red. Stopped edges
-alone are not errors. Use the supplied palette; native appearance can disagree.
-Composited contrast checks pass; native focus/appearance/input judgment remains.
+October 14–15, LOO-462: Jack Heart selected semantic roles, then Ink on Paper
+Work selection mirrored in Needs you, drill-in navigation and nested Work/pane
+layouts. Work fill/text resolve through the theme; file selection stays neutral.
+Keep focus separate, links quiet and actions restrained. Preserve report provenance:
+Working blue, Waiting/Blocked amber, Error red; unknown is not idle and stopped
+edges alone are not errors. Contrast checks do not establish native acceptance.
+
+October 15, LOO-488: Jack Heart approved whole-app themes through demo review,
+stacked on LOO-462: cream Light/slate Dark terminals and local RGB import snapshots.
+App semantics derive independently of ANSI, whose shortfalls retain warnings.
+Preview clones frozen non-color config, clearing Ghostty's theme selector before
+finalization. The patched C getter now exposes fixed RGB cursor/selection/search
+colors; unset or cell-relative values return false without writing. Production
+validates all ten named colors and 256 indexed entries against the chosen theme;
+compiled tests cover conflicting personal settings. Readback and unmounted views
+prove neither PTY continuity nor atomic renderer success (update returns void).
+Input/focus/coherence await native review; per-cell correction stays separate.
+No landing/install authority follows.
 
 October 14 rendering: Jack Heart approved the ownership cut with cmux research.
 Model-owned pane installation now precedes ending preparation; exact links share
@@ -598,9 +602,9 @@ operation a prerequisite for independent Tasks.
 
 ## Named participants and review feedback (curated 2026-09-25)
 
-Original attribution/continuation sources and dated gate receipts:
+Attribution and receipts:
 `35e759aaf:wave/product/MEMORY.md`, this heading. AGENTS.md owns the naming rule;
-curation changes no ownership or acceptance.
+curation changes neither.
 
 - Personal `user.name`, the current participant and each request's original
   author are different facts. Repository config cannot name every caller.
@@ -631,55 +635,37 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (2026-09-26)
+## Workspace redesign decisions (September 26–October 15)
 
-Jack rejected September 26's native calmer-workspace build: structural fidelity
-missed the mocks' warmth and accumulated inconsistent chrome. LOO-291 addressed
-tokens, rows, toolbar and typography. Diagnosis:
-`8f95d9e4e6:wave/product/MEMORY.md`, this heading.
+Jack Heart rejected September 26's composition despite structural fidelity:
+its warmth and chrome did not match the mocks. Full decisions, deferred owners
+and counterevidence: `77ff8e8eb8:.lf/wave/product/MEMORY.md`, **Workspace redesign decisions (2026-09-26)**.
+Retain serif repo/page/Task titles, sans Wave rows without decorative glyph/count,
+shared Work binding and native surface ownership. October 14's semantic roles
+cover both appearances, superseding the light-first emphasis.
 
-Decisions that outlive the branch (Jack's, verbatim where quoted):
+October 15, LOO-462: Jack selected Ink on Paper, one Work selection mirrored in
+Needs you, drill-in Repo/Wave/Task navigation and nested Work/pane layouts.
+Command-click adds adjacent Work; ordinary click replaces the focused slot;
+close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
+Back/Forward replace persistent adjacent columns and visible history buttons.
+Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
+Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
+acceptance. Cross-launch layout restoration remains excluded.
 
-- September 26 selected light first; October 14's semantic cut above now covers
-  both existing appearances. Neither has new native acceptance.
-- Serif for the repo name and page titles, including the Task title ("I'm
-  kinda liking the serif task title now"). Sidebar Wave rows are sans
-  ("sans-serif wins") with no glyph, no count, no dot ("nothing at all is
-  even simpler"); a needs-you dot may return later.
-- Rust derives Task grouping from checkout identity, including previously
-  unbound Sessions; Swift consumes it without rewriting Run attribution. The
-  former diagnostic Session browser is removed by LOO-462.
-- One universal bind from the room, ⌘K and Task rows ("worth making the
-  design and architecture simple and universal if it takes a little extra").
-  Bind changes a Run's Task, never its name, panes or Flow membership.
-  September 30's location grouping is independent of this attribution operation;
-  it needs no bind to present a Session under its checkout's Task.
-- The Session view has one toolbar: the breadcrumb bar, worktree as a quiet
-  mono chip, no pane header with one pane, split/close/zoom by keybind and a
-  hover trio, terminal edge-to-edge in warm charcoal. "Similar tool sets on
-  both the run and the session" must be collapsed or progressively disclosed.
-- The September 26 two-Flow-view baseline is replaced by October 6's Workflow
-  graph in the Task header; exact captured occurrence identity still holds.
-- The September 30 primary-Session direction supersedes deferring the waveless
-  beginner: repository onboarding must work before any Wave or Task exists.
+October 15, LOO-492: Jack Heart clarified that nested corner curves need even
+clearance; text padding alone does not satisfy the defect. The implementation
+derives workspace radius from pane radius plus inset. Terminal clearance sits
+outside Ghostty's measurement; native grid padding remains because block hit
+testing shares it. Focused headless checks cover radius/inset relationships,
+not the conditional outer stroke or native frames. Geometry proof with visible
+workspace borders and visual acceptance remain pending. AGENTS.md records the
+ViewInspector Observation limitation; fallback builds do not prove Ghostty behavior.
 
-State-of-the-art baseline adopted: one row component per sidebar level;
-state glyphs only when they mean something; a surface ladder instead of
-shadows; a seven-step type ramp (Cormorant 34/26/17, Lato 13/11, mono 12);
-blue means running and loop region and nothing else; only the running node
-animates. Research sources and Jack's decisions are preserved in
-[the branch's design history](https://github.com/loopflowstudio/loopflow/tree/be7a02db0/scratch).
-
-Jack separated follow-ups LOO-298/299/300 (detail at `9771ff7d7`) so LOO-291 can deliver S1–S5, the recorder,
-signposts and assign-on-change fixes. The accepted Run/Session tables and universal
-bind are future implementation, documented in [Infrastructure memory](../infrastructure/MEMORY.md#data-model-and-performance-decisions-2026-09-26).
-Chapter history remains part of that direction; the current contract uses past
-Linear Projects, with no Chapter table. Navigation stays Wave → Task.
-The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
-records the split. Local proof does not establish merger or Jack's acceptance.
-
-Trace removed visual features through their state and undo model
-(`536b0fd56:scratch/compress-pane-state.md`).
+LOO-298/299/300 retain their historical allocations; the archive does not close
+them. Rust owns grouping and binding; September 30's primary repo conversation
+supersedes deferring waveless entry. Trace removed features through state and
+Undo (`536b0fd56:scratch/compress-pane-state.md`), not just visible controls.
 
 ## Task files beside the conversation (2026-09-28)
 
@@ -750,12 +736,11 @@ September 30 desktop discovery operation ensures primary repo/Wave conversations
 ordinary list/status reads remain read-only. Wave detail holds its
 objective, Current KRs and complete Task plan, including unstarted Tasks.
 
-The accepted visual direction is D: sidebar A, center structure B, mood C.
-Use warm cream/burgundy, light selected-row tint/edge, serif page titles, sans
-body and literal lowercase mono Flow skills. Task title appears once; its issue
-ID in the breadcrumb links to Linear. Use Description; collapse real Comments
-with their count below it. Dated updates belong in comments, current scope and
-blockers in Description. Omit ELSEWHERE, Local work evidence and preview jargon.
+October 15's Work navigation/selection and themes supersede September's D
+composition (`ffdcf68935:.lf/wave/product/MEMORY.md`, this heading).
+Retain serif titles, sans body, lowercase mono Flow skills and one Task title.
+Description holds current scope/blockers; collapsed Comments hold dated updates.
+Omit ELSEWHERE, Local work evidence and preview jargon.
 
 The September 25 pinned-Flow, Resume and Stop & restart presentation is retired
 by October 4's correction. Its details remain at
@@ -871,8 +856,9 @@ no new store-cleanup or installation authority.
 The accepted start, not the summer draft, is frozen at
 [the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
 (23 September–21 October). Gate 2 accepted planning, not publication. The later
-September 24 hierarchy decisions govern. Historical KR counts and dated review
-mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
+September 24 hierarchy decisions govern. Historical KR counts and review mechanics:
+`b1e3f623a:wave/product/MEMORY.md`; planning-review lessons:
+`4a84d93b59:.lf/wave/product/MEMORY.md`, this heading.
 
 - Product value is human-selected external progress in any three of Cube,
   Etude, Kata and Hootro. Sessions, planning churn and Loopflow self-hosting
@@ -881,12 +867,6 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 - Product's dogfood revealed execution work: Infrastructure now owns execution,
   Intelligence evidence, and Product the external experience. Finish validated
   foundations instead of restarting them.
-- Freeze the exact Project/KR union before review; recompute totals from rows.
-  Definitions and KRs are separate verdicts, and current rosters cannot prove
-  historical completeness. Missing duration evidence stays unknown.
-- Keep observations beside beneficiary and consequence. Carry, learned, not
-  prioritized and misplaced are different findings. Review proposes; accepted
-  start applies. A report plus execution settlement establishes completion.
 - PM's overwritten snapshot cannot recover KR history. The start ledger is a
   forward boundary; retain later wording as dated evidence. Append-only provider
   revisions remain an option when a real review needs unavailable lineage.
@@ -966,20 +946,12 @@ the target machine's `lf`; observation grants no execution authority. The retire
 lfd and resident-cron contracts remain in
 [git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
 
-## Shared planning and runtime vocabulary
-
-Wave → Task is public planning; Chapter/Project identity stays internal and
-historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
-together. LfSession owns interactive Session/headless Run continuity and
-history; Process owns an lf invocation; FlowProcess records one Flow process's graph
-and steps. A Task run may start several Flow processes. No separate Run owner is
-restored because identifiers happen to coincide.
-
 ## Swift data path — RegistryQuery is the single reader
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. Migration detail: `92d95edfe:wave/product/MEMORY.md`,
-this heading.
+Unknown wire status stays explicit. AGENTS.md owns shared runtime vocabulary;
+earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
+`92d95edfe:wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)
 
@@ -994,27 +966,25 @@ Failed measurements, duplicate reads, original Home identity spelling and owners
 `ddc009d780:wave/product/MEMORY.md`, this heading; instruments remain under
 `scripts/benchmarks/desktop-performance/`. No configured startup proof is added.
 
-## Sessions projection and native resume (reconciled 2026-09-24)
+## Sessions projection and native resume (reconciled 2026-10-15)
 
-The older Ask/Ready/Complete and Task-review control contract is superseded by
-October 4's Task conversation correction. Details remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
-under this heading. Retain:
+October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
+`16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`, this heading.
 
 - `lf session list --json` owns the shared Session projection; Desktop owns no
   second queue, title store, liveness model or resolution state.
-- Provider history owns native resume. Row selection focuses the retained
-  terminal; **Move here** explicitly replaces an exact Loopflow-owned client
-  using PID and birth evidence. Resume preserves history, not unsent TUI input.
-  `session open --json --replace` prepares argv without stopping the old client.
-  Closing a pane or provider exit resolves nothing.
+- LOO-491: Jack Heart requested Task entry expose **Move here**, never a failing
+  Retry loop. `session connect --prepare --json --try` returns external ownership;
+  Desktop installs its pane and treats `.elsewhere` as usable. Fresh preparation
+  can discover ownership absent from the cached record. Only the explicit click
+  prepares `--takeover`; preparation does not stop the client. Resume preserves
+  provider history, not unsent input. Closing a pane resolves nothing.
 - Desktop retains terminals across selection, with explicit splits and reversible
   Close view/Undo. Viewing, running, elsewhere, opening and retry remain distinct.
   Canonical Git common-directory identity keeps Task checkouts out of repo roots.
-- Configured provider continuation and native focus/pane reconciliation remain
-  unproven by mocks, launch screenshots or empty inventories. The deleted review
-  handshake is no longer an acceptance requirement.
-- LOO-251/284/291 retain native, shared-action and planning proof obligations;
-  the archived reconciliation establishes neither completion nor new follow-ups.
+- LOO-491's headless tests cover Task entry/link placement, warning, click and
+  prepared argv, not native transfer or interactive provider readiness.
+  LOO-251/284/291 retain native, shared-action and planning proof obligations.
 
 ### Task observation and retired Watch
 
@@ -1084,8 +1054,9 @@ Watch**. Integration is not acceptance.
   asked that it land; no per-check report, "the bar on the right" unresolved.
 - Block chrome never takes selection or focus from the shell: a right-click
   keeps the selection under it, any key reaching the shell ends a block
-  selection, Command chords keep it. Fills keep the dimmest palette color at
-  3:1. Open: Option-letter inserts the composed character.
+  selection, Command chords keep it. LOO-487 moves fills before glyph contrast;
+  its color limits below replace the fixed-palette fill guarantee.
+  Open: Option-letter inserts the composed character.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
   color. The GUI drops those variables at launch, beside the execution markers.
@@ -1097,7 +1068,9 @@ Watch**. Integration is not acceptance.
   selection in Ghostty's `Screen`; Swift holds only hover. Upstream also splits a
   block when its command line soft-wraps; the patch treats the wrapped row as a
   continuation. A new artifact version accompanies every patch change;
-  publication needs authorization. Jack authorized `lf2`; published 2026-10-05.
+  Jack Heart authorized future artifact updates on October 6 through the patch
+  README workflow: relevant checks, immutable upload, public checksum readback.
+  `lf2` was published October 5; LOO-487 now pins published `lf6`.
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
   carry the patch and now run its Zig tests. Avoid synthetic multi-click
@@ -1116,6 +1089,33 @@ Watch**. Integration is not acceptance.
   output and last-command actions, multi-selection, bookmarks, sharing, exit-code
   or duration badges. Upstream API contribution may reduce patch maintenance
   later (ghostty-org/ghostty#11747).
+
+### Terminal feedback and color (LOO-487, 2026-10-15)
+
+Jack Heart accepted the design for implementation and hands-on review: “seems
+fine. i think i need to try it to know”. Approval of helpful/calm cues, paired
+native performance evidence and landing remain open. LOO-462's separate
+Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
+
+- Screen owns source colors, selection, blocks and search. Swift cell fills
+  tinted glyphs after correction; Ghostty now composes those fills before glyph
+  contrast. Swift retains gutter/header chrome and the parent's Find row.
+- Copy reads bytes and an opaque receipt under one lock, confirming cells only
+  after pasteboard success. Selection/geometry/visibility changes invalidate
+  cues. Incarnation-keyed notices cannot cross windows or replacement views.
+  Existing renderer scheduling supplies finite 160 ms edges; unrelated shader
+  draws must recompute absolute expiry. Reduce Motion preserves static Copy
+  confirmation and persistent Find styling, without replay on hidden returns.
+- Upstream black/white replacement collapsed semantic colors. The 3:1 default
+  instead chooses the feasible linear-RGB correction with least displacement,
+  retaining alpha and channel order; user `minimum-contrast = 1` bypasses it.
+  Faint text can remain unattainable. Exact hue, arbitrary color separation,
+  transparent backdrops, images and postprocessing are not guaranteed.
+- lf6's Zig checks, offscreen production Metal functions/background fragments
+  and GLSL compilation prove components, not full glyph composition, graphics
+  exemptions, imported-palette usability or presented-pixel timing. Draw-call
+  diagnostics are neither visible input latency nor configured-provider proof.
+  No measured improvement, sustained-use KR or external progress follows.
 
 ### Shared viewing boundary
 

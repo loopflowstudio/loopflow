@@ -103,6 +103,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, repo)| ContextDelivery {
+                repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),
                 wave: Some(format!("wave-{index}")),
@@ -144,6 +145,7 @@ mod tests {
     fn opencode_context_preserves_settings_and_existing_plugins() {
         let repo = tempfile::tempdir().unwrap();
         let context = ContextDelivery {
+            repository: None,
             repo: repo.path().to_owned(),
             home: repo.path().join("machine"),
             wave: None,

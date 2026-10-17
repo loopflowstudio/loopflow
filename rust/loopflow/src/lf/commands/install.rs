@@ -1397,6 +1397,9 @@ fn app_executable_paths(
     selection: &crate::installation::InstallSelection,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
+    let Some(bundle) = app_target else {
+        return Vec::new();
+    };
     let mut paths = selection
         .artifact_set
         .artifacts
@@ -1410,9 +1413,7 @@ fn app_executable_paths(
         })
         .map(|artifact| artifact.path.clone())
         .collect::<Vec<_>>();
-    if let Some(bundle) = app_target {
-        paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
-    }
+    paths.extend(["Loopflow", "lf"].map(|name| bundle.join("Contents/MacOS").join(name)));
     paths.sort();
     paths.dedup();
     paths
@@ -2744,8 +2745,8 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod artifact_tests {
     use super::{
-        commit_cli_symlink, copy_tree, prune_superseded_artifacts, retained_published_sets,
-        stage_binary, tree_digest,
+        app_executable_paths, commit_cli_symlink, copy_tree, prune_superseded_artifacts,
+        retained_published_sets, stage_binary, tree_digest,
     };
     use crate::installation::{
         ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
@@ -2771,6 +2772,33 @@ mod artifact_tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn cli_only_switch_leaves_prior_app_processes_out_of_quiescence() {
+        let retained_app = Path::new("/retained/Loopflow.app/Contents/MacOS/Loopflow");
+        let retained_helper = Path::new("/retained/Loopflow.app/Contents/MacOS/lf");
+        let mut artifacts = published_set("prior", &[retained_app, retained_helper]);
+        artifacts.artifacts[0].role = ArtifactRole::App;
+        artifacts.artifacts[1].role = ArtifactRole::AppHelper("lf".into());
+        let selection = InstallSelection {
+            installation_id: "published-prior".into(),
+            source: InstallSource::Published,
+            artifact_set: artifacts,
+            store: "/store/loopflow.db".into(),
+        };
+
+        assert!(app_executable_paths(&selection, None).is_empty());
+        let paths = app_executable_paths(&selection, Some(Path::new("/Applications/Loopflow.app")));
+        assert_eq!(
+            paths,
+            [
+                Path::new("/Applications/Loopflow.app/Contents/MacOS/Loopflow"),
+                Path::new("/Applications/Loopflow.app/Contents/MacOS/lf"),
+                retained_app,
+                retained_helper,
+            ]
+        );
     }
 
     #[test]

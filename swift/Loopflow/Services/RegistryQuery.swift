@@ -136,6 +136,11 @@ public struct RegistryQuery: Sendable {
         try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
     }
 
+    public func repositoryPath(id: String) async throws -> String {
+        try await run(["--repository", id, "repo", "identity", "--path"], nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
@@ -432,9 +437,10 @@ public struct RegistryQuery: Sendable {
 
     /// The Task's one ongoing conversation: the one already chosen, else its
     /// only or most recently used one, else a new one in its checkout. The
-    /// choice is remembered as the Task's primary.
+    /// choice is remembered as the Task's primary. External ownership is returned
+    /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json"], cwd)
+        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -444,8 +450,7 @@ public struct RegistryQuery: Sendable {
         takeover: Bool = false,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        var args = ["session", "connect", id, "--prepare", "--json"]
-        if takeover { args.append("--takeover") }
+        let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
@@ -459,6 +464,13 @@ public struct RegistryQuery: Sendable {
     ) async throws -> SessionRecord {
         let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Replace the primary conversation with fresh Work context; retain its history.
+    public func resetSession(id: String, agent: String?, cwd: String?) async throws -> SessionRecord {
+        var args = ["session", "new", id, "--json"]
+        if let agent { args += ["--agent", agent] }
+        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
 
     public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {

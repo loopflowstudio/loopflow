@@ -104,7 +104,7 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 
 /// Reported status wins for the current AgentProcess; otherwise use the
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
-fn waiting_sql(session: &str, now: i64) -> String {
+fn available_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
             JOIN processes p ON p.id={session}.agent_process_id
@@ -118,7 +118,7 @@ fn waiting_sql(session: &str, now: i64) -> String {
             ELSE act.attachment_token=p.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
-        quiet = crate::session::WAITING_QUIET_SECONDS
+        quiet = crate::session::AVAILABILITY_QUIET_SECONDS
     )
 }
 
@@ -144,10 +144,10 @@ fn inventory_query(
     if !filter.history {
         sql.push_str(" AND s.completed_at IS NULL");
     }
-    if filter.waiting {
+    if filter.available {
         sql.push_str(&format!(
             " AND {} AND s.agent_process_id IN (SELECT value FROM json_each({}))",
-            waiting_sql("s", now),
+            available_sql("s", now),
             bind(Value::Text(live_agents.into()))
         ));
     }
@@ -206,7 +206,7 @@ const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
-    let waiting = waiting_sql("a", now);
+    let available = available_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Flow is the Flow process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
@@ -218,7 +218,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
-        {waiting},
+        {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL)
@@ -290,7 +290,7 @@ fn read_summary(
             task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
             primary_scope: row.get(26)?,
             agent_process_evidence,
-            waiting: live && row.get(27)?,
+            available: live && row.get(27)?,
             program_status: row
                 .get::<_, Option<String>>(30)?
                 .map(|json| serde_json::from_str(&json))
@@ -442,7 +442,7 @@ impl SqliteStore {
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
-    // Waiting filters run before pagination; absence/unknown cannot occupy a page.
+    // Available filters run before pagination; absence/unknown cannot occupy a page.
     fn live_agent_ids(&self, needed: bool) -> StoreResult<String> {
         let mut live = Vec::new();
         if needed {
@@ -473,13 +473,13 @@ impl SqliteStore {
         Ok(serde_json::to_string(&live)?)
     }
 
-    /// Each row's Waiting is judged at `now`.
+    /// Each row's Available is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
         now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
-        let live_agents = self.live_agent_ids(filter.waiting)?;
+        let live_agents = self.live_agent_ids(filter.available)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut labels = std::collections::HashMap::new();
@@ -1172,7 +1172,7 @@ impl SqliteStore {
 
     /// Every open Session.
     pub fn sessions(&self, filter: &crate::session::SessionFilter) -> StoreResult<Vec<LfSession>> {
-        let live_agents = self.live_agent_ids(filter.waiting)?;
+        let live_agents = self.live_agent_ids(filter.available)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let (sql, values) = inventory_query(filter, SESSION_SELECT, now, &live_agents)?;

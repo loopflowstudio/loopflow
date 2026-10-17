@@ -5167,6 +5167,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_BIN", &shim);
         let delivery = crate::context_block::ContextDelivery {
+            repository: None,
             repo: repo.to_owned(),
             home: fixture.directory.path().to_owned(),
             wave: None,

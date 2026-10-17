@@ -115,11 +115,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// When the next open Session becomes Waiting through quiet alone, which
+    /// When the next open Session becomes Available through quiet alone, which
     /// no write announces. `None` when no reading is counting toward it.
-    pub(crate) fn next_quiet_waiting(&self, now: i64) -> StoreResult<Option<i64>> {
+    pub(crate) fn next_quiet_available(&self, now: i64) -> StoreResult<Option<i64>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let quiet = crate::session::WAITING_QUIET_SECONDS;
+        let quiet = crate::session::AVAILABILITY_QUIET_SECONDS;
         Ok(conn.query_row(
             "SELECT MIN(act.observed_at)+?2 FROM session_activity act
              JOIN agent_sessions s ON s.id=act.session_id

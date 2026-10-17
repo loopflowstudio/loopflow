@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+pub mod location;
+
 /// The Machine-local identity of a repository checkout.
 ///
 /// Linked worktrees collapse to their main checkout and symlink spellings

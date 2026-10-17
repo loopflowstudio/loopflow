@@ -543,7 +543,7 @@ impl Reader {
         if passed || self.quiet.map(|(read_at, _)| read_at) != Some(revisions.sessions) {
             self.quiet = store
                 .sqlite
-                .next_quiet_waiting(now)
+                .next_quiet_available(now)
                 .ok()
                 .map(|due| (revisions.sessions, due));
         }

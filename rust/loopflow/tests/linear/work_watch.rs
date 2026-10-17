@@ -805,7 +805,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
          SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
-    watch.session(|record| record["attention"] == "waiting");
+    watch.session(|record| record["attention"] == "available");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
     watch.session(|record| record["attention"].is_null());
 
@@ -1101,6 +1101,16 @@ fn selection_only_commit_reaches_two_open_work_readers() {
 fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    // This fixture registers Work before creating Git. Enroll that known
+    // legacy checkout explicitly, just as recovery does for released Work.
+    let id = home.store.repository_id(home.wave.repo()).unwrap().unwrap();
+    loopflow::repository::location::reconcile(
+        &home.store,
+        &loopflow::repository::CanonicalRepo::discover(Path::new(home.wave.repo())).unwrap(),
+        Some(&id),
+        None,
+    )
+    .unwrap();
     let config = Path::new(home.wave.repo()).join(".lf");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
@@ -1189,6 +1199,16 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
 fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    // This fixture registers Work before creating Git. Enroll that known
+    // legacy checkout explicitly, just as recovery does for released Work.
+    let id = home.store.repository_id(home.wave.repo()).unwrap().unwrap();
+    loopflow::repository::location::reconcile(
+        &home.store,
+        &loopflow::repository::CanonicalRepo::discover(Path::new(home.wave.repo())).unwrap(),
+        Some(&id),
+        None,
+    )
+    .unwrap();
     let config = Path::new(home.wave.repo()).join(".lf");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(

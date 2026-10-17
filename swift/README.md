@@ -37,20 +37,31 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Open a Wave to enter its conversation and fill the sidebar with its Tasks.
-The **Repo / Wave** path returns to either conversation. Each Wave keeps its
-Task-list scroll position. Burgundy fill marks selected Work everywhere it appears,
-including **Needs you**. The queue opens the exact waiting conversation, using
-shared Waiting or reported Blocked evidence.
+Navigation starts closed, with the repository selected in the Session workspace
+header. Click the location control or press **⌘K** to drop the full navigator over
+your panes. Choosing a repository, Wave, Task or Session closes the dropdown.
+Escape or a click outside dismisses it and restores your previous focus.
+Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
+
+Open a Wave conversation without moving its row. Its Tasks appear underneath;
+other expanded Waves stay open. Click the Task count to fold a branch without
+navigating. The repository stays at the top. Search filters both sections without
+changing selection. Burgundy fill marks one selected destination.
+
+**Available** shows full-size Tasks with their Wave context and opens the exact
+available conversation. Those Tasks are omitted from the Wave branches, so each
+appears once. Wave conversations stay in the hierarchy. Availability comes from
+shared Session evidence or a reported Blocked state; the CLI exposes it through
+`lf session list --available --json`.
 
 **Command-click** Work to open it beside the current workspace. A normal click
 replaces the focused workspace, or focuses it if already visible. Each workspace
 keeps its own panes, drafts and focus. Close its context header to hide it without
-closing its panes. Context headers appear when multiple workspaces are visible or
-the sidebar is hidden. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
+closing its panes. Context headers appear when multiple workspaces are visible. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
 
-Drag the sidebar edge to resize it. Its own collapse button or **⌃⌘S** hides it;
-the edge button restores it at the remembered width.
+Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
+it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
+across selections.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -58,15 +69,56 @@ Task rows show a title above reported program status, stored Task/PR links and t
 recorded remote Machine. Local Machine names stay hidden. The title opens the
 conversation; links open separately and underline on hover or keyboard focus.
 Unknown activity and live clients without program reports show no activity label
-or dot. Shared Waiting is labeled as inferred; report Blocked and Error remain
+or dot. Shared availability is labeled as inferred; report Blocked and Error remain
 distinct. Status read errors stay inspectable through a quiet info icon. A program's
 Done never completes its Task. Saved readings wait for fresh status.
 
-Selection uses a neutral fill and edge; keyboard focus has a separate outline.
-Ordinary controls and links stay neutral; burgundy emphasizes deliberate actions.
-Blue means reported work, amber means supported Waiting/blocked, red means failure.
-The same roles apply in light and dark appearances without changing terminal ANSI
-colors or replacing retained panes and drafts.
+Selected Work uses the theme’s selection fill and contrasting text, mirrored in Needs you.
+File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
+Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
+Status labels and shapes retain their meaning across palettes.
+Choose **Appearance → Choose Theme…** to preview the whole workspace. Set
+**Light theme** and **Dark theme** independently; **System** follows macOS using
+both. System lists both pickers; Light or Dark lists only its own. Each picker
+shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
+
+```yaml
+# ~/.lf/config.yaml
+theme: "light:Linen,dark:Hearth"   # System
+theme: "Hearth"                    # Dark (or Light) mode: one name
+```
+
+**Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
+Edit it by hand and every window follows; a misspelled name keeps the last theme
+and names the fix. Absent means Loopflow Light/Dark. A repository's
+`.lf/config.yaml` never sets the theme.
+
+Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
+cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
+are quieter light and charcoal alternatives.
+
+Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
+is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
+A file named like a built-in overrides it. **Customize** on a built-in writes your
+copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
+for an override). **Import file…** copies a theme into Yours, accepting only the
+picker's appearance; a dark file in the Light picker explains itself instead.
+
+```
+background = #171924
+foreground = #cad2ef
+palette = 4=#7aa2f7
+loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+```
+
+Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
+required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
+optional. Preview explains defaults, repeats and omitted settings. Fonts,
+commands, keybindings, includes and theme references are never followed.
+
+Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
+their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
+Source and license notices ship offline with the catalogue.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
@@ -78,6 +130,7 @@ quit. The watcher starts a ci-fix when a recorded landing fails its required
 checks; `lf ci watch --status` shows its last poll and what it started.
 
 ```text
+⌘T          new terminal; split right, then down, alternating
 ⌘D          split right
 ⌘⇧D         split down
 ⌘⌥←/→/↑/↓   focus the visual neighbor
@@ -92,6 +145,32 @@ block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
 Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
+
+Task workspaces start with the Session on the left and Files on the right,
+at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
+**Shell**, and **lf process**. Hidden shells keep running and file drafts stay
+retained. Files starts with its chooser closed. Click the selected path or press
+Command-P in the file pane to search **scratch** and files changed from the
+branch's recorded parent commit. Selection closes the dropdown; pin it to keep
+the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
+Sidebar selection switches the whole
+Task workspace; selections inside a Task can focus its companion.
+Resizing or closing the browser is remembered while the window stays open;
+layouts are not yet restored after quitting the app.
+
+Choose **PR** for a compact GitHub page: status, checks, pending reviewers,
+description and change totals. Expand **Files changed** and individual files to
+read published patches. Refresh updates GitHub data using the signed-in GitHub
+CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
+local uncommitted edits stay in Files.
+
+Hover over or click **Task** in the compact workspace header to reveal Complete,
+Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
+alternate right/down. The main Session's menu switches between **Claude**,
+**Codex**, and **OpenCode**, continuing the same Session with its history.
+**Reset session** starts a fresh primary conversation/process from current Work
+instructions, without replaying the previous conversation; its history remains
+available. Switching or resetting replaces the current provider process.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red
@@ -263,23 +342,45 @@ conversation or terminal title, directory and current reported status. Hovering
 the focused header reveals split right, split down and close; its context menu
 and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
+Terminal surfaces sit inside the rounded edge, so text wraps before the border
+in both single and split panes.
+The enclosing workspace curve follows the pane radius plus its inset, keeping
+the gap even around nested corners.
+The workspace also leaves clearance from the native window's larger lower corners.
+
+Copy selected text with **⌘C**: the pane header briefly confirms the line count,
+without decorating the selected cells. Find navigation briefly emphasizes the
+current match for 160 ms; hiding a pane cancels the cue. Reduce Motion uses
+Find's persistent match styling. Programs that own selection may show their own
+copy confirmation; terminal feedback describes only a terminal-owned copy.
+
+```ini
+# In your Ghostty configuration; reopen Loopflow after editing.
+minimum-contrast = 1
+```
+
+The default is `3`. Set `1` to preserve original colors. Correction moves only
+low-contrast text toward black or white while retaining its alpha and channel
+ordering. It preserves more color than replacing text with black or white, but
+cannot guarantee exact hue or separation of nearly identical colors. Faint text
+may not reach the requested ratio. Graphics, images, transparent backdrops and
+custom postprocessing are outside the opaque-text contrast guarantee.
 
 Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
+Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
+61.8%. New shell splits give 61.8% to the existing pane and 38.2% to the shell.
+Both sides retain usable minimum sizes, including nested splits; small windows
+shrink those minimums together.
 
-Press **⌘K** to search Waves, all planned Tasks, Workflows and Flows in the
-selected repository. Empty search shows recent destinations first; arrows select,
-Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
-The sidebar search remains a filter. Each repository retains up to 20 recent
-destinations for the window. Visited historical Tasks remain in recents after
-leaving their pages; opening one reads its exact identity again. This does not
-search all historical Tasks. Failed reads preserve the workspace and offer Retry.
-If a highlighted row disappears, Return opens the first remaining visible result;
-with no results it does nothing.
+Press **⌘K** to open and focus Find Work in the navigator. Search filters the
+existing Wave/Task rows. Flow and Workflow definitions remain in the repository
+menu; selecting one opens its inspector. Session rename and binding remain in
+the conversation's own controls.
+Failed reads preserve the workspace and offer Retry.
 
-With an unassigned Session selected, choose **Bind to Task…** in ⌘K or beside
-the Session name. Both open the same picker: review the named Task, then choose
+With an unassigned Session selected, choose **Bind to Task…** beside the Session
+name. Review the named Task, then choose
 **Bind permanently**. Opening the picker leaves the conversation and terminal intact.
 
 ```sh
@@ -334,10 +435,10 @@ include interactive provider Sessions and Task human FlowSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-Selecting a Session active in another client opens a pane that explains the situation; nothing is
-stopped until its explicit **Move here**, which stops the other client and
-resumes the Session in that pane. Unsent text typed in the other client is
-lost, and the pane says so before you commit.
+Opening a Task or selecting a Session active in another client shows its conversation
+pane with **Move here**. Clicking it stops the other client and resumes the Session
+in that pane. Unsent text typed in the other client is lost; the pane warns before
+the click. Opening or selecting the Session leaves the other client running.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
 the view: the terminal and its provider client keep running and reopen as left.
@@ -475,6 +576,12 @@ The shared `Loopflow` target contains models, queries, and reusable views. The
 platform behavior. The shared library remains iOS-compatible; there is no iOS
 application target.
 
+## Open Source Licenses
+
+Open **About Loopflow → Open Source Licenses** to read and search bundled notices
+offline. Matching source and rebuild instructions ship inside the app under
+`Contents/Resources/ThirdPartySources`. See [packaging and updates](../third_party/README.md).
+
 ## Build system
 
 `./dev` uses Swift Package Manager and installs to a stable application path
@@ -591,6 +698,11 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+
+Task actions distinguish the running command from confirmation of its updated
+reading. Confirmation expires after ten seconds even while heartbeats arrive;
+an accepted command is never automatically repeated. Refresh readings requests
+fresh observation without repeating the Task action.
 
 The reader's pipes drain off the main actor. Ten seconds without a frame ends
 the reading; cancellation closes stdin, then terminates and reaps only the

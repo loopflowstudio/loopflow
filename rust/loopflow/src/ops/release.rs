@@ -458,33 +458,23 @@ pub fn release_notes(
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
     let resolved_prev_tag = match prev_tag {
-        Some(tag) => tag.to_string(),
+        Some(tag) => Some(tag.to_string()),
         None => notes_base(&main_repo, version, &target)?,
     };
 
     let version = normalize_version(version);
 
     progress.status("Collecting release changes...");
-    let commits = release_commits_since(&main_repo, Some(&resolved_prev_tag), &target)?;
-    let commit_shas = commits
-        .iter()
-        .map(|commit| commit.sha.as_str())
-        .collect::<HashSet<_>>();
-    let prs = merged_prs_between(
-        &main_repo,
-        Some(&resolved_prev_tag),
-        "HEAD",
-        &target,
-        &commit_shas,
-    )?;
+    let changes =
+        collect_changes_between(&main_repo, resolved_prev_tag.as_deref(), "HEAD", &target)?;
 
     progress.status("Generating narrative release notes...");
     run_release_notes_stage(
         &main_repo,
         &version,
-        Some(&resolved_prev_tag),
-        &commits,
-        &prs,
+        resolved_prev_tag.as_deref(),
+        &changes.commits,
+        &changes.merged_prs,
         &target,
         progress,
         &|_| {},
@@ -505,7 +495,7 @@ pub fn preview_release_notes(
     let (repo, target) = resolve_repo_and_target(repo, target_name)?;
     let version = normalize_version(version);
     let base = match prev_tag {
-        Some(tag) => tag.to_string(),
+        Some(tag) => Some(tag.to_string()),
         None => notes_base(&repo, &version, &target)?,
     };
     let tagged_revision = local_tag_sha(&repo, &target_tag(&target, &version))?;
@@ -513,9 +503,10 @@ pub fn preview_release_notes(
         Some(revision) => revision.clone(),
         None => rev_parse(&repo, "HEAD")?,
     };
-    let changes = collect_changes_between(&repo, Some(&base), &revision, &target)?;
+    let changes = collect_changes_between(&repo, base.as_deref(), &revision, &target)?;
+    let range_start = base.as_deref().unwrap_or("repository start");
     progress.status(&format!(
-        "Previewing v{version}: {base}..{revision} ({} commits, {} merged PRs)",
+        "Previewing v{version}: {range_start}..{revision} ({} commits, {} merged PRs)",
         changes.commits.len(),
         changes.merged_prs.len()
     ));
@@ -550,7 +541,7 @@ pub fn preview_release_notes(
         };
     let (context, json) = build_release_notes_context(
         &version,
-        Some(&base),
+        base.as_deref(),
         &changes.commits,
         &changes.merged_prs,
         &target,
@@ -748,7 +739,9 @@ fn release_minor(
     let (repo, target) = resolve_repo_and_target(repo, target_name)?;
     if version_input.trim() != "minor" {
         let version = normalize_version(version_input);
-        if remote_tag_sha(&repo, &target_tag(&target, &version))?.is_some() {
+        if remote_tag_sha(&repo, &target_tag(&target, &version))?.is_some()
+            || latest_tag_optional(&repo, &target)?.is_none()
+        {
             return release_run_with_cron(&repo, &version, target_name, progress, None);
         }
     }
@@ -3821,26 +3814,17 @@ fn generate_release_with_target(
     let latest_tag = latest_tag_optional(repo, target)?;
 
     let version = resolve_version(latest_tag.as_deref(), version_input, target)?;
-    let prev_tag = if latest_tag.is_some() {
-        Some(notes_base(repo, &version, target)?)
-    } else {
-        None
-    };
+    let prev_tag = notes_base(repo, &version, target)?;
 
     progress.status("Collecting release changes...");
-    let commits = release_commits_since(repo, prev_tag.as_deref(), target)?;
-    let commit_shas = commits
-        .iter()
-        .map(|commit| commit.sha.as_str())
-        .collect::<HashSet<_>>();
-    let prs = merged_prs_between(repo, prev_tag.as_deref(), "HEAD", target, &commit_shas)?;
+    let changes = collect_changes_between(repo, prev_tag.as_deref(), "HEAD", target)?;
 
     progress.status("Generating release notes...");
     let (context, _) = build_release_notes_context(
         &version,
         prev_tag.as_deref(),
-        &commits,
-        &prs,
+        &changes.commits,
+        &changes.merged_prs,
         target,
         None,
         0,
@@ -4095,15 +4079,14 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
-fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
+fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<Option<String>> {
     let version = normalize_version(version);
     let _ = bump_version(&version, "patch")?;
-    if is_minor_version(&version) {
-        // Refresh target tags before resolving the previous minor's .0.
-        let _ = latest_tag_optional(repo, target)?;
-        minor_notes_base(repo, &version, target)
+    let latest = latest_tag_optional(repo, target)?;
+    if latest.is_some() && is_minor_version(&version) {
+        minor_notes_base(repo, &version, target).map(Some)
     } else {
-        latest_tag(repo, target)
+        Ok(latest)
     }
 }
 
@@ -4152,15 +4135,6 @@ fn version_from_tag(tag: &str, target: &ReleaseTarget) -> OpsResult<String> {
 
 fn target_tag(target: &ReleaseTarget, version: &str) -> String {
     format!("{}v{version}", target.tag_prefix)
-}
-
-fn latest_tag(repo: &Path, target: &ReleaseTarget) -> OpsResult<String> {
-    latest_tag_optional(repo, target)?.ok_or_else(|| {
-        OpsError::Message(format!(
-            "no previous tag found matching {}; create a tag before running release",
-            tag_glob(target)
-        ))
-    })
 }
 
 fn latest_tag_optional(repo: &Path, target: &ReleaseTarget) -> OpsResult<Option<String>> {
@@ -4227,14 +4201,6 @@ fn collect_changes_between(
         commits,
         merged_prs,
     })
-}
-
-fn release_commits_since(
-    repo: &Path,
-    previous_tag: Option<&str>,
-    target: &ReleaseTarget,
-) -> OpsResult<Vec<ReleaseCommit>> {
-    release_commits_between(repo, previous_tag, "HEAD", target)
 }
 
 fn release_commits_between(

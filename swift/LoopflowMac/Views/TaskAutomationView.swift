@@ -8,6 +8,8 @@ struct TaskAutomationView: View {
     @State private var error: String?
     @State private var busy = false
 
+    @Environment(\.palette) private var palette
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Delivery checks").font(.headline)
@@ -20,13 +22,13 @@ struct TaskAutomationView: View {
                     }
                 }
                 Text("Checks deliveries every minute while this Machine is available. Flow recovery belongs to its caller.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(palette.textSecondary)
                 if let checked = status.lastSuccessAt {
                     Text("Last successful check: \(Date(timeIntervalSince1970: Double(checked)), style: .relative) ago")
                         .font(.caption)
                 }
                 if let lastError = status.lastError {
-                    Text("Last failed check: \(lastError)").font(.caption).foregroundStyle(.secondary)
+                    Text("Last failed check: \(lastError)").font(.caption).foregroundStyle(palette.textSecondary)
                 }
                 ForEach(status.tasks) { task in
                     VStack(alignment: .leading, spacing: 4) {
@@ -46,7 +48,7 @@ struct TaskAutomationView: View {
             } else if error == nil {
                 ProgressView()
             }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
+            if let error { Text(error).foregroundStyle(palette.failure).font(.caption) }
             Button("Refresh") { perform {} }
         }
         .padding(20)

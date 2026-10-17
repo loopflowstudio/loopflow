@@ -269,31 +269,20 @@ struct TaskFlowTests {
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
         #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
 
-        // The compact header keeps position/actions; Overview holds the graph.
+        // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
-        let workflowName = try #require(workflow["name"] as? String)
-        #expect(try find("task-workflow-position").text().string() == "\(workflowName) · demo")
-        #expect(try find("task-workflow-action-4").button().labelView().text().string() == "ship")
-        _ = try find("task-workflow-move")
-        let overview = try find("task-overview").disclosureGroup()
-        #expect(try !overview.isExpanded())
-        #expect(try overview.find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
-            .accessibilityValue().string() == "Current")
         let header = drawn()
-        #expect(header.contains("task-workflow"), "the accessibility tree is readable")
-        #expect(!header.contains("task-workflow-node-demo"), "the graph stays collapsed in Overview")
-        #expect(header.isDisjoint(with: [
-            "work-materials", "work-toggle-materials", "work-toggle-files",
-            "work-current-stage", "task-show-monitor-\(task.id)",
-            "task-flow-processes", "task-work", "task-flow-start",
-        ]))
+        #expect(try find("task-lifecycle-menu").accessibilityValue().string() == "Collapsed")
+        #expect(!header.contains("task-workflow"))
+        #expect(!header.contains("work-task-details"))
+        #expect(panes.layout.allPanes.count == 2)
 
         // One menu adds the Flow process log as a pane beside the Session.
         try find("work-add-flow-log").button().tap()
         try await settle()
         #expect(panes.focusedPane.content == .flowLog(taskId: task.id, location: task.reference.workspace?.identity))
-        #expect(panes.layout.allPanes.count == 2)
+        #expect(panes.layout.allPanes.count == 3)
         // A line per process; its id, graph and steps only when opened.
         model.confirmMachine(try #require(task.reference.workspace?.machineId))
         let log = FlowProcessLog(model: model, taskId: task.id, location: task.reference.workspace?.identity)
@@ -555,10 +544,10 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "template inspection never starts work")
         #expect(surfaces.map(terminalText) == inputBeforeInspection, "disclosure keys never reach a PTY")
 
-        // The Session's Task: its Workflow is the header, with no Flow card or Sessions list.
+        // The Session's Task has compact lifecycle controls without a Workflow bar.
         model.select(.task(id: "issue-review"))
         try await settle(window)
-        _ = try find("task-workflow")
+        _ = try find("task-lifecycle-menu")
         #expect((try? find("task-flow-start")) == nil)
         #expect((try? find("work-materials")) == nil)
         try captureIfRequested(window, name: "task-workspace-native")

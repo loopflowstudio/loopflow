@@ -38,7 +38,8 @@ impl SqliteStore {
     }
 
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let begun: bool = conn.query_row(
             // Checkout membership is preservation evidence even when a
             // conversation has no explicit Task binding or Started timestamp.
@@ -49,7 +50,7 @@ impl SqliteStore {
                  OR EXISTS({})
                  OR EXISTS(SELECT 1 FROM flow_process_steps WHERE flow_lf_process_id IN ({}))",
                 super::task_work::session_ids("?1"),
-                super::task_work::lf_process_ids("?1"),
+                super::task_work::lf_process_ids(&conn, "?1")?,
             ),
             [task.as_str()],
             |row| row.get(0),

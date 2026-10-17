@@ -44,46 +44,24 @@ enum WorkTone {
 
     func ink(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .running: palette.working
-        case .done: palette.success
-        case .waiting: palette.waiting
-        case .failure: palette.failure
         case .stopped: palette.textSecondary
         case .neutral: palette.textTertiary
+        default: style(in: palette).ink
         }
     }
 
-    /// Opaque fill so a tone keeps its hue over a loop tint.
-    func fill(in palette: LoopflowPalette) -> Color {
+    private func style(in palette: LoopflowPalette) -> ThemeTone {
         switch self {
-        case .running: Color(hex: palette.isDark ? 0x2C3E57 : 0xE7EFFA)
-        case .done: Color(hex: palette.isDark ? 0x2D4735 : 0xD6EBD9)
-        case .waiting: Color(hex: palette.isDark ? 0x544321 : 0xF8E3AE)
-        case .failure: Color(hex: palette.isDark ? 0x5A2E2B : 0xFBE6E3)
-        case .stopped: Color(hex: palette.isDark ? 0x3E434A : 0xEEEAE5)
-        case .neutral: .clear
+        case .running: palette.workingTone
+        case .done: palette.successTone
+        case .waiting: palette.waitingTone
+        case .failure: palette.failureTone
+        case .stopped, .neutral: palette.stoppedTone
         }
     }
-
-    func stroke(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .running, .failure, .stopped: ink(in: palette)
-        case .done: Color(hex: palette.isDark ? 0x5E8E6A : 0x9CC4A3)
-        case .waiting: Color(hex: palette.isDark ? 0x9A7A36 : 0xDDB763)
-        case .neutral: Color(hex: palette.isDark ? 0x56606B : 0xD6CCC0)
-        }
-    }
-
-    /// Text on `fill`.
-    func text(in palette: LoopflowPalette) -> Color {
-        switch self {
-        case .running: Color(hex: palette.isDark ? 0xC9DCF5 : 0x1C4480)
-        case .done: Color(hex: palette.isDark ? 0xC4E6CC : 0x28523A)
-        case .waiting: Color(hex: palette.isDark ? 0xF4DDA6 : 0x6F4C0C)
-        case .failure: Color(hex: palette.isDark ? 0xF8CBC5 : 0x8A2A22)
-        case .stopped, .neutral: Color(hex: palette.isDark ? 0xD2CBC3 : 0x5F5752)
-        }
-    }
+    func fill(in palette: LoopflowPalette) -> Color { self == .neutral ? .clear : style(in: palette).fill }
+    func stroke(in palette: LoopflowPalette) -> Color { style(in: palette).stroke }
+    func text(in palette: LoopflowPalette) -> Color { style(in: palette).text }
 }
 
 extension TaskExecutionState {
@@ -141,27 +119,30 @@ private struct WorkPanel: ViewModifier {
     }
 }
 
-/// Ordinary actions stay neutral; only a deliberately emphasized action uses burgundy.
+/// Ordinary actions stay neutral; a deliberately emphasized action uses the theme accent.
 struct WorkOutlineButtonStyle: ButtonStyle {
     var emphasized = false
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
+    @State private var hovering = false
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typography.body(12.5))
-            .foregroundStyle(isEnabled ? (emphasized ? palette.emphasisInk : palette.actionInk) : palette.textTertiary)
+            .foregroundStyle(isEnabled ? (emphasized ? palette.accentInk : palette.actionInk) : palette.textTertiary)
             .padding(.horizontal, 11)
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(configuration.isPressed ? palette.actionHover : palette.surface)
+                    .fill(configuration.isPressed ? palette.surfaceElement : (hovering ? palette.surfaceMuted : palette.surface))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(isEnabled && emphasized ? palette.emphasisInk : palette.borderStrong, lineWidth: 1)
+                    .strokeBorder(isEnabled && emphasized ? palette.accentInk : palette.borderStrong, lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 6))
+            .onHover { hovering = $0 }
             .workFocusRing()
     }
 }
@@ -287,12 +268,6 @@ extension ProgramStatusState {
         case .idle, .clear: .neutral
         }
     }
-}
-
-// Ink on Paper belongs to Work destinations; file selection keeps its own treatment.
-extension LoopflowPalette {
-    var workSelectedFill: Color { Color(hex: 0x7A333D) }
-    var workSelectedText: Color { Color(hex: 0xFFFAF3) }
 }
 
 extension View {

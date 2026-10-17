@@ -449,10 +449,10 @@ List Sessions
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--all` | Include waiting steps from every repository on this machine Default: false. |
+| `--all` | Include Sessions from every repository on this machine Default: false. |
 | `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
 | `--history` | Include completed conversations and historical reviews Default: false. |
-| `--waiting` | Only conversations waiting on you Default: false. |
+| `--available` | Only conversations available for your input Default: false. |
 | `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
 | `--offset` | offset Default: 0. |
 | `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |
@@ -638,6 +638,8 @@ Establish or print this repository's selected planning identity
 | Argument | What it does |
 |---|---|
 | `--bind` | Associate this checkout with a repository identity, retaining prior IDs |
+| `--relocate` | Reconnect retained Work after a move predating its Git locator |
+| `--path` | Print the selected repository’s current local directory |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

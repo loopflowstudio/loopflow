@@ -936,9 +936,17 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     match cmd {
-        RepoCommand::Identity { bind, json } => {
-            crate::lf::commands::work_route::identity(bind.as_ref(), *json)
-        }
+        RepoCommand::Identity {
+            bind,
+            relocate,
+            path,
+            json,
+        } => crate::lf::commands::work_route::identity(
+            bind.as_ref(),
+            relocate.as_ref(),
+            *path,
+            *json,
+        ),
 
         RepoCommand::Comment { message, .. } => crate::lf::commands::waves::comment(None, message),
         RepoCommand::Planning { cmd } => crate::lf::commands::planning::run(cmd),

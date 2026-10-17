@@ -202,6 +202,10 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
+OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
+the terminal. Full stderr is retained in that private `opencode.stderr.log` file
+beside the Session's capture. Read or tail it from another terminal; native
+errors and retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.
@@ -961,8 +965,8 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you. In Desktop,
-a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+`--available` narrows that selection to conversations available for your input. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Available,
 as does idle for an interactive Session. Working, done, error and explicit clear
 suppress the quiet-time inference for that AgentProcess. A blocked child
 still counts when its parent reports working.
@@ -1042,6 +1046,34 @@ to the remote login directory. `--forward-agent` requires `--machine`.
 or Tasks. `--repository ID` selects that registered plan's local path, including on
 an explicitly selected Machine. Neither operation joins plans by code remote or
 changes a Machine's saved repository.
+
+```sh
+lf repo identity                         # enroll before moving the directory
+mv ../project ../renamed-project
+cd ../renamed-project
+lf repo identity                         # reconnect the same Work
+```
+
+The Git common directory retains a Machine-scoped locator. Reopening a moved
+checkout repairs Git's linked-worktree pointers and updates current Wave, Task
+and Session addresses together. Existing sibling worktree names and unpublished
+edits stay in place. Process paths and provider history retain their original
+values. Desktop reuses the repository's window and Session surfaces.
+
+After upgrading, a retained local Task's linked checkout and branch can establish
+the original Git directory automatically. Otherwise, establish its identity with
+`lf repo identity --bind repo_ID` before moving it. If it has already moved, run
+`lf repo identity --relocate repo_ID` from the new location. Ambiguous or reused
+paths require explicit recovery. A copied Git directory cannot
+replace its still-present source. Remote URLs and directory names never merge Work.
+Open the moved checkout before reusing its old path. Experimental Machines keep separate locators; disposable data
+clones observe copied addresses without claiming the source checkout.
+
+Provider callbacks launched with this version retain their launch description
+in the Machine and resolve moved references by repository identity. Already
+running older providers can retain old hook paths; this does not rewrite their
+environment or interrupt them. An installed Desktop update still requires the
+supported installation handoff; source tests do not prove that live handoff.
 
 Known Task launches resolve recorded checkout Machine before delegation. The
 cross-machine path requires the same repository plan to be explicitly bound at

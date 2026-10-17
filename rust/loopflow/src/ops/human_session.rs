@@ -277,7 +277,7 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// Waiting on a person, judged from current stream or terminal reports; absent when it is
+    /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
     pub program_status: Option<crate::program_status::Records>,
@@ -310,7 +310,7 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAttention {
-    Waiting,
+    Available,
 }
 
 fn session_state(session: &crate::session::SessionSummary) -> SessionState {
@@ -322,7 +322,7 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
 }
 
 fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    session.waiting.then_some(SessionAttention::Waiting)
+    session.available.then_some(SessionAttention::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -701,6 +701,7 @@ pub(crate) async fn open(
                 crate::config::agent_override().as_deref(),
             ) {
                 mode.require_action(surface(store, session).await?.state)?;
+                drop(progress);
                 import(store, &session.id, &agent).await?;
                 let session = store
                     .session(&session.id)
@@ -878,13 +879,14 @@ async fn connect_live_codex(
             store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: Some(thread), attachment: Some(attachment.clone()), account_id: provider.account_id.clone(),
         };
         let empty = connection.recover_history(Path::new(&endpoint)).await?;
+        let (_, manifest) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(), &session.artifact_key,
+        )?;
+        let context = manifest.process.as_ref().and_then(|request| request.conversation_context.clone());
         let initial = if empty {
-            let (_, manifest) = crate::session_record::resolve_manifest(
-                &crate::store::lf_home_dir(), &session.artifact_key,
-            )?;
             manifest.process.map(|request| request.codex_initial_input()).filter(|input| !input.is_empty())
         } else { None };
-        let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput { params: None, text: initial }));
+        let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput { params: None, text: initial, context }));
         let upstream = PathBuf::from(&endpoint);
         let relay = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();
@@ -1871,6 +1873,11 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(session.state, super::SessionState::Unknown);
+        assert_eq!(session.attention, Some(super::SessionAttention::Available));
+        assert_eq!(
+            serde_json::to_value(&session).unwrap()["attention"],
+            "available"
+        );
         assert!(matches!(
             session.flow_membership,
             super::SessionFlowMembership::Step {
@@ -1897,7 +1904,7 @@ mod tests {
             agent_process_id: None,
             primary_scope: None,
             agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
-            waiting: false,
+            available: false,
             terminal_id: None,
             task_terminal: false,
             task_primary: false,

@@ -568,7 +568,10 @@ fn claude_terminal_delivers_large_first_turn_without_prompt_arguments() {
 fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
     let repo = TestRepo::new();
     repo.create_branch("launcher");
-    let task_checkout = repo.create_named_worktree("managed");
+    let task_checkout = repo
+        .create_named_worktree("managed")
+        .canonicalize()
+        .unwrap();
     let home = tempfile::tempdir().unwrap();
     let machine = home.path().join("machine");
     fs::create_dir(&machine).unwrap();

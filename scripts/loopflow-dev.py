@@ -54,7 +54,7 @@ DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
-GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf3.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -248,8 +248,19 @@ def cmd_ghostty_build() -> int:
             "-Dtest-filter=program status",
             "-Dtest-filter=OSC 7501",
             "-Dtest-filter=ghostty.h Action.Key",
+            "-Dtest-filter=c_get:",
+            "-Dtest-filter=terminal contrast",
+            "-Dtest-filter=terminal feedback",
+            "-Dtest-filter=renderer.cell",
         ],
         cwd=source,
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+
+    result = run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "check_ghostty_shaders.py"), str(source)],
         check=False,
     )
     if result.returncode != 0:
@@ -274,6 +285,16 @@ def cmd_ghostty_build() -> int:
         return result.returncode
 
     _normalize_ghostty_library(local_framework)
+    run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/third_party.py"),
+            "package",
+            str(local_framework),
+            "--framework",
+            str(local_framework),
+        ]
+    )
 
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.unlink(missing_ok=True)
@@ -292,6 +313,9 @@ def cmd_ghostty_build() -> int:
     if result.returncode != 0:
         return result.returncode
 
+    run(
+        [sys.executable, str(REPO_ROOT / "scripts/third_party.py"), "verify-archive", str(artifact)]
+    )
     checksum = run_capture(["swift", "package", "compute-checksum", str(artifact)])
     if checksum.returncode != 0:
         print(checksum.stderr, file=sys.stderr)
@@ -610,6 +634,15 @@ def _install_dev_app() -> None:
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
+
+    run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts/third_party.py"),
+            "package",
+            str(app_dir / "Resources"),
+        ]
+    )
 
     identity = _ensure_dev_signing_identity()
     entitlements = SWIFT_DIR / "LoopflowMac" / "Loopflow.entitlements"

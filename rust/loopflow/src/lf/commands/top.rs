@@ -80,6 +80,7 @@ pub struct ProcessPruneReport {
     pub removed_process_receipts: u32,
     pub orphaned_agent_process_groups: Vec<u32>,
     pub reaped_agent_process_groups: u32,
+    pub agent_process_records: Vec<crate::harness::agent_process::AgentProcessCleanup>,
     pub errors: u32,
 }
 
@@ -169,6 +170,7 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         removed_process_receipts: 0,
         orphaned_agent_process_groups: agents.orphaned,
         reaped_agent_process_groups: agents.reaped,
+        agent_process_records: agents.records,
         errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
     };
     if !dry_run {
@@ -503,6 +505,12 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
                 .map(u32::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
+        ));
+    }
+    for record in &report.agent_process_records {
+        output.push_str(&format!(
+            "{}: {} — {}\n",
+            record.id, record.action, record.reason
         ));
     }
     if !report.dry_run {

@@ -191,14 +191,14 @@ struct WorkNavigationProofTests {
             let suffix = "\(Int(size.width))x\(Int(size.height))"
             let navigator = try view.inspect().find(WorkNavigator.self).actualView()
             let outline = try navigator.inspect()
-            // Full-width Task list under the selected Wave breadcrumb.
+            // The Wave remains in the index while its Tasks expand beneath it.
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
             }.count == 8)
             #expect(try outline.findAll(ViewType.Button.self) {
                 (try? $0.accessibilityIdentifier().hasPrefix("work-wave-wave-")) == true
-            }.count == 0)
-            _ = try outline.find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-0")
+            }.count == model.visibleWork.waves.count)
+            _ = try outline.find(viewWithAccessibilityIdentifier: "work-wave-wave-0")
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
             // Conversations do not add numeric controls to Work navigation.
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0") }

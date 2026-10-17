@@ -59,6 +59,15 @@ struct WorkspacePanesView: View {
     }
 }
 
+enum PaneGeometry {
+    // Keep pane outlines inside the native window's larger lower corners.
+    static let windowInset: CGFloat = 10
+    static let spacing: CGFloat = 6
+    static let cornerRadius = CornerRadius.md
+    // Nested curves share a center at the workspace's lower corners.
+    static let workspaceCornerRadius = cornerRadius + spacing
+}
+
 private struct MultiplexerView: View {
     @Environment(\.palette) private var palette
     let layout: LayoutNode
@@ -88,9 +97,8 @@ private struct MultiplexerView: View {
                 )
             }
         }
-        .padding(6)
+        .padding(PaneGeometry.spacing)
         .background(palette.surfaceMuted)
-        .environment(\.colorScheme, .dark)
         .accessibilityIdentifier("sessions-multiplexer")
     }
 }
@@ -123,30 +131,26 @@ private struct MultiplexerNodeView: View {
         case .split(let axis, let first, let second, let ratio):
             return AnyView(
                 GeometryReader { geometry in
-                    if axis == .vertical {
-                        HStack(spacing: 0) {
-                            _child(first)
-                                .frame(width: max(120, geometry.size.width * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.width,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            _child(first)
-                                .frame(height: max(100, geometry.size.height * ratio - 3))
-                            SplitDivider(
-                                axis: axis,
-                                ratio: ratio,
-                                extent: geometry.size.height,
-                                update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) }
-                            )
-                            _child(second)
-                        }
+                    let vertical = axis == .vertical
+                    let extent = vertical ? geometry.size.width : geometry.size.height
+                    let firstSize = first.minimumPaneSize
+                    let secondSize = second.minimumPaneSize
+                    let sizing = SplitSizing(extent: extent,
+                        firstMinimum: vertical ? firstSize.width : firstSize.height,
+                        secondMinimum: vertical ? secondSize.width : secondSize.height)
+                    let displayedRatio = sizing.constrain(ratio)
+                    let firstExtent = max(0, extent * displayedRatio - sizing.divider / 2)
+                    let secondExtent = max(0, extent - firstExtent - sizing.divider)
+                    let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                    stack {
+                        _child(first)
+                            .frame(width: vertical ? firstExtent : nil, height: vertical ? nil : firstExtent)
+                            .clipped()
+                        SplitDivider(axis: axis, ratio: displayedRatio, sizing: sizing,
+                            update: { store.updateRatio(between: first.firstPane.id, and: second.firstPane.id, ratio: $0) })
+                        _child(second)
+                            .frame(width: vertical ? secondExtent : nil, height: vertical ? nil : secondExtent)
+                            .clipped()
                     }
                 }
             )
@@ -163,40 +167,93 @@ private struct MultiplexerNodeView: View {
     }
 }
 
+/// Minimums follow the visible split tree; short windows shrink them together.
+extension LayoutNode {
+    var minimumPaneSize: CGSize {
+        switch self {
+        case .leaf: return CGSize(width: 240, height: 140)
+        case .split(let axis, let first, let second, _):
+            let a = first.minimumPaneSize, b = second.minimumPaneSize
+            if axis == .vertical {
+                return CGSize(width: a.width + b.width + PaneGeometry.spacing, height: max(a.height, b.height))
+            } else {
+                return CGSize(width: max(a.width, b.width), height: a.height + b.height + PaneGeometry.spacing)
+            }
+        }
+    }
+}
+
+struct SplitSizing {
+    let extent: CGFloat
+    let firstMinimum: CGFloat
+    let secondMinimum: CGFloat
+    var divider: CGFloat { min(PaneGeometry.spacing, max(0, extent)) }
+
+    func constrain(_ ratio: Double) -> Double {
+        guard extent > 0 else { return 0.5 }
+        let available = max(0, extent - divider)
+        let scale = min(1, available / max(1, firstMinimum + secondMinimum))
+        let lower = (firstMinimum * scale + divider / 2) / extent
+        let upper = 1 - (secondMinimum * scale + divider / 2) / extent
+        return min(max(ratio, lower), max(lower, upper))
+    }
+
+    func snapped(_ ratio: Double) -> Double {
+        let bounded = constrain(ratio)
+        for target in [1 - LayoutNode.goldenRatio, LayoutNode.goldenRatio] {
+            if abs(bounded - target) * extent <= 10, abs(constrain(target) - target) < 0.000001 {
+                return target
+            }
+        }
+        return bounded
+    }
+}
+
 struct SplitDivider: View {
     let axis: SplitAxis
     let ratio: Double
-    let extent: CGFloat
+    let sizing: SplitSizing
     let update: (Double) -> Void
-
+    @Environment(\.palette) private var palette
     @State private var dragStart: Double?
+    @State private var hovering = false
 
     var body: some View {
         Rectangle()
-            .fill(Color.clear)
-            .frame(
-                width: axis == .vertical ? 6 : nil,
-                height: axis == .horizontal ? 6 : nil
-            )
+            .fill(hovering || dragStart != nil ? palette.borderActive : .clear)
+            .frame(width: axis == .vertical ? sizing.divider : nil,
+                   height: axis == .horizontal ? sizing.divider : nil)
             .contentShape(Rectangle())
+            .onHover { inside in
+                guard hovering != inside else { return }
+                hovering = inside
+                if inside { (axis == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() }
+                else { NSCursor.pop() }
+            }
+            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
                         let start = dragStart ?? ratio
                         if dragStart == nil { dragStart = ratio }
-                        let delta = axis == .vertical
-                            ? value.translation.width
-                            : value.translation.height
-                        guard extent > 0 else { return }
-                        update(start + Double(delta / extent))
+                        let delta = axis == .vertical ? value.translation.width : value.translation.height
+                        guard sizing.extent > 0 else { return }
+                        update(sizing.snapped(start + Double(delta / sizing.extent)))
                     }
                     .onEnded { _ in dragStart = nil }
             )
+            .accessibilityLabel(axis == .vertical ? "Resize panes horizontally" : "Resize panes vertically")
+            .accessibilityValue("\(Int(ratio * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                update(sizing.constrain(ratio + (direction == .increment ? 0.02 : -0.02)))
+            }
     }
 }
 
 struct SessionPaneView: View {
+    @Environment(\.theme) private var theme
     @State private var shellError: String?
+    @State private var changingSession = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
     let isFocused: Bool
@@ -210,6 +267,7 @@ struct SessionPaneView: View {
     private var hover: PaneHover { workspace.hover }
     @State private var bellRinging = false
     @State private var terminalTitle: String?
+    @State private var copyConfirmation: String?
 
     private var hovering: Bool { hover.paneId == pane.id }
 
@@ -228,28 +286,28 @@ struct SessionPaneView: View {
         VStack(spacing: 0) {
             if showsStrip {
                 strip
-                Rectangle().fill(TerminalPalette.divider).frame(height: 1)
+                Rectangle().fill(theme.palette.border).frame(height: 1)
             }
             content
+                // Reserve the rounded edge before Ghostty measures its surface.
+                .padding(pane.terminal == nil ? 0 : PaneGeometry.cornerRadius)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(TerminalPalette.background)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-        .environment(\.colorScheme, .dark)
+        .background(theme.terminal.background.color)
+        .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
         // Retained pane selection is not proof of native keyboard focus.
         .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .strokeBorder(isFocused ? LoopflowPalette.dark.selectionEdge : TerminalPalette.divider,
-                              lineWidth: isFocused ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
+                .strokeBorder(isFocused ? theme.palette.borderStrong : theme.palette.border, lineWidth: 1)
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
+        .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
-        .alert("Could not open shell", isPresented: Binding(
+        .alert("Could not change pane", isPresented: Binding(
             get: { shellError != nil }, set: { if !$0 { shellError = nil } }
         )) {
             Button("OK") { shellError = nil }
@@ -264,12 +322,18 @@ struct SessionPaneView: View {
                   update.terminal == _terminalIdentity else { return }
             terminalTitle = sessions.surfaces.title(for: update.terminal)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .ghosttyCopyConfirmation)) { notification in
+            guard let terminal = _terminalIdentity,
+                  sessions.surfaces.ownsCopyConfirmation(notification, terminal: terminal) else { return }
+            copyConfirmation = notification.userInfo?["message"] as? String
+        }
         .onChange(of: isFocused) { _, focused in
             if focused { bellRinging = false }
         }
-        .onChange(of: _terminalIdentity) { _, _ in
+        .onChange(of: pane.incarnation) { _, _ in
             bellRinging = false
             terminalTitle = nil
+            copyConfirmation = nil
         }
     }
 
@@ -278,32 +342,50 @@ struct SessionPaneView: View {
     private var strip: some View {
         HStack(spacing: 8) {
             if let tone = programTone {
-                Circle().fill(tone.ink(in: .dark)).frame(width: 6, height: 6)
+                Circle().fill(tone.ink(in: theme.palette)).frame(width: 6, height: 6)
                     .accessibilityHidden(true)
             }
-            Label(programHeading.name, systemImage: programHeading.symbol)
-                .font(Typography.body(11)).fontWeight(.semibold)
-                .foregroundStyle(TerminalPalette.foreground)
-                .fixedSize()
-                .accessibilityIdentifier("pane-program-\(pane.id)")
+            Menu {
+                paneContentChoices
+            } label: {
+                Label(programHeading.name, systemImage: programHeading.symbol)
+                    .font(Typography.body(11)).fontWeight(.semibold)
+                    .foregroundStyle(theme.palette.text)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .disabled(changingSession)
+            .help("Choose this Session's agent or open a companion pane")
+            .accessibilityIdentifier("pane-program-\(pane.id)")
+            if let session = primarySession {
+                stripButton("arrow.clockwise", label: "Reset session", id: "pane-reset-session",
+                    help: "Start fresh with current Work context. Keeps history; discards unsent input.",
+                    disabled: changingSession) { changeSession(session, agent: nil) }
+            }
             Text(programHeading.context)
-                .font(Typography.code(11)).foregroundStyle(TerminalPalette.dim)
+                .font(Typography.code(11)).foregroundStyle(theme.palette.textSecondary)
                 .lineLimit(1).truncationMode(.middle)
                 .help(programHeading.detail)
                 .accessibilityIdentifier("pane-context-\(pane.id)")
             if let status = _programStatus, status.summary != nil {
                 ProgramStatusLabel(status: status)
-                    .environment(\.palette, LoopflowPalette.dark)
             }
             if let error = _programStatusSurface?.observationError {
                 Image(systemName: "exclamationmark.circle")
                     .help(error).accessibilityLabel(error)
             }
             Spacer(minLength: 8)
+            if let copyConfirmation {
+                Text(copyConfirmation)
+                    .font(Typography.body(11))
+                    .foregroundStyle(theme.palette.text)
+                    .lineLimit(1)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier("terminal-copy-confirmation")
+            }
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(LoopflowPalette.dark.waiting)
+                    .foregroundStyle(theme.palette.waiting)
                     .accessibilityLabel("Session ready")
             }
             if isFocused && hovering {
@@ -336,6 +418,87 @@ struct SessionPaneView: View {
     }
 
     @ViewBuilder
+    private var paneContentChoices: some View {
+        if let session = primarySession {
+            Section("Session agent") {
+                ForEach(["claude", "codex", "opencode"], id: \.self) { agent in
+                    Button {
+                        changeSession(session, agent: agent)
+                    } label: {
+                        Label(agent == "opencode" ? "OpenCode" : agent.capitalized,
+                              systemImage: session.record.provider == agent ? "checkmark" : "bubble.left")
+                    }
+                    .disabled(session.record.provider == agent)
+                    .help("Continue this Session with \(agent). Replaces the current process; unsent input is lost.")
+                }
+            }
+            Divider()
+        }
+        if let taskId = paneTaskId {
+            ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
+                Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
+                    let content = PaneContent.files(taskId: taskId, location: pane.content.location,
+                        execution: pane.executionLocation)
+                    do {
+                        let files = try workspace.files(for: content, task: model.task(id: taskId)?.task, query: sessions.query)
+                        files.page = page
+                        try workspace.selectContent(content, in: pane, containsSession: !paneSessions.isEmpty)
+                    } catch { shellError = error.localizedDescription }
+                }
+            }
+            Button("lf process", systemImage: "list.bullet.rectangle") {
+                selectContent(.flowLog(taskId: taskId, location: pane.content.location,
+                    execution: pane.executionLocation))
+            }
+        }
+        Button("Shell", systemImage: "terminal") {
+            selectContent(.shell(location: pane.content.location, execution: pane.executionLocation))
+        }
+    }
+
+    private func selectContent(_ content: PaneContent) {
+        do { try workspace.selectContent(content, in: pane, containsSession: !paneSessions.isEmpty) }
+        catch { shellError = error.localizedDescription }
+    }
+
+    private var primarySession: SessionItem? {
+        guard paneSessions.count == 1, let session = paneSessions.first,
+              session.record.taskPrimary || session.record.primaryScope != nil else { return nil }
+        return session
+    }
+
+    private var paneTaskId: String? {
+        switch pane.content {
+        case .files(let task, _, _), .flowLog(let task, _, _): return task
+        default:
+            if let work = primarySession?.record.work, work.kind == .task { return work.id }
+            return workspace.key.kind == .task ? workspace.key.id : nil
+        }
+    }
+
+    private func changeSession(_ session: SessionItem, agent: String?) {
+        changingSession = true
+        Task { @MainActor in
+            defer { changingSession = false }
+            do {
+                let record: SessionRecord
+                if let agent {
+                    record = try await sessions.switchProvider(session.id, to: agent)
+                } else {
+                    record = try await sessions.reset(session.id)
+                }
+                guard store.layout.pane(for: pane.id)?.incarnation == pane.incarnation else { return }
+                store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
+                    execution: pane.executionLocation))
+                workspace.presentation.selectedSessionId = record.id
+                if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
+                    model.navigation.selectedSessionId = record.id
+                }
+            } catch { shellError = error.localizedDescription }
+        }
+    }
+
+    @ViewBuilder
     private var paneActions: some View {
         Button("Split right (⌘D)") { split(.vertical) }
         Button("Split down (⌘⇧D)") { split(.horizontal) }
@@ -354,12 +517,7 @@ struct SessionPaneView: View {
         catch { shellError = error.localizedDescription }
     }
 
-    private func closePane() {
-        if case .shell = pane.content {
-            if let terminal = pane.terminal { sessions.surfaces.release(terminal) }
-        }
-        store.close(pane.id)
-    }
+    private func closePane() { workspace.closePane(pane.id) }
 
     /// One strip glyph with a hit target larger than its symbol.
     private func stripButton(
@@ -369,7 +527,7 @@ struct SessionPaneView: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 11))
-                .foregroundStyle(TerminalPalette.dim)
+                .foregroundStyle(theme.palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
         }
@@ -410,7 +568,6 @@ struct SessionPaneView: View {
                     _terminal(item: item, surface: surface)
                 } else {
                     _sessionPlaceholder(item)
-                        .environment(\.colorScheme, .dark)
                 }
             } else {
                 emptyWorkspace
@@ -447,7 +604,7 @@ struct SessionPaneView: View {
             switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
             case .success(let files):
                 TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                    checkoutBase: task?.reference.workspace?.baseCommit)
+                    checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
                     .environment(\.colorScheme, .light)
                     .simultaneousGesture(TapGesture().onEnded { focusPane() })
             case .failure(let error):
@@ -460,25 +617,25 @@ struct SessionPaneView: View {
     private var emptyWorkspace: some View {
         if workspace.openingConversation {
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
             ContentUnavailableView {
                 Label("No Task conversation open", systemImage: "bubble.left")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text(workspace.conversationError == nil
                     ? "Open this Task from the sidebar to return to its conversation."
                     : "The conversation could not open. Retry the opening above.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             }
         } else {
             ContentUnavailableView {
                 Label("No session open", systemImage: "terminal")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text("Open a conversation or a shell in this Work.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 Button {
                     do { try workspace.newShell() }
@@ -487,7 +644,7 @@ struct SessionPaneView: View {
                     Label("New shell", systemImage: "terminal")
                 }
                 .buttonStyle(.bordered)
-                .tint(TerminalPalette.foreground)
+                .tint(theme.palette.text)
                 .accessibilityIdentifier("sessions-empty-new-shell")
             }
         }
@@ -496,20 +653,20 @@ struct SessionPaneView: View {
     /// The pane a Session occupies before its terminal exists here. Each state
     /// explains itself and carries its one explicit next action.
     @ViewBuilder
-    private func _sessionPlaceholder(_ item: SessionItem) -> some View {
+    func _sessionPlaceholder(_ item: SessionItem) -> some View {
         switch item.state {
         case .elsewhere:
             _elsewherePlaceholder(item)
         case .opening, .prepared:
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Session terminal ended").foregroundStyle(TerminalPalette.foreground)
+                Text("Session terminal ended").foregroundStyle(theme.palette.text)
                 ScrollView {
                     Text(output).font(.system(.body, design: .monospaced))
-                        .foregroundStyle(TerminalPalette.foreground).textSelection(.enabled)
+                        .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 openButton(item, retrying: true)
@@ -517,24 +674,24 @@ struct SessionPaneView: View {
         case .failed(let message):
             ContentUnavailableView {
                 Label("Session failed to open", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text(message)
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 openButton(item, retrying: true)
             }
         case .pending where workspace.openingConversation:
             ProgressView("Opening conversation…")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
             ContentUnavailableView {
                 Label("Not running here", systemImage: "terminal")
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .foregroundStyle(theme.palette.text)
             } description: {
                 Text("This Session has no live terminal in this pane yet.")
-                    .foregroundStyle(TerminalPalette.dim)
+                    .foregroundStyle(theme.palette.textSecondary)
             } actions: {
                 openButton(item, retrying: false)
             }
@@ -552,8 +709,8 @@ struct SessionPaneView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .tint(TerminalPalette.foreground)
-            .foregroundStyle(TerminalPalette.foreground)
+            .tint(theme.palette.text)
+            .foregroundStyle(theme.palette.text)
             .disabled(action.unavailableReason != nil)
             .help(action.unavailableReason ?? action.help)
             .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
@@ -566,7 +723,7 @@ struct SessionPaneView: View {
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
         ContentUnavailableView {
             Label("Active in another terminal", systemImage: "rectangle.on.rectangle")
-                .foregroundStyle(TerminalPalette.foreground)
+                .foregroundStyle(theme.palette.text)
         } description: {
             Text(
                 """
@@ -575,7 +732,7 @@ struct SessionPaneView: View {
                 It keeps running there until you move it.
                 """
             )
-            .foregroundStyle(TerminalPalette.dim)
+            .foregroundStyle(theme.palette.textSecondary)
         } actions: {
             if let action = item.record.action(.moveHere) {
                 VStack(spacing: Spacing.sm) {
@@ -586,8 +743,8 @@ struct SessionPaneView: View {
                         Label(action.label, systemImage: "arrow.down.forward.square")
                     }
                     .buttonStyle(.bordered)
-                    .tint(TerminalPalette.foreground)
-                    .foregroundStyle(TerminalPalette.foreground)
+                    .tint(theme.palette.text)
+                    .foregroundStyle(theme.palette.text)
                     .disabled(action.unavailableReason != nil)
                     .help(action.unavailableReason ?? action.help)
                     .accessibilityLabel("Move session here")
@@ -595,7 +752,7 @@ struct SessionPaneView: View {
                     .accessibilityIdentifier("session-move-here-\(item.id)")
                     Text("Moving stops the other client. Unsent text typed there is lost.")
                         .font(Typography.caption(9))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
             }
         }
@@ -609,7 +766,7 @@ struct SessionPaneView: View {
            let terminal = pane.terminal {
             GhosttyTerminalView(
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
-                argv: surface.openArgv,
+                argv: item.launchArguments,
                 terminal: terminal,
                 surfacePool: sessions.surfaces,
                 isFocused: isFocused,
@@ -620,7 +777,7 @@ struct SessionPaneView: View {
                 onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
                 onFocus: focusPane
             )
-            .id(surface.id)
+            .id(item.launchId)
         } else {
             Text("Session location unavailable")
         }
@@ -639,7 +796,7 @@ struct SessionPaneView: View {
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
         case .flowLog: "Flow processes"
-        case .files: "Files"
+        case .files(let taskId, _, _): workspace.browserPage(for: taskId).rawValue
         }
     }
 
@@ -649,7 +806,7 @@ struct SessionPaneView: View {
         case .session: "Session"
         case .shell: "Shell"
         case .flowLog: "Flow processes"
-        case .files: "Files"
+        case .files(let taskId, _, _): workspace.browserPage(for: taskId).rawValue
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.record.provider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,

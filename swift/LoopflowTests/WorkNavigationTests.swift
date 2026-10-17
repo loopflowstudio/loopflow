@@ -1,4 +1,5 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import SwiftUI
 import Testing
@@ -9,6 +10,78 @@ import ViewInspector
 @Suite("Unified Work and Session navigation")
 @MainActor
 struct WorkNavigationTests {
+    @Test("Navigation starts closed at the repository; chooser and pinned sidebar preserve panes")
+    func closedChooserAndPinnedSidebar() async throws {
+        let model = try model()
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let view = SessionsContentView(model: model, repoPath: "/src/loopflow", workspaces: registry,
+            machineId: fixtureMachineId, repository: "repo", query: RegistryQuery { _, _ in "{}" })
+        let rootKey = try #require(registry.selectedWork)
+        let root = try #require(registry.retained(rootKey))
+        let layout = root.multiplexer.layout
+        let picker = try view.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
+        #expect(try picker.accessibilityValue().string() == "loopflow")
+        #expect(!model.navigation.showsNavigator)
+        try picker.button().tap()
+        #expect(model.navigation.palette == .search)
+        #expect(root.multiplexer.layout == layout)
+        let chooser = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(button: "loopflow")
+        }
+        #expect(throws: Never.self) {
+            try chooser.inspect().find(viewWithAccessibilityIdentifier: "work-search")
+        }
+        let pin = try chooser.inspect().find(WorkGlyphButton.self).actualView()
+        try pin.inspect().find(ViewType.Button.self).tap()
+        #expect(model.navigation.showsNavigator)
+        #expect(model.navigation.palette == nil)
+        model.navigation.resizeSidebar(460, availableWidth: 1200)
+        model.select(.wave(id: "wave-1"))
+        #expect(model.navigation.showsNavigator)
+        model.navigation.toggleNavigator()
+        #expect(!model.navigation.showsNavigator)
+        model.navigation.toggleNavigator()
+        #expect(model.navigation.showsNavigator)
+        #expect(model.navigation.sidebarWidth == 460)
+        #expect(root.multiplexer.layout == layout)
+    }
+
+    @Test("Repo and Wave selections dismiss temporary navigation and preserve pinned navigation", arguments: [false, true])
+    func selectingWorkClosesDropdown(pinned: Bool) async throws {
+        let model = try model()
+        await model.refresh()
+        model.navigation.showsNavigator = pinned
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        for repository in [false, false, true, true] {
+            model.navigation.palette = .search
+            if repository {
+                try navigator.inspect().find(button: "loopflow").tap()
+            } else {
+                try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
+            }
+            #expect(model.navigation.palette == nil)
+            #expect(model.navigation.showsNavigator == pinned)
+        }
+        model.navigation.palette = .search
+        model.setRepoPath("/src/loopflow")
+        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.showsNavigator == pinned)
+    }
+
+    @Test("Navigation shortcuts leave Escape and extra-modifier provider shortcuts alone")
+    func navigationShortcutOwnership() {
+        #expect(WorkNavigationShortcut(characters: "k", modifiers: .command) == .search)
+        #expect(WorkNavigationShortcut(characters: "S", modifiers: [.command, .control, .capsLock]) == .toggleSidebar)
+        for modifiers: NSEvent.ModifierFlags in [[], [.control], [.command, .shift], [.command, .option]] {
+            #expect(WorkNavigationShortcut(characters: "k", modifiers: modifiers) == nil)
+            #expect(WorkNavigationShortcut(characters: "s", modifiers: modifiers) == nil)
+        }
+        #expect(WorkNavigationShortcut(characters: "\u{1b}", modifiers: []) == nil)
+        #expect(WorkNavigationShortcut(characters: "c", modifiers: .command) == nil)
+    }
+
     @Test("Repository view reconstruction keeps the Session store's resolved location")
     func repositoryViewKeepsResolvedLocation() throws {
         let repo = "/workspace-alias-\(UUID().uuidString)"
@@ -649,7 +722,7 @@ struct WorkNavigationTests {
         let navigation = model.navigation
         navigation.selectedSessionId = "human"
         #expect(navigation.selection == .task(id: "issue-review"))
-        navigation.taskListScrollOffsets["wave-1"] = 160
+        navigation.listScrollOffset = 160
         navigation.showsNavigator = false
         navigation.search = "upcoming"
         navigation.content = .terminals
@@ -661,7 +734,7 @@ struct WorkNavigationTests {
         #expect(model.navigation === navigation)
         #expect(model.navigation.content == .terminals)
         #expect(model.navigation.selectedSessionId == "human")
-        #expect(model.navigation.taskListScrollOffsets["wave-1"] == 160)
+        #expect(model.navigation.listScrollOffset == 160)
         #expect(!model.navigation.showsNavigator)
         #expect(model.navigation.search == "upcoming")
         #expect(fixtureWork(registry, fixtureWorkspace("/src/loopflow")) === workspace)
@@ -802,23 +875,23 @@ struct WorkNavigationTests {
         #expect(owner.startingTaskSessions.isEmpty)
     }
 
-    @Test("Task inspection retains Waiting links without a Session inventory")
-    func inspectorKeepsExactWaitingConversation() async throws {
+    @Test("Task inspection retains Available links without a Session inventory")
+    func inspectorKeepsExactAvailableConversation() async throws {
         var records = try JSONSerialization.jsonObject(with: Data(sessionsJSON().utf8)) as! [[String: Any]]
-        records[0]["attention"] = "waiting"
+        records[0]["attention"] = "available"
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: String(decoding: JSONSerialization.data(withJSONObject: records), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "issue-review"))
         var opened: String?
         let view = WorkSurfaceView(model: model, onOpenSession: { opened = $0.id })
-        try view.inspect().find(viewWithAccessibilityIdentifier: "task-waiting-human").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human").button().tap()
         #expect(opened == "human")
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-sessions-working") }
         #expect(throws: (any Error).self) { try view.inspect().find(text: "No open Sessions.") }
         await source.fail()
         await model.refresh()
-        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-waiting-human") }
+        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human") }
     }
 
     @Test("Work outside the plan remains explained in Wave details")
@@ -1077,13 +1150,12 @@ struct WorkNavigationTests {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
         }
         model.navigation.search = " "
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2") }
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-2")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2")
         #expect(model.selection == .wave(id: "wave-2"))
     }
 
-    @Test("Repository lists Waves; entering one shows its Tasks and breadcrumb")
+    @Test("Wave selection reveals Tasks without moving the Wave or changing other branches")
     func singleWaveNavigator() throws {
         var value = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var wave = try #require((value["waves"] as? [[String: Any]])?.first)
@@ -1096,15 +1168,20 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review") }
         try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1").button().tap()
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-1")
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-fold-wave-1").button().tap()
+        #expect(model.selection == .wave(id: "wave-1"))
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review") }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-fold-wave-1").button().tap()
+        model.select(nil)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review")
     }
 
     @Test("Attention opens the exact retained conversation and Back returns to interrupted Work", arguments: [false, true])
     func attentionNavigation(alreadyRetained: Bool) async throws {
         let record = try session("needs-answer", work: .task(id: "ts_review00000000000000000000000000"))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-        wire["attention"] = "waiting"
+        wire["attention"] = "available"
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(),
             sessions: String(decoding: JSONSerialization.data(withJSONObject: [wire]), as: UTF8.self))
         let query = RegistryQuery { args, _ in try await source.read(args) }
@@ -1125,15 +1202,26 @@ struct WorkNavigationTests {
         if alreadyRetained {
             #expect(root.multiplexer.pane(forSessionId: record.id)?.id == existingPane?.id)
         }
+        let projected = model.visibleWork.navigator(search: "", planningReadable: true,
+            selection: model.selection, unavailable: nil)
+        #expect(projected.available.map(\.row.id.work) == [.task(id: "issue-review")])
+        #expect(!projected.waves.flatMap(\.tasks).contains { $0.id.work == .task(id: "issue-review") })
+        model.navigation.search = "W2-131"
+        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-issue-review")
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1") }
+        model.navigation.search = "no such work"
+        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-issue-review") }
+        model.navigation.search = ""
         let attention = try #require(model.visibleWork.attention(unavailable: nil).first)
         #expect(model.isSelected(attention))
+        #expect(model.navigatorSelection == attention.work)
         if !alreadyRetained { #expect(model.isSelected(attention.work)) }
         model.goBack()
         #expect(!model.isSelected(attention))
         #expect(model.selection == .wave(id: "wave-2"))
     }
 
-    @Test("Drill-in, resizing, collapse and history preserve Work and drafts")
+    @Test("In-place navigation, resizing, collapse and history preserve Work and drafts")
     func navigatorContextReturn() async throws {
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(), sessions: sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -1148,12 +1236,15 @@ struct WorkNavigationTests {
         draft.editor.string = "keep this thought"
         retained.multiplexer.newShell(location: WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
         let pane = retained.multiplexer.focusedPane
-        model.navigation.taskListScrollOffsets["wave-1"] = 168
+        model.navigation.listScrollOffset = 168
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-open-repository").button().tap()
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2").button().tap()
+        let repository = try #require(try? navigator.inspect().find(button: "loopflow"), "Repository header")
+        try repository.tap()
+        try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-2"), "Second Wave").button().tap()
         #expect(model.selection == .wave(id: "wave-2"))
+        #expect(model.navigation.expandedWaves.count == 2)
+        _ = try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review"), "Retained Task row")
         model.goBack()
         #expect(model.selection == nil)
         model.goBack()
@@ -1161,16 +1252,18 @@ struct WorkNavigationTests {
         model.goForward()
         #expect(model.selection == nil)
         model.goBack()
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
+        model.navigation.showsNavigator = true
+        let collapse = try #require(try? navigator.inspect().find(WorkGlyphButton.self), "Sidebar collapse control").actualView()
+        try collapse.inspect().find(ViewType.Button.self).tap()
         #expect(!model.navigation.showsNavigator)
         model.navigation.showsNavigator = true
         #expect(model.navigation.sidebarWidth == 460)
-        #expect(model.navigation.taskListScrollOffsets["wave-1"] == 168)
+        #expect(model.navigation.listScrollOffset == 168)
         #expect(registry.retained(key) === retained)
         #expect(retained.multiplexer.focusedPane == pane)
         #expect(files.document("notes.md") === draft)
         #expect(draft.editor.string == "keep this thought")
-        try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-conversation-wave-1").button().tap()
+        try #require(try? navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1"), "First Wave").button().tap()
         #expect(model.selection == .wave(id: "wave-1"))
         #expect(model.navigation.forwardStack.isEmpty)
     }

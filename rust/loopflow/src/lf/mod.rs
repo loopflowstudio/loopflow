@@ -928,7 +928,7 @@ pub enum SessionCommand {
     List {
         #[arg(long)]
         json: bool,
-        /// Include waiting steps from every repository on this machine
+        /// Include Sessions from every repository on this machine
         #[arg(long)]
         all: bool,
         /// Select interactive (true), headless (false), or both (all)
@@ -937,9 +937,9 @@ pub enum SessionCommand {
         /// Include completed conversations and historical reviews
         #[arg(long)]
         history: bool,
-        /// Only conversations waiting on you
+        /// Only conversations available for your input
         #[arg(long)]
-        waiting: bool,
+        available: bool,
         /// Maximum conversations; 0 reads the complete matching inventory
         #[arg(long, default_value_t = 100)]
         limit: usize,
@@ -1864,6 +1864,12 @@ pub enum RepoCommand {
         /// Associate this checkout with a repository identity, retaining prior IDs
         #[arg(long)]
         bind: Option<crate::durable::RepositoryId>,
+        /// Reconnect retained Work after a move predating its Git locator
+        #[arg(long, conflicts_with = "bind")]
+        relocate: Option<crate::durable::RepositoryId>,
+        /// Print the selected repository's current local directory
+        #[arg(long, conflicts_with = "json")]
+        path: bool,
         #[arg(long)]
         json: bool,
     },

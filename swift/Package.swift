@@ -23,13 +23,14 @@ let package = Package(
             path: "Loopflow",
             exclude: ["Info.plist"],
             resources: [
-                .copy("Fonts")
+                .copy("Fonts"),
+                .copy("Themes")
             ]
         ),
         .binaryTarget(
             name: "GhosttyKit",
-            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf3.xcframework.zip",
-            checksum: "dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f"
+            url: "https://bin.loopflow.studio/GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip",
+            checksum: "19d6f6e2f93cf3d967aaaa9761c6ee1995683381ac432598d7b0496610934ce9"
         ),
         .executableTarget(
             name: "LoopflowMac",
@@ -47,7 +48,8 @@ let package = Package(
                 "dmg-background.png",
             ],
             resources: [
-                .copy("GhosttyResources")
+                .copy("GhosttyResources"),
+                .copy("ThirdPartyNotices")
             ],
             swiftSettings: [
                 .define("GHOSTTY_ENABLED", .when(platforms: [.macOS])),

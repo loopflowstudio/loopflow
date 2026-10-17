@@ -17,6 +17,7 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 
 ```bash
 lf install                  # update to the latest published release, from any directory
+LF_INSTALL_CLI_ONLY=1 lf install # update the CLI while keeping Desktop and its clients running
 lf schedule         # check at login and weekly (macOS)
 lf schedule daily   # also accepts weekly, hourly, 5min
 ```
@@ -48,6 +49,9 @@ lf operate                 # review and operate this repository’s work
 lf repo-operate             # canonical name for the same skill
 lf --wave designer wave-operate  # operate one Wave
 ```
+
+OpenCode keeps errors and retries in its native terminal UI. Loopflow prints a
+diagnostic log path before launch; full stderr stays there without covering your input.
 
 Give an external agent harness the Loopflow operating skill:
 

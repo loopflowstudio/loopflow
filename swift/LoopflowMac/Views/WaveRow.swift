@@ -34,6 +34,7 @@ func waveOutline(_ waves: [WaveViewModel]) -> [(wave: WaveViewModel, indent: Int
 }
 
 struct WaveRow: View {
+    @Environment(\.palette) private var palette
     let wave: WaveViewModel
     let isSelected: Bool
     let onSelect: () -> Void
@@ -57,8 +58,9 @@ struct WaveRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: CornerRadius.md)
-                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
+                .fill(isHovering ? palette.actionHover : Color.clear)
         )
+        .workSelection(isSelected)
         .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
@@ -84,6 +86,7 @@ struct WaveRow: View {
 }
 
 private struct WaveRowLabel: View {
+    @Environment(\.palette) private var palette
     let wave: WaveViewModel
 
     var body: some View {
@@ -97,7 +100,7 @@ private struct WaveRowLabel: View {
                     Text(wave.displayName)
                         .font(Typography.sectionTitle(18))
                         .fontWeight(.semibold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(palette.text)
                         .lineLimit(1)
                         .accessibilityIdentifier("wave-name")
 
@@ -105,10 +108,10 @@ private struct WaveRowLabel: View {
                         Text("\(wave.openTaskCount)")
                             .font(Typography.caption(10))
                             .fontWeight(.medium)
-                            .foregroundStyle(.white.opacity(0.68))
+                            .foregroundStyle(palette.textSecondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color.white.opacity(0.1))
+                            .background(palette.surfaceElement)
                             .clipShape(Capsule())
                             .accessibilityLabel("\(wave.openTaskCount) open tasks")
                     }
@@ -119,7 +122,7 @@ private struct WaveRowLabel: View {
                 if let tagline = wave.objectiveTagline {
                     Text(tagline)
                         .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.68))
+                        .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
                         .accessibilityIdentifier("wave-objective")
                 }

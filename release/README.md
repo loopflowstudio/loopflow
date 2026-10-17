@@ -3,6 +3,7 @@
 ```bash
 mkdir -p release/unreleased
 $EDITOR release/unreleased/DECISIONS.md
+lf release run 0.1.0             # first release; no seed tag needed
 lf release run patch
 lf release notes 0.13.0 --preview  # inspect the cycle since v0.12.0
 lf release run minor             # close the patch cycle, then publish its minor
@@ -36,11 +37,11 @@ Explicit experiments initialize the embedded schema in a fresh directory.
 Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
-On an active Machine, promotion fences the old runtime generation, checkpoints and
-drains exact Wave/Project/Task containment, advances the store, restarts the
-same keeper, then reconciles every enabled open Work onto a new Run. `lf install`
-prints the terminal upgrade result directly; no manual zero-Run window is
-required.
+Full installation restarts the replaced Desktop app and its bundled helpers.
+Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
+stopping Desktop and its clients. Promotion advances the shared store through
+the published migration boundary and retains the prior published artifacts;
+it does not restart Tasks or Flows.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
@@ -233,13 +234,21 @@ publication facts; the release controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
-Minor releases summarize a completed patch cycle. When changes remain,
+The first release requires an explicit version, such as `0.1.0` or `1.0.0`.
+With no matching target tag, its changes and notes include first-parent history
+from repository start through the selected source, including the root commit.
+Target areas still filter that history. Existing manifest versions need no reset;
+the requested version owns the release. Notes and previews use the same initial
+range when no target tag exists, unless `--prev-tag` supplies a base.
+
+Subsequent minor releases summarize a completed patch cycle. When changes remain,
 `lf release run minor` publishes the next patch first. When the latest completed
 patch already contains everything, it reuses that patch. The minor uses the
 same product snapshot; version metadata and release notes change. Patch notes
 compare against the preceding release, while minor notes compare against the
 preceding `.0` tag. A missing cycle baseline is reported explicitly.
-An explicit minor version such as `lf release run 0.13.0` follows the same policy.
+An explicit minor version such as `lf release run 0.13.0` follows the same policy
+once the target has release history.
 
 The selected pair and snapshot survive interruption in
 `.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing

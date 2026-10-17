@@ -459,6 +459,9 @@ final class WorkModel {
                 store.surfaces.focus(.session(record.id, machineId: machine))
             }
         }
+        workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity,
+            execution: store.executionLocation(for: record.id))
+        workspace.prepareTaskPanes(query: store.query)
         workspace.presentation.selectedSessionId = record.id
         workspace.presentation.content = .terminals
         store.beginPaneLoad(record.id)
@@ -534,7 +537,6 @@ final class WorkModel {
         } else {
             switch item.state {
             case .failed(let message), .ended(let message): reason = message
-            case .elsewhere: reason = "Session is open elsewhere; use Move here explicitly."
             case .pending where item.record.action(.open) == nil:
                 reason = "Session has no available opening action."
             default: reason = files?.isRefreshingChanges == true ? nil : files?.changesError
@@ -542,7 +544,7 @@ final class WorkModel {
         }
         if let reason {
             taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: reason)
-        } else if item.state == .live,
+        } else if item.state == .live || item.state == .elsewhere,
                   !destination.showsChanges || (files?.changes != nil && files?.isRefreshingChanges == false) {
             taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
         }
@@ -814,7 +816,7 @@ final class WorkModel {
     @ObservationIgnored private var scopeFloor = 0
     @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
-    @ObservationIgnored private var checkpointWaiters: [(id: Int, resume: CheckedContinuation<Void, any Error>)] = []
+    @ObservationIgnored private var checkpointWaiters: [(id: Int, resume: CheckedContinuation<Void, any Error>, deadline: Task<Void, Never>)] = []
     private var workActivityGeneration = 0
 
     /// A launch repository taken from the saved workspace without running
@@ -1099,6 +1101,7 @@ final class WorkModel {
         let ready = checkpointWaiters.filter { $0.id <= answered }
         checkpointWaiters.removeAll { $0.id <= answered }
         for waiter in ready {
+            waiter.deadline.cancel()
             if let reason { waiter.resume.resume(throwing: RegistryQueryError(reason)) }
             else { waiter.resume.resume() }
         }
@@ -1118,7 +1121,15 @@ final class WorkModel {
             return
         }
         let id = send { .checkpoint(id: $0, replay: []) }
-        try await withCheckedThrowingContinuation { checkpointWaiters.append((id, $0)) }
+        try await withCheckedThrowingContinuation { continuation in
+            let deadline = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                guard let self, let index = self.checkpointWaiters.firstIndex(where: { $0.id == id }) else { return }
+                let waiter = self.checkpointWaiters.remove(at: index)
+                waiter.resume.resume(throwing: RegistryQueryError("Refresh was not confirmed within 10 seconds"))
+            }
+            checkpointWaiters.append((id, continuation, deadline))
+        }
     }
 
     private func resumePlanningWaiters(through answered: Int) {
@@ -1423,7 +1434,21 @@ final class WorkModel {
         setRepoPath(path, preservingOpening: false)
     }
 
+    /// The router has observed the same durable repository at a new address.
+    /// Retain navigation and native owners; refresh readers in their new scope.
+    func relocateRepository(to path: String) {
+        guard repoPath != path else { return }
+        historyLookup?.cancel()
+        historyLookup = nil
+        sessionsGeneration &+= 1
+        peerPlanningGeneration &+= 1
+        workActivityGeneration &+= 1
+        repoPath = path
+        rescanWork()
+    }
+
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
+        if navigation.palette == .search { navigation.palette = nil }
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
@@ -1493,6 +1518,17 @@ final class WorkModel {
         if wasSelected, let next = registry.selectedWork { select(next.reference) }
     }
 
+    /// The sidebar represents the selected conversation once, even when its
+    /// retained surface lives in another Work's pane layout.
+    var navigatorSelection: WorkReference? {
+        let work = visibleWork
+        if let sessionID = navigation.selectedSessionId,
+           let item = work.attention(unavailable: sessions.errorMessage).first(where: { $0.session.id == sessionID }) {
+            return item.work
+        }
+        return work.breadcrumb(selection: selection, sessionId: nil)?.task?.id.work ?? selection
+    }
+
     func isSelected(_ reference: WorkReference) -> Bool {
         if selection == reference { return true }
         guard let selection, selection.kind == .task, reference.kind == .task else { return false }
@@ -1505,6 +1541,7 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
+        if navigation.palette == .search { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
@@ -1532,6 +1569,12 @@ final class WorkModel {
             navigation.content = selection == nil ? .overview : .details
         }
         setSelection(selection)
+        if let crumb = visibleWork.breadcrumb(selection: selection, sessionId: nil), let wave = crumb.wave {
+            let inAvailable = crumb.task.map { task in
+                visibleWork.attention(unavailable: sessions.errorMessage).contains { $0.work == task.id.work }
+            } ?? false
+            if !inAvailable { navigation.expandedWaves.insert(wave.id) }
+        }
         clearSelectionIfOutsideScope()
         openSelectedWorkspace(besideFocused: besideFocused)
     }
@@ -1798,15 +1841,19 @@ final class WorkModel {
         let owner = navigation
         let home = workDataDirectory
         guard owner.taskRunDrafts[taskId]?.acting != true else { return }
-        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
+        owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
         owner.taskRunDrafts[taskId]?.error = nil
         do {
             try await action()
+            owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
             try await confirmWorkUpdate(after: home)
             owner.taskRunDrafts[taskId] = nil
         } catch {
-            owner.taskRunDrafts[taskId]?.acting = false
-            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
+            let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
+            owner.taskRunDrafts[taskId]?.phase = nil
+            owner.taskRunDrafts[taskId]?.error = accepted
+                ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
+                : error.localizedDescription
         }
     }
 

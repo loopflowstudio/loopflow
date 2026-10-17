@@ -69,6 +69,67 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test("Task entry exposes Move here without taking over the external terminal", arguments: [false, true])
+    func taskConversationActiveElsewhere(explicitSession: Bool) async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let taskID = try #require(task.runtime?.workId)
+        var record = try renameFixtureRecord("external-primary", title: "Task conversation",
+            work: .task(id: taskID))
+        record.workspace = SessionWorkspace(machineId: "machine-local", worktree: "/src/task",
+            taskId: taskID, unavailable: nil)
+        let encoded = try JSONEncoder().encode(record)
+        let active = String(decoding: encoded, as: UTF8.self)
+        var wire = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        // Preparation supplies a takeover command; the external client is still active.
+        wire["open_argv"] = ["lf", "session", "connect", record.id, "--takeover"]
+        let prepared = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+        let owner = ExternalConversationOwner(active: active, prepared: prepared)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["wave", "show"]) { return data }
+            if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
+            if args.starts(with: ["session", "connect"]) { return try await owner.prepare(args) }
+            throw RegistryQueryError("Unexpected Task conversation operation")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        if explicitSession {
+            await model.openTaskLink(try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id).url))
+        } else {
+            await model.openTaskConversation(task.id)
+        }
+        let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
+        let store = registry.sessionStore(repository: "repo", repoPath: wave.wave.repo, query: query)
+        #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
+        #expect(workspace.conversationError == nil)
+        #expect(model.taskOpening?.status == .usable)
+        #expect(store.sessions.first?.state == .elsewhere)
+        #expect(await !owner.takeoverPrepared)
+        // Inspect the production placeholder directly: ViewInspector cannot resolve
+        // Observation environment objects while descending the workspace tree.
+        let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
+            sessions: store, workspace: workspace, model: model, projected: false, onFocus: { _, _ in })
+            ._sessionPlaceholder(try #require(store.sessions.first))
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "session-retry-\(record.id)")
+        }
+        let move = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(record.id)").button()
+        #expect(!move.isDisabled())
+        #expect(throws: Never.self) {
+            try view.inspect().find(text: "Moving stops the other client. Unsent text typed there is lost.")
+        }
+        try move.tap()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(store.sessions.first?.state == .prepared)
+        #expect(store.sessions.first?.surface?.id == record.id)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "connect", record.id, "--takeover"])
+        #expect(await owner.takeoverPrepared)
+        #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
+    }
+
     @Test(arguments: [false, true])
     func openingInstallsItsPreparedPaneWithoutPreparingAgain(unprepared: Bool) async throws {
         let data = try fixture()
@@ -429,7 +490,7 @@ struct WorkDestinationTests {
                 #expect(throws: RegistryQueryError.self) { try workspace.split(unavailableFiles.id, axis: .vertical) }
                 #expect(store.layout == unavailableLayout)
             }
-            remote.multiplexer.load(sessionId: "replacement")
+            remote.multiplexer.replace(targetPane.id, with: .session(id: "replacement"))
             let unchanged = remote.multiplexer.layout
             #expect(throws: RegistryQueryError.self) {
                 try registry.controlPane(.init(target: target, action: .shell), model: model)
@@ -590,7 +651,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(try #require(link.url))
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
-        #expect(workspace.multiplexer.focusedPaneId == terminal.id)
+        #expect(workspace.multiplexer.focusedPane.content == .files(taskId: task.id, location: identity))
         #expect(files.selection == "retained-draft.rs")
         #expect(files.showsChanges)
         let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
@@ -622,7 +683,7 @@ struct WorkDestinationTests {
             case "closed": workspace.multiplexer.close(pane.id)
             case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
             case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
-            case "replaced": workspace.multiplexer.load(sessionId: "replacement")
+            case "replaced": workspace.multiplexer.replace(pane.id, with: .session(id: "replacement"))
             case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
             default: store.recordPaneLive(record.id)
             }
@@ -655,7 +716,7 @@ struct WorkDestinationTests {
         let opening = Task { await model.openTaskLink(url) }
         while !(await barrier.contains("comparison")) { await Task.yield() }
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
-        let originalPane = workspace.multiplexer.focusedPane
+        let originalPane = try #require(workspace.multiplexer.pane(forSessionId: record.id))
         #expect(workspace.openingConversation)
         let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
         // New request to the same Session, without its still-reading companion.
@@ -861,8 +922,11 @@ struct WorkDestinationTests {
             workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
         )
         #expect(throws: Never.self) {
-            try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
         }
+        destination.bindWorkspaces(registry, repository: "fixture-repository")
+        let selectedKey = try #require(registry.selectedWork)
+        #expect(registry.retained(selectedKey)?.location == task.reference.workspace?.identity)
         #expect(workspace.multiplexer.layout == layout)
         #expect(document.editor.string == "unsaved draft")
         #expect(throws: Never.self) {
@@ -1555,6 +1619,51 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.allSatisfy { $0.status == .usable })
     }
 
+    @Test func repositoryMoveRetainsWindowAndSessionStore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let before = directory.appendingPathComponent("before")
+        let after = directory.appendingPathComponent("after")
+        try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let git = Foundation.Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", before.path]
+        try git.run()
+        git.waitUntilExit()
+        #expect(git.terminationStatus == 0)
+        let query = RegistryQuery { args, cwd in
+            if args.contains("--path") { return after.path }
+            if cwd == before.path.normalizedFilePath && FileManager.default.fileExists(atPath: after.path) {
+                return #"{"id":"unrelated","locators":["unrelated"]}"#
+            }
+            return #"{"id":"retained-plan","locators":["retained-plan"]}"#
+        }
+        let router = WorkLinkRouter()
+        let workspace = try await router.openRepository(path: before.path, link: nil, query: query) { _ in }
+        let window = UUID()
+        router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
+            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let store = registry.sessionStore(repository: workspace.id, repoPath: before.path, query: query)
+        try FileManager.default.moveItem(at: before, to: after)
+        let replacement = Foundation.Process()
+        replacement.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        replacement.arguments = ["init", "-q", before.path]
+        try replacement.run()
+        replacement.waitUntilExit()
+        #expect(replacement.terminationStatus == 0)
+        #expect(try await router.resolveWorkspace(workspace, query: query).path == after.path.normalizedFilePath)
+        let moved = try await router.openRepository(path: after.path, link: nil, query: query) { _ in
+            Issue.record("A move must retain the existing window")
+        }
+        #expect(moved.id == workspace.id)
+        #expect(router.repositoryPath(workspace.id) == moved.path)
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
+        #expect(try await router.resolveWorkspace(workspace, query: query).path == moved.path)
+        #expect(registry.sessionStore(repository: workspace.id, repoPath: moved.path, query: query) === store)
+        #expect(store.repoPath == WaveOrigin.resolve(moved.path))
+    }
+
     private func repositoryFixturePath() -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
     }
@@ -1809,5 +1918,26 @@ private actor LinkedDestinationBarrier {
 private actor DestinationReadCounter {
     private var count = 0
     func next() -> Int { count += 1; return count }
+}
+private actor ExternalConversationOwner {
+    let active: String
+    let prepared: String
+    private(set) var takeoverPrepared = false
+
+    init(active: String, prepared: String) {
+        self.active = active
+        self.prepared = prepared
+    }
+
+    func prepare(_ args: [String]) throws -> String {
+        if args.contains("--takeover") {
+            takeoverPrepared = true
+            return prepared
+        }
+        guard args.contains("--try") else {
+            throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
+        }
+        return active
+    }
 }
 #endif

@@ -490,17 +490,7 @@ impl SqliteStore {
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let filter = match wave_id {
-            Some(_) => "p.wave_id=?1 AND ",
-            None => "",
-        };
-        let query =
-            format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
-        let mut statement = conn.prepare(&query)?;
-        let rows =
-            statement.query_map(params_from_iter(wave_id), |row| map_task_row(&conn, row))?;
-        rows.collect::<rusqlite::Result<_>>()
-            .map_err(StoreError::from)
+        tasks_in(&conn, wave_id)
     }
 
     pub fn sync_task_placement(
@@ -2146,6 +2136,18 @@ pub(super) fn request_completion_in(
         params![task.as_str(), request],
     )?;
     Ok(Some(request))
+}
+
+pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
+    let filter = match wave_id {
+        Some(_) => "p.wave_id=?1 AND ",
+        None => "",
+    };
+    let query = format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
+    let mut statement = conn.prepare(&query)?;
+    let rows = statement.query_map(params_from_iter(wave_id), |row| map_task_row(conn, row))?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(StoreError::from)
 }
 
 #[cfg(test)]

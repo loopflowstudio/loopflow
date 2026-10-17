@@ -1,5 +1,6 @@
 //! Retained pane arrangement, explicit input and passive reads use Desktop's existing Apple event boundary.
 //! No file-backed layout cache, socket server, or Work mutation participates.
+use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +28,23 @@ pub struct DesktopWindowInspection {
     pub session: Option<DesktopSessionInspection>,
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
+    pub layout: Option<DesktopWorkLayoutInspection>,
     pub opening: Option<DesktopOpening>,
+}
+
+/// Actual outer geometry; retained workspaces outside this tree remain inspectable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DesktopWorkLayoutInspection {
+    Workspace {
+        work: WorkWorkspaceKey,
+    },
+    Split {
+        axis: DesktopSplitAxis,
+        ratio: f64,
+        first: Box<Self>,
+        second: Box<Self>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -49,21 +66,6 @@ pub struct DesktopSessionInspection {
     pub reason: Option<String>,
     pub observed_at: Option<String>,
     pub actions: Option<Vec<SessionAction>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkWorkspaceKind {
-    Repository,
-    Wave,
-    Task,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkWorkspaceKey {
-    pub repository: String,
-    pub kind: WorkWorkspaceKind,
-    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -270,7 +272,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        ["desktop", "list"] => Some(schema::<DesktopInspection>()),
+        ["desktop", "state"] => Some(schema::<DesktopInspection>()),
         ["desktop", "open"] => Some(schema::<DesktopOpening>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log"
@@ -387,7 +389,7 @@ fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool
     if json {
         println!("{}", serde_json::to_string_pretty(&opening)?);
     } else {
-        println!("Opening {}\nInspect with `lf desktop list --json`; launch acceptance does not establish usability.", opening.url);
+        println!("Opening {}\nInspect with `lf desktop state --json`; launch acceptance does not establish usability.", opening.url);
     }
     Ok(())
 }
@@ -566,7 +568,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             diff,
             json,
         } => return open_work(cli, session.as_deref(), *diff, *json || cli.json),
-        DesktopCommand::List { json } => return inspect(*json || cli.json),
+        DesktopCommand::State { json } => return inspect(*json || cli.json),
         _ => {}
     }
     // Work selects the repository/checkout. One live reading supplies every
@@ -578,7 +580,7 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
     let selected = inspection.resolve_pane(&resolution, command, caller.as_deref())?;
     let target = selected.target()?;
     let (action, json) = match command {
-        DesktopCommand::Open { .. } | DesktopCommand::List { .. } => unreachable!("handled above"),
+        DesktopCommand::Open { .. } | DesktopCommand::State { .. } => unreachable!("handled above"),
         DesktopCommand::Text { text, json, .. } => {
             validate_literal_text(text)?;
             (
@@ -722,7 +724,7 @@ impl DesktopInspection {
             | DesktopCommand::FlowLog { pane, .. }
             | DesktopCommand::Split { pane, .. }
             | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
-            DesktopCommand::Open { .. } | DesktopCommand::List { .. } => {
+            DesktopCommand::Open { .. } | DesktopCommand::State { .. } => {
                 bail!("This command does not address a pane")
             }
         };
@@ -812,7 +814,7 @@ impl DesktopInspection {
                 leaf,
             }),
             [] => bail!(
-                "No eligible pane{} in the selected Work. Inspect with `lf desktop list`; no pane was changed.",
+                "No eligible pane{} in the selected Work. Inspect with `lf desktop state`; no pane was changed.",
                 pane.as_ref().map(|id| format!(" {id}")).unwrap_or_default()
             ),
             _ => {

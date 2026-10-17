@@ -1060,7 +1060,7 @@ Zoom an exact retained pane without changing selection; --off unzooms it
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf desktop list
+## lf desktop state
 
 Read actual windows and panes without launching, focusing, or acquiring clients
 

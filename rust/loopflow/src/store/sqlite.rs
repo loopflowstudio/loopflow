@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::id::{AgentSessionId, WaveId};
@@ -45,6 +45,7 @@ pub(crate) mod project_selection;
 mod project_transitions;
 mod repositories;
 mod revisions;
+mod selections;
 mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_admission;
@@ -92,6 +93,23 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     pub(crate) conn: Arc<Mutex<Connection>>,
+}
+
+fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
+    let query = if repo.is_some() {
+        "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
+    } else {
+        "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses WHERE retired_at IS NULL ORDER BY created_at DESC"
+    };
+    let mut stmt = conn.prepare(query)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(repo), |row| {
+        Ok(map_wave_row(row))
+    })?;
+    rows.map(|wave| wave?).collect()
 }
 
 impl SqliteStore {
@@ -728,35 +746,6 @@ impl SqliteStore {
     ) -> StoreResult<std::collections::HashSet<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         deleted_task_issues_in(&conn, wave_id)
-    }
-
-    fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = if repo.is_some() {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason, slug
-             FROM wave_addresses WHERE repo = ?1 AND retired_at IS NULL ORDER BY created_at DESC"
-        } else {
-            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
-                    retired_at, superseded_by_wave_id, retirement_reason, slug
-             FROM wave_addresses WHERE retired_at IS NULL ORDER BY created_at DESC"
-        };
-        let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
-            vec![Box::new(repo.to_string())]
-        } else {
-            vec![]
-        };
-        let mut stmt = conn.prepare(query)?;
-        let params_iter = params.iter().map(|v| v.as_ref() as &dyn ToSql);
-        let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
-            Ok(map_wave_row(row))
-        })?;
-
-        let mut waves = Vec::new();
-        for wave in rows {
-            waves.push(wave??);
-        }
-        Ok(waves)
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -1780,7 +1769,8 @@ impl SqliteStore {
     }
 
     pub fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        self.read_waves(repo)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        waves_in(&conn, repo)
     }
 
     pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {

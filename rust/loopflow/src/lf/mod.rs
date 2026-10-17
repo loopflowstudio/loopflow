@@ -721,7 +721,7 @@ pub enum DesktopCommand {
         json: bool,
     },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
-    List {
+    State {
         #[arg(long)]
         json: bool,
     },

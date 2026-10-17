@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Loopflow · Query views</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="study-bar"><span><b class="study-mark">lf</b> ARRANGE <span class="study-divider">/</span> Query views</span><span class="study-note">Interactive study · sample Work</span><button id="reset" class="quiet">Reset study ↺</button></header>
+  <div class="app-window">
+    <header class="titlebar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <nav id="breadcrumbs" aria-label="Breadcrumb"></nav>
+      <div class="title-actions"><button id="activity-button" title="Change sample Work">Sample activity</button><button id="edit-button" class="edit-button" aria-expanded="true">⌘ K <span>Edit view</span></button></div>
+    </header>
+    <div class="app-body">
+      <aside id="sidebar" aria-label="Work navigation"></aside>
+      <main id="main" aria-label="Work view"></main>
+      <aside id="editor" class="editor" aria-label="Edit view">
+        <header class="editor-heading"><div><span class="eyebrow">SELECTION</span><h2>What belongs here?</h2></div><button id="close-editor" class="icon-button" aria-label="Close view editor">×</button></header>
+        <div class="editor-content">
+          <label for="view-name">View name</label><input id="view-name" value="Repository">
+          <div class="label-row"><label for="query">Query</label><span>⌘ ↵ to apply</span></div>
+          <textarea id="query" spellcheck="false" rows="4" aria-describedby="query-feedback"></textarea>
+          <div id="query-feedback" role="status"></div>
+          <button id="apply-query" class="primary">Apply selection <span>↵</span></button>
+          <div class="preset-list"><span class="eyebrow">TRY A VIEW</span><button data-preset="repo"><span>Repository</span><small>Open Tasks + Waves</small></button><button data-preset="product"><span>Product</span><small>One Wave’s open Tasks</small></button><button data-preset="attention"><span>Needs you</span><small>Across the repository</small></button><button data-preset="overlap"><span>Product + Needs you</span><small>Overlapping queries, first wins</small></button><button data-preset="picked"><span>A hand-picked pair</span><small>Two explicit Task references</small></button></div>
+          <details class="syntax"><summary>Query vocabulary</summary><p><code>wave:product</code> includes its subtree.<br><code>state:open</code> means started, unfinished.<br><code>kind:wave</code> shows Wave references.<br><code>query:needs-you</code> includes a saved query.<br>Combine with <code>or</code>; spaces mean AND.</p><p>Explicit <code>task:LF-108</code> can include backlog. Unknown input leaves the current view intact.</p></details>
+          <div id="selection-reading"></div>
+          <div class="arrangement-heading"><span class="eyebrow">ARRANGEMENT</span><button id="auto-layout" class="text-button">Retile automatically</button></div>
+          <p id="arrangement-note" class="muted"></p>
+          <details class="syntax" id="tree-details"><summary>Inspect / edit the split tree</summary><p>All member IDs stay in the map, including hidden and overlapping matches.</p><textarea id="tree-input" rows="9" spellcheck="false" aria-label="Retained split tree"></textarea><button id="apply-tree">Apply tree</button><p id="tree-error" role="status"></p></details>
+          <button id="pin-view" class="pin-button">＋ Pin this view</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="statusbar"><span id="status">Selection defines membership. Arrangement keeps your place.</span><span><i class="sample-dot"></i> Sample sessions · nothing executes</span></footer>
+  </div>
+  <footer class="study-footer"><span>Edit a query. Move a tile. Hide it. Come back.</span><span>⌘K Edit view <span class="study-divider">·</span> Esc Back</span></footer>
+  <div id="activity" class="popover" hidden><span class="eyebrow">SIMULATE A WORK CHANGE</span><button id="start-sample">Start the backlog Task</button><button id="finish-sample">Complete “Search result context”</button><p>Only changes this study’s sample data.</p></div>
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>

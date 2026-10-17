@@ -875,6 +875,11 @@ impl SqliteStore {
         super::migrations::latest_version_sqlite(&conn)
     }
 
+    pub(crate) fn applied_schema_version(&self) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        super::migrations::latest_applied_version_sqlite(&conn)
+    }
+
     // -- Provider tokens -------------------------------------------------------
 
     pub(crate) fn provider_auth_snapshot(

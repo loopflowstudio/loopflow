@@ -248,7 +248,7 @@ final class SessionsWorkspace {
 
     func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
         if let retainedStore {
-            retainedStore.repoPath = repoPath
+            retainedStore.repoPath = WaveOrigin.resolve(repoPath)
             return retainedStore
         }
         let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces)

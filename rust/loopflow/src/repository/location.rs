@@ -135,6 +135,11 @@ pub fn reconcile(
 /// Ordinary reads reconnect only an enrolled Git directory. They never invent
 /// a repository identity or write a locator into unrelated checkouts.
 pub fn reconnect_current() -> Result<()> {
+    // A disposable registry observes copied addresses without claiming the
+    // source checkout or rewriting its retained history.
+    if crate::data_clone::is_selected() {
+        return Ok(());
+    }
     // Most commands are unrelated to relocation. Inspect only the enclosing
     // Git locator before adding any Git subprocesses or database reads.
     let cwd = std::env::current_dir()?;

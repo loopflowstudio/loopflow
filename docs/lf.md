@@ -1058,10 +1058,11 @@ values. Desktop reuses the repository's window and Session surfaces.
 
 For a checkout registered before locators, establish its identity with
 `lf repo identity --bind repo_ID` before moving it. If it has already moved, run
-`lf repo identity --relocate repo_ID` from the new location. A missing locator,
-copied Git directory or reused old path requires that explicit recovery; remote
-URLs and directory names never merge Work. Open the moved checkout before reusing
-its old path. Experimental Machines keep separate locators.
+`lf repo identity --relocate repo_ID` from the new location. A missing locator
+or reused old path requires explicit recovery. A copied Git directory cannot
+replace its still-present source. Remote URLs and directory names never merge Work.
+Open the moved checkout before reusing its old path. Experimental Machines keep separate locators; disposable data
+clones observe copied addresses without claiming the source checkout.
 
 Provider callbacks launched with this version retain their launch description
 in the Machine and resolve moved references by repository identity. Already

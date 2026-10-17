@@ -3337,6 +3337,122 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
 }
 
 #[test]
+fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
+    for condition in ["retained", "alias", "branch-changed", "offline", "reused"] {
+        let enrolls = matches!(condition, "retained" | "alias");
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let main = repo.path().canonicalize().unwrap();
+        let checkout = root.path().canonicalize().unwrap().join("task");
+        success(
+            Command::new("git")
+                .current_dir(&main)
+                .args(["worktree", "add", "-b", "continuity"])
+                .arg(&checkout)
+                .output()
+                .unwrap(),
+        );
+        let registered = support::register_task_with_pr(
+            &home.path().join(".lf"),
+            &main,
+            "continuity",
+            &repo.head_sha(),
+        );
+        let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+        db.execute(
+            "UPDATE tasks SET worktree=?1 WHERE id=?2",
+            rusqlite::params![checkout.to_str().unwrap(), registered.task.id.as_str()],
+        )
+        .unwrap();
+        let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+        let id = store
+            .repository_id(main.to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        let locator = main
+            .join(".git/loopflow")
+            .join(store.local_machine().unwrap().id.as_str())
+            .join("loopflow-repository");
+        fs::remove_file(&locator).unwrap();
+        fs::write(checkout.join("unpublished.txt"), "keep me").unwrap();
+        match condition {
+            "alias" => {
+                let alias = root.path().join("alias");
+                std::os::unix::fs::symlink(&checkout, &alias).unwrap();
+                db.execute(
+                    "UPDATE tasks SET worktree=?1 WHERE id=?2",
+                    rusqlite::params![alias.to_str().unwrap(), registered.task.id.as_str()],
+                )
+                .unwrap();
+            }
+            "branch-changed" => {
+                success(
+                    Command::new("git")
+                        .current_dir(&checkout)
+                        .args(["checkout", "-b", "unrelated"])
+                        .output()
+                        .unwrap(),
+                );
+            }
+            "offline" => {
+                fs::rename(&checkout, root.path().join("offline")).unwrap();
+            }
+            "reused" => {
+                fs::rename(&main, root.path().join("original")).unwrap();
+                success(
+                    Command::new("git")
+                        .args(["init", "-q"])
+                        .arg(&main)
+                        .output()
+                        .unwrap(),
+                );
+            }
+            _ => {}
+        }
+        let reads: Vec<_> = (0..3)
+            .map(|_| {
+                command(home.path(), &main, &["session", "list", "--json"])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for read in reads {
+            let result = read.wait_with_output().unwrap();
+            if enrolls {
+                success(result);
+            } else {
+                assert!(!result.status.success());
+                assert!(String::from_utf8_lossy(&result.stderr).contains("--bind"));
+            }
+        }
+        assert_eq!(locator.exists(), enrolls);
+        assert_eq!(
+            store.repository_id(main.to_str().unwrap()).unwrap(),
+            Some(id.clone())
+        );
+        if enrolls {
+            assert_eq!(fs::read_to_string(&locator).unwrap().trim(), id.as_str());
+            assert_eq!(
+                fs::read_to_string(checkout.join("unpublished.txt")).unwrap(),
+                "keep me"
+            );
+            assert_eq!(
+                success(
+                    command(home.path(), &checkout, &["repo", "identity"])
+                        .output()
+                        .unwrap()
+                )
+                .trim(),
+                id.as_str()
+            );
+        }
+    }
+}
+
+#[test]
 fn repository_reuse_before_reopening_cannot_steal_work() {
     let original = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

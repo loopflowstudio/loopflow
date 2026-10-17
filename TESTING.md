@@ -66,7 +66,14 @@ restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
 
-The disposable installation job also caches its Cargo target and registry on
+`uv run python scripts/test_task_installation.py --repository-upgrade`
+installs the checksum-verified 0.14.3 CLI, creates a Task checkout and Session,
+then promotes the candidate against that populated store. It checks automatic
+Git locator enrollment, retained identity, historical paths, unpublished edits
+and promotion retry without external network access during the proof. Native
+provider resume and macOS Desktop installation require separate acceptance.
+
+The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
 the first run is cold. Source, OS users, Homes and installations are recreated

@@ -2090,11 +2090,22 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
 }
 
 #[test]
-fn repository_move_resumes_the_same_native_conversation() {
+fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
     let identity = fixture.json(&["repo", "identity", "--json"]);
-    let launch = fixture.run(&["-i", "--agent", "codex", ":", "Keep this conversation"]);
+    let task = fixture.json(&["task", "create", "--title", "Retained checkout", "--json"]);
+    let task_id = task["id"].as_str().unwrap();
+    fixture.json(&["task", "checkout", task_id, "--json"]);
+    let launch = fixture.run(&[
+        "--task",
+        task_id,
+        "-i",
+        "--agent",
+        "codex",
+        ":",
+        "Keep this conversation",
+    ]);
     assert!(launch.status.success(), "{launch:?}");
     let session: String = fixture
         .db()
@@ -2106,6 +2117,27 @@ fn repository_move_resumes_the_same_native_conversation() {
         [&session], |row| row.get::<_, String>(0)).unwrap()
     };
     let before = native();
+    let machine: String = fixture
+        .db()
+        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let locator = fixture
+        .repo
+        .path()
+        .join(".git/loopflow")
+        .join(machine)
+        .join("loopflow-repository");
+    std::fs::remove_file(&locator).unwrap();
+    let resumed = fixture.run(&["session", "connect", &session]);
+    assert!(resumed.status.success(), "{resumed:?}");
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(native(), before);
+    assert_eq!(
+        std::fs::read_to_string(locator).unwrap().trim(),
+        identity["id"].as_str().unwrap()
+    );
     fixture
         .repo
         .create_file("unfinished.txt", "Retain unpublished edits");

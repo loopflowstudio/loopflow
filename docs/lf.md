@@ -1056,10 +1056,11 @@ and Session addresses together. Existing sibling worktree names and unpublished
 edits stay in place. Process paths and provider history retain their original
 values. Desktop reuses the repository's window and Session surfaces.
 
-For a checkout registered before locators, establish its identity with
+After upgrading, a retained local Task's linked checkout and branch can establish
+the original Git directory automatically. Otherwise, establish its identity with
 `lf repo identity --bind repo_ID` before moving it. If it has already moved, run
-`lf repo identity --relocate repo_ID` from the new location. A missing locator
-or reused old path requires explicit recovery. A copied Git directory cannot
+`lf repo identity --relocate repo_ID` from the new location. Ambiguous or reused
+paths require explicit recovery. A copied Git directory cannot
 replace its still-present source. Remote URLs and directory names never merge Work.
 Open the moved checkout before reusing its old path. Experimental Machines keep separate locators; disposable data
 clones observe copied addresses without claiming the source checkout.

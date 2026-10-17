@@ -1565,6 +1565,33 @@ fn run() -> anyhow::Result<()> {
         .as_ref()
         .map(|id| CwdGuard::enter(&loopflow::lf::commands::work_route::repository_path(id)?))
         .transpose()?;
+    let reads_work = cli.may_launch_agent()
+        || cli.task.is_some()
+        || cli.wave.is_some()
+        || matches!(
+            cli.command,
+            Some(
+                Commands::Task { .. }
+                    | Commands::Wave { .. }
+                    | Commands::Session { .. }
+                    | Commands::Repo { .. }
+                    | Commands::ContextBlock { .. }
+            )
+        );
+    if reads_work
+        && !cli.context
+        && !cli.explain
+        && !planning_read
+        && !location_read
+        && !matches!(
+            cli.command,
+            Some(Commands::Repo {
+                cmd: loopflow::lf::RepoCommand::Identity { .. }
+            })
+        )
+    {
+        loopflow::repository::location::reconnect_current()?;
+    }
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);

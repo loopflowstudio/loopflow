@@ -31,6 +31,8 @@ pub enum ContextMoment {
 /// files; references and the active skill retain their complete launch bytes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextDelivery {
+    /// Durable identity and canonical main-checkout address captured at launch.
+    pub repository: Option<(crate::durable::RepositoryId, PathBuf)>,
     pub repo: PathBuf,
     pub wave: Option<String>,
     pub skill_file: Option<PathBuf>,
@@ -89,13 +91,55 @@ impl ContextDelivery {
                 )
             })
             .transpose()?;
+        let repository = crate::store::read_existing_registry()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+            .map(|store| -> Result<_, CoreError> {
+                let root = crate::repository::CanonicalRepo::discover(&repo)
+                    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+                Ok(store
+                    .sqlite
+                    .repository_id(&root.to_string())
+                    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+                    .map(|id| (id, root.as_path().to_path_buf())))
+            })
+            .transpose()?
+            .flatten();
         Ok(Self {
+            repository,
             repo: repo.clone(),
             wave: components.wave.clone(),
             skill_file,
             references,
             home: crate::store::lf_home_dir(),
         })
+    }
+
+    pub(crate) fn relocate(&mut self) -> anyhow::Result<()> {
+        let Some((id, source)) = &self.repository else {
+            return Ok(());
+        };
+        let store = crate::store::sqlite::SqliteStore::new(&self.home.join("loopflow.db"))?;
+        let Some(destination) = store.repository_path(id)? else {
+            return Ok(());
+        };
+        let destination = PathBuf::from(destination);
+        if *source == destination {
+            return Ok(());
+        }
+        let update = |path: &mut PathBuf| {
+            if let Ok(relative) = path.strip_prefix(source) {
+                *path = destination.join(relative);
+            }
+        };
+        update(&mut self.repo);
+        if let Some(path) = &mut self.skill_file {
+            update(path);
+        }
+        for path in &mut self.references {
+            update(path);
+        }
+        self.repository = Some((id.clone(), destination));
+        Ok(())
     }
 
     pub fn block(&self, moment: ContextMoment) -> Result<ContextBlock, CoreError> {
@@ -151,12 +195,14 @@ impl ContextDelivery {
         &self,
         command: &mut std::process::Command,
     ) -> anyhow::Result<()> {
-        let path = write_prompt_log(
-            &self.repo,
-            &serde_json::to_string(self)?,
-            "context-delivery",
-            None,
-        )?;
+        // Provider environments outlive directory moves. Keep their launch
+        // description in the Machine, where the hook's address stays valid.
+        let directory = self.home.join("context-deliveries");
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(format!("{}.json", uuid::Uuid::new_v4()));
+        let file = tempfile::NamedTempFile::new_in(&directory)?;
+        serde_json::to_writer(file.as_file(), self)?;
+        file.persist(&path)?;
         command.env(CONTEXT_DELIVERY_ENV, path);
         Ok(())
     }
@@ -390,6 +436,7 @@ mod tests {
 
     fn delivery(repo: &Path) -> ContextDelivery {
         ContextDelivery {
+            repository: None,
             repo: repo.canonicalize().unwrap(),
             wave: None,
             skill_file: None,

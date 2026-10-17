@@ -1113,9 +1113,11 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     {
         return Ok(None);
     }
-    Ok(Some(Store {
-        sqlite: sqlite::SqliteStore::open_read_only(&path)?,
-    }))
+    let sqlite = sqlite::SqliteStore::open_read_only(&path)?;
+    if sqlite.applied_schema_version()?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(Store { sqlite }))
 }
 
 /// Open the machine's shared registry store only if one already exists.

@@ -531,6 +531,7 @@ mod tests {
             .claim_session_attachment("conversation", None, &process, true)
             .unwrap();
         let context = ContextDelivery {
+            repository: None,
             repo: home.path().to_owned(),
             home: home.path().to_owned(),
             wave: None,

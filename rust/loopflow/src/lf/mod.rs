@@ -1864,6 +1864,12 @@ pub enum RepoCommand {
         /// Associate this checkout with a repository identity, retaining prior IDs
         #[arg(long)]
         bind: Option<crate::durable::RepositoryId>,
+        /// Reconnect retained Work after a move predating its Git locator
+        #[arg(long, conflicts_with = "bind")]
+        relocate: Option<crate::durable::RepositoryId>,
+        /// Print the selected repository's current local directory
+        #[arg(long, conflicts_with = "json")]
+        path: bool,
         #[arg(long)]
         json: bool,
     },

@@ -112,6 +112,8 @@ final class WorkLinkRouter {
 
     func hasWindow(_ repository: String) -> Bool { targets[repository] != nil }
 
+    func repositoryPath(_ repository: String) -> String? { workspaces[repository]?.path }
+
     func confirmRegisteredWorkspace(_ repository: String, requests: Set<UUID>) {
         guard !Task.isCancelled, hasWindow(repository) else { return }
         for (path, request) in repositoryOpenings where request.repository == repository && requests.contains(request.id) {
@@ -131,7 +133,15 @@ final class WorkLinkRouter {
         let requests = workspaceRequests(workspace.id)
         let observed = workspaces
         do {
-            let resolved = try await Self.readRepository(path: workspace.path, query: query)
+            let retainedPath = workspaces[workspace.id]?.path ?? workspace.path
+            var resolved = try? await Self.readRepository(path: retainedPath, query: query)
+            try Task.checkCancellation()
+            guard workspaceRequests(workspace.id) == requests else { throw CancellationError() }
+            if resolved?.identity.locators.contains(workspace.id) != true {
+                let path = try await query.repositoryPath(id: workspace.id)
+                resolved = try await Self.readRepository(path: path, query: query)
+            }
+            guard let resolved else { throw RegistryQueryError("Repository location is unavailable.") }
             try Task.checkCancellation()
             guard resolved.identity.locators.contains(workspace.id) else {
                 throw RegistryQueryError("This location no longer retains this repository identity. The restored workspace was not changed.")

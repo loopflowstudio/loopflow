@@ -1789,6 +1789,162 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
 }
 
 #[test]
+fn repository_move_keeps_identity_work_and_sibling_checkouts() {
+    let source = TestRepo::new();
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let old = root.join("before");
+    success(
+        Command::new("git")
+            .args([
+                "clone",
+                source.path().to_str().unwrap(),
+                old.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap(),
+    );
+    let sibling = root.join("before.work");
+    success(
+        Command::new("git")
+            .current_dir(&old)
+            .args(["worktree", "add", "-b", "work", sibling.to_str().unwrap()])
+            .output()
+            .unwrap(),
+    );
+    fs::write(sibling.join("unfinished.txt"), "preserve me").unwrap();
+    let nested = old.join("nested");
+    success(
+        Command::new("git")
+            .current_dir(&old)
+            .args(["worktree", "add", "-b", "nested", nested.to_str().unwrap()])
+            .output()
+            .unwrap(),
+    );
+    fs::write(nested.join("unfinished.txt"), "nested edits").unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let wave = store
+        .ensure_wave(old.to_str().unwrap(), "retained")
+        .unwrap();
+    let identity = |path: &Path| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), path, &["repo", "identity", "--json"])
+                .output()
+                .unwrap(),
+        ))
+        .unwrap()
+    };
+    let before = identity(&old);
+    let session: serde_json::Value = serde_json::from_str(&success(
+        command(home.path(), &old, &["session", "ensure", "--json"])
+            .output()
+            .unwrap(),
+    ))
+    .unwrap();
+    let moved = root.join("after");
+    fs::rename(&old, &moved).unwrap();
+    let after = identity(&moved);
+    assert_eq!(before, after);
+    assert_eq!(
+        store.get_wave(&wave).unwrap().unwrap().repo(),
+        moved.to_str().unwrap()
+    );
+    assert_eq!(identity(&sibling), after);
+    assert_eq!(identity(&moved.join("nested")), after);
+    assert_eq!(
+        fs::read_to_string(moved.join("nested/unfinished.txt")).unwrap(),
+        "nested edits"
+    );
+    assert_eq!(identity(&moved), after);
+    let resumed: serde_json::Value = serde_json::from_str(&success(
+        command(home.path(), &moved, &["session", "ensure", "--json"])
+            .output()
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(session["id"], resumed["id"]);
+    assert!(session["id"].as_str().is_some());
+    assert_eq!(resumed["cwd"], session["cwd"]);
+    assert_eq!(
+        fs::read_to_string(sibling.join("unfinished.txt")).unwrap(),
+        "preserve me"
+    );
+
+    // Reusing the old name and remote creates a distinct repository.
+    success(
+        Command::new("git")
+            .args([
+                "clone",
+                source.path().to_str().unwrap(),
+                old.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap(),
+    );
+    assert_ne!(identity(&old)["id"], after["id"]);
+    assert_eq!(identity(&moved), after);
+    assert_eq!(
+        store.list_waves(Some(old.to_str().unwrap())).unwrap().len(),
+        0
+    );
+}
+
+#[test]
+fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
+    let original = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let old = original.path().canonicalize().unwrap();
+    let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let copy = root.path().join("copy");
+    success(
+        Command::new("cp")
+            .args(["-R", old.to_str().unwrap(), copy.to_str().unwrap()])
+            .output()
+            .unwrap(),
+    );
+    let rejected = command(home.path(), &copy, &["repo", "identity", "--json"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert_eq!(store.repository_path(&id).unwrap().as_deref(), old.to_str());
+
+    // A legacy registration has no physical locator. Recovery is explicit;
+    // basename or remote equality cannot silently merge it with another clone.
+    fs::remove_file(
+        old.join(".git/loopflow")
+            .join(store.local_machine().unwrap().id.as_str())
+            .join("loopflow-repository"),
+    )
+    .unwrap();
+    let moved = root.path().join("moved");
+    fs::rename(&old, &moved).unwrap();
+    let recovered: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            &moved,
+            &["repo", "identity", "--relocate", id.as_str(), "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(recovered["id"], id.as_str());
+    let repeated = success(
+        command(
+            home.path(),
+            &moved,
+            &["repo", "identity", "--relocate", id.as_str()],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(repeated.trim(), id.as_str());
+}
+
+#[test]
 fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     let source = TestRepo::new();
     let target = TestRepo::new();
@@ -3178,4 +3334,141 @@ fn scoped_first_task_run_prepares_with_its_own_options() {
     assert_eq!(task.workspace_slug, "selected-first-checkout");
     assert_eq!(task.agent.as_deref(), Some("codex"));
     assert!(task.worktree.unwrap().join(".git").exists());
+}
+
+#[test]
+fn repository_reuse_before_reopening_cannot_steal_work() {
+    let original = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let old = original.path().canonicalize().unwrap();
+    let before = success(
+        command(home.path(), &old, &["repo", "identity"])
+            .output()
+            .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let moved = root.path().join("moved");
+    fs::rename(&old, &moved).unwrap();
+    fs::create_dir(&old).unwrap();
+    success(
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&old)
+            .output()
+            .unwrap(),
+    );
+    let rejected = command(home.path(), &old, &["repo", "identity"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--relocate"));
+    let read = command(home.path(), &old, &["session", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(!read.status.success());
+    assert!(String::from_utf8_lossy(&read.stderr).contains("--relocate"));
+    // Explicit recovery resolves the ambiguous reuse without enrolling it.
+    assert_eq!(
+        success(
+            command(
+                home.path(),
+                &moved,
+                &["repo", "identity", "--relocate", before.trim()]
+            )
+            .output()
+            .unwrap()
+        ),
+        before
+    );
+    assert_ne!(
+        success(
+            command(home.path(), &old, &["repo", "identity"])
+                .output()
+                .unwrap()
+        ),
+        before
+    );
+}
+
+#[test]
+fn repository_locators_isolate_machines_and_collapse_symlink_aliases() {
+    let repo = TestRepo::new();
+    let production = tempfile::tempdir().unwrap();
+    let experiment = tempfile::tempdir().unwrap();
+    let identify = |home: &Path, cwd: &Path| {
+        success(command(home, cwd, &["repo", "identity"]).output().unwrap())
+    };
+    let original = identify(production.path(), repo.path());
+    let experimental = identify(experiment.path(), repo.path());
+    assert_ne!(original, experimental);
+    let root = tempfile::tempdir().unwrap();
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(repo.path(), &alias).unwrap();
+    assert_eq!(identify(production.path(), &alias), original);
+    let moved = root.path().join("moved");
+    fs::rename(repo.path(), &moved).unwrap();
+    assert_eq!(identify(experiment.path(), &moved), experimental);
+    assert_eq!(identify(production.path(), &moved), original);
+}
+
+#[test]
+fn repository_concurrent_reconciliation_retains_one_identity() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let original = success(
+        command(home.path(), repo.path(), &["repo", "identity"])
+            .output()
+            .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let moved = root.path().join("moved");
+    fs::rename(repo.path(), &moved).unwrap();
+    let children: Vec<_> = (0..4)
+        .map(|_| {
+            command(home.path(), &moved, &["repo", "identity"])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        assert_eq!(success(child.wait_with_output().unwrap()), original);
+    }
+}
+
+#[test]
+fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
+    let root = tempfile::tempdir().unwrap();
+    let before = root.path().join("before");
+    let git = root.path().join("git");
+    success(
+        Command::new("git")
+            .args(["init", "-q", "--separate-git-dir"])
+            .arg(&git)
+            .arg(&before)
+            .output()
+            .unwrap(),
+    );
+    let home = tempfile::tempdir().unwrap();
+    let identity = success(
+        command(home.path(), &before, &["repo", "identity"])
+            .output()
+            .unwrap(),
+    );
+    let after = root.path().join("after");
+    fs::rename(&before, &after).unwrap();
+    success(
+        command(home.path(), &after, &["session", "list", "--json"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        success(
+            command(home.path(), &after, &["repo", "identity"])
+                .output()
+                .unwrap()
+        ),
+        identity
+    );
 }

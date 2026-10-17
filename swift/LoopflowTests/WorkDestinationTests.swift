@@ -1619,6 +1619,51 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.allSatisfy { $0.status == .usable })
     }
 
+    @Test func repositoryMoveRetainsWindowAndSessionStore() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let before = directory.appendingPathComponent("before")
+        let after = directory.appendingPathComponent("after")
+        try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let git = Foundation.Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", before.path]
+        try git.run()
+        git.waitUntilExit()
+        #expect(git.terminationStatus == 0)
+        let query = RegistryQuery { args, cwd in
+            if args.contains("--path") { return after.path }
+            if cwd == before.path.normalizedFilePath && FileManager.default.fileExists(atPath: after.path) {
+                return #"{"id":"unrelated","locators":["unrelated"]}"#
+            }
+            return #"{"id":"retained-plan","locators":["retained-plan"]}"#
+        }
+        let router = WorkLinkRouter()
+        let workspace = try await router.openRepository(path: before.path, link: nil, query: query) { _ in }
+        let window = UUID()
+        router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
+            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        let store = registry.sessionStore(repository: workspace.id, repoPath: before.path, query: query)
+        try FileManager.default.moveItem(at: before, to: after)
+        let replacement = Foundation.Process()
+        replacement.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        replacement.arguments = ["init", "-q", before.path]
+        try replacement.run()
+        replacement.waitUntilExit()
+        #expect(replacement.terminationStatus == 0)
+        #expect(try await router.resolveWorkspace(workspace, query: query).path == after.path.normalizedFilePath)
+        let moved = try await router.openRepository(path: after.path, link: nil, query: query) { _ in
+            Issue.record("A move must retain the existing window")
+        }
+        #expect(moved.id == workspace.id)
+        #expect(router.repositoryPath(workspace.id) == moved.path)
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
+        #expect(try await router.resolveWorkspace(workspace, query: query).path == moved.path)
+        #expect(registry.sessionStore(repository: workspace.id, repoPath: moved.path, query: query) === store)
+        #expect(store.repoPath == WaveOrigin.resolve(moved.path))
+    }
+
     private func repositoryFixturePath() -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
     }

@@ -459,6 +459,12 @@ pub(crate) fn require_writable_session(id: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn is_selected() -> bool {
+    SELECTED
+        .get()
+        .is_some_and(|manifest| manifest.directory == crate::store::lf_home_dir())
+}
+
 pub(crate) fn session_unavailable(id: &str) -> Result<Option<String>> {
     let home = crate::store::lf_home_dir();
     if let Some(manifest) = SELECTED.get().filter(|manifest| manifest.directory == home) {

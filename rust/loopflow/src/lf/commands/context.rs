@@ -311,12 +311,15 @@ fn load_delivery(
     let bytes = std::fs::read(&path).map_err(|error| {
         anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
     })?;
-    serde_json::from_slice(&bytes).map_err(|error| {
-        anyhow!(
-            "Decode provider context delivery {}: {error}",
-            path.display()
-        )
-    })
+    let mut delivery: crate::context_block::ContextDelivery = serde_json::from_slice(&bytes)
+        .map_err(|error| {
+            anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })?;
+    delivery.relocate()?;
+    Ok(delivery)
 }
 
 fn emit_context(
@@ -569,6 +572,7 @@ mod tests {
             let skill = repo.path().join("skill.md");
             std::fs::write(&skill, format!("SESSION_{index}_SKILL")).unwrap();
             let context = ContextDelivery {
+                repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),
                 wave: None,

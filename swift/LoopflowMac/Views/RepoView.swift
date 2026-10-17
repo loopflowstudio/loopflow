@@ -50,7 +50,7 @@ struct RepoView: View {
                         model: model, repoPath: repoPath,
                         workspaces: sessionWorkspaces, repository: repository, query: query
                     )
-                    .id(repoPath.normalizedFilePath)
+                    .id(repository ?? repoPath.normalizedFilePath)
                 } else {
                     WorkNavigator(model: model, onOpenSession: { _ in })
                 }
@@ -113,6 +113,9 @@ struct RepoView: View {
             await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
         }
         .task { await model.keepWorkCurrent() }
+        .onChange(of: taskLinks?.repositoryPath(repository ?? ""), initial: true) { _, path in
+            if let path { model.relocateRepository(to: path) }
+        }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .task(id: model.repoPath) {
             // Fixture and UI-test runs render without background helpers.

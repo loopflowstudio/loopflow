@@ -136,6 +136,11 @@ public struct RegistryQuery: Sendable {
         try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
     }
 
+    public func repositoryPath(id: String) async throws -> String {
+        try await run(["--repository", id, "repo", "identity", "--path"], nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {

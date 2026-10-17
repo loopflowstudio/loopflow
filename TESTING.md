@@ -73,6 +73,16 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
+`uv run python scripts/test_task_installation.py --session-upgrade` starts a
+live Session with the real 0.14.3 CLI before promoting the candidate. Disposable
+provider and terminal executables check automatic same-conversation recovery,
+hooks, nested commands, pending direction, history, concurrent installers and
+recovery after a missed first probe. Compatible reinstall preserves the provider.
+A live released Flow remains untouched during installation; after its observed
+exit, selecting remaining work preserves its receipts without repeating an effect.
+The installation and migration are real; configured provider and GUI behavior
+remain separate acceptance.
+
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;

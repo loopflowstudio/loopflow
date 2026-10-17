@@ -1520,6 +1520,21 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         return loopflow::data_clone::run(cmd);
     }
+    // Installation owns its promotion/recovery authority. In particular,
+    // read-only candidate preflight must work before a first install settles.
+    let bypasses_installation_startup_gate = matches!(
+        &cli.command,
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. }
+                | loopflow::lf::SelfCommand::Doctor {
+                    planning: false,
+                    ..
+                }
+        })
+    );
+    if !bypasses_installation_startup_gate {
+        loopflow::installation::dispatch_default_cli()?;
+    }
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
     let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
@@ -1690,21 +1705,6 @@ fn run() -> anyhow::Result<()> {
             return finish_command(result);
         }
     }
-    // Installation owns its promotion/recovery authority. In particular,
-    // read-only candidate preflight must work before a first install settles.
-    let bypasses_installation_startup_gate = matches!(
-        &cli.command,
-        Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::Install { .. }
-                | loopflow::lf::SelfCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-        })
-    );
-    if !bypasses_installation_startup_gate {
-        loopflow::installation::dispatch_default_cli()?;
-    }
     if let Some(Commands::SessionTitle { provider }) = &cli.command {
         // Prompt callbacks must not enter ordinary admission or wait for its
         // durable-write budget. Keep only bounded, noninitializing observation.
@@ -1806,7 +1806,7 @@ fn run() -> anyhow::Result<()> {
     }
 }
 
-/// Preview stops before process admission, installation dispatch, Work preparation,
+/// Preview stops before process admission, Work preparation,
 /// automatic routing or provider discovery. Unsupported shapes never fall through.
 fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let invocation = definition_invocation(cli)?;

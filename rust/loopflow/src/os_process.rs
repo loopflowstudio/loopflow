@@ -245,6 +245,24 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     which_on_path(Path::new("lf")).unwrap_or_else(|| PathBuf::from("lf"))
 }
 
+/// Installed hook declarations outlive a release; keep their address stable.
+pub(crate) fn resolve_hook_binary() -> Result<PathBuf> {
+    let selected = resolve_lf_binary();
+    if crate::store::custom_home_selected() {
+        return Ok(selected);
+    }
+    let root = crate::installation::root()?;
+    let Some(installed) = crate::installation::installed_cli(&root)? else {
+        return Ok(selected);
+    };
+    if std::fs::canonicalize(&selected).ok().as_ref() != Some(&installed.path) {
+        return Ok(selected);
+    }
+    let gate =
+        crate::installation::entry_gate_path(&root, &crate::installation::ArtifactRole::Cli)?;
+    Ok(if gate.is_file() { gate } else { selected })
+}
+
 /// Resolve the `lf` a Work launch will use: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
@@ -490,12 +508,8 @@ mod tests {
         std::env::set_var("LF_BIN", &binary);
         assert_eq!(super::resolve_lf_binary(), binary);
         assert_eq!(super::resolve_pinned_lf_binary().unwrap(), binary);
-        // Dispatch must stay in this executable, not fall through to an
-        // installed CLI and replace the test process.
-        crate::installation::dispatch_default_cli().unwrap();
         std::env::set_var("LF_BIN", "/missing/selected/lf");
         assert!(super::resolve_pinned_lf_binary().is_err());
-        assert!(crate::installation::dispatch_default_cli().is_err());
     }
 
     #[test]

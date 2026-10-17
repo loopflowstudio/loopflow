@@ -16,6 +16,7 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
             connection: SessionConnectionArgs { prepare: false, .. },
             ..
         } | SessionCommand::Resume(SessionConnectionArgs { prepare: false, .. })
+            | SessionCommand::Recover { .. }
     ) {
         let cwd = crate::repo::working_directory()?;
         let argv = std::env::args().collect::<Vec<_>>();
@@ -27,6 +28,9 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Recover { id, agent_process } => {
+            crate::installation::recovery::resume(id, agent_process)
+        }
         SessionCommand::Attach { id, observe } => {
             let store = open_shared_store().await?;
             let session = crate::ops::human_session::session_by_id(&store, id)

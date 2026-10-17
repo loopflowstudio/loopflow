@@ -33,6 +33,11 @@ pub fn latest() -> Result<()> {
         (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
     ) {
         println!("Published release {tag} is already installed.");
+        if let crate::installation::InstallationState::Settled(active) =
+            crate::installation::read_state(&crate::installation::root()?)?
+        {
+            super::recover_native_sessions(&active.selection);
+        }
         return Ok(());
     }
     let temporary = tempfile::tempdir()?;

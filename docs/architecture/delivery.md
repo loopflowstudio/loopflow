@@ -248,7 +248,7 @@ detection latency measurable in `lf ci`.
 
 It backs off to five minutes after a degraded pass and waits for the reset when
 fewer than 500 core requests remain. Every recorded landing is also checked
-every five minutes, so a conflicting or stale head and a CI timeout are repaired
+every five minutes, so a conflicting or stale head can be repaired
 without any check failing.
 
 The command runs three ways: in a terminal, as a launchd service
@@ -267,9 +267,8 @@ starting its detached worker. A dead launch may retry once using the same
 conversation and native history; a completed blocked repair retains its outcome.
 The same incident failing again waits until the head or evidence changes.
 Required integration is actionable even with green checks. Pending and missing
-checks retain their first-observed clock; provider attempt changes reset that
-clock without resetting the timeout rerun allowance. A failed read is never evidence
-of CI failure or merge. GitHub remains the final merge authority.
+checks keep waiting without synthetic failures or elapsed-time reruns. A failed
+read is never evidence of CI failure or merge. GitHub remains the final merge authority.
 
 An auto-merge request targeting a merge queue keeps waiting when its base
 advances, including before queue entry. Its original-head CI still receives
@@ -309,12 +308,14 @@ recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
 `ship` runs gate and `land --wait-and-fix`. Waited landing uses the existing
-observation and CI repair path every 15 seconds for at most 30 minutes, releasing
-its lock between reads. Repair admission exempts the calling command and recorded
-ancestors waiting for it; unrelated live or unresolved Processes still prevent
+observation and CI repair path every 15 seconds until verified merge, closure,
+a concrete blocker or interruption, releasing its lock between reads. Repair
+admission exempts the calling command and recorded ancestors waiting for it;
+unrelated live or unresolved Processes still prevent
 editing. Unanswered turns alone are history, not execution. The same incident
-reservation deduplicates a concurrent watcher. Timeout retains intent and returns
-held (exit 3); interruption retains intent and returns stopped (exit 130).
+reservation deduplicates a concurrent watcher. Elapsed time never terminates
+observation, repair admission or a live repair. A concrete blocker returns held
+(exit 3); interruption retains intent and returns stopped (exit 130).
 Neither ordinary reconciliation nor a manual GitHub merge invents a verdict.
 
 Independently accepted later work is an ordinary Task plus a linking comment.
@@ -387,11 +388,12 @@ under that boundary. Unknown process identity and live unrelated work defer
 admission.
 
 The repository lock skips overlapping observations. Per-Task and per-PR claims
-still fence direct callers. A pass budgets 45 seconds and each Task or external
-operation 10 seconds; deferred work stays visible in check output. launchd's
-calendar entries run each minute and coalesce sleep into a wake-time check.
-The detached tmux launch starts a separate process group, including when it must
-start the tmux server. No provider turn runs inside the tick.
+still fence direct callers. Delivery observations have no elapsed-time cutoff;
+concurrent checks skip the landing while its current observation owns the lock.
+launchd calendar entries run each minute and coalesce sleep into a wake-time check.
+The detached transport owner starts a separate process group. Startup waits for
+its acknowledgement without an elapsed-time cutoff. No provider turn runs inside
+the tick.
 
 Desktop consumes the Rust automation projection: installed/enabled state,
 last successful and failed receipts, selection and blockers. A missing receipt

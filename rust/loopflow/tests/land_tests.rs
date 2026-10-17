@@ -1770,7 +1770,6 @@ fi"#;
             ("gh", script.as_str()),
             ("codex", codex.as_str()),
             ("open", noop_open_script()),
-            ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nif [ \"$LF_TEST_FAIL_START\" = 1 ] && [ ! -f \"$LF_TEST_REPAIR_LAUNCHES.failed\" ]; then touch \"$LF_TEST_REPAIR_LAUNCHES.failed\"; exit 1; fi\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\nexit 0\n"),
         ]);
         let worktree = repo.create_named_worktree("watched-land");
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
@@ -1814,7 +1813,6 @@ fi"#;
                 .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("LF_TEST_SYNC_LOG", &sync_log)
                 .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
-                .env("LF_TEST_FAIL_START", if fail_start { "1" } else { "0" })
                 .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
                 .env(
                     "LF_TEST_REPAIR_PROOF",
@@ -1894,8 +1892,13 @@ fi"#;
                 "a delivery check records failures without repairing"
             );
         }
+        let transport_log = lf_home.join("logs/transport.log");
+        if fail_start {
+            fs::create_dir_all(&transport_log).unwrap();
+        }
         let mut output = command().args(check).output().unwrap();
         if fail_start {
+            fs::remove_dir(&transport_log).unwrap();
             let reserved: String = conn
                 .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
                     row.get(0)
@@ -1939,7 +1942,9 @@ fi"#;
             fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             loop {
-                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
+                // Checkout cleanup waits for the transport's final output drain
+                // as well as the repair executor, both real Processes.
+                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id JOIN agent_sessions s ON s.id=c.repair_session_id JOIN processes transport ON transport.id=s.transport_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL AND transport.completed_at IS NOT NULL)",[],|row|row.get(0)).unwrap();
                 if done {
                     break;
                 }
@@ -2081,7 +2086,11 @@ fi"#;
                 .unwrap();
             assert_eq!((step, flow_process.as_str()), (0, "failed"));
         }
-        assert!(!worktree.exists());
+        assert!(
+            !worktree.exists(),
+            "repair={repair}, flow={flow}, merge_race={merge_race}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(!local_branch_exists(&repo, "watched-land"));
         assert!(!remote_branch_exists(&repo, "watched-land"));
         if repair {

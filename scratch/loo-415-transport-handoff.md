@@ -1,11 +1,23 @@
 # LOO-415 — live Session transport
 
+## October 17 demo and delivery authorization
+
+Jack Heart closed the native Claude demo tab with its Cedar/Amber question
+unanswered, saw the question return on public Session attachment, and reported
+“worked”. Answering Amber then produced `DEMO_SECOND:Amber`. The same real Claude
+PID 60408 and AgentProcess survived; the demo used an experimental LF_HOME with
+the branch binary and the real provider account. Installed-store integration,
+SSH and other unperformed acceptance remain open. Details and evidence are in
+[the demo note](transport-demo.md). Jack then requested `lf ship -b!`, explicitly
+authorizing ship and merge and superseding earlier no-merge constraints below.
+Gate must preserve this result and its limits in delivery context before cleanup.
+
 ## Scope and decisions
 
 Reconciled October 17, 2026 against the working implementation. Owner topology
 and native UI requirements are accepted; implementation and restoration coverage
 remain under review. The supplied attachment-deadline feedback is addressed by
-the implementation and eight recorded transport proofs below. Local `origin/main`
+the implementation and the recorded transport proofs below. Local `origin/main`
 and the branch base both name `72dbe0344f`;
 no newer upstream revision was available in the inspected refs.
 
@@ -28,8 +40,10 @@ continuity of its old pending request. Automatic attachment never transitions.
 The separate Claude-mode investigation is evidence, not a new execution directive.
 
 The original brief is retained in [evidence](evidence/loo-415-original-brief.txt).
-The accepted direction supersedes its multiplexer exemption: every execution has
-an independent owner. Remote commands use `lf --machine LABEL ...`. LOO-416 owns
+The accepted direction supersedes its multiplexer exemption: conversations, Flows,
+Task execution and shells have independent owners. Delivery controllers retain
+their existing cancellation lifetime; their conversations own transport separately.
+Remote commands use `lf --machine LABEL ...`. LOO-416 owns
 product lifecycle, uniform primary creation and readiness/cache policy; LOO-497
 and LOO-489 own shared arrangement/navigation. No parallel layout store or shared
 resident server is introduced. No code, tests, help or configuration are copied
@@ -111,14 +125,40 @@ input can report blocked; silence cannot. Linear Flow steps can report progress.
 
 ## Verification and remaining acceptance
 
+October 17 gate review found and repaired these regressions:
+
+- Dispatch wrapped delivery controllers merely because they could launch an agent,
+  changing cancellation and release-lock ownership. Delegate actual conversation,
+  Flow and Task execution; keep delivery controllers at their existing boundary.
+- Admitting the owned executor before Task placement recorded the wrong checkout
+  and rejected valid Task starts. Only the external viewer admits before handoff;
+  the executor admits after placement.
+- Pipe-backed shell commands never received EOF, and interactive Flows lost their
+  terminal when stdout was redirected. Forward authenticated pipe EOF after input
+  drains and select a PTY when either stdin or stdout is a terminal.
+- A fixed two-second post-exit window retained locks and exposed completed native
+  results on reopen. Drain final output and exit for previously attached executions;
+  keep the replay window only for starts that have never had a viewer.
+- Clones could not create the new relay socket. Their inherited sandbox permits
+  only their own canonical-home-derived private transport directory in addition
+  to clone-local sockets. Source sockets and external networking stay denied.
+
+Crash and ancestry fixtures now distinguish the viewer, owner and executor. The
+repair-start fixture exercises a real transport-log failure instead of a removed
+tmux shim. New transport proofs cover pipe EOF without lost bytes and a slow
+observer dropping without blocking the healthy viewer or losing final output.
+The review retained one owner protocol and the existing Process ledger; no new
+state store, compatibility path or configuration switch was added.
+
 Focused proofs use the built CLI and disposable Machine homes. Codex's stand-in
 requires an answer on the original WebSocket request: creator exit and zero viewers
 leave native PID/thread/turn and provider attachment unchanged; replacement answers
 without capture settlement or input replay. The Claude-shaped shell stand-in and
 shell fixture cover launch-then-attach,
 retained shell cwd/environment/jobs and stale input. They do not run native Claude
-or kill an ordinary Claude CLI creator. Independent native Claude experiments
-prove an unanswered question without viewers, but not lf creator death or attach.
+or kill an ordinary Claude CLI creator. The October 17 real Claude demo above
+proves tab closure and public reattachment to its unanswered question in an
+experimental Machine home; installed-store acceptance remains open.
 The headless OpenCode stand-in Flow proof checks original step/capture identity
 after creator death.
 An explicit native transition settles the old capture as interrupted, returns 130
@@ -149,11 +189,11 @@ answers the original request. Established control and observe connections remain
 usable beyond the deadline. Review retained existing signal cleanup and input gating;
 no new cancellation authority or retry path was needed.
 
-Gate still owns the full affected suites, local/SSH attach and outage/reconnect,
-missing startup acknowledgement, owner crash, slow-viewer/load limits, migration
-frontier and remote installed acceptance. Ordinary Claude creator teardown,
-nested CLI launch, twelve retained Sessions and exact terminal-mode restoration
-still need their own proofs. Flow OSC acceptance must cover step clearing, linear
+The remaining acceptance includes real SSH attach and outage/reconnect,
+missing startup acknowledgement, owner crash, twelve retained Sessions,
+remote/installed-store acceptance and exact terminal-mode restoration.
+Automated local attachment, nested CLI ancestry, slow-viewer isolation and migration
+frontier checks ran at gate. Flow OSC acceptance must cover step clearing, linear
 progress, idle hand-back and explicit blocking in a real terminal path; the
 existing final-frame and parser tests do not establish all of those behaviors.
 Configured native provider/Desktop judgment belongs to demo;
@@ -168,7 +208,29 @@ claimed. This is remaining acceptance, not a waiver of mode restoration.
 Headless observation has a bounded output tail; authoritative final
 answers remain in Session capture/history.
 
-Checks: reused October 17 `cargo test -p loopflow --test transport_tests -- --test-threads=1` (8) and `cargo test -p loopflow --lib preferred_name_resume_uses_config_when_forwarded_name_is_empty` (1), inherited `LF_*` unset and stdin closed; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` passed. Reconciliation: `git diff --check` and `lf context` passed. Prior release repair, terminal unit, documented commands and third-party results remain applicable; gate owns broader acceptance.
+Gate checks, October 17 (inherited `LF_*` unset, stdin closed; Rust fixtures use `scripts/test_network.py` except clones, which install their own inherited sandbox):
+
+- `uv run python scripts/test.py --reuse-passing` — initial gate found the architecture-map and Rust regressions above; Desktop built and 600 tests passed headlessly, website 75 passed, Swift boundaries passed; no second full matrix was run after repairs.
+- `uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E '(not binary(=loopflow) or test(flow_tests::) or test(task_flow_launch_tests::) or test(transport::)) and not test(data_clones::)' --build-jobs 4 --test-threads 4 --no-fail-fast` (network runner configured) — 726/739 passed before the final repairs; failing cases were repaired and checked below; canonical draft migration exercised.
+- `cargo test -p loopflow --lib flow_tests:: -- --test-threads=4` — 29 passed after Flow crash-fixture repair.
+- `cargo test -p loopflow --lib task_flow_launch_tests:: -- --test-threads=4` — 27 passed after admission/placement repair.
+- `cargo nextest run -p loopflow --test integration --test session_lifecycle_tests --test transport_tests -E 'binary(=session_lifecycle_tests) or binary(=transport_tests) or test(lf_pr_land_returns_before_later_checks_repair_and_observe_merge) or test(surviving_release_notes_provider_retains_target_checkout_and_context) or test(scheduled_release_tests::)' --build-jobs 4 --test-threads 4 --no-fail-fast` — 44/48 passed; the four remaining cases were checked separately after fixes/diagnostics below.
+- `cargo nextest run -p loopflow --test integration --test session_lifecycle_tests -E 'test(public_reconciliation_survives_controller_death_without_republishing) or test(surviving_release_notes_provider_retains_target_checkout_and_context) or test(unavailable_store_starts_no_provider) or test(sigint_records_session_interruption_and_retires_the_orphan)' --build-jobs 4 --test-threads 4 --no-fail-fast` — reconciliation, unavailable-store error and interruption passed; release fixture still needed its captured-event lookup correction.
+- `cargo test -p loopflow --test integration surviving_release_notes_provider_retains_target_checkout_and_context -- --nocapture` — passed after selecting the actual executor through its captured event.
+- `cargo nextest run -p loopflow --test integration -E 'test(public_reconciliation_survives_controller_death_without_republishing)' --stress-count 5 --build-jobs 4 --test-threads 1` — 5/5 passed in 33.8 seconds; the earlier parallel failure did not reproduce, and its assertion now includes outcome/log diagnostics; no automatic test retry added.
+- `cargo nextest run -p loopflow --test transport_tests --build-jobs 4 --test-threads 4` — final 10/10 passed in 14.0 seconds, including EOF and slow observer isolation.
+- `cargo test -p loopflow --test integration data_clones:: -- --test-threads=4` — final 4/4 passed, including new conversation, source immutability and source-socket/network denial.
+- `cargo test -p loopflow --test integration session_cli_tests::terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts` — passed with the real combined-PTY output fixture.
+- `uv run pytest python/tests/test_third_party.py` — 13 passed; notices match the new terminal dependencies.
+- `cargo clippy --all-targets -- -D warnings`; `cargo fmt --all -- --check`; `git diff --check` — passed on the repaired code.
+- `uv run python scripts/check_architecture.py`; `uv run python scripts/check_migrations.py` — passed; complete owner map, one draft, 76 released migrations unchanged.
+
+All reproduced Rust failures have passing focused follow-ups. The initial aggregate
+is retained as failed, not relabeled a clean final-tree matrix; CI owns that fresh
+matrix. The single nonreproducing reconciliation failure remains visible above.
+No live SSH, installed-store or unsupported terminal-mode acceptance is claimed.
+The existing Claude demo evidence and its experimental-home limit are retained in
+the architecture reference as well as this plan.
 
 The pre-implementation authority counterexamples and full original handoff remain
 in [preserved evidence](evidence/loo-415-before-owner.txt). They explain why process

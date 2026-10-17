@@ -200,6 +200,91 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
 }
 
 #[test]
+fn pipe_eof_delivers_all_input_before_the_command_exits() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command(&[
+            "transport",
+            "start",
+            "--",
+            "/bin/sh",
+            "-c",
+            "cat; printf final >&2",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let mut viewer = fixture
+        .command(&["transport", "attach", &owner])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = b"literal ' input\nsecond line\n";
+    viewer.stdin.take().unwrap().write_all(input).unwrap();
+    let result = wait_for_viewer(viewer, Duration::from_secs(10));
+    assert!(result.status.success(), "{result:?}");
+    assert_eq!(result.stdout, input);
+    assert_eq!(result.stderr, b"final");
+}
+
+#[test]
+fn slow_observer_does_not_block_output_or_final_exit() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command(&[
+            "transport",
+            "start",
+            "--",
+            "/bin/sh",
+            "-c",
+            "i=0; while [ \"$i\" -lt 64 ]; do read -r start; dd if=/dev/zero bs=65536 count=1 2>/dev/null; i=$((i+1)); done; printf final >&2",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let mut slow = fixture.viewer(&owner, false);
+    let mut active = fixture.viewer(&owner, true);
+    active.input("start\n");
+    let mut stdout_bytes = 0;
+    let mut stderr = Vec::new();
+    loop {
+        let frame = active.read();
+        match frame["kind"].as_str().unwrap() {
+            "output" => {
+                let bytes: Vec<u8> = serde_json::from_value(frame["bytes"].clone()).unwrap();
+                if frame["stream"] == 1 {
+                    stdout_bytes += bytes.len();
+                    // Pace the producer with the active consumer, while the
+                    // observer accumulates enough unread output to disconnect.
+                    if stdout_bytes < 4 * 1024 * 1024 && stdout_bytes % 65536 == 0 {
+                        active.input("next\n");
+                    }
+                } else {
+                    stderr.extend(bytes);
+                }
+            }
+            "exit" => {
+                assert_eq!(frame["code"], 0);
+                break;
+            }
+            kind => panic!("unexpected frame: {kind}"),
+        }
+    }
+    assert_eq!(stdout_bytes, 4 * 1024 * 1024);
+    assert_eq!(stderr, b"final");
+    let mut retained = Vec::new();
+    slow.socket.read_to_end(&mut retained).unwrap();
+    assert!(
+        retained.len() < stdout_bytes * 2,
+        "slow viewer was not disconnected"
+    );
+}
+
+#[test]
 fn native_pending_request_survives_creator_exit_without_settling_capture_or_replay() {
     native_pending_request(None);
 }
@@ -319,6 +404,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, cancel: bool
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
     drop(listener);
+    socket.set_nonblocking(false).unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();

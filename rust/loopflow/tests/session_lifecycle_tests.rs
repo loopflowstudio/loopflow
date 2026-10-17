@@ -1009,6 +1009,36 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
+fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() {
+    let fixture = Fixture::new(false);
+    let primary = fixture.json(&["connect", "--prepare", "--json"]);
+    let before = fixture.count("agent_sessions");
+    for verb in ["connect", "resume"] {
+        let output = fixture.run(&[
+            "-b",
+            verb,
+            "--fresh",
+            "--prepare",
+            "--message",
+            "Do not submit",
+            "--json",
+        ]);
+        assert!(!output.status.success(), "{output:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("--prepare") && error.contains("--message"),
+            "{error}"
+        );
+        assert_eq!(fixture.count("agent_sessions"), before);
+        assert!(fixture.launches().is_empty());
+        assert_eq!(
+            fixture.json(&["connect", "--prepare", "--json"])["id"],
+            primary["id"]
+        );
+    }
+}
+
+#[test]
 fn fresh_preparation_keeps_the_previous_live_client_and_named_history() {
     let fixture = Fixture::new(true);
     let first = fixture.json(&["-a", "opencode", "connect", "--prepare", "--json"]);

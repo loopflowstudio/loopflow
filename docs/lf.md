@@ -495,8 +495,8 @@ running its remaining work fresh, and names what waits on you, including a Task
 at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
-An open conversation keeps the instructions it launched with; `replace` it
-after an upgrade.
+An open conversation keeps the instructions it launched with; use `lf connect --fresh`
+in its scope after an upgrade to start with current instructions.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs

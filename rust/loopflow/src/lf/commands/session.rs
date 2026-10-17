@@ -299,6 +299,10 @@ async fn connect(
         ..
     } = connection;
     anyhow::ensure!(
+        !*prepare || message.is_none(),
+        "--prepare cannot be used with --message"
+    );
+    anyhow::ensure!(
         message.is_none() || cli.batch,
         "a next-turn message requires -b"
     );

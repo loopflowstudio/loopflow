@@ -202,6 +202,10 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
+OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
+the terminal. Full stderr is retained in that private `opencode.stderr.log` file
+beside the Session's capture. Read or tail it from another terminal; native
+errors and retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.

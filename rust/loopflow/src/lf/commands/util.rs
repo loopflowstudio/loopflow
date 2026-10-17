@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
@@ -428,13 +428,27 @@ fn run_native_session(
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
-    let observed_capture = capture_dir
-        .clone()
-        .filter(|_| command.program == "opencode" && agent_session.is_none());
-    if observed_capture.is_some() {
-        process.args(["--print-logs", "--log-level", "INFO"]);
-        process.stderr(Stdio::piped());
-    }
+    let opencode_capture = capture_dir
+        .as_ref()
+        .filter(|_| command.program == "opencode")
+        .map(|dir| {
+            let path = dir.join("opencode.stderr.log");
+            let mut options = OpenOptions::new();
+            options.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let file = options
+                .open(&path)
+                .with_context(|| format!("open OpenCode diagnostics at {}", path.display()))?;
+            eprintln!("OpenCode diagnostics: {}", path.display());
+            process.args(["--print-logs", "--log-level", "INFO"]);
+            process.stderr(Stdio::piped());
+            Ok::<_, anyhow::Error>((dir.clone(), file))
+        })
+        .transpose()?;
     process.current_dir(&command.cwd);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
     let mut activation = None;
@@ -508,12 +522,21 @@ fn run_native_session(
     }
     // The process record now owns the launch identity.
     drop(launch_lock);
-    let observer = observed_capture.map(|capture_dir| {
+    let observer = opencode_capture.map(|(capture_dir, diagnostics)| {
         let stderr = child
             .stderr
             .take()
             .expect("piped OpenCode stderr is available");
-        std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
+        let discover_session = agent_session.is_none();
+        std::thread::spawn(move || {
+            observe_opencode_session(&capture_dir, stderr, diagnostics, discover_session)
+                .with_context(|| {
+                    format!(
+                        "OpenCode diagnostics: {}",
+                        capture_dir.join("opencode.stderr.log").display()
+                    )
+                })
+        })
     });
     let status = if let Some(title) = &mut title {
         crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
@@ -760,26 +783,36 @@ async fn serve_codex_native(
     Ok(())
 }
 
-fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
+fn observe_opencode_session(
+    capture_dir: &Path,
+    stderr: impl Read,
+    mut diagnostics: File,
+    discover_session: bool,
+) -> std::io::Result<()> {
     let mut write_error = None;
-    let mut observed = false;
-    for line in BufReader::new(stderr).lines() {
-        let line = line?;
+    let mut observed = !discover_session;
+    let mut reader = BufReader::new(stderr);
+    let mut line = Vec::new();
+    while reader.read_until(b'\n', &mut line)? != 0 {
+        // Never write behind the native renderer. Drain even after a disk error
+        // so diagnostic failure cannot block the provider or discard its input.
+        if let Err(error) = diagnostics.write_all(&line) {
+            write_error.get_or_insert(error);
+        }
         if !observed {
-            if let Some(agent_session) = parse_opencode_session_id(&line) {
+            if let Some(agent_session) = parse_opencode_session_id(&String::from_utf8_lossy(&line))
+            {
                 observed = true;
                 if let Err(error) = crate::session_record::write_provider_session(
                     capture_dir,
                     &agent_session.into(),
                     None,
                 ) {
-                    write_error = Some(error);
+                    write_error.get_or_insert(error);
                 }
             }
         }
-        if line.contains("level=ERROR") {
-            eprintln!("{line}");
-        }
+        line.clear();
     }
     match write_error {
         Some(error) => Err(error),

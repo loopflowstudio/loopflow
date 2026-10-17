@@ -192,6 +192,98 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
 }
 
 #[test]
+fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
+    let fixture = Fixture::new("opencode");
+    fs::write(
+        fixture.home.path().join("bin/opencode"),
+        r#"#!/usr/bin/python3
+import os, subprocess, sys
+if '--version' in sys.argv:
+    print('fixture'); sys.exit(0)
+if '--session' not in sys.argv:
+    os.write(2, b'level=INFO message=created id=ses_diagnostics\n')
+else:
+    assert sys.argv[sys.argv.index('--session') + 1] == 'ses_diagnostics'
+mode = 'resume' if '--session' in sys.argv else 'launch'
+os.write(1, b'native composer\n')
+for attempt in range(3):
+    os.write(2, f'level=ERROR message="stream error" mode={mode} attempt={attempt} error="Model access is disabled"\n'.encode())
+subprocess.run(['/bin/sh', '-c', 'printf "background diagnostic\\n" >&2'], check=True)
+os.write(2, b'non-UTF8: \xff\x1b[2Junterminated')
+"#,
+    )
+    .unwrap();
+
+    let first = fixture
+        .command()
+        .args(["-i", ":", "launch"])
+        .output()
+        .unwrap();
+    let session = fixture.session();
+    let resumed = fixture
+        .command()
+        .args(["session", "connect", &session])
+        .output()
+        .unwrap();
+    for (output, mode) in [(&first, "launch"), (&resumed, "resume")] {
+        success(output);
+        assert_eq!(output.stdout, b"native composer\n");
+        let stderr = String::from_utf8(output.stderr.clone()).unwrap();
+        assert!(!stderr.contains("stream error"), "{stderr}");
+        assert!(!stderr.contains("background diagnostic"), "{stderr}");
+        let path = stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
+            .expect("launch announces retained diagnostics");
+        let log = fs::read(path).unwrap();
+        let text = String::from_utf8_lossy(&log);
+        for attempt in 0..3 {
+            assert!(
+                text.contains(&format!("mode={mode} attempt={attempt}")),
+                "{text}"
+            );
+        }
+        assert!(text.contains("Model access is disabled"));
+        assert!(text.contains("background diagnostic"));
+        assert!(log.ends_with(b"non-UTF8: \xff\x1b[2Junterminated"));
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(fixture.session(), session);
+}
+
+#[test]
+fn opencode_failure_before_session_creation_keeps_diagnostics() {
+    let fixture = Fixture::new("opencode");
+    fs::write(
+        fixture.home.path().join("bin/opencode"),
+        "#!/bin/sh\nprintf 'startup failure without a session\\n' >&2\nexit 23\n",
+    )
+    .unwrap();
+    let output = fixture
+        .command()
+        .args(["-i", ":", "launch"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("OpenCode did not report a resumable session"),
+        "{stderr}"
+    );
+    let path = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("OpenCode diagnostics: "))
+        .unwrap();
+    assert_eq!(
+        fs::read(path).unwrap(),
+        b"startup failure without a session\n"
+    );
+}
+
+#[test]
 fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() {
     for provider in ["claude", "codex", "opencode"] {
         let fixture = Fixture::new(provider);

@@ -352,12 +352,13 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     let clone = parent.join("clone");
     fs::create_dir(&source).unwrap();
     let repo = loopflow_test_support::TestRepo::new();
+    let repo_path = repo.path().canonicalize().unwrap();
     let registered =
-        crate::support::register_task_without_pr(&source, repo.path(), "main", &repo.head_sha());
+        crate::support::register_task_without_pr(&source, &repo_path, "main", &repo.head_sha());
     let database = Connection::open(source.join("loopflow.db")).unwrap();
     database.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,provider,task_id,wave_id)
         VALUES('copied-primary','Task conversation','generated',1,1,?1,'claude',?2,?3)",
-        rusqlite::params![repo.path().to_str().unwrap(),registered.task.id.as_str(),registered.task.wave_id.as_str()]).unwrap();
+        rusqlite::params![repo_path.to_str().unwrap(),registered.task.id.as_str(),registered.task.wave_id.as_str()]).unwrap();
     database
         .execute_batch(
             "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
@@ -381,11 +382,7 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     ));
     let lf = clone.join("bin/lf");
     let run = |args: &[&str]| {
-        let mut command = vec![
-            lf.to_str().unwrap(),
-            "--repo",
-            repo.path().to_str().unwrap(),
-        ];
+        let mut command = vec![lf.to_str().unwrap(), "--repo", repo_path.to_str().unwrap()];
         command.extend(args);
         serde_json::from_str::<Value>(&success(clone_command(&parent, &clone, &command))).unwrap()
     };
@@ -397,7 +394,9 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
         .unwrap()
         .iter()
         .find(|session| session["task_primary"] == true)
-        .unwrap();
+        .unwrap_or_else(|| {
+            panic!("copied Task primary missing from Session inventory: {sessions}")
+        });
     assert_eq!(primary["id"], "copied-primary");
     assert_eq!(primary["task_primary"], true);
     assert!(primary["open_argv"].as_array().unwrap().is_empty());

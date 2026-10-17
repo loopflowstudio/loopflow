@@ -8,7 +8,7 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::WorkSelection;
 use crate::store::SharedStore;
 
-use super::{NativeSession, OpenMode, SessionAction, SessionState};
+use super::{OpenMode, SessionAction, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +54,7 @@ impl SessionConnectExplanation {
                 SessionConnectIntent::Start => "Start this conversation",
                 SessionConnectIntent::Resume => "Resume saved provider history",
                 SessionConnectIntent::ConnectOrResume => {
-                    "Connect to the recorded live conversation, or resume saved history"
+                    "Attach to a retained terminal, or explicitly transition a structured Run to native history"
                 }
             };
             let mode = match action.mode {
@@ -147,18 +147,13 @@ async fn read_connection(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    let native = NativeSession::of(&session)?;
     let provider = store.sqlite.input_provider_session(&session.artifact_key)?;
-    // Do not probe a socket: even a connect-and-close enters the live driver's protocol.
-    let connection = if native.provider == "codex" && provider.is_some() {
-        store.sqlite.session_connection(&session.id)?
-    } else {
-        None
-    };
-    let intent = if provider.is_none() {
-        SessionConnectIntent::Start
-    } else if !prepare_only && connection.is_some() {
+    // A metadata read does not acquire viewer control or probe the endpoint.
+    let connection = store.sqlite.session_transport(&session.id)?;
+    let intent = if !prepare_only && connection.is_some() {
         SessionConnectIntent::ConnectOrResume
+    } else if provider.is_none() {
+        SessionConnectIntent::Start
     } else {
         SessionConnectIntent::Resume
     };
@@ -167,15 +162,8 @@ async fn read_connection(
         mode,
         prepare_only,
     });
-    if let Some((_, thread)) = connection {
-        let matching = provider
-            .as_ref()
-            .is_some_and(|provider| provider.agent_session == thread);
-        report.unavailable.push(if matching {
-            "Recorded live endpoint is not probed; reachability and driver takeover are checked only when opening"
-        } else {
-            "Recorded live thread differs from saved history; a reachable endpoint would refuse connection, an absent endpoint may resume history"
-        }.into());
+    if connection.is_some() {
+        report.unavailable.push("Retained execution endpoint is not probed; an unavailable owner leaves continuity unknown".into());
     }
     if !prepare_only {
         if !session.cwd.is_dir() {
@@ -208,7 +196,7 @@ async fn read_connection(
     let state = super::session_state(&metadata);
     report.state = Some(state);
     report.actions = super::session_actions(state);
-    // The live Codex connection precedes the native-client refusal in ordinary open.
+    // Retained terminal attachment precedes the native-client refusal in ordinary open.
     // With no socket observation, report the native fallback's refusal conditionally.
     if provider.is_some() {
         if let Err(error) = mode.require_action(state) {

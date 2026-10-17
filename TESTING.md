@@ -115,6 +115,10 @@ credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
+Run this check when changing transport ownership or process journaling: every
+added CLI process pays connection and schema setup costs, including at exit.
+Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
+to preserve completion and interruption receipts after database contention.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -1446,6 +1450,13 @@ Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
 `launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
+Retained terminal changes also run Linux Clippy, `transport_tests`,
+`interactive_flow_keeps_input_and_advances_only_after_each_provider_exits`, and
+the disposable installation proof `declared_agent_can_start_another_tasks_flow`.
+Assert that attachment returns after execution exits, as well as checking its
+output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
+Process ancestry assertions follow the recorded chain through transport owners
+rather than assuming a fixed number of launch processes.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

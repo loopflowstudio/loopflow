@@ -1751,7 +1751,7 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
     .unwrap();
     db.execute("INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,agent_session_id,attached_lf_process_id,attachment_token,endpoint,started_at) VALUES('00000000000040008000000000000002','agent','fixture','00000000000040008000000000000003',?1,'00000000000040008000000000000003','claim',?2,1)",
         rusqlite::params![session.id, endpoint.to_str().unwrap()]).unwrap();
-    db.execute("UPDATE agent_sessions SET provider='codex',agent_process_id='00000000000040008000000000000002',provider_thread='native-proof' WHERE id=?1", [&session.id]).unwrap();
+    db.execute("UPDATE agent_sessions SET provider='codex',agent_process_id='00000000000040008000000000000002',transport_lf_process_id='00000000000040008000000000000003',provider_thread='native-proof' WHERE id=?1", [&session.id]).unwrap();
     db.execute(
         "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id='00000000000040008000000000000002'",
         rusqlite::params![child.id(), time::OffsetDateTime::now_utc().unix_timestamp()],

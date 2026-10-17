@@ -1,0 +1,182 @@
+//! Library-backed terminal snapshots and replies while no controlling viewer exists.
+
+#[derive(Default)]
+pub(super) struct Queries {
+    pub detached: bool,
+    pub replies: Vec<u8>,
+}
+
+impl vt100::Callbacks for Queries {
+    fn unhandled_csi(
+        &mut self,
+        screen: &mut vt100::Screen,
+        prefix: Option<u8>,
+        _: Option<u8>,
+        params: &[&[u16]],
+        command: char,
+    ) {
+        if !self.detached {
+            return;
+        }
+        let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
+        match (prefix, first, command) {
+            (None, 6, 'n') => {
+                let (row, col) = screen.cursor_position();
+                self.replies
+                    .extend(format!("\x1b[{};{}R", row + 1, col + 1).bytes());
+            }
+            (None, 5, 'n') => self.replies.extend(b"\x1b[0n"),
+            (None, 0, 'c') => self.replies.extend(b"\x1b[?1;2c"),
+            _ => {}
+        }
+    }
+}
+
+pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
+    let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
+    if screen.alternate_screen() {
+        bytes.extend(b"\x1b[?1049h");
+    } else {
+        bytes.extend(b"\x1b[?1049l\x1b[3J\x1b[H\x1b[2J");
+        let mut history = screen.clone();
+        history.set_scrollback(usize::MAX);
+        for offset in (1..=history.scrollback()).rev() {
+            history.set_scrollback(offset);
+            if let Some(row) = history.rows_formatted(0, history.size().1).next() {
+                bytes.extend(row);
+                bytes.extend(b"\r\n");
+            }
+        }
+    }
+    bytes.extend(screen.state_formatted());
+    bytes
+}
+
+/// Reports may be inserted only between complete terminal sequences and UTF-8
+/// characters. The parser decides boundaries; raw provider bytes stay unchanged.
+pub(super) struct Boundary {
+    parser: vte::Parser,
+    state: Complete,
+    pending: Vec<u8>,
+    overflow: bool,
+}
+struct Complete {
+    ready: bool,
+    was_ready: bool,
+}
+impl vte::Perform for Complete {
+    fn print(&mut self, _: char) {
+        self.ready = true;
+    }
+    fn execute(&mut self, _: u8) {
+        self.ready = self.was_ready;
+    }
+    fn csi_dispatch(&mut self, _: &vte::Params, _: &[u8], _: bool, _: char) {
+        self.ready = true;
+    }
+    fn esc_dispatch(&mut self, _: &[u8], _: bool, _: u8) {
+        self.ready = true;
+    }
+    fn osc_dispatch(&mut self, _: &[&[u8]], _: bool) {
+        self.ready = true;
+    }
+    fn unhook(&mut self) {
+        self.ready = true;
+    }
+}
+impl Boundary {
+    pub fn new() -> Self {
+        Self {
+            parser: vte::Parser::new(),
+            pending: Vec::new(),
+            overflow: false,
+            state: Complete {
+                ready: true,
+                was_ready: true,
+            },
+        }
+    }
+    pub fn advance(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            if self.pending.len() < 65536 {
+                self.pending.push(*byte);
+            } else {
+                self.overflow = true;
+            }
+            self.state.was_ready = self.state.ready;
+            self.state.ready = false;
+            self.parser.advance(&mut self.state, &[*byte]);
+            if *byte == 0x1b {
+                self.state.ready = false;
+            }
+            if self.state.ready {
+                self.pending.clear();
+                self.overflow = false;
+            }
+        }
+    }
+    pub fn pending(&self) -> Option<&[u8]> {
+        (!self.overflow).then_some(self.pending.as_slice())
+    }
+    pub fn ready(&self) -> bool {
+        self.state.ready
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{snapshot, Boundary, Queries};
+
+    #[test]
+    fn restores_grid_and_input_modes_without_replaying_terminal_queries() {
+        let mut parser = vt100::Parser::new_with_callbacks(
+            24,
+            80,
+            2000,
+            Queries {
+                detached: true,
+                ..Default::default()
+            },
+        );
+        parser.process(b"\x1b[?1049h\x1b[?2004h\x1b[?1hhello\x1b[6n");
+        assert_eq!(parser.callbacks().replies, b"\x1b[1;6R");
+        let mut restored = vt100::Parser::new(24, 80, 2000);
+        restored.process(&snapshot(parser.screen()));
+        assert_eq!(restored.screen().contents(), "hello");
+        assert!(restored.screen().alternate_screen());
+        assert_eq!(
+            restored.screen().input_mode_formatted(),
+            parser.screen().input_mode_formatted()
+        );
+    }
+
+    #[test]
+    fn reconnect_retains_an_incomplete_escape_prefix() {
+        let mut boundary = Boundary::new();
+        boundary.advance(b"text\x1b[?20");
+        assert_eq!(boundary.pending(), Some(b"\x1b[?20".as_slice()));
+        let mut restored = vt100::Parser::new(24, 80, 0);
+        restored.process(boundary.pending().unwrap());
+        restored.process(b"04h");
+        assert!(restored.screen().bracketed_paste());
+        boundary.advance(b"04h");
+        assert_eq!(boundary.pending(), Some(b"".as_slice()));
+    }
+
+    #[test]
+    fn status_never_splits_an_osc_csi_or_utf8_character() {
+        let mut boundary = Boundary::new();
+        for frame in [
+            b"\x1b]7501;state=working\x1b\\".as_slice(),
+            b"\x1b[?2004h",
+            "\u{1f980}".as_bytes(),
+        ] {
+            for byte in &frame[..frame.len() - 1] {
+                boundary.advance(&[*byte]);
+                assert!(!boundary.ready());
+            }
+            boundary.advance(&frame[frame.len() - 1..]);
+            assert!(boundary.ready());
+        }
+    }
+}

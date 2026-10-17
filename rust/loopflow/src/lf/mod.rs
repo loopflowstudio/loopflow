@@ -398,6 +398,11 @@ pub enum ScratchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    /// Retain command execution independently of terminal viewers
+    Transport {
+        #[command(subcommand)]
+        cmd: crate::transport::TransportCommand,
+    },
     /// Create and use an offline, isolated development data clone (macOS)
     Clone {
         #[command(subcommand)]
@@ -883,6 +888,12 @@ impl SessionConnectionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Attach to the current execution without restarting or submitting input
+    Attach {
+        id: String,
+        #[arg(long)]
+        observe: bool,
+    },
     /// Save a steer for this Session without starting a turn
     Steer { id: String, message: String },
     /// Inspect steer delivery or retry delivery

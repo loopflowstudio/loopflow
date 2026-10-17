@@ -132,8 +132,8 @@ struct ProcessContext {
     process_started_at: Option<i64>,
     cwd: PathBuf,
     ledger_path: PathBuf,
-    /// Early observation retains a noninitializing connection through completion.
-    ledger: Option<SqliteStore>,
+    /// Retain the first successful connection through Process completion.
+    ledger: Arc<OnceLock<SqliteStore>>,
     receipt_wait: Duration,
     /// Serialized argv captured at Process start so terminal rows name their work.
     command: Option<String>,
@@ -590,11 +590,14 @@ fn ledger_insert(
         .lock()
         .expect("receipt cost mutex poisoned")
         .waited;
-    let recorded = match context
-        .ledger
-        .clone()
-        .map_or_else(|| SqliteStore::new(&context.ledger_path), Ok)
-    {
+    let recorded = match context.ledger.get().cloned().map_or_else(
+        || {
+            let store = SqliteStore::new(&context.ledger_path)?;
+            let _ = context.ledger.set(store.clone());
+            Ok::<_, crate::store::StoreError>(store)
+        },
+        Ok,
+    ) {
         Ok(store) => {
             let wait = context
                 .receipt_wait
@@ -832,7 +835,7 @@ fn create_process_context(
         process_started_at,
         cwd: repo_root.to_path_buf(),
         ledger_path,
-        ledger,
+        ledger: Arc::new(ledger.map(OnceLock::from).unwrap_or_default()),
         receipt_wait,
         command: fields
             .command

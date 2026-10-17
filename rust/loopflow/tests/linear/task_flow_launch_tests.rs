@@ -742,28 +742,32 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(flows[0]["state"], "current");
         assert_eq!(flows[0]["task_id"], task.registered.task.id.as_str());
         let flow_process = flows[0]["id"].as_str().unwrap();
-        let recorded: (String, String) = db
+        let recorded: String = db
             .query_row(
-                "SELECT cwd,parent_lf_process_id FROM processes WHERE id=?1",
+                "SELECT cwd FROM processes WHERE id=?1",
                 [flow_process],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
-            Path::new(&recorded.0),
+            Path::new(&recorded),
             task.repo.path().canonicalize().unwrap()
         );
-        let ancestor = if launch == "task" {
-            db.query_row(
-                "SELECT parent_lf_process_id FROM processes WHERE id=?1",
-                [&recorded.1],
-                |row| row.get::<_, String>(0),
+        // Execution retains the caller through its viewer and transport owner;
+        // the number of intervening Processes is not the attribution contract.
+        let caller_retained: bool = db
+            .query_row(
+                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
+                    SELECT id,parent_lf_process_id FROM processes WHERE id=?1
+                    UNION ALL
+                    SELECT p.id,p.parent_lf_process_id FROM processes p
+                    JOIN ancestors a ON p.id=a.parent_lf_process_id
+                 ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
+                rusqlite::params![flow_process, parent],
+                |row| row.get(0),
             )
-            .unwrap()
-        } else {
-            recorded.1
-        };
-        assert_eq!(ancestor, parent.as_str());
+            .unwrap();
+        assert!(caller_retained, "{launch}: Flow lost its original caller");
         let original: String = db
             .query_row("SELECT cwd FROM processes WHERE id=?1", [parent], |row| {
                 row.get(0)

@@ -1148,3 +1148,26 @@ fn task_overview_excludes_diagnostic_process_history() {
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
 }
+
+#[test]
+fn desktop_state_retains_outer_and_inner_layouts() {
+    use loopflow::lf::commands::desktop::{DesktopInspection, DesktopWorkLayoutInspection};
+    let reading: DesktopInspection = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/desktop_inspection.json"
+    ))
+    .unwrap();
+    let window = &reading.windows[0];
+    assert_eq!(
+        window.layout,
+        Some(DesktopWorkLayoutInspection::Workspace {
+            work: window.workspaces[0].work.clone()
+        })
+    );
+    assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
+    assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
+    let encoded = serde_json::to_string(&reading).unwrap();
+    assert_eq!(
+        serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),
+        reading
+    );
+}

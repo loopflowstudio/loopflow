@@ -17,7 +17,7 @@
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
       "supported_operations": [
-        "list",
+        "state",
         "hide",
         "restore",
         "focus",
@@ -113,7 +113,15 @@
           }
         ]
       },
-      "opening": null
+      "opening": null,
+      "layout": {
+        "kind": "workspace",
+        "work": {
+          "repository": "repo_22222222222222222222222222222222",
+          "kind": "task",
+          "id": "task_44444444444444444444444444444444"
+        }
+      }
     },
     {
       "repository": "repo_other",
@@ -149,7 +157,8 @@
         }
       },
       "session": null,
-      "opening": null
+      "opening": null,
+      "layout": null
     }
   ]
 }

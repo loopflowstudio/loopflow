@@ -17,6 +17,7 @@ public struct WorkspaceIdentity: Codable, Hashable, Sendable {
 /// Presentation identity. Execution locations belong to pane contents.
 public struct WorkWorkspaceKey: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case repository, wave, task }
+    /// Durable repository plan ID; filesystem locators belong to opening/execution state.
     public let repository: String
     public let kind: Kind
     public let id: String

@@ -626,7 +626,7 @@ final class WorkModel {
             path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
+            supportedOperations: ["state", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout?.inspection, opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

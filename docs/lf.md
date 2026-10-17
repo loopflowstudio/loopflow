@@ -801,7 +801,7 @@ lf session connect SESSION_ID --explain
 lf history show PROCESS_LFID --explain
 lf --task LOO-427 desktop open --diff --json  # conversation plus Changes
 lf desktop open --session SESSION_ID --diff  # exact Task-associated Session
-lf desktop list --json                       # read an already-running Mac app
+lf desktop state --json                       # read an already-running Mac app
 ```
 
 Explanation reads local records without allocating a checkout, creating a plan,
@@ -822,7 +822,7 @@ Session and Changes requests still require that location. A `--diff` request wit
 ordinary primary-Session owner to choose/prepare its conversation.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native
-endpoint. `desktop list --json` includes each window's latest Task `opening`
+endpoint. `desktop state --json` includes each window's latest Task `opening`
 reading and lookup failures. Page mounting and requested Session/Changes readiness
 settle that request; connection/comparison failures remain visible. These receipts
 are not configured/native acceptance, and `opening` must not authorize pane input.
@@ -833,7 +833,8 @@ a local checkout or transfer execution. Bare `open` is ambiguous with `pr open`;
 Sessions use `session connect`.
 
 Desktop inspection reports registered repository/window identities, selection,
-reading availability and retained Work pane trees with focus, zoom
+reading availability, the outer `layout` split tree with axes and ratios,
+and retained Work pane trees with focus, zoom
 and hidden panes. Each workspace reports its repository/Wave/Task key, title, open
 state and selection; Machine/checkout locations belong to its pane contents. `task` forwards Rust's recommendation and `run_control`;
 `session` forwards its actions, including unavailable reasons and takeover warnings.
@@ -847,7 +848,9 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
-The outer checkout-slot `layouts` field is removed; `workspaces` retains pane trees.
+The window `layout` places open Work; `workspaces` also includes retained Work
+outside that tree. Hiding outer Work currently drops its split position while
+retaining its inner panes. State reports that distinction.
 Opening Work selects its named tab without starting a conversation or preparing a
 checkout. Closing a tab hides its workspace; reopening restores panes, drafts and
 zoom. Closing the last tab starts nothing. This retention lasts for the window,
@@ -856,7 +859,7 @@ not across app quit. Mutation receipts identify `work` and `pane`, not readiness
 Select Work and use pane IDs from the retained layout:
 
 ```sh
-lf desktop list --json
+lf desktop state --json
 lf --task LOO-427 desktop text -- 'add to the draft'
 lf --task LOO-427 desktop key enter
 lf --repo loopflow --task LOO-427 desktop hide --pane "$pane"
@@ -899,7 +902,7 @@ lf help desktop --all --json          # all Desktop command contracts
 Structured help derives syntax from Clap and Desktop output schemas from their
 wire types. It describes the installed CLI without opening the app. A null
 `result_schema` means that command has no schema advertised yet. Running-app
-support remains in `desktop list`; current Work eligibility stays in its legal
+support remains in `desktop state`; current Work eligibility stays in its legal
 actions. A successful shell receipt may precede its surface: inspect readiness
 before input, and do not repeat creation after a lost reply.
 

@@ -748,7 +748,7 @@ supplies `flow_processes`, using the same execution details as CLI inspection.
 
 ```sh
 lf --task LOO-427 desktop open --diff --json
-lf desktop list --json
+lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
 
@@ -761,7 +761,9 @@ restores focus and zoom. Bare Work navigation starts no Session or checkout.
 The last tab can close without starting a repository conversation. Window close
 and app quit still end embedded clients; this is not draft recovery after quit.
 
-Inspection reports each workspace's `work`, title, open state and selection.
+Inspection reports the window's outer `layout` with Work keys, split axes and
+ratios, plus each retained workspace's `work`, title, open state and selection.
+Outer hidden Work remains in `workspaces`; its former split position is not retained.
 Execution locations live on contents, not workspace keys or pane receipts.
 There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
 content location: the matching local Work stream, or an owner-pinned read with

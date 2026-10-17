@@ -581,6 +581,7 @@ mod tests {
 
     #[test]
     fn explicit_binary_selection_applies_to_the_main_machine() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let binary = std::env::current_exe().unwrap();
         std::env::set_var("LF_BIN", &binary);

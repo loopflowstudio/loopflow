@@ -395,6 +395,12 @@ fn _migration_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
+    // Saved selection intent is introduced by the current draft; older prefixes omit it.
+    let has_selections: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_selections')",
+        [],
+        |row| row.get(0),
+    )?;
     // Released stores still carry this field until delivery receipts take ownership.
     let mut failures = if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='pm_writeback_json')",
@@ -410,6 +416,20 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
     } else {
         Vec::new()
     };
+    if has_selections {
+        failures.extend(validate_json_column::<crate::work::selection::Selection>(
+            conn,
+            "saved_selections",
+            "id",
+            "selection_json",
+        )?);
+        failures.extend(validate_json_column::<crate::work::selection::Arrangement>(
+            conn,
+            "saved_selections",
+            "id",
+            "arrangement_json",
+        )?);
+    }
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='krs')",
         [],

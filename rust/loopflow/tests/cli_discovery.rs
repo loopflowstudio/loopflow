@@ -597,19 +597,19 @@ fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
 }
 
 #[test]
-fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
+fn desktop_state_uses_the_retained_reader_without_an_inspect_alias() {
     use loopflow::lf::DesktopCommand;
 
     for args in [
-        vec!["lf", "desktop", "list", "--json"],
-        vec!["lf", "desktop", "li", "--json"],
+        vec!["lf", "desktop", "state", "--json"],
+        vec!["lf", "desktop", "sta", "--json"],
     ] {
         let args = normalize_args(args.into_iter().map(str::to_owned).collect()).unwrap();
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(matches!(
             cli.command,
             Some(Commands::Desktop {
-                cmd: DesktopCommand::List { json: true }
+                cmd: DesktopCommand::State { json: true }
             })
         ));
     }
@@ -618,11 +618,11 @@ fn desktop_list_uses_the_retained_reader_without_an_inspect_alias() {
     let help = success(run(
         repo.path(),
         home.path(),
-        &["desktop", "list", "--help"],
+        &["desktop", "state", "--help"],
     ));
     assert_eq!(
         help,
-        success(run(repo.path(), home.path(), &["help", "desktop", "list"]))
+        success(run(repo.path(), home.path(), &["help", "desktop", "state"]))
     );
     let retired = run(repo.path(), home.path(), &["desktop", "inspect", "--json"]);
     assert_eq!(retired.status.code(), Some(2));

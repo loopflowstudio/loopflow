@@ -30,11 +30,7 @@ impl SqliteStore {
     /// A Task is started by its first Run, an unpublished reservation included.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
+        task_started_in(&conn, task)
     }
 
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
@@ -71,4 +67,12 @@ impl SqliteStore {
             completed,
         })
     }
+}
+
+pub(super) fn task_started_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
 }

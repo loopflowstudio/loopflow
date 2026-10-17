@@ -5,6 +5,14 @@ indirect enum WorkLayout: Equatable {
     case workspace(WorkWorkspaceKey)
     case split(SplitAxis, WorkLayout, WorkLayout, Double)
 
+    var inspection: DesktopWorkLayoutInspection {
+        switch self {
+        case .workspace(let key): .workspace(work: key)
+        case .split(let axis, let first, let second, let ratio):
+            .split(axis: axis, ratio: ratio, first: first.inspection, second: second.inspection)
+        }
+    }
+
     var keys: [WorkWorkspaceKey] {
         switch self {
         case .workspace(let key): [key]

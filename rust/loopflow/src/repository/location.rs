@@ -55,10 +55,12 @@ pub fn reconcile(
     fs2::FileExt::lock_exclusive(&lock)?;
     let locator = read_locator(&common)?;
     let destination = repo.to_string();
-    if locator.is_none() && bind.is_none() && relocate.is_none() {
-        if let Some(id) = store.repository_id(&destination)? {
-            return Err(anyhow!("{destination} retains repository {id} but has no Git locator. If this is the original checkout, establish it with `lf repo identity --bind {id}`. If the directory moved, run `lf repo identity --relocate {id}` from its new location before reusing the old path."));
-        }
+    if locator.is_none()
+        && bind.is_none()
+        && relocate.is_none()
+        && store.repository_id(&destination)?.is_some()
+    {
+        return Ok(store.ensure_repository(&destination)?);
     }
     if let Some(id) = relocate.or(locator.as_ref()).filter(|_| bind.is_none()) {
         if relocate.is_some() && locator.as_ref().is_some_and(|other| other != id) {
@@ -132,8 +134,8 @@ pub fn reconcile(
     Ok(selected)
 }
 
-/// Ordinary reads reconnect only an enrolled Git directory. They never invent
-/// a repository identity or write a locator into unrelated checkouts.
+/// Ordinary reads reconnect enrolled directories and enroll retained identities
+/// witnessed by linked Task checkouts. They never invent an identity.
 pub fn reconnect_current() -> Result<()> {
     // A disposable registry observes copied addresses without claiming the
     // source checkout or rewriting its retained history.
@@ -181,13 +183,9 @@ pub fn reconnect_current() -> Result<()> {
     let Some(repo) = CanonicalRepo::current()? else {
         return Ok(());
     };
-    let Some(_) = locator else {
-        if let Some(id) = store.sqlite.repository_id(&repo.to_string())? {
-            return Err(anyhow!("{} retains repository {id} but has no Git locator; establish the original checkout with `lf repo identity --bind {id}`, or recover its move with `lf repo identity --relocate {id}`", repo));
-        }
-        return Ok(());
-    };
-    if registered.is_some_and(|path| path != repo.to_string()) {
+    let needs_enrollment =
+        locator.is_none() && store.sqlite.repository_id(&repo.to_string())?.is_some();
+    if needs_enrollment || registered.is_some_and(|path| path != repo.to_string()) {
         let runtime = tokio::runtime::Runtime::new()?;
         let store = runtime.block_on(crate::store::open_store(
             &crate::store::storage_config_from_env()?,

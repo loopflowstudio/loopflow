@@ -290,7 +290,7 @@ fn terminal_pair() -> io::Result<(File, File)> {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut size,
+            &raw mut size,
         )
     } < 0
     {
@@ -419,6 +419,9 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         command.process_group(0);
     }
     let mut child = command.spawn()?;
+    // Command retains its configured slave descriptors after spawn. Close them
+    // so Linux reports PTY EOF when the execution closes its own descriptors.
+    drop(command);
     let group = crate::os_process::ProcessGroupGuard::new(child.id());
     let mut readers: Vec<(u8, File)> = Vec::new();
     let input: File;

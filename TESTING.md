@@ -1446,6 +1446,13 @@ Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
 `launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
+Retained terminal changes also run Linux Clippy, `transport_tests`,
+`interactive_flow_keeps_input_and_advances_only_after_each_provider_exits`, and
+the disposable installation proof `declared_agent_can_start_another_tasks_flow`.
+Assert that attachment returns after execution exits, as well as checking its
+output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
+Process ancestry assertions follow the recorded chain through transport owners
+rather than assuming a fixed number of launch processes.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

@@ -1533,14 +1533,22 @@ fn declared_agent_can_start_another_tasks_flow() {
         format!("task:{}", target.task.id)
     );
     // The step ran in Y's checkout under a Flow process X's conversation started.
-    let observed: (String, String) = fixture.db().query_row(
-        "SELECT step.cwd,s.task_id FROM processes step JOIN processes flow_process ON flow_process.id=step.parent_lf_process_id
-         JOIN processes launch ON launch.id=flow_process.parent_lf_process_id
-         JOIN agent_sessions s ON s.id=launch.caller_session_id
-         JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let observed: (String, String) = fixture
+        .db()
+        .query_row(
+            "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
+            SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
+            FROM processes step
+            JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
+            UNION ALL
+            SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
+            FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
+         ) SELECT DISTINCT a.cwd,s.task_id FROM ancestors a
+         JOIN agent_sessions s ON s.id=a.caller_session_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     assert_eq!(observed, (y.display().to_string(), caller.id.to_string()));
 }
 

@@ -97,6 +97,67 @@ pub(super) fn require_admission_in(conn: &Connection, task: &TaskId) -> StoreRes
 }
 
 impl SqliteStore {
+    /// Explicit operator recovery for a historical Task, never automatic admission.
+    pub fn establish_task_admission(
+        &self,
+        task: &TaskId,
+        request: &str,
+    ) -> StoreResult<TaskAdmission> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let local = super::durable::map_local_machine(&tx)?.id;
+        let authority = match authority_in(&tx, task)? {
+            Some(authority) => {
+                if authority.machine_id != local {
+                    return Err(StoreError::InvalidAuthority(
+                        "Task already has a different admission authority; recovery cannot replace it".into(),
+                    ));
+                }
+                authority
+            }
+            None => {
+                let started: bool = tx.query_row(
+                    "SELECT started_at IS NOT NULL OR worktree IS NOT NULL OR checkout_machine_id IS NOT NULL FROM tasks WHERE id=?1",
+                    [task.as_str()], |row| row.get(0),
+                )?;
+                if started || owner_in(&tx, task)?.is_some() {
+                    return Err(StoreError::InvalidAuthority(
+                        "Task has recorded execution; establishment cannot relocate or replace it"
+                            .into(),
+                    ));
+                }
+                let repo: String = tx.query_row(
+                    "SELECT waves.repo FROM tasks JOIN projects ON projects.id=tasks.project_id JOIN waves ON waves.id=projects.wave_id WHERE tasks.id=?1",
+                    [task.as_str()], |row| row.get(0),
+                )?;
+                let authority = TaskAdmissionAuthority {
+                    machine_id: local.clone(),
+                    repository_id: super::repositories::ensure_repository_in(&tx, &repo)?,
+                };
+                super::planning_write::local(
+                    &tx,
+                    &crate::work::edit::WorkEdit::for_target(
+                        task.as_str(),
+                        &[crate::work::edit::WorkValue::TaskAdmissionAuthority(Some(
+                            authority.clone(),
+                        ))],
+                    ),
+                )?;
+                authority
+            }
+        };
+        // Claim validates planning, terminal state and explicit placement in this
+        // same transaction. Failure rolls back establishment as well.
+        let owner = claim_in(&tx, task, &local)?;
+        tx.commit()?;
+        Ok(TaskAdmission {
+            request: request.into(),
+            task_id: task.clone(),
+            authority,
+            owner: Some(owner),
+        })
+    }
+
     pub fn task_admission(
         &self,
         task: &TaskId,
@@ -191,6 +252,86 @@ mod tests {
             })
             .unwrap()
             .id
+    }
+
+    fn historical_task(store: &SqliteStore, repo: &str) -> TaskId {
+        let task = new_task(store, repo);
+        // Reproduce a retained Task created before admission authority existed.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET admission_authority=NULL WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
+        task
+    }
+
+    #[test]
+    fn explicit_historical_recovery_preserves_task_and_reserves_one_owner() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let task = historical_task(&store, home.path().to_str().unwrap());
+        let before = store.task(&task).unwrap().unwrap();
+        let local = store.local_machine().unwrap().id;
+        assert!(store.task_admission(&task, "read").unwrap().is_none());
+        assert!(store.claim_task_admission(&task, &local, "claim").is_err());
+        let recovered = store.establish_task_admission(&task, "recover").unwrap();
+        assert_eq!(recovered.authority.machine_id, local);
+        assert_eq!(recovered.owner.as_ref(), Some(&local));
+        let retry = store.establish_task_admission(&task, "retry").unwrap();
+        assert_eq!(retry.authority, recovered.authority);
+        assert_eq!(retry.owner, recovered.owner);
+        let after = store.task(&task).unwrap().unwrap();
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.description, before.description);
+        assert_eq!(after.project_id, before.project_id);
+        assert!(after.worktree.is_none());
+        assert!(!store.task_started(&task).unwrap());
+    }
+
+    #[test]
+    fn historical_recovery_never_relocates_work_or_overrides_delegation() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().to_str().unwrap();
+        let task = historical_task(&store, repo);
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)",
+            [task.as_str()],
+        ).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE tasks SET started_at=1 WHERE id=?1", [task.as_str()])
+            .unwrap();
+        assert!(store
+            .establish_task_admission(&task, "started")
+            .unwrap_err()
+            .to_string()
+            .contains("recorded execution"));
+        assert!(store.task_admission(&task, "unchanged").unwrap().is_none());
+
+        let delegated = historical_task(&store, repo);
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "remote", "remote", "/repo")
+            .unwrap();
+        store
+            .place_work(&WorkRef::Task(delegated.clone()), &remote)
+            .unwrap();
+        assert!(store
+            .establish_task_admission(&delegated, "delegated")
+            .unwrap_err()
+            .to_string()
+            .contains("delegation"));
+        assert!(store
+            .task_admission(&delegated, "rolled-back")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -295,6 +436,11 @@ mod tests {
         let imported = target.task_admission(&task, "target").unwrap().unwrap();
         assert_eq!(imported.authority, authority);
         assert!(imported.owner.is_none());
+        assert!(target
+            .establish_task_admission(&task, "wrong-authority")
+            .unwrap_err()
+            .to_string()
+            .contains("different admission authority"));
         let local = target.local_machine().unwrap().id;
         assert!(target
             .claim_task_admission(&task, &local, "unauthorized")

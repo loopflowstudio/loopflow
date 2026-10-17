@@ -25,7 +25,11 @@ pub fn run(
             cli.command,
             Some(crate::lf::Commands::Task {
                 cmd: crate::lf::TaskCommand::Location { .. }
-                    | crate::lf::TaskCommand::Admission { claim: None, .. }
+                    | crate::lf::TaskCommand::Admission {
+                        claim: None,
+                        establish: false,
+                        ..
+                    }
             })
         );
     // These operations use the addressed Machine's own records and accounts.

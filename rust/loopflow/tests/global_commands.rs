@@ -3269,6 +3269,33 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
         String::from_utf8_lossy(&refused.stderr).contains("first-start admission is unavailable")
     );
     assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    // Explicit operator establishment supplies the missing authority without
+    // rewriting the Task or allowing an ordinary checkout to infer ownership.
+    let established: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "admission", id, "--establish", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(established["task_id"], id);
+    assert_eq!(established["owner"], established["authority"]["machine_id"]);
+    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    success(
+        command(home.path(), repo.path(), &["task", "checkout", id])
+            .output()
+            .unwrap(),
+    );
+    let saved = SqliteStore::new(&path)
+        .unwrap()
+        .task_by_issue(id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.id.as_str(), id);
+    assert!(Path::new(saved.worktree.as_deref().unwrap()).exists());
 }
 
 fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {

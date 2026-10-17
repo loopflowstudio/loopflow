@@ -61,6 +61,7 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
     fs::write(repo.path().join("scratch/plan.md"), "CURRENT_SCRATCH").unwrap();
     fs::write(repo.path().join("active.md"), "Saved active skill\n").unwrap();
     let delivery = ContextDelivery {
+        repository: None,
         repo: repo_path,
         wave: Some("parent/child".into()),
         skill_file: Some(repo.path().join("active.md")),
@@ -139,4 +140,41 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
             file["bytes"].as_u64().unwrap()
         );
     }
+}
+
+#[test]
+fn hook_after_repository_move_reads_retained_skill_and_current_scratch() {
+    let _env = support::EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let old = repo.path().canonicalize().unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
+        .unwrap();
+    let id = store.ensure_repository(old.to_str().unwrap()).unwrap();
+    fs::create_dir(old.join("scratch")).unwrap();
+    fs::write(old.join("scratch/plan.md"), "RETAINED_SCRATCH").unwrap();
+    fs::write(old.join("active.md"), "RETAINED_SKILL").unwrap();
+    let delivery = ContextDelivery {
+        repository: Some((id.clone(), old.clone())),
+        repo: old.clone(),
+        wave: None,
+        skill_file: Some(old.join("active.md")),
+        references: Vec::new(),
+        home: home.path().join("machine"),
+    };
+    fs::write(
+        old.join("delivery.json"),
+        serde_json::to_vec(&delivery).unwrap(),
+    )
+    .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let moved = root.path().join("moved");
+    fs::rename(&old, &moved).unwrap();
+    let compact = hook(&moved, home.path(), "compact");
+    assert!(compact.contains("RETAINED_SCRATCH"));
+    assert!(compact.contains("RETAINED_SKILL"));
+    assert_eq!(
+        store.repository_path(&id).unwrap().unwrap(),
+        moved.canonicalize().unwrap().to_str().unwrap()
+    );
 }

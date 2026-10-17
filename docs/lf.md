@@ -1043,6 +1043,32 @@ or Tasks. `--repository ID` selects that registered plan's local path, including
 an explicitly selected Machine. Neither operation joins plans by code remote or
 changes a Machine's saved repository.
 
+```sh
+lf repo identity                         # enroll before moving the directory
+mv ../project ../renamed-project
+cd ../renamed-project
+lf repo identity                         # reconnect the same Work
+```
+
+The Git common directory retains a Machine-scoped locator. Reopening a moved
+checkout repairs Git's linked-worktree pointers and updates current Wave, Task
+and Session addresses together. Existing sibling worktree names and unpublished
+edits stay in place. Process paths and provider history retain their original
+values. Desktop reuses the repository's window and Session surfaces.
+
+For a checkout registered before locators, establish its identity with
+`lf repo identity --bind repo_ID` before moving it. If it has already moved, run
+`lf repo identity --relocate repo_ID` from the new location. A missing locator,
+copied Git directory or reused old path requires that explicit recovery; remote
+URLs and directory names never merge Work. Open the moved checkout before reusing
+its old path. Experimental Machines keep separate locators.
+
+Provider callbacks launched with this version retain their launch description
+in the Machine and resolve moved references by repository identity. Already
+running older providers can retain old hook paths; this does not rewrite their
+environment or interrupt them. An installed Desktop update still requires the
+supported installation handoff; source tests do not prove that live handoff.
+
 Known Task launches resolve recorded checkout Machine before delegation. The
 cross-machine path requires the same repository plan to be explicitly bound at
 the destination. Peer selection/exchange and complete remote execution observation

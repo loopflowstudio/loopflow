@@ -1434,6 +1434,19 @@ final class WorkModel {
         setRepoPath(path, preservingOpening: false)
     }
 
+    /// The router has observed the same durable repository at a new address.
+    /// Retain navigation and native owners; refresh readers in their new scope.
+    func relocateRepository(to path: String) {
+        guard repoPath != path else { return }
+        historyLookup?.cancel()
+        historyLookup = nil
+        sessionsGeneration &+= 1
+        peerPlanningGeneration &+= 1
+        workActivityGeneration &+= 1
+        repoPath = path
+        rescanWork()
+    }
+
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
         if navigation.palette == .search { navigation.palette = nil }
         if let openRepository, let path,

@@ -308,7 +308,10 @@ fn load_delivery(
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
         })?;
-    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+    let mut delivery: crate::context_block::ContextDelivery =
+        serde_json::from_slice(&std::fs::read(path)?)?;
+    delivery.relocate()?;
+    Ok(delivery)
 }
 
 fn emit_context(
@@ -542,6 +545,7 @@ mod tests {
             let skill = repo.path().join("skill.md");
             std::fs::write(&skill, format!("SESSION_{index}_SKILL")).unwrap();
             let context = ContextDelivery {
+                repository: None,
                 repo: repo.path().to_owned(),
                 home: home.path().to_owned(),
                 wave: None,

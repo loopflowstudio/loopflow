@@ -10,11 +10,61 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
+    let common = std::path::Path::new(repo).join(".git");
+    // Historical rows can retain a symlink spelling. Only the canonical entry
+    // enrolls Git; reading/importing legacy aliases must not replace its locator.
+    let common = if common.is_dir()
+        && std::path::Path::new(repo).canonicalize().ok().as_deref()
+            == Some(std::path::Path::new(repo))
+    {
+        Some(crate::repository::location::locator_directory(
+            &common,
+            &super::durable::map_local_machine(conn)?.id,
+        ))
+    } else {
+        None
+    };
+    let locator = if let Some(common) = &common {
+        crate::repository::location::read_locator(common)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+    } else {
+        None
+    };
+    if let Some(id) = repository_id_in(conn, repo)? {
+        if common.is_some() && locator.is_none() {
+            return Err(StoreError::InvalidData(format!(
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo identity --bind {id}`, or recover the moved checkout with `lf repo identity --relocate {id}`"
+            )));
+        }
+        if let Some(locator) = &locator {
+            let path: Option<String> = conn
+                .query_row(
+                    "SELECT repo FROM repository_plans WHERE id=?1",
+                    [locator.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if path.as_deref() != Some(repo) {
+                return Err(StoreError::InvalidData(
+                    "Git locator conflicts with retained Work; reconcile with `lf repo identity`"
+                        .into(),
+                ));
+            }
+        }
+        return Ok(id);
+    }
+    let id = locator.unwrap_or_else(RepositoryId::new);
+    // The Git locator may precede a rolled-back transaction. Reuse it on retry;
+    // an identity already registered elsewhere must be reconciled, not copied.
     conn.execute(
         "INSERT INTO repository_plans(repo,id,selected)
          SELECT ?1,?2,1 WHERE NOT EXISTS(SELECT 1 FROM repository_plans WHERE repo=?1)",
-        params![repo, RepositoryId::new().as_str()],
+        params![repo, id.as_str()],
     )?;
+    if let Some(common) = &common {
+        crate::repository::location::write_locator(common, &id)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    }
     repository_id_in(conn, repo)?.ok_or(StoreError::NotFound)
 }
 
@@ -43,6 +93,71 @@ pub(super) fn task_is_shared_in(conn: &Connection, task: &TaskId) -> StoreResult
 }
 
 impl SqliteStore {
+    /// Move current addresses together. Captures, Process rows and provider
+    /// history retain the paths at which they were recorded.
+    pub(crate) fn relocate_repository(
+        &self,
+        id: &RepositoryId,
+        destination: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let source: String = tx.query_row(
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [id.as_str()],
+            |row| row.get(0),
+        )?;
+        if source == destination {
+            return Ok(());
+        }
+        if repository_id_in(&tx, destination)?.is_some() {
+            return Err(StoreError::InvalidData(format!(
+                "{destination} already retains another repository; no Work was moved"
+            )));
+        }
+        // Freeze only observed checkout membership before changing its address.
+        // A future clone reusing the old path cannot acquire this history.
+        tx.execute(
+            "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
+             SELECT t.id,e.id FROM tasks t JOIN projects p ON p.id=t.project_id
+             JOIN waves w ON w.id=p.wave_id JOIN processes e
+               ON e.cwd=rtrim(t.worktree,'/') OR instr(e.cwd,rtrim(t.worktree,'/')||'/')=1
+             WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+               AND (t.worktree=?1 OR instr(t.worktree,?1||'/')=1)",
+            [&source],
+        )?;
+        for table in [
+            "repository_plans",
+            "waves",
+            "agent_sessions",
+            "planning_destinations",
+            "planning_peer_routes",
+            "planning_peer_imports",
+            "planning_peer_conflicts",
+            "pm_projects",
+            "pm_items",
+        ] {
+            tx.execute(
+                &format!("UPDATE {table} SET repo=?2 WHERE repo=?1"),
+                params![source, destination],
+            )?;
+        }
+        // Only descendants moved with the directory. Sibling worktrees keep
+        // their actual paths, even when their names retain the old prefix.
+        for (table, column, scope) in [
+            ("agent_sessions", "cwd", "repo=?2"),
+            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND project_id IN (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)"),
+        ] {
+            tx.execute(
+                &format!("UPDATE {table} SET {column}=?2 || substr({column},length(?1)+1)
+                    WHERE ({scope}) AND ({column}=?1 OR instr({column},?1||'/')=1)"),
+                params![source, destination],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Read execution only on its owning Machine. Foreign cached placements do
     /// not become another authority; peers must read that Machine themselves.
     pub fn observe_task_location(
@@ -238,6 +353,77 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
+
+    #[test]
+    fn relocation_rolls_back_and_retains_nested_task_processes() {
+        use crate::durable::{ProjectId, TaskId};
+        use crate::id::{LfProcessId, TraceId, WaveId};
+        use rusqlite::params;
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let id = store.ensure_repository("/before").unwrap();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let task = TaskId::new();
+        let process = LfProcessId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/before',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
+            conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON tasks BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
+        }
+        assert!(store.relocate_repository(&id, "/after").is_err());
+        assert_eq!(
+            store.repository_path(&id).unwrap().as_deref(),
+            Some("/before")
+        );
+        assert_eq!(store.get_wave(&wave).unwrap().unwrap().repo(), "/before");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER interrupt_move;")
+            .unwrap();
+        store.relocate_repository(&id, "/after").unwrap();
+        store.relocate_repository(&id, "/after").unwrap();
+        assert_eq!(store.task_work(&task).unwrap().processes[0].id, process);
+        assert_eq!(store.task_open_processes(&task).unwrap()[0].id, process);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            super::super::task_work::task_of_process(&conn, &process)
+                .unwrap()
+                .as_deref(),
+            Some(task.as_str())
+        );
+        let cwd: String = conn
+            .query_row("SELECT cwd FROM processes WHERE id=?1", [&process], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cwd, "/before/task/src");
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM relocated_task_processes", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
+        let unrelated = LfProcessId::new();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',2)",
+            params![unrelated, TraceId::new()],
+        )
+        .unwrap();
+        assert!(super::super::task_work::task_of_process(&conn, &unrelated)
+            .unwrap()
+            .is_none());
+    }
 
     #[test]
     fn two_machine_routing_uses_one_plan_and_keeps_execution_local() {

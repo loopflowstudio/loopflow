@@ -2892,6 +2892,27 @@ mod tests {
         conn.execute_batch(&sql[body_start..body_end]).unwrap();
     }
 
+    #[test]
+    fn repository_relocation_upgrade_retains_released_work() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "repository_relocation");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/repository_relocation_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("repository_relocation"))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO relocated_task_processes(task_id,process_id) VALUES('task','process')",
+            [],
+        )
+        .unwrap();
+        let addresses: (String, String) = conn.query_row(
+            "SELECT t.worktree,p.cwd FROM relocated_task_processes r JOIN tasks t ON t.id=r.task_id JOIN processes p ON p.id=r.process_id", [],
+            |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(addresses, ("/before/task".into(), "/before/task".into()));
+    }
+
     pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);

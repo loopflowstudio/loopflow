@@ -247,7 +247,10 @@ final class SessionsWorkspace {
     private var retainedStore: SessionsStore?
 
     func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
-        if let retainedStore { return retainedStore }
+        if let retainedStore {
+            retainedStore.repoPath = repoPath
+            return retainedStore
+        }
         let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces)
         retainedStore = store
         return store
@@ -573,7 +576,7 @@ final class SessionsStore {
 
     let surfaces: GhosttySurfacePool
 
-    let repoPath: String
+    var repoPath: String
     let query: RegistryQuery
     private var executionLocations: [String: TaskLocationObservation] = [:]
 
@@ -607,7 +610,7 @@ final class SessionsStore {
         self.repoPath = WaveOrigin.resolve(repoPath)
         self.query = query
         self.surfaces = surfaces
-        metrics = SessionsLatencyMetrics(scope: URL(fileURLWithPath: self.repoPath).lastPathComponent)
+        metrics = SessionsLatencyMetrics(scope: URL(fileURLWithPath: repoPath).lastPathComponent)
     }
 
     func reconcile(_ records: [SessionRecord]) {

@@ -638,6 +638,8 @@ Establish or print this repository's selected planning identity
 | Argument | What it does |
 |---|---|
 | `--bind` | Associate this checkout with a repository identity, retaining prior IDs |
+| `--relocate` | Reconnect retained Work after a move predating its Git locator |
+| `--path` | Print the selected repository’s current local directory |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

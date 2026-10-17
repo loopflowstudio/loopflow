@@ -23,6 +23,10 @@ fn checkout(cwd: &str) -> String {
     format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
+fn process_membership(process: &str) -> String {
+    format!("(({}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)", checkout(&format!("{process}.cwd")))
+}
+
 fn session_membership(session: &str) -> String {
     format!(
         "{session}.primary_scope IS NULL
@@ -62,7 +66,7 @@ fn lf_process_ids_in(selector: &str, candidates: Option<&str>) -> String {
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL{}
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members){}",
-        session_ids(selector), tasks(selector), checkout("ae.cwd"),
+        session_ids(selector), tasks(selector), process_membership("ae"),
         within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id"))
 }
 
@@ -85,7 +89,7 @@ pub(super) fn task_of_process(
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))
                  ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
-                checkout("e.cwd"), session_membership("a")
+                process_membership("e"), session_membership("a")
             ),
             [process],
             |row| row.get(0),
@@ -395,7 +399,7 @@ fn task_open_process_ids() -> String {
         SELECT open.id FROM open JOIN task_scope tw ON {}
         UNION SELECT s.process FROM sessions s JOIN agent_sessions a ON a.id=s.session
             JOIN task_scope tw ON ({session})",
-        checkout("open.cwd")
+        process_membership("open")
     )
 }
 

@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "98fb7dcf6c80a78038cc5fbf02d7c9d4e5589b9876c31d047791dbd2c36f98c5",
+    "Cargo.lock": "7c9ddb8b3c128135850e69daafdb7c0f37cb0b08946564cf5685222c93655db2",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -594,6 +594,15 @@
       "source": {
         "url": "https://static.crates.io/crates/anyhow/anyhow-1.0.104.crate",
         "sha256": "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+      }
+    },
+    {
+      "id": "arrayvec@0.7.8",
+      "scope": "lf",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "url": "https://static.crates.io/crates/arrayvec/arrayvec-0.7.8.crate",
+        "sha256": "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
       }
     },
     {
@@ -2586,6 +2595,15 @@
       }
     },
     {
+      "id": "unicode-width@0.2.2",
+      "scope": "lf",
+      "license": "MIT OR Apache-2.0",
+      "source": {
+        "url": "https://static.crates.io/crates/unicode-width/unicode-width-0.2.2.crate",
+        "sha256": "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+      }
+    },
+    {
       "id": "universal-hash@0.5.1",
       "scope": "lf",
       "license": "MIT OR Apache-2.0",
@@ -2646,6 +2664,24 @@
       "source": {
         "url": "https://static.crates.io/crates/uuid/uuid-1.27.0.crate",
         "sha256": "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+      }
+    },
+    {
+      "id": "vt100@0.16.2",
+      "scope": "lf",
+      "license": "MIT",
+      "source": {
+        "url": "https://static.crates.io/crates/vt100/vt100-0.16.2.crate",
+        "sha256": "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
+      }
+    },
+    {
+      "id": "vte@0.15.0",
+      "scope": "lf",
+      "license": "Apache-2.0 OR MIT",
+      "source": {
+        "url": "https://static.crates.io/crates/vte/vte-0.15.0.crate",
+        "sha256": "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
       }
     },
     {
@@ -2766,5 +2802,5 @@
       }
     }
   ],
-  "notices_sha256": "67d3f7e398ff88163cd9423cee0f1a9bcb311027349496ffa29b4e83665cf267"
+  "notices_sha256": "7a4466c11dfc696be2359b11b1f8047afc8465984dcfea5f5f5aed751970c175"
 }

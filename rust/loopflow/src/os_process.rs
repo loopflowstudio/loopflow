@@ -248,7 +248,7 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 /// Resolve the `lf` a Work launch will use: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
-/// against the *login* shell's PATH inside tmux — a third binary, chosen by
+/// against a child shell's PATH — a third binary, chosen by
 /// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
@@ -343,22 +343,11 @@ pub(crate) fn shell_escape(value: &str) -> String {
     format!("'{escaped}'")
 }
 
-pub(crate) async fn start_lf_session_with_env(
-    session: &str,
+pub(crate) fn start_lf_session(
     cwd: &Path,
     argv: &[String],
     env: &[(&str, &str)],
-) -> Result<()> {
-    let context = execution_context()?;
-    start_session_with_context(session, cwd, argv, env, context).await
-}
-
-pub(crate) async fn start_lf_session_inheriting(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-    inherit: &(dyn Fn(&mut std::process::Command) + Send + Sync),
+    inherit: &dyn Fn(&mut std::process::Command),
 ) -> Result<()> {
     let context = execution_context()?;
     let environment = session_environment(env, &context);
@@ -367,51 +356,8 @@ pub(crate) async fn start_lf_session_inheriting(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect::<Vec<_>>();
     let shell = lf_session_shell_command(cwd, argv, &environment);
-    let logs = context.lf_home.join("logs");
-    std::fs::create_dir_all(&logs)?;
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(logs.join(format!("{session}.log")))?;
-    let mut command = std::process::Command::new("sh");
-    command
-        .args(["-c", &shell])
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
-    inherit(&mut command);
-    // SAFETY: setsid affects only the child and is async-signal-safe. The repair
-    // Process keeps its own lifetime after the release controller exits.
-    unsafe {
-        std::os::unix::process::CommandExt::pre_exec(&mut command, || {
-            if libc::setsid() < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn()?;
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
+    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)?;
     Ok(())
-}
-
-async fn start_session_with_context(
-    session: &str,
-    cwd: &Path,
-    argv: &[String],
-    env: &[(&str, &str)],
-    context: crate::child::ChildExecutionContext,
-) -> Result<()> {
-    let child_env = session_environment(env, &context);
-    let environment = child_env
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    let shell_command = lf_session_shell_command(cwd, argv, &environment);
-    start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
 fn session_environment(
@@ -477,55 +423,13 @@ pub(crate) fn lf_session_shell_command(
         PROCESS_CONTEXT_ENV.join(" "),
         SESSION_AUTH_ENV.join(" "),
     );
-    // A long-lived tmux server can retain a deleted cwd despite new-session -c.
+    // Resolve cwd in the child before executing the prepared command.
     let enter_directory = format!("cd -- {} || exit", shell_escape(&cwd.to_string_lossy()));
     if env.is_empty() {
         format!("{enter_directory}; {clear_context}; exec {command}")
     } else {
         format!("{enter_directory}; {clear_context}; exec env {env} {command}")
     }
-}
-
-pub(crate) async fn start_tmux_session(
-    session: &str,
-    cwd: &str,
-    shell_command: &str,
-) -> Result<()> {
-    let mut command = tokio::process::Command::new("tmux");
-    command.current_dir(cwd);
-    command.process_group(0);
-    // This client may start the tmux server, whose environment every later
-    // session inherits, including ones a person opens by hand.
-    for name in PROCESS_CONTEXT_ENV {
-        command.env_remove(name);
-    }
-    command.env_remove(crate::config::USER_NAME_ENV);
-    for name in SESSION_AUTH_ENV {
-        command.env_remove(name);
-    }
-    let status = command
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            session,
-            "-c",
-            cwd,
-            "/bin/sh",
-            "-lc",
-            shell_command,
-        ])
-        .status()
-        .await
-        .map_err(|err| anyhow!("tmux failed to spawn in {cwd}: {err}"))?;
-    if !status.success() {
-        return Err(anyhow!("tmux failed to launch session '{session}'"));
-    }
-    let _ = tokio::process::Command::new("tmux")
-        .args(["set-option", "-t", session, "mouse", "on"])
-        .status()
-        .await;
-    Ok(())
 }
 
 /// What one lf process is: its Machine, binary, Process, Flow step and claims. A new
@@ -636,66 +540,6 @@ mod tests {
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         assert!(!output.stderr.is_empty());
-    }
-
-    #[test]
-    #[ignore = "requires a local tmux executable; uses an isolated server"]
-    fn detached_child_recovers_deleted_tmux_server_directory() {
-        let directory = tempfile::Builder::new()
-            .prefix("lf-tmux-")
-            .tempdir_in("/tmp")
-            .unwrap();
-        let socket = directory.path().join("socket");
-        let original = directory.path().join("deleted");
-        let cwd = directory.path().join("checkout with 'quotes'");
-        let output_path = directory.path().join("pwd");
-        std::fs::create_dir(&original).unwrap();
-        std::fs::create_dir(&cwd).unwrap();
-        let tmux = || {
-            let mut command = std::process::Command::new("tmux");
-            command
-                .env_remove("TMUX")
-                .args(["-S"])
-                .arg(&socket)
-                .args(["-f", "/dev/null"]);
-            command
-        };
-        assert!(tmux()
-            .current_dir(&original)
-            .args(["new-session", "-d", "-s", "anchor", "sleep 15"])
-            .status()
-            .unwrap()
-            .success());
-        std::fs::remove_dir(&original).unwrap();
-        let command = lf_session_shell_command(
-            &cwd,
-            &[
-                "/bin/sh".into(),
-                "-c".into(),
-                format!(
-                    "pwd -P > {}",
-                    super::shell_escape(output_path.to_str().unwrap())
-                ),
-            ],
-            &[],
-        );
-        let launched = tmux()
-            .args(["new-session", "-d", "-s", "child", "-c"])
-            .arg(&cwd)
-            .args(["/bin/sh", "-lc", &command])
-            .status()
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !output_path.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let output = std::fs::read_to_string(&output_path);
-        let _ = tmux().arg("kill-server").status();
-        assert!(launched.success());
-        assert_eq!(
-            output.unwrap().trim(),
-            cwd.canonicalize().unwrap().to_str().unwrap()
-        );
     }
 
     #[test]
@@ -823,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn lf_session_replaces_tmux_invocation_context() {
+    fn detached_session_replaces_inherited_invocation_context() {
         let argv = vec![
             "lf".to_string(),
             "work".to_string(),

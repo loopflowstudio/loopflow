@@ -33,7 +33,8 @@ pub fn run(
     let resident_operation = matches!(
         &cli.command,
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::List { .. }
+            cmd: crate::lf::SessionCommand::Attach { .. }
+                | crate::lf::SessionCommand::List { .. }
                 | crate::lf::SessionCommand::Connect { .. }
                 | crate::lf::SessionCommand::Ensure { .. }
                 | crate::lf::SessionCommand::Resume(..)

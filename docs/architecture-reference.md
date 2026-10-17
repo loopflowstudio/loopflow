@@ -22,10 +22,10 @@ Invocation-owned account failover now settles the old process and preserves its
 history before replacement. Top and Task gates share unfinished-row selection
 and identity judgment; unknown agents and receipt-less lf rows remain visible.
 Sampling failure retains Unknown rows, not an empty inventory. Public Task-status
-and scheduled-entry agreement remain unproved. Native connection launch now carries
-its frozen attachment, keeps relay/upstream endpoints distinct and settles client
-exit without ending the provider. Composed stand-ins cover pre-launch takeover
-and repeated-owner token rejection; configured connection remains unproved.
+and scheduled-entry agreement remain unproved. Native launch retains its frozen provider attachment under a detached terminal
+owner. Replacing an outer viewer changes only its input token. Whole-path stand-ins
+cover creator exit, zero viewers and the original pending Codex request/channel;
+configured native connection remains unproved.
 The LfProcess/LfSession rename is integrated from #1516. The
 [execution guide](architecture/execution.md#record-actual-processes) records this
 boundary; record fixtures do not establish installed acceptance.
@@ -43,9 +43,9 @@ schemas and old format readers. The cutover retains current Work and links,
 accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf connect` selects a Session ID,
-Task or Wave; `--takeover` stops owned clients and connects through the same live
-Codex AgentProcess, preserving its active turn and other conversations. There is no
-separate AgentProcess-restart operation. A Flow whose process died leaves its
+Task or Wave. Retained native terminals attach without replacing their provider.
+Explicit native resume of a structured Run may restart the provider while preserving
+Session/history, without resubmitting input. `session attach` never restarts. A Flow whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
@@ -248,8 +248,9 @@ A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
-Sessions without one remain unknown; client files are not read. Terminal placement
-belongs to the attached LfProcess, fenced by its attachment.
+Sessions without one remain unknown; client files are not read. The Session's `transport_lf_process_id` names its detached terminal owner. The
+execution child owns capture settlement and the frozen provider attachment;
+viewers receive separate revocable input tokens. Passive viewing takes no claim.
 Saved sockets are offered only for live records; a live endpoint's connection
 failure is an error, not permission to start another agent. Input completion uses
 its latest turn's LfProcess completion (the capture owner before any turn), not

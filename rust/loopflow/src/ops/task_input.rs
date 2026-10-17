@@ -132,9 +132,7 @@ async fn handle_attachment(
         return Ok(());
     }
     if line == "/detach" {
-        let _ = std::process::Command::new("tmux")
-            .args(["detach-client"])
-            .status();
+        crate::transport::detach_viewers()?;
         return Ok(());
     }
     if line == "/interrupt" {

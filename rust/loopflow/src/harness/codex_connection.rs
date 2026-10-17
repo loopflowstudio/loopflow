@@ -141,7 +141,7 @@ pub(crate) struct NativeInput {
 impl CodexConnection {
     /// Read all native turn pages before displaying the conversation. This
     /// connection never subscribes, answers approvals, or acquires an attachment.
-    pub async fn recover_history(&self, endpoint: &Path) -> Result<bool> {
+    pub async fn recover_history(&self, endpoint: &Path) -> Result<()> {
         let thread = self
             .thread_id
             .as_ref()
@@ -164,7 +164,6 @@ impl CodexConnection {
             .await?;
         let mut history = super::codex_history::History::default();
         let mut cursor = Value::Null;
-        let mut empty = true;
         loop {
             let result = rpc_request(
                 &mut upstream,
@@ -175,10 +174,9 @@ impl CodexConnection {
                 }),
             )
             .await?;
-            empty &= result["data"]
+            result["data"]
                 .as_array()
-                .ok_or_else(|| anyhow!("Native history response has no turns"))?
-                .is_empty();
+                .ok_or_else(|| anyhow!("Native history response has no turns"))?;
             super::dispatch::off_reactor(|| {
                 history.record(
                     &self.store,
@@ -198,7 +196,7 @@ impl CodexConnection {
             cursor = next;
         }
         upstream.close(None).await?;
-        Ok(empty)
+        Ok(())
     }
 
     pub async fn serve(&self, client: UnixStream, endpoint: &Path) -> Result<()> {
@@ -423,7 +421,7 @@ fn native_start_params(client: &Value, prepared: Value) -> Value {
     Value::Object(params)
 }
 
-// A terminal may close without completing the WebSocket handshake. This applies
+// The retained native client may explicitly exit without a WebSocket close handshake. This applies
 // only to its side of the relay: provider disconnects still propagate as failures.
 fn client_result<T>(result: std::result::Result<T, Error>) -> Result<Option<T>> {
     match result {
@@ -610,7 +608,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminal_exit_with_or_without_close_handshake_ends_the_relay_cleanly() {
+    async fn native_client_exit_with_or_without_close_handshake_ends_its_channel_cleanly() {
         for handshake in [false, true] {
             let home = tempfile::tempdir_in("/tmp").unwrap();
             let endpoint = home.path().join("provider.sock");

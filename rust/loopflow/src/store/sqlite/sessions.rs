@@ -389,6 +389,39 @@ fn primary_session_in(
 }
 
 impl SqliteStore {
+    pub(crate) fn bind_session_transport(
+        &self,
+        session: &str,
+        attachment: &crate::process::SessionAttachment,
+        owner: &crate::id::LfProcessId,
+    ) -> StoreResult<()> {
+        self.with_session_attachment(session, attachment, || {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?2 WHERE id=?1",
+                params![session, owner.as_str()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn session_transport(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<crate::id::LfProcessId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let id: Option<String> = conn
+            .query_row(
+                "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.completed_at IS NULL",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        id.map(|id| crate::id::LfProcessId::parse(&id).map_err(invalid))
+            .transpose()
+    }
+
     pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         interactive_sessions_in(&conn, "", [])

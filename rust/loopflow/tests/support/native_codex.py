@@ -114,6 +114,11 @@ def _client(endpoint: str, home: Path, thread: str | None) -> None:
             if rpc.get("method") == "turn/started" and (home / "fail-after-submit").exists():
                 raise SystemExit(25)
             if rpc.get("method") == "item/commandExecution/requestApproval":
+                if (home / "wait-approval").exists():
+                    (home / "pending-request.json").write_text(json.dumps(rpc))
+                    print("permission pending", flush=True)
+                    with open("/dev/tty") as terminal:
+                        assert terminal.readline().strip() == "decline"
                 _send(stream, {"id": rpc["id"], "result": {"decision": "decline"}}, True)
             if rpc.get("method") == "turn/completed":
                 if "TITLE_HOST" in os.environ:
@@ -162,6 +167,7 @@ def _server(endpoint: str, home: Path) -> None:
                     if method is None:
                         with lock:
                             (home / "native-approval.json").write_text(json.dumps(rpc["result"]))
+                            (home / "native-answer.json").write_text(json.dumps(rpc))
                             turn = turns[-1]
                             turn["status"] = "completed"
                             turns_file.write_text(json.dumps(turns))

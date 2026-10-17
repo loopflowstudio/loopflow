@@ -366,7 +366,7 @@ pub(crate) fn start_lf_session(
     argv: &[String],
     env: &[(&str, &str)],
     inherit: &dyn Fn(&mut std::process::Command),
-) -> Result<()> {
+) -> Result<crate::id::LfProcessId> {
     let context = execution_context()?;
     let environment = session_environment(env, &context);
     let environment = environment
@@ -374,8 +374,7 @@ pub(crate) fn start_lf_session(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect::<Vec<_>>();
     let shell = lf_session_shell_command(cwd, argv, &environment);
-    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)?;
-    Ok(())
+    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)
 }
 
 fn session_environment(

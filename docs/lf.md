@@ -562,8 +562,9 @@ sync unrelated upstream changes. Continued publication automatically carries wor
 past already-merged history, including squash merges. PR operations also work on
 ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
-its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
-timeout or interruption leaves the intent intact. Repeating land for a merged
+its PR every 15 seconds until verified merge, closure, a concrete blocker or
+interruption, including with Desktop closed. Elapsed time never ends the wait or
+triggers a rerun. Interruption leaves the intent intact. Repeating land for a merged
 Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
@@ -673,14 +674,14 @@ continue when the schedule is disabled or a Task is held.
 Set repository defaults in `.lf/config.yaml`:
 
 ```yaml
-automation: {retries: 1, timeout_reruns: 1}
+automation: {retries: 1}
 ```
 
 Use `lf task automate EXP-12 off` to hold future CI repair, and
 `lf task automate EXP-12 on` to enable it again. These settings never resume a
 Flow. One failed repair startup may retry; a completed blocked repair waits for
 changed evidence.
-Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
+Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
 
 ## Accounts and children

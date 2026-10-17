@@ -1697,7 +1697,7 @@ pub enum PrCommand {
     },
     /// Request auto-merge, retain settlement intent, and return.
     Land {
-        /// Wait up to 30 minutes for merge and repair failing CI; timeout retains the request
+        /// Wait for verified merge and repair failing CI until interrupted or blocked
         #[arg(long)]
         wait_and_fix: bool,
         #[arg(long)]

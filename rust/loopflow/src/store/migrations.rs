@@ -3355,6 +3355,48 @@ mod tests {
         validate_foreign_keys(&conn).unwrap();
     }
 
+    #[test]
+    fn landing_timeout_removal_preserves_intent_and_recovers_synthetic_blocks() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "remove_landing_timeouts");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/landing_timeouts.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("remove_landing_timeouts"))
+            .unwrap();
+        let state: (String, String, String, Option<String>) = conn.query_row(
+            "SELECT state,requested_head_sha,observed_head_sha,blocked_reason FROM pr_landings WHERE id='slow'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            state,
+            (
+                "watching".into(),
+                "requested".into(),
+                "observed".into(),
+                None
+            )
+        );
+        let blocker: String = conn
+            .query_row(
+                "SELECT blocked_reason FROM pr_landings WHERE id='blocked'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(blocker, "credential revoked");
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('pr_landings')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!columns.iter().any(|name| name.starts_with("ci_")));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     #[tokio::test]
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
@@ -3387,15 +3429,7 @@ mod tests {
         {
             for placement in ["home", "local"] {
                 conn.execute(
-                    "INSERT INTO pr_landings (
-                        id, repo, pr_number, worktree, branch, requested_head_sha,
-                        observed_head_sha, merge_commit, state, generation,
-                        supervisor_placement, supervisor_home_id, supervisor_process_id,
-                        supervisor_heartbeat_at, blocked_reason, created_at, updated_at,
-                        task_id, after_merge, next_slug, ci_pending_head, ci_pending_since, ci_timeout_reruns
-                     ) VALUES (?1, 'owner/repo', ?2, '/tmp/landing', 'repair', 'requested',
-                        'observed', ?3, ?4, 7, ?5, ?6, 123, 30, ?7, 10, 40,
-                        'landing_task', 'continue_task', 'follow-up', 'observed', 20, 1)",
+                    include_str!("../../tests/fixtures/migrations/retired_home_landing.sql"),
                     rusqlite::params![
                         format!("{placement}_{state}"),
                         index as i64 + if placement == "home" { 1 } else { 11 },
@@ -3496,11 +3530,6 @@ mod tests {
             "UPDATE pr_landings SET supervisor_placement='home', supervisor_machine_id='retired_home',
                 supervisor_process_id=456, supervisor_heartbeat_at=50 WHERE id='home_watching' AND generation=8", [],
         ).is_err());
-        let retained_ci: (String, i64, i64) = conn.query_row(
-            "SELECT ci_pending_head, ci_pending_since, ci_timeout_reruns FROM pr_landings WHERE id='home_blocked'",
-            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).unwrap();
-        assert_eq!(retained_ci, ("observed".into(), 20, 1));
         let history: String = conn
             .query_row(
                 "SELECT retired_supervisor_json FROM pr_landings WHERE id='home_blocked'",

@@ -1,3 +1,4 @@
+-- draft: repository_relocation
 -- Preserve checkout membership when its current address changes. Historical
 -- Process paths and attribution remain untouched; this grants no control authority.
 CREATE TABLE relocated_task_processes (

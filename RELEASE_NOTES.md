@@ -1,30 +1,23 @@
-# v0.14.3
+# v0.14.4
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.3 makes returning to work smoother: interrupted Codex Sessions reopen without a scan of historical process receipts, and Desktop terminals give text and pane borders more room. Upgrade to avoid the long “Preparing codex” wait on installations with large receipt histories and keep terminal text clear of rounded corners as panes resize.
+v0.14.4 keeps repository Work and native Sessions connected when a checkout moves or its directory is renamed. Loopflow retains the repository’s identity and updates its current address, so Desktop navigation and Session recovery can follow the move without losing Task membership or native conversation identity.
 
-## Return to interrupted Sessions sooner
+## Keep working after a directory move
 
-Reopening a Codex Session now reads the receipt for the relevant Process directly. The change removes work that grew with accumulated receipts while retaining the checks used to establish process identity and attachment ownership. (#1575)
+A moved checkout previously received a new repository identity, leaving Desktop navigation and Session callbacks pointing at the old address. Loopflow now retains identity in the Git common directory and reconciles current addresses together, while Desktop refreshes the existing workspace without replacing Session owners. (#1578)
 
-- In a controlled fixture with 234,483 synthetic historical receipts, median reconnect time fell from 53.72 to 1.85 seconds for a short history and from 54.35 to 1.79 seconds for a 56,766-byte context.
-- All 12 benchmark samples preserved native identity, captured input and every pre-existing event. No context, history or receipts were deleted.
-- Missing, corrupt or mismatched receipts and reused process identities retain their existing handling; recovery does not require permission to enumerate the receipt directory.
-
-## Keep terminal text inside the pane
-
-Desktop now reserves space inside terminal borders before Ghostty measures its surface, so columns and wrapping fit within the visible clearance. Adjusted outer spacing also keeps lower pane outlines clear of the window’s rounded corners. (#1574)
-
-- Terminal content has an 8-point inset, with a 10-point gutter along the Work layout’s sides and bottom.
-- Nested corner curves stay evenly spaced, and existing split-divider spacing is retained.
-- Recorded frame and grid checks cover both split directions and light and dark themes.
+- Preserve historical paths, Task membership, native conversation IDs, sibling worktrees and unpublished edits.
+- Distinguish a repository move from an independent clone or a different checkout reusing an old path through machine-scoped location records.
+- Resume native conversations after a rename; newly launched provider callbacks resolve relocated references from their recorded launch information.
 
 ## Operational notes
 
-- The reconnect measurements are warm results from a shared host. They reproduce the delayed reconnect stage; they do not measure the original incident or establish cold-cache startup acceptance. Independent startup acceptance remains pending.
-- A CLI-only installation preserves active Desktop clients but does not update their explicitly pinned bundled helper. Desktop needs its updated bundle to use the reconnect fix; plan adoption without interrupting live work.
+- Existing checkouts without a location record have explicit recovery through the `repo identity` command’s `--bind` and `--relocate` options. (#1578)
+- Already running older providers retain their existing hook environments. The callback change does not rewrite those live environments. (#1578)
+- The PR records repository preservation, native resume, callback, migration and Desktop navigation checks. Coordinated release/install and acceptance with the installed CLI and Desktop remained outstanding at implementation delivery; the Docker installation harness was unavailable locally. (#1578)
 
 ## Small changes
 
-- Updated the Python development dependency Ruff from 0.16.10 to 0.17.0. (#1572)
+- Disposable data clones remain isolated from repository relocation. Historical linked-checkout registrations preserve unrelated checkout context and Task placement without writing a location record into the main Git directory. (#1578)

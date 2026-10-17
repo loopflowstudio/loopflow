@@ -72,13 +72,14 @@ pub async fn ensure_local(store: &SqliteStore, task: &TaskId) -> Result<()> {
 
 pub fn command(
     selector: &str,
+    establish: bool,
     claim: Option<&MachineId>,
     request: Option<&str>,
     json: bool,
 ) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let store = if claim.is_some() {
+        let store = if establish || claim.is_some() {
             crate::store::open_store(&crate::store::storage_config_from_env()?).await?
         } else {
             crate::store::read_existing_registry()?.ok_or_else(|| anyhow!("Task admission registry is unavailable"))?
@@ -87,6 +88,13 @@ pub fn command(
         let task = store.sqlite.resolve_task_id(selector, Some(&repo.to_string()))?
             .ok_or_else(|| anyhow!("Task {selector} is not recorded in this repository"))?;
         let request = request.map(str::to_owned).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        if establish {
+            let reply = store.sqlite.establish_task_admission(&task, &request)?;
+            if json { println!("{}", serde_json::to_string(&reply)?); }
+            else { println!("{}: authority {}, execution {}", reply.task_id, reply.authority.machine_id,
+                reply.owner.as_ref().expect("establishment reserves execution")); }
+            return Ok(());
+        }
         let reply = observe(&store.sqlite, &task, claim, &request).await?
             .ok_or_else(|| anyhow!("Task has no established first-start authority; historical absence cannot admit execution"))?;
         if claim.is_some() && reply.owner.is_some() {

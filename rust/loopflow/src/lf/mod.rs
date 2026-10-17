@@ -1289,6 +1289,9 @@ pub enum TaskCommand {
     /// Inspect or reserve the Task's permanent first execution owner
     Admission {
         issue: String,
+        /// Explicitly establish this Machine as authority and owner for an unstarted historical Task
+        #[arg(long, conflicts_with = "claim")]
+        establish: bool,
         /// Request first execution on this Machine; an existing owner wins
         #[arg(long)]
         claim: Option<crate::durable::MachineId>,

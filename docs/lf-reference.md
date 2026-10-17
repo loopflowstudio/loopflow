@@ -1623,9 +1623,21 @@ Create a planning Task without allocating a checkout or starting work
 
 Inspect or reserve the Task's permanent first execution owner
 
+```bash
+lf task admission MTG-121 --establish --json
+```
+
+Explicitly choose this Machine as the permanent authority for a historical Task
+that has never started, then reserve its first execution. Use this only on the
+Machine selected to coordinate that Task; observation and failed peer reads never
+make that choice. Existing authority and execution ownership are retained, and
+delegation to another Machine is not overridden. Repeating the same recovery is
+safe. This does not launch work; continue with `lf task run MTG-121`.
+
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
+| `--establish` | Establish this Machine as authority and owner for an unstarted historical Task |
 | `--claim` | Request first execution on this Machine; an existing owner wins |
 | `--request` | Correlate a coordinator reply with this request |
 | `--json` | json Default: false. |

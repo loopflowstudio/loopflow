@@ -916,12 +916,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Admission {
             issue,
+            establish,
             claim,
             request,
             json,
-        } => {
-            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
-        }
+        } => loopflow::ops::task_admission::command(
+            issue,
+            *establish,
+            claim.as_ref(),
+            request.as_deref(),
+            *json,
+        ),
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
         | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
@@ -1469,7 +1474,11 @@ fn run() -> anyhow::Result<()> {
                 Some(Commands::Task {
                     cmd: TaskCommand::Location { .. }
                         | TaskCommand::WatchFiles { .. }
-                        | TaskCommand::Admission { claim: None, .. }
+                        | TaskCommand::Admission {
+                            claim: None,
+                            establish: false,
+                            ..
+                        }
                 })
             );
         if preview {
@@ -1552,7 +1561,11 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd: TaskCommand::Location { .. }
                 | TaskCommand::WatchFiles { .. }
-                | TaskCommand::Admission { claim: None, .. }
+                | TaskCommand::Admission {
+                    claim: None,
+                    establish: false,
+                    ..
+                }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1606,6 +1619,7 @@ fn run() -> anyhow::Result<()> {
             TaskCommand::Admission {
                 issue,
                 claim: None,
+                establish: false,
                 request,
                 json,
             },
@@ -1613,6 +1627,7 @@ fn run() -> anyhow::Result<()> {
     {
         return loopflow::ops::task_admission::command(
             issue,
+            false,
             None,
             request.as_deref(),
             *json || cli.json,

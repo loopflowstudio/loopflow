@@ -20,6 +20,13 @@ fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>>
     let common = if common.is_dir() {
         common
     } else if common.is_file() {
+        // Legacy registrations may name a linked checkout. Its shared Git
+        // directory belongs to the main repository, never that local alias.
+        let canonical = crate::repository::CanonicalRepo::discover(root)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        if canonical.as_path() != root {
+            return Ok(None);
+        }
         crate::git::worktrees::git_common_dir(root)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
     } else {

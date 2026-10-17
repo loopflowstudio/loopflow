@@ -1,16 +1,24 @@
 # infrastructure wave memory
 
+## Native terminal diagnostics (LOO-501, 2026-10-17)
+
+Jack Heart authorized repair/delivery preserving input, diagnostics and native
+history; model-access denial grants no account changes. Loopflow's ERROR echo
+overlaid OpenCode's composer. Launch/resume now retain byte-exact stderr in an
+announced private capture log; the native renderer owns display. Resume retains
+the supplied native identity.
+Installed OpenCode 1.19.3 with lf 0.14.4 reproduced it. Candidate local-API PTY
+evidence covers retries, resize/edit/submit, normal success and native identity;
+it proves neither paid-account access, screenshot version 1.18.33 nor delivery.
+Release's entry-point lesson applies: source tests miss competing terminal writers.
+
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
-Jack Heart authorized selective test cleanup and delivery, without retries or a
-five-minute CI claim. CI's architecture scan, checker fixtures and portable HTML
-freshness retain distinct proof; editorial fragments cannot prove agent judgment.
-Catalog, command resolution, safety contracts and prompt goldens remain.
-[Assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13)
-records the net 49-line test reduction. #1545 merged as `414d4dd27`, including
-Docker Hub acquisition after ECR quota failure. Merge supplies no installation
-acceptance or measured CI saving. Release's cold-image/operation-entry lessons
-apply; earlier retry recovery grants no exception to Jack's no-retries boundary.
+Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
+#1545 merged; installation and measured savings remain unproved. Assertion
+boundaries, counts and acquisition evidence:
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading;
+[assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13).
 
 ## Global agent override (LOO-440, curated 2026-10-11)
 
@@ -450,11 +458,8 @@ Prior recommendations and review: `906576f39:wave/infrastructure/MEMORY.md`, thi
 ## Release follow-through (reconciled 2026-10-05)
 
 Jack Heart assigned Infrastructure responsibility through verified publication and
-installed acceptance. Release owns execution/evidence; recover through its supported
-operation and report blockers/next actions in the ongoing conversation. Merge or a
-queued build is unfinished. Manual publication proves no unattended settlement.
-Exact v0.13.5 installation/recovery evidence: [Release memory](release/MEMORY.md);
-prior parent account: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading.
+installed acceptance. [Release memory](release/MEMORY.md) owns execution, recovery
+and proof limits; prior parent account: `86d0e5e6a2:wave/infrastructure/MEMORY.md`.
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
@@ -1081,11 +1086,8 @@ Jack Heart authorized CI delivery. lf-12be237 retains ten consecutive typical-co
 PRs under five minutes and separate queue/push-to-merged proof. #1543 merged;
 queue 38452715134 remains 6:24 (6:25 updatedAt).
 
-Selected DerivedData-miss overlap is implemented; hits use ordinary Xcode.
-Matched pairs save 4.794s cold (opposite signs), 18.575s changed-source warm;
-exact hits add 0.064s. Warm changes miss. Earlier overlap gains are no forecast;
-codegen/boxing remain rejected. Query savings prove no build gain. Contention
-limits attribution; Xcode client CPU/RSS omits compilers.
+Miss overlap is implemented; hits use Xcode. Mixed trials, attribution limits
+and rejected alternatives: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
 Process groups left a compiler alive; scoped cancellation passed. Toolchain/SDK/deployment and

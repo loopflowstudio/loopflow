@@ -196,6 +196,18 @@ The probe uses native terminal-title defaults and checks the latest OSC title,
 so an earlier correct title cannot hide a later overwrite. The TUI probe does not
 cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
 
+`tests/e2e/opencode_terminal.py` probes installed OpenCode through the real lf
+interactive launch with a private home and local API. Prepare a disposable npm
+prefix with `@opencode-ai/plugin` matching `opencode --version`, then pass that
+prefix as `--dependencies` alongside `--lf`, `--native`, and `--output`. Run through
+`scripts/test_network.py` with `uv run --no-sync`. It retains raw terminal bytes,
+screen text, requests and diagnostic logs; checks repeated model-access failures,
+draft editing across resize, recovery, typed submission and a fresh successful
+launch. `--expect-overlay` reproduces the old stderr corruption against the
+installed lf release. The
+`session_launch_contract::opencode_` fixtures also cover early failure, arbitrary
+stderr bytes, subprocess diagnostics and resume identity without a provider install.
+
 `uv run python scripts/test_task_installation.py --native-titles` builds a
 release-shaped candidate only inside Docker and exercises published promotion
 under a disposable OS account. It checks preview, existing settings and symlinks,

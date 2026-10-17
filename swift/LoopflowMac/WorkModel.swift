@@ -136,8 +136,18 @@ final class WorkModel {
     func bindWorkspaces(_ registry: SessionsWorkspaceRegistry, repository: String) {
         guard workspaceRegistry !== registry else { return }
         workspaceRegistry = registry
-        workspaceRepository = repository
-        openSelectedWorkspace()
+        let retainedRepository = registry.keys.first?.repository
+        workspaceRepository = retainedRepository ?? repository
+        guard retainedRepository != nil, taskOpening?.status != .opening else {
+            openSelectedWorkspace()
+            return
+        }
+        // Retained Work may all be hidden; nil selection must not reopen it.
+        setSelection(registry.selectedWork?.reference)
+        if let key = registry.selectedWork, let workspace = registry.retained(key) {
+            navigation.workspacePresentation = workspace.presentation
+            navigation.selectedSessionId = workspace.presentation.selectedSessionId
+        }
     }
 
     func openSelectedWorkspace(besideFocused: Bool = false) {

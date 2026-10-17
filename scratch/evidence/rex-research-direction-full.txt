@@ -1,0 +1,24 @@
+# Session ownership research — October 16, 2026
+
+Jack Heart requested a deep dive into Rex architecture to test whether long-lived
+Sessions require an always-running server. Jack added that he has enjoyed the
+serverless design space and that theoretically the owners could all be background
+processes. Compare a shared on-demand server with detached per-Session processes;
+At the initial research request, process ownership was provisional. The later
+acceptance below supersedes that status.
+
+Jack also asked which state belongs in lfdb and what interface with agent providers
+preserves maximum Session continuity. Evaluate live-turn, PTY/screen/scrollback,
+provider conversation/history, unsent input and layout continuity separately;
+trace persisted identity, runtime ownership and reconnect capabilities rather than
+equating a saved Session ID with survival.
+
+The completed investigation examined Rex primary documentation and Loopflow
+ownership. The design-only Flow finished; architecture acceptance followed in
+the same conversation. The next requested contribution is the failure audit.
+
+Later direction: Jack accepted the ownership approach and requested an audit of
+past loading, stalled selection and forced-restart fixes. Jack wants restarting
+to become a safe, pleasant way to choose less context or a fresh conversation,
+after reliability is established. Record this downstream intent without expanding
+the current reliability work into a context-reset feature.

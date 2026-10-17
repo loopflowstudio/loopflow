@@ -10,9 +10,8 @@ struct RepoView: View {
     @Environment(\.palette) private var palette
     @State private var showsAutomation = false
     @State private var model: WorkModel
-    /// The repository window retains its panes and native surfaces through
-    /// navigation. Other repository windows never mount these surfaces.
-    @State private var sessionWorkspaces: SessionsWorkspaceRegistry
+    /// The application retains these panes when this window closes.
+    private let sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkLinkRouter?
     private let repository: String?
     private let openingRequests: Set<UUID>
@@ -20,6 +19,7 @@ struct RepoView: View {
 
     init(
         portfolioService: PortfolioService,
+        sessionWorkspaces: SessionsWorkspaceRegistry,
         initialRepoPath: String? = nil,
         query: RegistryQuery = RegistryQueryLocal.shared,
         taskLinks: WorkLinkRouter? = nil,
@@ -28,6 +28,7 @@ struct RepoView: View {
         openRepository: ((String, URL?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
+        self.sessionWorkspaces = sessionWorkspaces
         self.initialRepoPath = initialRepoPath
         self.query = query
         self.taskLinks = taskLinks
@@ -38,7 +39,6 @@ struct RepoView: View {
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         model.openRepository = openRepository
         _model = State(initialValue: model)
-        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localMachineId: model.savedMachineId))
     }
 
     var body: some View {

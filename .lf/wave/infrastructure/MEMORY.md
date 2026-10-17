@@ -185,30 +185,40 @@ and installed concurrent-Flow acceptance remain unproved. Exact gate evidence:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 Session titles.
 
-## Program Status direction (LOO-398, 2026-10-07)
+## Program Status direction (LOO-398/415, reconciled 2026-10-16)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
 lf writing only for pipe-driven work/Flow position. Reports override inference
 in Rust's single Waiting judgment; they grant no execution authority.
-Implement from the spec. LOO-384 remains for non-reporters; provider adoption is
-unverified. LOO-402 owns broader presentation.
-Jack authorized build and publication for review, not landing, and made LOO-394's
-absent relay a named follow-up. Its #1484 covers naming only.
+Jack Heart assigned emission to LOO-415 on October 7, conditional on lf and
+Flows reporting equally well to external hosts; LOO-398 owns reading. LOO-415's
+brief requires one terminal writer for Flow steps as well as conversations.
+A PTY accepted only 62 of 74 OSC bytes: a parent mutex cannot serialize independent
+step writers. Provider reports pass unchanged, with no reports in JSON/log output.
+LOO-384 retains non-reporters; LOO-402 owns broader presentation. Source proofs
+do not establish installed/native adoption; viewer absence is not provider death.
+Earlier patch evidence and constraints:
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, Program Status direction.
 
-Jack approved the embedded patch at `a60e9e2a…`; both earlier patches survive
-in immutable lf2, verified by public checksum and SwiftPM
-linking. Literal state/kind/message appears in the breadcrumb header and pane
-strip; Task-header intent remains for review. SQL/CLI/DTO/Swift proofs establish
-separate boundaries, not installed or composed native-pane acceptance. Provider
-generation and surface incarnation fence observations; viewer absence is not death.
+## Session continuity (LOO-416, 2026-10-16)
 
-Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
-existing independent output paths cannot safely finish the escape before normal
-text. Flow children inherit terminal descriptors; a parent mutex cannot serialize
-them, and piping native children changes terminal behavior. Extending this Task
-with PTY transport or deferring emission to LOO-394 remains an unresolved choice,
-not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
-original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
+Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
+shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
+creation and lifecycle, including nested CLI callers without Desktop. No shared
+daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
+transport; its multiplexer exemption and repaint-only brief still need alignment
+with this outcome. LOO-497 owns the shared layout API; LOO-489 integrates it.
+
+Application retention now keeps repository registries across window closure;
+headless tests cover twelve Work layouts/drafts, not twelve live providers.
+Known scenes render before lookup; fresh resolution still owns new link delivery.
+App death still destroys runtime state: durable identity, native history and
+repaint alone cannot restore live input or exact scrollback. Renderer recovery
+and layout replication across Desktop installations remain unresolved.
+
+Release's operation-entry lesson applies: prove reopening through its public
+router, then native remount and provider survival separately. Neither retained
+models nor successful surface construction proves editable provider readiness.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
@@ -303,30 +313,22 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## AgentProcess (LOO-443/447, 2026-10-10)
+## AgentProcess (LOO-443/447, reconciled 2026-10-16)
 
-Jack Heart accepted #1519 (`71741bd4`).
-LOO-447 owns Claude/OpenCode takeover/stop; Jack excluded removal timing,
-historical orphans and configured-provider runs.
+Jack Heart accepted #1519 (`71741bd4`) and #1524 landing (`55bc3fcd`).
+AgentProcess owns fenced attachment and exact stop; client death differs from
+provider death, and unknown descendants grant no signaling. Stand-ins prove
+A → B → A rejection, not configured relay or installed acceptance.
 
-Headless launch requires attachment. AgentProcess replaces generation;
-released counters stay unread, old callers stale. Client/provider death differs;
-leader death or unknown descendants grants no signaling.
-`82b5d90d5` proves A → B → A rejection with stand-ins, not configured relay.
-CI: `be4a2b2af:wave/infrastructure/MEMORY.md`, this heading.
-
-Jack Heart's October 10 decision `fd830a3f` supersedes live takeover for Claude
-and OpenCode: stop through the AgentProcess record, resume the same native
-conversation, and publish. Codex live handoff removal belongs to separate work;
-retain its generations, fences and saved connection here. Jack later approved
-#1524, gate/landing and completion after verified merge (`55bc3fcd`).
-Delete Claude replay and OpenCode relay/recovery preparation, including the shared
-named-lifeline rewrite. Preserve exact stop, foreground exclusion, native history
-and uncertain turns. `f2096ffce`'s public stop/resume and frozen-authority fixtures
-pass. Gate repaired stale refusal and socket-server lifetime fixtures. Published
-checkpoint CI skipped tests; Linux/installed acceptance remains unproved.
-Prior live-takeover evidence: `5e95ce9a4:wave/infrastructure/MEMORY.md`, this heading.
-Plan: `scratch/stop-and-take-over-claude.md`.
+Jack Heart's October 10 decision `fd830a3f` selects explicit Claude/OpenCode
+takeover by stopping the AgentProcess and resuming native history. October 16's
+continuity direction above requires attach-only automatic restoration instead.
+Preserve Codex's fences/connection, foreground exclusion, native history and
+uncertain turns. Deleted Claude replay/OpenCode recovery paths stay deleted.
+Jack excluded historical-orphan cleanup, removal timing and configured-provider
+runs. Linux/installed acceptance remains unproved; checkpoint CI skipped tests.
+Earlier decisions, source proofs and live-takeover counterevidence:
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, AgentProcess.
 
 LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion,
 approving landing with quieter output. Fenced native answers, replay/schema and
@@ -684,9 +686,10 @@ Receipts preserve attempts, later edits, nulls, ages, foreign/partial facts and 
 Journal routes replace inventories, retaining causal losers and uncertainty.
 Released SQL stays immutable; no old-version Git decoder. Key pairing and automatic export of Git-imported,
 unmapped Work into Linear remain open; Linear's unconditional updates retain a
-remote-edit race. LOO-414 owns exclusive first-start authority: missing local
-placement proves no peer absence. Jack's `19116a1b` stacks 427 on 412 for later
-landing; this approval does not settle that separate authority.
+remote-edit race. Jack moved minimum first-start admission to LOO-427 on October
+11; LOO-414 retains coordinator recovery and detached launch retries. Missing
+local placement proves no peer absence. Earlier stacking approval `19116a1b`
+did not settle first-start authority.
 
 Ordinary Tasks/comments replace FollowThrough and its ritual/CLI/DTO/UI/Flow.
 Private recovery retains filing IDs/uncertainty, committing Tasks before comments. One config

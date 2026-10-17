@@ -27,7 +27,7 @@ extension PaneState {
     }
 }
 
-/// One window's retained workspace for Work: the pane layout and the
+/// One retained workspace for Work: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
 @Observable
@@ -280,10 +280,8 @@ final class SessionsWorkspace {
     }
 }
 
-/// Owned by each window's root view. Keying workspaces per window keeps
-/// Sessions↔Work navigation and repo switches lossless inside that window
-/// while never sharing an NSView or multiplexer across windows — a Session
-/// viewed in another window is just another "active elsewhere" client.
+/// One repository's retained Work and surfaces, mounted by its current window.
+/// Different repositories never share native views or multiplexers.
 @MainActor
 @Observable
 final class SessionsWorkspaceRegistry {
@@ -492,7 +490,7 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// One native occurrence per window. A deliberate eligible Work opening can
+    /// One native occurrence per repository. A deliberate eligible Work opening can
     /// relocate presentation, but neither copies a surface nor binds the Session.
     func revealSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
         for other in workspaces.values where other !== workspace {

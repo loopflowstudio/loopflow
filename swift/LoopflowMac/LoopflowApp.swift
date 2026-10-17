@@ -15,6 +15,7 @@ private func enrichProcessPathForGUILaunch() {
 struct LoopflowApp: App {
     @State private var taskLinks = WorkLinkRouter.shared
     @State private var portfolioService = PortfolioService()
+    @State private var workspaces: RepositoryWorkspaces
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
@@ -31,6 +32,8 @@ struct LoopflowApp: App {
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
         if AppTestMode.current() == nil { LaunchJournal.home.begin() }
         bootstrapLoopflowApp()
+        _workspaces = State(initialValue: RepositoryWorkspaces(
+            localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
         // Enrich our own process PATH before any children spawn, so tools launched
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
@@ -48,10 +51,12 @@ struct LoopflowApp: App {
             Group {
                 if let workspace {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
+                                            workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
                                             openRepository: requestRepository)
                 } else if AppTestMode.shouldBypassRegistry {
-                    RepoView(portfolioService: portfolioService, initialRepoPath: launchRepoURL?.path,
+                    RepoView(portfolioService: portfolioService,
+                             sessionWorkspaces: workspaces.registry(for: "fixture"), initialRepoPath: launchRepoURL?.path,
                              query: registryQuery)
                 } else {
                     WorkspaceLaunchView {

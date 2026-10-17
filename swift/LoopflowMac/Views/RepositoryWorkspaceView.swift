@@ -36,39 +36,32 @@ struct WorkspaceLaunchView: View {
     }
 }
 
-/// Restored scene locators are rechecked before starting readers or providers.
-/// A path reused for another plan must not restore that plan's panes here.
+/// Retained content mounts independently of resolution; unknown scene locators
+/// still need an identity reading before they can supply a workspace.
 struct RepositoryWorkspaceView: View {
     let workspace: RepositoryWorkspace
     let portfolioService: PortfolioService
+    let workspaces: RepositoryWorkspaces
     let query: RegistryQuery
     let router: WorkLinkRouter
     let openRepository: (String, URL?) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var reading: WorkReading<RepositoryWorkspace> = .loading
-    @State private var openingRequests: Set<UUID> = []
+    @State private var resolutionError: String?
+    @State private var validatedRequests: Set<UUID>?
 
     var body: some View {
         let requests = router.workspaceRequests(workspace.id)
-        Group {
-            switch reading {
-            case .available(let resolved):
-                RepoView(portfolioService: portfolioService, initialRepoPath: resolved.path,
-                         query: query, taskLinks: router, repository: resolved.id, openingRequests: openingRequests,
-                         openRepository: openRepository)
-            case .unavailable(_, let reason):
-                VStack {
-                    Text(reason).textSelection(.enabled)
-                    Button("Retry") { Task { await resolve() } }
-                }.padding()
-            case .loading:
-                ProgressView("Opening repository…")
-            }
+        RepositoryWorkspaceContent(workspace: router.retainedWorkspace(workspace.id), error: resolutionError,
+                                   retry: { Task { await resolve() } }) { resolved in
+            RepoView(portfolioService: portfolioService,
+                     sessionWorkspaces: workspaces.registry(for: resolved.id), initialRepoPath: resolved.path,
+                     query: query, taskLinks: router, repository: resolved.id, openingRequests: validatedRequests ?? [],
+                     openRepository: openRepository)
         }
         .task(id: requests) {
             // A new request may arrive between validation and registration.
             // Reuse that now-registered shell without unmounting retained content.
-            if case .available = reading, router.hasWindow(workspace.id) {
+            if validatedRequests != nil, router.hasWindow(workspace.id) {
                 router.confirmRegisteredWorkspace(workspace.id, requests: requests)
                 return
             }
@@ -77,23 +70,46 @@ struct RepositoryWorkspaceView: View {
     }
 
     private func resolve() async {
-        reading = .loading
+        resolutionError = nil
+        validatedRequests = nil
         let requests = router.workspaceRequests(workspace.id)
         do {
             let current = try await router.resolveWorkspace(workspace, query: query)
             guard !Task.isCancelled else { return }
             guard current.id == workspace.id else {
-                // This restored shell has not mounted any panes. Its retained
-                // locator belongs to the scene already reserved by the router.
+                // The locator belongs to a scene already reserved by the router.
                 openRepository(current.path, nil)
                 dismiss()
                 return
             }
-            openingRequests = requests
-            reading = .available(current)
+            validatedRequests = requests
         } catch {
             guard !Task.isCancelled, !(error is CancellationError) else { return }
-            reading = .unavailable(lastGood: nil, reason: error.localizedDescription)
+            resolutionError = error.localizedDescription
+        }
+    }
+}
+
+/// Keep the content at one structural position through refresh and failure.
+struct RepositoryWorkspaceContent<Content: View>: View {
+    let workspace: RepositoryWorkspace?
+    let error: String?
+    let retry: () -> Void
+    @ViewBuilder let content: (RepositoryWorkspace) -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let workspace {
+                content(workspace)
+            } else if error == nil {
+                ProgressView("Opening repository…")
+            }
+            if let error {
+                HStack {
+                    Text(error).textSelection(.enabled)
+                    Button("Retry", action: retry)
+                }.padding()
+            }
         }
     }
 }

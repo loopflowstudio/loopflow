@@ -59,6 +59,11 @@ replaces the focused workspace, or focuses it if already visible. Each workspace
 keeps its own panes, drafts and focus. Close its context header to hide it without
 closing its panes. Context headers appear when multiple workspaces are visible. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
 
+Closing a repository window keeps its panes, selected Work and file drafts until
+Desktop quits. Reopening a known repository shows retained content immediately,
+even while repository resolution waits or fails. Errors remain visible; new Task
+links wait for resolution before delivery. Unknown repositories need an initial lookup.
+
 Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
 it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
 across selections.

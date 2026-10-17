@@ -115,6 +115,10 @@ credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
+Run this check when changing transport ownership or process journaling: every
+added CLI process pays connection and schema setup costs, including at exit.
+Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
+to preserve completion and interruption receipts after database contention.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

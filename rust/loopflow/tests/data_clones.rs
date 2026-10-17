@@ -152,7 +152,6 @@ fn clone_migrates_only_its_snapshot_and_confines_children() {
     for provider in ["copied-codex", "copied-claude"] {
         for args in [
             vec!["session", "connect", provider],
-            vec!["session", "new", provider],
             vec!["-b", "session", "connect", provider, "--message", "again"],
         ] {
             let mut command = vec![lf.to_str().unwrap()];
@@ -392,7 +391,13 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     };
     let waves = run(&["wave", "list", "--json"]);
     assert!(waves.to_string().contains("task-pr-tests"));
-    let primary = run(&["session", "ensure", "--task", "INF-123", "--json"]);
+    let sessions = run(&["session", "list", "--task", "INF-123", "--json"]);
+    let primary = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["task_primary"] == true)
+        .unwrap();
     assert_eq!(primary["id"], "copied-primary");
     assert_eq!(primary["task_primary"], true);
     assert!(primary["open_argv"].as_array().unwrap().is_empty());

@@ -105,12 +105,12 @@ cli:
       $ lf flow show pursue                    # print its steps
       $ lf flow customize pursue               # copy it into your repo
       $ lf -b -a claude:opus flow pursue        # headless, on a model you pick
-      $ lf resume                              # pick the last Session back up
+      $ lf connect                             # this scope's ongoing conversation
       $ lf account                             # logins and remaining capacity
       $ lf history usage                               # tokens and cost per Session
       $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                     # its own worktree, then its Flow
-      $ lf session ensure --task EXP-12        # back to that Task's conversation
+      $ lf connect --task EXP-12               # back to that Task's conversation
       $ lf history usage --task EXP-12                 # what that Task cost
       $ lf land                                # merge when checks pass
     items:

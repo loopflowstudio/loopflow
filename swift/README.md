@@ -170,7 +170,9 @@ alternate right/down. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains
-available. Switching or resetting replaces the current provider process.
+available. Reset preserves the previous terminal and client. Provider switching
+replaces the current provider process. Repository, Wave, Task and exact Session
+preparation all use `lf connect --prepare`; reset uses `--fresh` for its scope.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red

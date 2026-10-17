@@ -123,7 +123,7 @@ Reading is half; the system stays steerable while it runs.
 
 ```bash
 lf --wave <wave> wave-operate "ship the parser fix first"
-lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
+lf connect --wave <wave>                  # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # save a steer for the Task's Sessions
 lf interrupt INF-123                     # end the active turn

@@ -54,13 +54,9 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// directories, while cron add saves a command whose own selectors name its Work.
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
 
-/// Primary conversations default to the repository unless `--wave` is explicit.
-/// `human_session::primary::tests` proves ambient Wave context cannot redirect them.
-const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
-
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
-const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"], &["session", "resume"]];
+const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
 
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
@@ -547,7 +543,6 @@ fn registry_is_complete() {
         .iter()
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_DEFAULT)
         .chain(SESSION_TARGETS)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
@@ -595,7 +590,6 @@ fn registry_is_complete() {
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_DEFAULT)
         .chain(SESSION_TARGETS)
     {
         assert!(

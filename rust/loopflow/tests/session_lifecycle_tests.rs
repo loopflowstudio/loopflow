@@ -222,8 +222,8 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
     assert!(prompt.contains("When Work exists, apply it"));
     let empty = fixture.json(&["wave", "show", "--all", "--json"]);
-    let primary = fixture.json(&["session", "ensure", "--json"]);
-    let again = fixture.json(&["session", "ensure", "--json"]);
+    let primary = fixture.json(&["session", "connect", "--prepare", "--json"]);
+    let again = fixture.json(&["session", "connect", "--prepare", "--json"]);
     assert_eq!(primary["id"], again["id"]);
     assert_eq!(fixture.count("agent_sessions"), 1);
     let configured: (String, String) = fixture
@@ -254,7 +254,14 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "work-first",
         &fixture.repo.head_sha(),
     );
-    let task_primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+    let task_primary = fixture.json(&[
+        "session",
+        "connect",
+        "--prepare",
+        "--task",
+        "INF-123",
+        "--json",
+    ]);
     let population = serde_json::json!({
         "empty": empty,
         "primary": primary,
@@ -1002,6 +1009,69 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
+fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() {
+    let fixture = Fixture::new(false);
+    let primary = fixture.json(&["connect", "--prepare", "--json"]);
+    let before = fixture.count("agent_sessions");
+    for verb in ["connect", "resume"] {
+        let output = fixture.run(&[
+            "-b",
+            verb,
+            "--fresh",
+            "--prepare",
+            "--message",
+            "Do not submit",
+            "--json",
+        ]);
+        assert!(!output.status.success(), "{output:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("--prepare") && error.contains("--message"),
+            "{error}"
+        );
+        assert_eq!(fixture.count("agent_sessions"), before);
+        assert!(fixture.launches().is_empty());
+        assert_eq!(
+            fixture.json(&["connect", "--prepare", "--json"])["id"],
+            primary["id"]
+        );
+    }
+}
+
+#[test]
+fn fresh_preparation_keeps_the_previous_live_client_and_named_history() {
+    let fixture = Fixture::new(true);
+    let first = fixture.json(&["-a", "opencode", "connect", "--prepare", "--json"]);
+    let id = first["id"].as_str().unwrap();
+    fixture.json(&["session", "rename", id, "Keep this conversation", "--json"]);
+    let (mut client, input) = fixture.attach(&["connect", id]);
+    let previous = fixture.json(&["connect", id, "--prepare", "--json"]);
+    let fresh = fixture.json(&[
+        "-a",
+        "opencode",
+        "-b",
+        "resume",
+        "--fresh",
+        "--prepare",
+        "--takeover",
+        "--json",
+    ]);
+    assert_ne!(fresh["id"], id);
+    assert_eq!(fresh["cwd"], first["cwd"]);
+    assert!(client.try_wait().unwrap().is_none());
+    assert_eq!(fixture.launches(), [input]);
+    let retained = fixture.json(&["connect", id, "--prepare", "--json"]);
+    assert_eq!(retained["title"], "Keep this conversation");
+    assert_eq!(retained["agent_process_id"], previous["agent_process_id"]);
+    assert_eq!(retained["state"], "active");
+    assert_eq!(
+        fixture.json(&["connect", "--prepare", "--json"])["id"],
+        fresh["id"]
+    );
+    fixture.release(client);
+}
+
+#[test]
 fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_exits() {
     let fixture = Fixture::new(false);
     support::register_task_with_pr(
@@ -1011,7 +1081,14 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
         &fixture.repo.head_sha(),
     );
     let first = fixture.json(&[
-        "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+        "-a",
+        "opencode",
+        "session",
+        "connect",
+        "--prepare",
+        "--task",
+        "INF-123",
+        "--json",
     ]);
     assert!(fixture.launches().is_empty());
     assert!(first["agent_process_id"].is_null());
@@ -1019,9 +1096,18 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
     let mut session = first;
     for replacement in [false, true] {
         if replacement {
-            let previous = session["id"].as_str().unwrap();
             let before = fixture.launches();
-            session = fixture.json(&["-a", "opencode", "session", "new", previous, "--json"]);
+            session = fixture.json(&[
+                "-a",
+                "opencode",
+                "session",
+                "connect",
+                "--task",
+                "INF-123",
+                "--fresh",
+                "--prepare",
+                "--json",
+            ]);
             assert_eq!(fixture.launches(), before);
             assert!(session["agent_process_id"].is_null());
         }
@@ -1089,7 +1175,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
             &fixture.repo.head_sha(),
         );
         let session = fixture.json(&[
-            "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+            "-a",
+            "opencode",
+            "session",
+            "connect",
+            "--prepare",
+            "--task",
+            "INF-123",
+            "--json",
         ]);
         let id = session["id"].as_str().unwrap();
         let provider = fixture.home.path().join("bin/opencode");
@@ -1110,8 +1203,19 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
                 [id],
             )
             .unwrap();
-        let successor =
-            retired.then(|| fixture.json(&["-a", "opencode", "session", "new", id, "--json"]));
+        let successor = retired.then(|| {
+            fixture.json(&[
+                "-a",
+                "opencode",
+                "session",
+                "connect",
+                "--task",
+                "INF-123",
+                "--fresh",
+                "--prepare",
+                "--json",
+            ])
+        });
         std::fs::write(provider, script).unwrap();
 
         let opened = fixture.run(&["session", "connect", id]);
@@ -1121,7 +1225,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         assert_ne!(launches[1], previous);
         assert_eq!(fixture.session_row(&previous).0, id);
         assert_eq!(fixture.session_row(&launches[1]).0, id);
-        let primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+        let primary = fixture.json(&[
+            "session",
+            "connect",
+            "--prepare",
+            "--task",
+            "INF-123",
+            "--json",
+        ]);
         assert_eq!(primary["id"], successor.as_ref().unwrap_or(&session)["id"]);
         assert_eq!(fixture.session_row(&launches[1]).3, retired);
     }
@@ -1152,7 +1263,13 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         fixture.session_row(&fixture.launches()[before]).0
     };
     let primary = |args: &[&str]| -> Value {
-        fixture.json(&[&["session", "ensure", "--json", "--task"], args].concat())
+        fixture.json(
+            &[
+                &["session", "connect", "--prepare", "--json", "--task"],
+                args,
+            ]
+            .concat(),
+        )
     };
     let members = |issue: &str| -> Vec<String> {
         fixture
@@ -1166,12 +1283,18 @@ fn a_task_primary_is_one_of_its_own_conversations() {
 
     // The Task's only unfinished interactive conversation is its primary.
     let sole = converse(&sole_path);
-    let chosen = primary(&["INF-123"]);
+    let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
     // It stays an ordinary member of its Task.
     assert_eq!(chosen["primary_scope"], Value::Null);
     assert_eq!(chosen["task_primary"], true);
-    assert_eq!(members("INF-123"), std::slice::from_ref(&sole));
+    assert_eq!(members("Inf-123"), std::slice::from_ref(&sole));
+    for args in [
+        vec!["connect", "--task", "inf-123", "--prepare", "--json"],
+        vec!["--task", "Inf-123", "connect", "--prepare", "--json"],
+    ] {
+        assert_eq!(fixture.json(&args)["id"], sole.as_str());
+    }
 
     // Among several, the most recently used one; the others stay open.
     let earlier = converse(&several_path);
@@ -1186,13 +1309,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
-    // An explicit choice wins, and keeps winning over later use.
+    // Opening an exact conversation leaves the Task's primary unchanged.
     assert_eq!(
-        primary(&["INF-124", "--choose", &earlier])["id"],
+        fixture.json(&["connect", &earlier, "--prepare", "--json"])["id"],
         earlier.as_str()
     );
+    let explained = fixture.json(&["connect", "--task", "inf-124", "--explain", "--json"]);
+    assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
     let newest = converse(&several_path);
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
     let marked: Vec<String> = fixture
@@ -1203,22 +1328,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .filter(|session| session["task_primary"] == true)
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(marked, std::slice::from_ref(&earlier));
+    assert_eq!(marked, std::slice::from_ref(&later));
     assert!(members("INF-124").contains(&newest));
-
-    // Another Task's conversation cannot be chosen.
-    let foreign = fixture.run(&[
-        "session", "ensure", "--task", "INF-124", "--choose", &sole, "--json",
-    ]);
-    assert!(!foreign.status.success(), "{foreign:?}");
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
 
     // A finished primary gives way to the Task's most recent conversation.
     fixture
         .db()
         .execute(
             "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
-            [&earlier],
+            [&later],
         )
         .unwrap();
     assert_eq!(primary(&["INF-124"])["id"], newest.as_str());
@@ -1280,13 +1398,50 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
 
     // Replacing it finishes that conversation and names a fresh one.
-    let successor = fixture.json(&["session", "new", created["id"].as_str().unwrap(), "--json"]);
+    let successor = fixture.json(&[
+        "session",
+        "connect",
+        "--task",
+        "INF-125",
+        "--fresh",
+        "--prepare",
+        "--json",
+    ]);
     assert_ne!(successor["id"], created["id"]);
     assert_eq!(primary(&["INF-125"])["id"], successor["id"]);
     assert_eq!(
         members("INF-125"),
         [successor["id"].as_str().unwrap().to_string()]
     );
+    let nested = empty_path.join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    for verb in ["connect", "resume"] {
+        let opened = fixture
+            .command(&[verb, "--prepare", "--json"])
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        assert!(opened.status.success(), "{opened:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&opened.stdout).unwrap()["id"],
+            successor["id"]
+        );
+        let repository = fixture
+            .command(&[
+                "--repo",
+                fixture.repo.path().to_str().unwrap(),
+                verb,
+                "--prepare",
+                "--json",
+            ])
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        assert!(repository.status.success(), "{repository:?}");
+        let repository: Value = serde_json::from_slice(&repository.stdout).unwrap();
+        assert_eq!(repository["primary_scope"], "repository");
+        assert_ne!(repository["id"], successor["id"]);
+    }
 }
 
 #[test]

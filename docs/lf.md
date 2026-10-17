@@ -256,7 +256,9 @@ a distinct Task, even with the same title. Use the saved ID to inspect or edit i
 Task references accept unique UUID prefixes of at least four hex digits, bare or
 prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
 Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
-add digits to select one. Full IDs and exact Linear ticket aliases still work.
+add digits to select one. Full IDs and Linear ticket aliases still work.
+Ticket aliases are case-insensitive: `loo-498`, `Loo-498`, and `LOO-498`
+select the same Task. Output retains the recorded spelling.
 Displayed local selectors start at seven digits and extend when needed; retain
 full IDs in automation.
 
@@ -433,42 +435,50 @@ lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
 lf history show SESSION --context       # input cost by source
 lf history show SESSION --instructions  # why guidance was included or omitted
-lf session ensure                   # this repository's one ongoing conversation
+lf connect                         # this repository's one ongoing conversation
 lf connect --wave growth            # open a Wave's primary conversation
 lf connect --task EXP-12 --prepare  # prepare a Task conversation without launching
 lf --task EXP-12 skill task-session # another conversation about that Task
-lf session connect SESSION         # stop headless Claude/OpenCode and resume history
-lf session new SESSION         # fresh conversation for the same scope
+lf connect SESSION                 # continue this exact conversation
+lf connect --fresh                 # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
-The repository and each Wave have one ongoing conversation. `session ensure`
-finds it or prepares it, a Wave's with its goal and memory, and repeats return the
-same Session. `session new` stops that conversation, keeps it as history, and prepares
-a fresh one. Neither launches a provider; `session connect SESSION` opens it in
-the current terminal. First-use trust or sign-in prompts stay open until answered
-or canceled; waiting for input does not time out the foreground conversation.
+`lf connect` opens the repository, Wave or Task's ongoing conversation for this
+checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
+`--wave`, `--task`, or a Session ID overrides the checkout's scope. Unassociated
+linked checkouts require an explicit target; ordinary `lf` starts a conversation
+there. First creation uses the matching scope's session skill, including its
+operating instructions. Reopening keeps those instructions and native history.
+
+`connect --fresh` selects a new primary in the same scope and checkout. The previous
+client and history survive. Each explicit fresh request creates another; ordinary
+connect recovers the current primary after an uncertain reply. Fresh accepts scope
+selection, not a Session ID. First-use trust or sign-in prompts stay open until
+answered or canceled.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
 returns an SSH command in either format.
+Preparation cannot be combined with `--message`.
 
-A Task's primary is one of its own conversations: the one named with
-`--choose SESSION`, else its only unfinished interactive conversation, else the
-most recently used. A Task with none gets a new one in its checkout. The others
-stay open, and listing Sessions never picks or starts one.
+A Task keeps its selected primary. Opening an exact Session does not change it.
+Without a primary, connect selects the most recently used eligible conversation, or creates one in
+the Task's checkout when none exists. The others stay open, and listing Sessions
+never picks or starts one.
 
-Use `lf resume` in the Task checkout, or `lf session connect SESSION`,
+Use `lf connect` in the Task checkout, or `lf connect SESSION`,
 to reopen the same conversation after a failed terminal launch. Retained native
 history survives retries. A recorded interactive provider observed dead can reopen
 without manual repair; a live or unknown provider cannot be started twice.
 Explicitly connecting to a replaced Session preserves its history and leaves
 the successor as primary, even when the old launch never acquired native history.
-For headless Claude and OpenCode, connect stops the run and resumes its saved
-native conversation; it is not live takeover. Codex retains
-its live connection. Missing process or conversation identity needs recovery before
-a headless run can be stopped and resumed.
+Interactive Sessions with a retained execution owner reconnect to that terminal
+without restarting the provider. For headless Claude and OpenCode, connect stops
+the run and resumes its saved native conversation; it is not live takeover.
+Codex retains its live connection. Missing process or conversation identity needs
+recovery before a headless run can be stopped and resumed.
 
 Session connect, rename and bind take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
@@ -476,9 +486,9 @@ inspection and replay; they do not select these Session actions.
 
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
-| Repository | `lf operate` | `lf session ensure` |
-| Wave | `lf --wave growth wave-operate` | `lf session ensure -w growth` |
-| Task | `lf task-operate EXP-12` | `lf session ensure --task EXP-12` |
+| Repository | `lf operate` | `lf connect` |
+| Wave | `lf --wave growth wave-operate` | `lf connect --wave growth` |
+| Task | `lf task-operate EXP-12` | `lf connect --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
 procedure. It leaves running Flows alone, reads a stopped or failed Flow before
@@ -486,8 +496,8 @@ running its remaining work fresh, and names what waits on you, including a Task
 at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
-An open conversation keeps the instructions it launched with; `replace` it
-after an upgrade.
+An open conversation keeps the instructions it launched with; use `lf connect --fresh`
+in its scope after an upgrade to start with current instructions.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs
@@ -779,8 +789,8 @@ installed-app and retained-window state remain uninspected.
 
 `session connect SESSION --explain` reports start, native resume or possible live
 connection, takeover/try intent and the shared Session actions.
-`resume --explain` uses the same Task preference and checkout/repository recency
-as ordinary resume; explicit `--task` or `--wave` overrides discovery. JSON adds `action`, `state`, `actions`, `impediments` and
+`connect --explain` and `resume --explain` resolve the same scope as opening,
+including first creation and fresh intent; explicit `--task` or `--wave` overrides discovery. JSON adds `action`, `state`, `actions`, `impediments` and
 `unavailable` to `resolution`. `connect --prepare` prepares launch
 arguments without takeover, with or without `--json`. JSON changes representation only. Live
 endpoints are not probed, unrecorded native conversations are not admitted, and
@@ -990,9 +1000,8 @@ the checkout. A stopped Flow is history and blocks nothing.
 ## Keep a document workspace
 
 ```bash
-lf session ensure                    # persistent repository conversation
-lf session ensure --wave product     # separate persistent Wave conversation
-lf session connect SESSION           # open the prepared conversation
+lf connect                       # persistent repository conversation
+lf connect --wave product         # separate persistent Wave conversation
 ```
 
 Inside the conversation's persistent checkout:

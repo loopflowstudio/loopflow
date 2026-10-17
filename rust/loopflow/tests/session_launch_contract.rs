@@ -947,13 +947,13 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
             .unwrap();
     let wave = store.list_waves(None).unwrap().into_iter().next().unwrap();
     let wave_id = wave.id().as_str();
-    let missing = fixture
+    let alias = fixture
         .command()
         .current_dir(other.path())
         .args(["resume", "--wave", wave_id, "--prepare"])
         .output()
         .unwrap();
-    assert!(!missing.status.success());
+    success(&alias);
     let first = fixture
         .command()
         .current_dir(other.path())
@@ -964,6 +964,20 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     let prepared: Value = serde_json::from_slice(&first.stdout).unwrap();
     let id = prepared["id"].as_str().unwrap();
     let saved = store.session(id).unwrap().unwrap();
+    fs::create_dir(saved.cwd.join("nested")).unwrap();
+    for verb in ["connect", "resume"] {
+        let contextual = fixture
+            .command()
+            .current_dir(saved.cwd.join("nested"))
+            .args([verb, "--prepare", "--json"])
+            .output()
+            .unwrap();
+        success(&contextual);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&contextual.stdout).unwrap()["id"],
+            id
+        );
+    }
     let again = fixture
         .command()
         .args(["--wave", wave_id, "session", "connect", "--prepare"])
@@ -1044,7 +1058,14 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         .any(|arg| arg == "--takeover"));
     let next = fixture
         .command()
-        .args(["session", "new", id, "--json"])
+        .args([
+            "connect",
+            "--wave",
+            wave_id,
+            "--fresh",
+            "--prepare",
+            "--json",
+        ])
         .output()
         .unwrap();
     success(&next);
@@ -1062,114 +1083,126 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
 }
 
 #[test]
-fn contextual_resume_uses_repository_recency_but_unowned_worktrees_stay_local() {
+fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
     let fixture = Fixture::new("claude:sonnet");
+    fixture.repo.create_file(
+        ".lf/skills/repo/session.md",
+        "Repository conversation override\n",
+    );
     fixture.repo.stage_all();
     fixture.repo.commit("provider settings");
-    let linked = fixture.home.path().join("linked");
-    success(
-        &Command::new("git")
-            .args(["worktree", "add", "-b", "linked"])
-            .arg(&linked)
-            .current_dir(fixture.repo.path())
+    let linked = fixture.repo.create_named_worktree("unassociated");
+    let prepare = |cwd: &Path, args: &[&str]| -> Value {
+        let output = fixture
+            .command()
+            .current_dir(cwd)
+            .args(args)
+            .args(["--prepare", "--json"])
             .output()
-            .unwrap(),
+            .unwrap();
+        success(&output);
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let first = prepare(fixture.repo.path(), &["connect"]);
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
+            .unwrap();
+    assert_eq!(
+        store
+            .session(first["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap()
+            .skill
+            .as_deref(),
+        Some("repo/session")
     );
-    fixture.run(&["-i", ":", "main conversation"]);
-    let main_id = fixture.session();
+    let id = first["id"].as_str().unwrap();
+    let saved = Path::new(first["cwd"].as_str().unwrap());
+    assert_ne!(saved, fixture.repo.path());
+    fs::create_dir(saved.join("nested")).unwrap();
+    let alias = fixture.home.path().join("alias");
+    std::os::unix::fs::symlink(saved.join("nested"), &alias).unwrap();
+    for cwd in [fixture.repo.path(), saved, &saved.join("nested"), &alias] {
+        for command in [vec!["connect"], vec!["resume"], vec!["session", "resume"]] {
+            assert_eq!(prepare(cwd, &command)["id"], id);
+        }
+    }
+    // An ordinary conversation is not a primary claim for an unassociated checkout.
     success(
         &fixture
             .command()
             .current_dir(&linked)
-            .args(["-i", ":", "linked conversation"])
+            .args(["-i", ":", "local conversation"])
             .output()
             .unwrap(),
     );
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
-    let linked_id: String = db
-        .query_row(
-            "SELECT id FROM agent_sessions WHERE id != ?1",
-            [&main_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    // Native human recency wins over newer assistant activity and repository primaries.
-    let native = args(&fixture.received())
-        .windows(2)
-        .find(|pair| pair[0] == "--session-id")
-        .unwrap()[1]
-        .to_owned();
-    let history = fixture
-        .home
-        .path()
-        .join(format!(".claude/projects/fixture/{native}.jsonl"));
-    fs::create_dir_all(history.parent().unwrap()).unwrap();
-    fs::write(
-        &history,
-        serde_json::json!({"type":"user", "userType":"external", "sessionId": native, "timestamp":"2099-01-01T00:00:00.000Z", "message":{"content":"continue"}}).to_string() + "\n",
+    let count = || {
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+    };
+    // A same-name repository under the configured lookup root must not steal
+    // the recovery command printed for this unrelated linked checkout.
+    let other = TestRepo::new();
+    let lookup_root = fixture.home.path().join("src");
+    fs::create_dir_all(&lookup_root).unwrap();
+    std::os::unix::fs::symlink(
+        other.path(),
+        lookup_root.join(fixture.repo.path().file_name().unwrap()),
     )
     .unwrap();
-    // Repository primary is a candidate, never the main-checkout default.
-    success(
-        &fixture
+    let before = count();
+    for verb in ["connect", "resume"] {
+        let output = fixture
             .command()
-            .args(["session", "ensure", "--json"])
+            .current_dir(&linked)
+            .args([verb, "--prepare"])
             .output()
-            .unwrap(),
-    );
-    let selected = fixture
+            .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("This worktree has no associated work conversation"));
+        assert_eq!(count(), before);
+        let recovery = error
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("lf --repo "))
+            .unwrap()
+            .split("  ")
+            .next()
+            .unwrap();
+        let argv = shlex::split(recovery).unwrap();
+        let args: Vec<&str> = argv.iter().skip(1).map(String::as_str).collect();
+        assert_eq!(prepare(&linked, &args)["id"], id);
+        assert_eq!(prepare(&linked, &[verb, id])["id"], id);
+    }
+    let explanation = fixture
         .command()
-        .args(["resume", "--prepare", "--json"])
+        .args(["--explain", "--json", "connect", "--fresh"])
         .output()
         .unwrap();
-    success(&selected);
+    success(&explanation);
+    let explanation: Value = serde_json::from_slice(&explanation.stdout).unwrap();
+    assert_eq!(explanation["action"]["intent"], "start");
+    assert_eq!(explanation["resolution"]["checkout"]["value"], first["cwd"]);
+    assert_eq!(count(), before);
+    let fresh = prepare(saved, &["resume", "--fresh", "--takeover"]);
+    assert_ne!(fresh["id"], id);
+    assert_eq!(fresh["cwd"], first["cwd"]);
     assert_eq!(
-        serde_json::from_slice::<Value>(&selected.stdout).unwrap()["id"],
-        linked_id
+        prepare(fixture.repo.path(), &["connect"])["id"],
+        fresh["id"]
     );
-    db.execute(
-        "UPDATE agent_sessions SET created_at=99999999999 WHERE id=?1",
-        [&main_id],
-    )
-    .unwrap();
-    let selected = fixture
-        .command()
-        .current_dir(&linked)
-        .args(["session", "resume", "--prepare", "--json"])
-        .output()
-        .unwrap();
-    success(&selected);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&selected.stdout).unwrap()["id"],
-        linked_id
-    );
-    db.execute(
-        "UPDATE agent_sessions SET created_at=1 WHERE id=?1",
-        [&main_id],
-    )
-    .unwrap();
-    // Selection in main launches with the linked checkout's current policy.
-    fs::write(
-        linked.join(".lf/config.yaml"),
-        "agent: claude:haiku\nyolo: true\npaste: false\ndiff: false\ndiff_files: false\n",
-    )
-    .unwrap();
-    let resumed = fixture.run(&["resume"]);
-    pair(&resumed, "--resume", &native);
-    pair(&resumed, "--model", "haiku");
-    bypass(&resumed, "claude", true);
-    assert_eq!(
-        Path::new(resumed["cwd"].as_str().unwrap())
-            .canonicalize()
-            .unwrap(),
-        linked.canonicalize().unwrap()
-    );
+    assert_eq!(prepare(&linked, &["connect", id])["id"], id);
+    let another = prepare(saved, &["connect", "--fresh"]);
+    assert_ne!(another["id"], fresh["id"]);
+    assert_eq!(count(), before + 2);
     for argv in [
-        vec!["resume", &linked_id],
-        vec!["connect", &linked_id, "--wave", "fixture"],
-        vec!["--task", "missing", "connect", &linked_id],
-        vec!["session", "replace", &linked_id],
-        vec!["connect", &linked_id, "--replace"],
+        vec!["connect", id, "--fresh"],
+        vec!["resume", id, "--wave", "fixture"],
+        vec!["--task", "missing", "connect", id],
     ] {
         assert!(!fixture
             .command()
@@ -1178,6 +1211,7 @@ fn contextual_resume_uses_repository_recency_but_unowned_worktrees_stay_local() 
             .unwrap()
             .status
             .success());
+        assert_eq!(count(), before + 2);
     }
 }
 
@@ -1206,7 +1240,7 @@ exit 3
 "#,
     )
     .unwrap();
-    for argv in [vec!["resume"], vec!["connect", &id]] {
+    for argv in [["resume", &id], ["connect", &id]] {
         let result = fixture.command().args(argv).output().unwrap();
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("Native history is missing"));

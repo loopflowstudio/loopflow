@@ -21,7 +21,7 @@ use crate::session_record::{
     AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
 };
 use crate::store::{open_store, storage_config_from_env, SharedStore};
-use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
+use crate::work::task::{CiCheck, CiIncident};
 
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
@@ -65,10 +65,6 @@ pub(crate) enum LandingObservation {
     },
     Pending {
         head_sha: String,
-        attempt: Option<String>,
-    },
-    Queued {
-        head_sha: String,
     },
     Passing {
         head_sha: String,
@@ -84,22 +80,17 @@ pub(crate) enum LandingObservation {
     Closed {
         head_sha: String,
     },
-    Degraded {
-        reason: String,
-    },
 }
 
 impl LandingObservation {
-    fn head_sha(&self) -> Option<&str> {
+    fn head_sha(&self) -> &str {
         match self {
             Self::Unarmed { head_sha }
-            | Self::Pending { head_sha, .. }
-            | Self::Queued { head_sha }
+            | Self::Pending { head_sha }
             | Self::Passing { head_sha }
             | Self::Failing { head_sha, .. }
             | Self::Merged { head_sha, .. }
-            | Self::Closed { head_sha } => Some(head_sha),
-            Self::Degraded { .. } => None,
+            | Self::Closed { head_sha } => head_sha,
         }
     }
 }
@@ -111,14 +102,8 @@ pub(crate) type ObservePr = Arc<dyn Fn(&PrLanding) -> OpsResult<LandingObservati
 pub(crate) type RepairCi = Arc<dyn Fn(&PrLanding, &CiIncident) -> OpsResult<()> + Send + Sync>;
 
 fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
-    match observe_pr_merge(&landing.worktree, u64::from(landing.pr_number)) {
-        Ok(observation) => {
-            classify_github_observation(landing, observation.pr, observation.request)
-        }
-        Err(error) => Ok(LandingObservation::Degraded {
-            reason: error.to_string(),
-        }),
-    }
+    let observation = observe_pr_merge(&landing.worktree, u64::from(landing.pr_number))?;
+    classify_github_observation(landing, observation.pr, observation.request)
 }
 
 fn ci_fix(
@@ -152,7 +137,7 @@ fn classify_github_observation(
         // The queue checks an integrated commit. Its membership takes precedence
         // over the original PR head's mergeability and check results.
         _ if matches!(request, Some(MergeRequest::Queued(_))) => {
-            Ok(LandingObservation::Queued { head_sha })
+            Ok(LandingObservation::Pending { head_sha })
         }
         _ if request.is_none() => Ok(LandingObservation::Unarmed { head_sha }),
         _ if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) => {
@@ -164,8 +149,8 @@ fn classify_github_observation(
                 }],
             })
         }
-        _ => match merge_gate_state(&landing.worktree, u64::from(landing.pr_number), &head_sha) {
-            Ok(Some(reading)) if reading.failing => Ok(LandingObservation::Failing {
+        _ => match merge_gate_state(&landing.worktree, u64::from(landing.pr_number), &head_sha)? {
+            Some(reading) if reading.failing => Ok(LandingObservation::Failing {
                 head_sha,
                 failing_checks: reading
                     .failing_leaves
@@ -176,18 +161,9 @@ fn classify_github_observation(
                     })
                     .collect(),
             }),
-            Ok(Some(reading)) if reading.pending => Ok(LandingObservation::Pending {
-                head_sha,
-                attempt: Some(reading.attempt),
-            }),
-            Ok(Some(_)) => Ok(LandingObservation::Passing { head_sha }),
-            Ok(None) => Ok(LandingObservation::Pending {
-                head_sha,
-                attempt: None,
-            }),
-            Err(error) => Ok(LandingObservation::Degraded {
-                reason: error.to_string(),
-            }),
+            Some(reading) if reading.pending => Ok(LandingObservation::Pending { head_sha }),
+            Some(_) => Ok(LandingObservation::Passing { head_sha }),
+            None => Ok(LandingObservation::Pending { head_sha }),
         },
     }
 }
@@ -358,15 +334,21 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        crate::os_process::start_lf_session(&landing.worktree, &argv, &environment, &|command| {
-            if let Some((lock, lease)) = release {
-                lock.inherit(command);
-                lease.inherit(command);
-            }
-        })
+        let owner = crate::os_process::start_lf_session(
+            &landing.worktree,
+            &argv,
+            &environment,
+            &|command| {
+                if let Some((lock, lease)) = release {
+                    lock.inherit(command);
+                    lease.inherit(command);
+                }
+            },
+        )
         .map_err(repair_error)?;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
+            let owner_exited = crate::journal::process_evidence(&store.sqlite, &owner)
+                == crate::journal::ProcessIdentityEvidence::Dead;
             let saved = store
                 .sqlite
                 .repair_reservation(&incident.identity)
@@ -374,9 +356,9 @@ fn admit_ci_fix(
             if saved.process.as_ref() != Some(&launcher) {
                 return Ok(());
             }
-            if tokio::time::Instant::now() >= deadline {
+            if owner_exited {
                 return Err(repair_error(
-                    "repair startup acknowledgement timed out; reservation retained",
+                    "repair owner exited before claiming its reservation; inspect transport.log",
                 ));
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -396,23 +378,6 @@ fn repair_live(store: &SharedStore, process: Option<&crate::id::LfProcessId>) ->
 
 fn repair_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
-}
-
-/// Checks pending past the deadline become one synthetic failing check.
-const CI_TIMEOUT: &str = "ci-timeout";
-
-fn is_ci_timeout(incident: &CiIncident) -> bool {
-    incident.failure_set == [CI_TIMEOUT]
-}
-
-fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
-    LandingObservation::Failing {
-        head_sha: head_sha.to_string(),
-        failing_checks: vec![CiCheck {
-            name: CI_TIMEOUT.into(),
-            url: None,
-        }],
-    }
 }
 
 /// A taskless checkout's work is the Processes started in it.
@@ -487,24 +452,12 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
                     && ci_incident(&landing, &failing_checks, OffsetDateTime::now_utc()).identity
                         == incident.identity
             }
-            LandingObservation::Pending { head_sha, .. } => {
-                head_sha == incident.failed_head_sha && is_ci_timeout(&incident)
-            }
             _ => false,
         };
         if !matching {
             return Err(repair_error(
                 "PR evidence changed before repair; next check will reconcile it",
             ));
-        }
-        if is_ci_timeout(&incident) {
-            store
-                .sqlite
-                .consume_timeout_rerun(
-                    landing.id.as_str(),
-                    OffsetDateTime::now_utc().unix_timestamp(),
-                )
-                .map_err(repair_error)?;
         }
         process_ci_fix(&store, &landing, &incident)
     })();
@@ -577,9 +530,6 @@ fn process_ci_fix(
         checks,
         task_context,
     );
-    if is_ci_timeout(incident) {
-        prompt.push_str("\nThe recorded CI attempt exceeded 30 minutes. Diagnose pending or missing expected checks. This incident authorizes at most one timeout-only rerun; do not loop reruns or manufacture an empty commit. If no eligible run exists or the rerun still blocks, report the blocker.");
-    }
     prompt.push_str(
         "\n\nReturn your final answer as one JSON object: {\"status\":\"published\",\"summary\":\"Published head, PR URL, auto-merge state, and checks run\"}. If an external capability or human decision prevents repair, return {\"status\":\"blocked\",\"summary\":\"Exact blocker and next action\"}. Continue resolving repairable failures yourself. Do not mark an unpublished repair as published. This result belongs only in your final answer; create no result file.",
     );
@@ -704,18 +654,17 @@ fn process_ci_fix(
 }
 
 fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> CiIncident {
-    let mut failure_set = checks
-        .iter()
-        .map(|check| check.name.clone())
-        .collect::<Vec<_>>();
-    failure_set.sort();
-    failure_set.dedup();
     let mut attempts = checks
         .iter()
         .map(|check| (&check.name, &check.url))
         .collect::<Vec<_>>();
     attempts.sort();
     attempts.dedup();
+    let mut failure_set = attempts
+        .iter()
+        .map(|(name, _)| (*name).clone())
+        .collect::<Vec<_>>();
+    failure_set.dedup();
     let mut digest = Sha256::new();
     for (name, url) in attempts {
         digest.update(name.as_bytes());
@@ -753,16 +702,6 @@ fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> 
         created_at: now,
         updated_at: now,
     }
-}
-
-fn actionable_failure(head_sha: &str, failing_checks: &[CiCheck], now: OffsetDateTime) -> bool {
-    CiObservation {
-        head_sha: head_sha.to_string(),
-        state: CiState::Failing,
-        failing_checks: failing_checks.to_vec(),
-        observed_at: now,
-    }
-    .repair_legal()
 }
 
 async fn persist_landing_state(
@@ -826,14 +765,12 @@ where
     F: FnOnce() -> OpsResult<T> + Send + 'static,
 {
     let ownership = Arc::clone(ownership);
-    let operation = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let _ownership = ownership;
         operation()
-    });
-    tokio::time::timeout(Duration::from_secs(10), operation)
-        .await
-        .map_err(|_| OpsError::Message(format!("landing {label} exceeded 10 seconds")))?
-        .map_err(|error| OpsError::Message(format!("landing {label} panicked: {error}")))?
+    })
+    .await
+    .map_err(|error| OpsError::Message(format!("landing {label} panicked: {error}")))?
 }
 
 fn lock_landing(landing: &PrLanding) -> OpsResult<Option<Arc<File>>> {
@@ -924,41 +861,8 @@ async fn reconcile_claimed(
         .await?
     };
     record_observed_head(store, landing, &observed).await?;
-    if let LandingObservation::Pending { head_sha, attempt } = &observed {
-        let allowance = load_config_or_default(Some(&landing.worktree))
-            .automation
-            .timeout_reruns;
-        if let Some(allowed) = store
-            .sqlite
-            .ci_timeout(
-                landing.id.as_str(),
-                head_sha,
-                attempt.as_deref(),
-                OffsetDateTime::now_utc().unix_timestamp(),
-                allowance,
-            )
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            if !allowed {
-                return block_landing(
-                    store,
-                    landing,
-                    "CI timeout rerun allowance exhausted; inspect the pending checks".into(),
-                )
-                .await;
-            }
-            observed = ci_timeout_failure(head_sha);
-        }
-    }
-    if let LandingObservation::Failing {
-        head_sha,
-        failing_checks,
-    } = &observed
-    {
+    if let LandingObservation::Failing { failing_checks, .. } = &observed {
         let now = OffsetDateTime::now_utc();
-        if !actionable_failure(head_sha, failing_checks, now) {
-            return Ok(());
-        }
         let incident = ci_incident(landing, failing_checks, now);
         store
             .observe_ci_incident(&incident)
@@ -973,11 +877,6 @@ async fn reconcile_claimed(
             move || observe(&landing)
         })
         .await?;
-        if is_ci_timeout(&incident) {
-            if let LandingObservation::Pending { head_sha, .. } = &observed {
-                observed = ci_timeout_failure(head_sha);
-            }
-        }
         // Changed failures wait for another check; non-failure evidence can
         // settle immediately without a repair.
         if let LandingObservation::Failing {
@@ -1055,18 +954,15 @@ async fn reconcile_claimed(
             )
             .await
         }
-        LandingObservation::Pending { head_sha, .. } | LandingObservation::Queued { head_sha } => {
-            resume_watching(store, landing, head_sha).await
-        }
-        LandingObservation::Degraded { reason } => {
-            // Failure to read is never evidence of CI failure or merge.
-            Err(OpsError::Message(reason))
-        }
+        LandingObservation::Pending { head_sha } => resume_watching(store, landing, head_sha).await,
         LandingObservation::Failing {
             head_sha,
             failing_checks,
         } => {
-            if !actionable_failure(&head_sha, &failing_checks, now) {
+            // Publication can expose a new head before its repair worker exits.
+            // Keep observing that worker's landing rather than admitting a new
+            // incident against the checkout it still owns.
+            if repair_running(store, landing)? {
                 return Ok(());
             }
             let incident = ci_incident(landing, &failing_checks, now);
@@ -1161,18 +1057,17 @@ async fn record_observed_head(
     landing: &mut PrLanding,
     observed: &LandingObservation,
 ) -> OpsResult<()> {
-    if let Some(head) = observed.head_sha() {
-        if head != landing.observed_head_sha {
-            persist_landing_state(
-                store,
-                landing,
-                PrLandingState::Watching,
-                head.to_string(),
-                None,
-                None,
-            )
-            .await?;
-        }
+    let head = observed.head_sha();
+    if head != landing.observed_head_sha {
+        persist_landing_state(
+            store,
+            landing,
+            PrLandingState::Watching,
+            head.to_string(),
+            None,
+            None,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1420,46 +1315,60 @@ async fn wait_for_landing(
     store: &SharedStore,
     id: &crate::pr_landing::PrLandingId,
 ) -> OpsResult<()> {
-    tokio::time::timeout(Duration::from_secs(30 * 60), async {
-        loop {
-            let landing = store
-                .get_pr_landing(id)
-                .await
-                .map_err(repair_error)?
-                .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
-            let observed = reconcile_pr_landing(
-                store.clone(),
-                landing,
-                Arc::new(observe_github),
-                Some(ci_fix(None)),
-            )
-            .await?;
-            match observed.state {
-                PrLandingState::Merged => return Ok(()),
-                PrLandingState::Closed => {
-                    return Err(OpsError::DeliveryHeld(
-                        "Pull request closed without merging; Task completion is pending".into(),
-                    ))
-                }
-                PrLandingState::Blocked => {
-                    return Err(OpsError::DeliveryHeld(
-                        observed
-                            .blocked_reason
-                            .unwrap_or_else(|| "Landing is blocked".into()),
-                    ))
-                }
-                PrLandingState::Watching | PrLandingState::Repairing => {}
-            }
-            tokio::time::sleep(Duration::from_secs(15)).await;
-        }
-    })
-    .await
-    .map_err(|_| {
-        OpsError::DeliveryHeld(
-            "Landing wait timed out; merge intent retained. Run lf pr reconcile or wait again."
-                .into(),
+    let observe: ObservePr = Arc::new(observe_github);
+    let repair = ci_fix(None);
+    #[cfg(test)]
+    let (observe, repair) = LANDING_IO
+        .try_with(Clone::clone)
+        .unwrap_or((observe, repair));
+    loop {
+        let landing = store
+            .get_pr_landing(id)
+            .await
+            .map_err(repair_error)?
+            .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
+        let observed = reconcile_pr_landing(
+            store.clone(),
+            landing,
+            Arc::clone(&observe),
+            Some(Arc::clone(&repair)),
         )
-    })?
+        .await?;
+        match observed.state {
+            PrLandingState::Merged => return Ok(()),
+            PrLandingState::Closed => {
+                return Err(OpsError::DeliveryHeld(
+                    "Pull request closed without merging; Task completion is pending".into(),
+                ))
+            }
+            PrLandingState::Blocked => {
+                return Err(OpsError::DeliveryHeld(
+                    observed
+                        .blocked_reason
+                        .unwrap_or_else(|| "Landing is blocked".into()),
+                ))
+            }
+            PrLandingState::Watching | PrLandingState::Repairing => {}
+        }
+        tokio::time::sleep(Duration::from_secs(15)).await;
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static LANDING_IO: (ObservePr, RepairCi);
+}
+
+#[cfg(test)]
+pub(super) async fn wait_with_io(
+    store: &SharedStore,
+    id: &crate::pr_landing::PrLandingId,
+    observe: ObservePr,
+    repair: RepairCi,
+) -> OpsResult<()> {
+    LANDING_IO
+        .scope((observe, repair), wait_for_landing(store, id))
+        .await
 }
 
 pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
@@ -1470,16 +1379,9 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
             checked_at: OffsetDateTime::now_utc().unix_timestamp(),
             errors: Vec::new(),
         };
-        reconcile_repository_async(
-            repo,
-            &store,
-            tokio::time::Instant::now() + Duration::from_secs(45),
-            &mut report.errors,
-        )
-        .await?;
+        reconcile_repository_async(repo, &store, &mut report.errors).await?;
         Ok(report)
     });
-    // Timed-out observations retain their landing locks until the worker exits.
     runtime.shutdown_background();
     result
 }
@@ -1487,7 +1389,6 @@ pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
 async fn reconcile_repository_async(
     repo: &Path,
     store: &SharedStore,
-    deadline: tokio::time::Instant,
     errors: &mut Vec<String>,
 ) -> OpsResult<()> {
     let repo = crate::repository::RepoId::discover(repo)
@@ -1498,26 +1399,17 @@ async fn reconcile_repository_async(
         .map_err(|error| OpsError::Message(error.to_string()))?;
     landings.sort_by_key(|landing| landing.updated_at);
     for landing in landings {
-        if tokio::time::Instant::now() >= deadline {
-            errors.push("delivery coverage overdue: pass deadline exceeded".into());
-            break;
-        }
         let number = landing.pr_number;
         let id = landing.id.clone();
-        match tokio::time::timeout_at(
-            deadline,
-            reconcile_pr_landing(store.clone(), landing, Arc::new(observe_github), None),
-        )
-        .await
-        {
-            Ok(Ok(landing)) => {
+        match reconcile_pr_landing(store.clone(), landing, Arc::new(observe_github), None).await {
+            Ok(landing) => {
                 if landing.state == PrLandingState::Merged {
                     if let Err(error) = cleanup_landed_pr(store, &landing).await {
                         errors.push(format!("PR #{number}: {error}"));
                     }
                 }
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 let saved = store.get_pr_landing(&id).await.map_err(repair_error)?;
                 if !saved.is_some_and(|landing| {
                     landing.state == PrLandingState::Blocked
@@ -1526,32 +1418,11 @@ async fn reconcile_repository_async(
                     errors.push(format!("PR #{number}: {error}"));
                 }
             }
-            Err(_) => {
-                errors.push(format!("PR #{number}: observation deadline exceeded"));
-                break;
-            }
         }
     }
     for mut task in super::task_automation::repository_tasks(store, &repo).await? {
-        if tokio::time::Instant::now() >= deadline {
-            errors.push("Task delivery coverage overdue: pass deadline exceeded".into());
-            break;
-        }
-        match tokio::time::timeout_at(
-            deadline,
-            super::task::reconcile_delivered_task(store, &mut task),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => errors.push(format!("{}: {error}", task.identifier)),
-            Err(_) => {
-                errors.push(format!(
-                    "{}: delivery observation deadline exceeded",
-                    task.identifier
-                ));
-                break;
-            }
+        if let Err(error) = super::task::reconcile_delivered_task(store, &mut task).await {
+            errors.push(format!("{}: {error}", task.identifier));
         }
     }
     Ok(())
@@ -1564,8 +1435,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        classify_github_observation, lock_landing, reconcile_pr_landing, wait_for_landing,
-        LandingObservation, ObservePr, RepairCi,
+        classify_github_observation, reconcile_pr_landing, wait_for_landing, LandingObservation,
+        ObservePr, RepairCi,
     };
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{MergeRequest, PrInfo};
@@ -1613,7 +1484,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 observed,
-                LandingObservation::Queued {
+                LandingObservation::Pending {
                     head_sha: "pr-head".to_string()
                 }
             );
@@ -1789,78 +1660,12 @@ mod tests {
         assert_eq!(observed.state, PrLandingState::Merged);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn landing_wait_timeout_holds_without_losing_merge_intent() {
-        let (_directory, store, landing) = fixture().await;
-        // Another observer owns this landing throughout the wait. No provider
-        // call occurs; the real waiting loop expires under Tokio's paused clock.
-        let _owner = lock_landing(&landing).unwrap().unwrap();
-        let saved = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
-        let before = tokio::time::Instant::now();
-        let result = wait_for_landing(&store, &landing.id).await;
-        assert!(
-            matches!(result, Err(OpsError::DeliveryHeld(reason)) if reason.contains("timed out"))
-        );
-        assert!(before.elapsed() >= std::time::Duration::from_secs(30 * 60));
-        assert_eq!(
-            store.get_pr_landing(&landing.id).await.unwrap().unwrap(),
-            saved
-        );
-    }
-
     #[tokio::test]
     async fn landing_wait_missing_record_is_a_failure_not_a_hold() {
         let (_directory, store, _) = fixture().await;
         let missing = crate::pr_landing::PrLandingId::from_raw("missing");
         let result = wait_for_landing(&store, &missing).await;
         assert!(matches!(result, Err(OpsError::Message(reason)) if reason.contains("disappeared")));
-    }
-
-    #[tokio::test]
-    async fn ci_deadline_tracks_attempts_and_keeps_the_timeout_rerun_bound() {
-        let (_directory, store, landing) = fixture().await;
-        let id = landing.id.as_str();
-        assert_eq!(
-            store.sqlite.ci_timeout(id, "head", None, 100, 1).unwrap(),
-            None
-        );
-        assert_eq!(
-            store.sqlite.ci_timeout(id, "head", None, 1899, 1).unwrap(),
-            None
-        );
-        assert_eq!(
-            store.sqlite.ci_timeout(id, "head", None, 1900, 1).unwrap(),
-            Some(true)
-        );
-        assert_eq!(
-            store
-                .sqlite
-                .ci_timeout(id, "head", Some("run-1/attempt-2"), 1901, 1)
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            store
-                .sqlite
-                .ci_timeout(id, "head", Some("run-1/attempt-2"), 3701, 1)
-                .unwrap(),
-            Some(true)
-        );
-        store.sqlite.consume_timeout_rerun(id, 3701).unwrap();
-        assert_eq!(
-            store
-                .sqlite
-                .ci_timeout(id, "head", Some("run-1/attempt-3"), 3702, 1)
-                .unwrap(),
-            None
-        );
-        assert_eq!(
-            store
-                .sqlite
-                .ci_timeout(id, "head", Some("run-1/attempt-3"), 5502, 1)
-                .unwrap(),
-            Some(false)
-        );
     }
 
     #[tokio::test]
@@ -1882,15 +1687,19 @@ mod tests {
         let (_directory, store, landing) = fixture().await;
         let script = script(vec![
             LandingObservation::Pending {
-                head_sha: "head".into(),
-                attempt: None,
+                head_sha: "new-head".into(),
             },
-            merged(),
+            LandingObservation::Merged {
+                head_sha: "new-head".into(),
+                merge_commit: "merge".into(),
+            },
         ]);
         let pending = check(store.clone(), landing, &script).await.unwrap();
         assert_eq!(pending.state, PrLandingState::Watching);
         assert!(pending.supervisor.is_none());
         assert!(pending.merge_commit.is_none());
+        assert_eq!(pending.observed_head_sha, "new-head");
+        assert_eq!(pending.requested_head_sha, "head");
         assert_eq!(*script.repairs.lock().unwrap(), 0);
         let landed = check(store.clone(), pending, &script).await.unwrap();
         assert_eq!(landed.state, PrLandingState::Merged);
@@ -1905,11 +1714,23 @@ mod tests {
     #[tokio::test]
     async fn unchanged_incident_gets_one_repair_across_ticks_and_still_observes_merge() {
         let (_directory, store, landing) = fixture().await;
+        // Order and duplicates cannot change an incident; repository-specific
+        // checks receive the same repair admission as any other required check.
+        let failures = |names: &[&str]| LandingObservation::Failing {
+            head_sha: "head".into(),
+            failing_checks: names
+                .iter()
+                .map(|name| CiCheck {
+                    name: (*name).into(),
+                    url: None,
+                })
+                .collect(),
+        };
         let script = script(vec![
-            failure("head"),
-            failure("head"),
-            failure("head"),
-            failure("head"),
+            failures(&["rust", "scratch-clear", "rust"]),
+            failures(&["scratch-clear", "rust"]),
+            failures(&["rust", "scratch-clear"]),
+            failures(&["scratch-clear", "scratch-clear", "rust"]),
             merged(),
         ]);
         let pending = check(store.clone(), landing, &script).await.unwrap();
@@ -1927,6 +1748,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].incident.failure_set, ["rust", "scratch-clear"]);
         assert!(incidents[0].incident.responded_at.is_some());
     }
 
@@ -2035,16 +1857,18 @@ mod tests {
     #[tokio::test]
     async fn unavailable_observation_keeps_delivery_pending_and_releases_claim() {
         let (_directory, store, landing) = fixture().await;
-        let script = script(vec![LandingObservation::Degraded {
-            reason: "network failure".into(),
-        }]);
-        assert!(check(store.clone(), landing.clone(), &script)
-            .await
-            .is_err());
+        let error = reconcile_pr_landing(
+            store.clone(),
+            landing.clone(),
+            Arc::new(|_| Err(OpsError::Message("network failure".into()))),
+            Some(Arc::new(|_, _| panic!("failed reads cannot start repair"))),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "network failure");
         let saved = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
         assert_eq!(saved.state, PrLandingState::Watching);
         assert!(saved.supervisor.is_none());
-        assert_eq!(*script.repairs.lock().unwrap(), 0);
     }
 
     #[tokio::test]
@@ -2061,7 +1885,7 @@ mod tests {
         assert!(saved.merge_commit.is_none());
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn overlapping_check_returns_while_canceled_repair_retains_its_lock() {
         let (_directory, store, landing) = fixture().await;
         let (entered, started) = tokio::sync::oneshot::channel();

@@ -3436,3 +3436,39 @@ fn repository_concurrent_reconciliation_retains_one_identity() {
         assert_eq!(success(child.wait_with_output().unwrap()), original);
     }
 }
+
+#[test]
+fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
+    let root = tempfile::tempdir().unwrap();
+    let before = root.path().join("before");
+    let git = root.path().join("git");
+    success(
+        Command::new("git")
+            .args(["init", "-q", "--separate-git-dir"])
+            .arg(&git)
+            .arg(&before)
+            .output()
+            .unwrap(),
+    );
+    let home = tempfile::tempdir().unwrap();
+    let identity = success(
+        command(home.path(), &before, &["repo", "identity"])
+            .output()
+            .unwrap(),
+    );
+    let after = root.path().join("after");
+    fs::rename(&before, &after).unwrap();
+    success(
+        command(home.path(), &after, &["session", "list", "--json"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        success(
+            command(home.path(), &after, &["repo", "identity"])
+                .output()
+                .unwrap()
+        ),
+        identity
+    );
+}

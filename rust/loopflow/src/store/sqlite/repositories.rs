@@ -1,5 +1,6 @@
 //! Selected planning identity, separate from a machine's local repository path.
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::path::{Path, PathBuf};
 
 use crate::durable::{
     MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskExecutionSource, TaskId,
@@ -9,21 +10,29 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
-    let common = std::path::Path::new(repo).join(".git");
-    // Historical rows can retain a symlink spelling. Only the canonical entry
-    // enrolls Git; reading/importing legacy aliases must not replace its locator.
-    let common = if common.is_dir()
-        && std::path::Path::new(repo).canonicalize().ok().as_deref()
-            == Some(std::path::Path::new(repo))
-    {
-        Some(crate::repository::location::locator_directory(
-            &common,
-            &super::durable::map_local_machine(conn)?.id,
-        ))
+fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>> {
+    let root = Path::new(repo);
+    // Historical symlink spellings never replace the canonical Git locator.
+    if root.canonicalize().ok().as_deref() != Some(root) {
+        return Ok(None);
+    }
+    let common = root.join(".git");
+    let common = if common.is_dir() {
+        common
+    } else if common.is_file() {
+        crate::git::worktrees::git_common_dir(root)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
     } else {
-        None
+        return Ok(None);
     };
+    Ok(Some(crate::repository::location::locator_directory(
+        &common,
+        &super::durable::map_local_machine(conn)?.id,
+    )))
+}
+
+pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
+    let common = git_locator_in(conn, repo)?;
     let locator = if let Some(common) = &common {
         crate::repository::location::read_locator(common)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
@@ -345,6 +354,10 @@ impl SqliteStore {
              ON CONFLICT(id) DO UPDATE SET selected=1 WHERE selected=0",
             params![repo, id.as_str()],
         )?;
+        if let Some(common) = git_locator_in(&tx, repo)? {
+            crate::repository::location::write_locator(&common, id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        }
         tx.commit()?;
         Ok(())
     }

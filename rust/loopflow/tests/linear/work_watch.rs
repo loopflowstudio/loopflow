@@ -1101,6 +1101,16 @@ fn selection_only_commit_reaches_two_open_work_readers() {
 fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    // This fixture registers Work before creating Git. Enroll that known
+    // legacy checkout explicitly, just as recovery does for released Work.
+    let id = home.store.repository_id(home.wave.repo()).unwrap().unwrap();
+    loopflow::repository::location::reconcile(
+        &home.store,
+        &loopflow::repository::CanonicalRepo::discover(Path::new(home.wave.repo())).unwrap(),
+        Some(&id),
+        None,
+    )
+    .unwrap();
     let config = Path::new(home.wave.repo()).join(".lf");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
@@ -1189,6 +1199,16 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
 fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    // This fixture registers Work before creating Git. Enroll that known
+    // legacy checkout explicitly, just as recovery does for released Work.
+    let id = home.store.repository_id(home.wave.repo()).unwrap().unwrap();
+    loopflow::repository::location::reconcile(
+        &home.store,
+        &loopflow::repository::CanonicalRepo::discover(Path::new(home.wave.repo())).unwrap(),
+        Some(&id),
+        None,
+    )
+    .unwrap();
     let config = Path::new(home.wave.repo()).join(".lf");
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(

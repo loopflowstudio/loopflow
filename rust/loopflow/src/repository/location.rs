@@ -153,8 +153,11 @@ pub fn reconnect_current() -> Result<()> {
             return Ok(());
         };
         let directory = git.parent().expect("Git file has parent").join(directory);
-        let relative = fs::read_to_string(directory.join("commondir"))?;
-        directory.join(relative.trim())
+        match fs::read_to_string(directory.join("commondir")) {
+            Ok(relative) => directory.join(relative.trim()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => directory,
+            Err(error) => return Err(error).context("read Git common directory"),
+        }
     };
     let Some(store) = crate::store::read_existing_registry()? else {
         return Ok(());

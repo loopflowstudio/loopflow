@@ -23,8 +23,19 @@ fn checkout(cwd: &str) -> String {
     format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
-fn process_membership(process: &str) -> String {
-    format!("(({}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)", checkout(&format!("{process}.cwd")))
+fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
+    let current = checkout(&format!("{process}.cwd"));
+    // Read-only clients also inspect released databases before promotion.
+    // Those schemas cannot have relocation receipts; leave them untouched.
+    let relocations: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
+        [], |row| row.get(0),
+    )?;
+    Ok(if relocations {
+        format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
+    } else {
+        current
+    })
 }
 
 fn session_membership(session: &str) -> String {
@@ -50,24 +61,28 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-pub(super) fn lf_process_ids(selector: &str) -> String {
-    lf_process_ids_in(selector, None)
+pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
+    lf_process_ids_in(conn, selector, None)
 }
 
-fn lf_process_ids_in(selector: &str, candidates: Option<&str>) -> String {
+fn lf_process_ids_in(
+    conn: &rusqlite::Connection,
+    selector: &str,
+    candidates: Option<&str>,
+) -> StoreResult<String> {
     let within = |column: &str| match candidates {
         Some(query) => format!(" AND {column} IN ({query})"),
         None => String::new(),
     };
     // History and attachments share one query-local membership; the partial
     // index skips retained events that name no Process.
-    format!("WITH members AS MATERIALIZED ({})
+    Ok(format!("WITH members AS MATERIALIZED ({})
         SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) WHERE 1{}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL{}
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL{}
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members){}",
-        session_ids(selector), tasks(selector), process_membership("ae"),
-        within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id"))
+        session_ids(selector), tasks(selector), process_membership(conn, "ae")?,
+        within("ae.id"), within("se.lf_process_id"), within("p.attached_lf_process_id"), within("p.id")))
 }
 
 /// Prefer the deepest checkout when membership names more than one Task.
@@ -89,7 +104,7 @@ pub(super) fn task_of_process(
                  WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
                     WHERE a.id IN (SELECT id FROM members) AND ({}))
                  ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
-                process_membership("e"), session_membership("a")
+                process_membership(conn, "e")?, session_membership("a")
             ),
             [process],
             |row| row.get(0),
@@ -105,7 +120,7 @@ pub(super) fn flows_of_task(
         conn,
         &format!(
             "e.id IN ({})",
-            lf_process_ids_in("?1", Some("SELECT lf_process_id FROM flow_processes"))
+            lf_process_ids_in(conn, "?1", Some("SELECT lf_process_id FROM flow_processes"))?
         ),
         &[&task.as_str()],
     )
@@ -386,9 +401,9 @@ pub(super) fn reach_end_in(
 
 /// Match unfinished Processes through checkout, Session history and attachments.
 /// Start from the small unfinished inventory and retain the attachment partial index.
-fn task_open_process_ids() -> String {
+fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
     let session = session_membership("a");
-    format!(
+    Ok(format!(
         "WITH task_scope AS MATERIALIZED (SELECT id,worktree,checkout_machine_id FROM tasks WHERE id=?1),
         open AS MATERIALIZED (SELECT id,cwd,agent_session_id,attached_lf_process_id FROM processes INDEXED BY processes_unfinished
             WHERE completed_at IS NULL),
@@ -399,8 +414,8 @@ fn task_open_process_ids() -> String {
         SELECT open.id FROM open JOIN task_scope tw ON {}
         UNION SELECT s.process FROM sessions s JOIN agent_sessions a ON a.id=s.session
             JOIN task_scope tw ON ({session})",
-        process_membership("open")
-    )
+        process_membership(conn, "open")?
+    ))
 }
 
 fn members(
@@ -488,7 +503,7 @@ impl SqliteStore {
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
                 super::processes::PROCESS_SELECT,
-                lf_process_ids("?1")
+                lf_process_ids(&tx, "?1")?
             ))?
             .query_map([task.as_str()], super::processes::read_process)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -507,11 +522,12 @@ impl SqliteStore {
 
     /// Single-Task execution gates need neither other Tasks nor retained Session/Flow payloads.
     pub(crate) fn task_open_processes(&self, task: &TaskId) -> StoreResult<Vec<LfProcess>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
         let mut query = conn.prepare(&format!(
             "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
             super::processes::PROCESS_SELECT,
-            task_open_process_ids(),
+            task_open_process_ids(&conn)?,
         ))?;
         let processes = query
             .query_map([task.as_str()], super::processes::read_process)?
@@ -870,7 +886,7 @@ mod tests {
                     } else {
                         ""
                     },
-                    super::lf_process_ids("?1")
+                    super::lf_process_ids(&conn, "?1").unwrap()
                 ))
                 .unwrap();
             let mut ids = query
@@ -901,7 +917,9 @@ mod tests {
         // Cleanup must ignore completed Process history as it grows, including
         // attachment lookup for unrelated completed providers.
         let cleanup_cost = || {
-            let mut query = conn.prepare(&super::task_open_process_ids()).unwrap();
+            let mut query = conn
+                .prepare(&super::task_open_process_ids(&conn).unwrap())
+                .unwrap();
             let ids = query
                 .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
                 .unwrap()
@@ -937,7 +955,7 @@ mod tests {
         );
         // Flow reads restrict candidates without losing historical association
         // when the candidate ran outside the Task's checkout.
-        let candidates = super::lf_process_ids_in("?1", Some("SELECT ?2"));
+        let candidates = super::lf_process_ids_in(&conn, "?1", Some("SELECT ?2")).unwrap();
         let read_candidates = || {
             let mut statement = conn.prepare(&candidates).unwrap();
             let selected = statement

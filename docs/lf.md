@@ -461,6 +461,7 @@ answered or canceled.
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
 returns an SSH command in either format.
+Preparation cannot be combined with `--message`.
 
 A Task keeps its selected primary. Opening an exact Session does not change it.
 Without a primary, connect selects the most recently used eligible conversation, or creates one in

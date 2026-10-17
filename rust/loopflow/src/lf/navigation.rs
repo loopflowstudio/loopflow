@@ -155,7 +155,6 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
                 remote.extend_from_slice(tokens);
             }
         } else {
-            remote.push(value.clone());
             if !boundary {
                 if let Some(expansion) = resolve_child(current, value, &path).ok().flatten() {
                     for owner in &expansion {
@@ -163,11 +162,16 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
                             .find_subcommand(owner)
                             .expect("resolved child exists");
                     }
+                    // Local flag routing must see the alias's canonical owner.
+                    remote.extend(expansion.clone());
                     path.extend(expansion);
+                    index += 1;
+                    continue;
                 } else {
                     boundary = true;
                 }
             }
+            remote.push(value.clone());
         }
         index += 1;
     }

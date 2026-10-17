@@ -3002,6 +3002,16 @@ mod tests {
     #[test]
     fn session_work_flags_normalize_before_machine_routing() {
         for command in ["resume", "connect"] {
+            let cli = Cli::try_parse_from(["lf", "session", command, "session-id"])
+                .unwrap()
+                .checked()
+                .unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Session {
+                    cmd: SessionCommand::Connect { id: Some(id), .. }
+                }) if id == "session-id"
+            ));
             for (flag, value) in [("--task", "LOO-1"), ("--wave", "infra")] {
                 for argv in [
                     vec!["lf", flag, value, "session", command, "--prepare"],
@@ -3021,7 +3031,6 @@ mod tests {
             }
         }
         for argv in [
-            vec!["lf", "session", "resume", "session-id"],
             vec!["lf", "--task", "LOO-1", "session", "connect", "session-id"],
             vec![
                 "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",

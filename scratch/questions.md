@@ -45,3 +45,10 @@ were not completed; logs are under .lf/tmp/gate/run-39590 and
 claim the interrupted Rust run or pending UI suites passed.
 
 Repair validation: cargo fmt; cargo test -p loopflow --test session_lifecycle_tests preparation_ (2 passed); cargo clippy --all-targets -- -D warnings — passed with inherited LF variables removed and closed stdin.
+
+Final gate decisions: copied Sessions are read-only archives under docs/data-clones.md.
+The clone fixture now reads its retained Task primary through session list instead
+of using execution preparation as a lookup; no exception to Machine routing or
+continuation authority is added. Remote alias routing, the obsolete rejection of
+resume SESSION, and the retained-request fixture are repaired and verified.
+The final check record is in scratch/loo-499.md. No product decision blocks delivery.

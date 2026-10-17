@@ -58,6 +58,11 @@ def _contract(parts):
 
 def _launch(session, request, prompt):
     _record_launch()
+    deadline = time.monotonic() + 30
+    while (HOME / "hold-turn").exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("fixture turn was not released")
+        time.sleep(0.01)
     assistant = "msg_" + uuid.uuid4().hex
     info = {"id": assistant, "sessionID": session, "role": "assistant", "parentID": request,
             "time": {"created": int(time.time() * 1000)},

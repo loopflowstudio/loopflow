@@ -34,3 +34,10 @@ includes worktree paths and restored scenes; it grants presentation only. Fresh
 validation still owns Task-link delivery and opening receipts. Headless tests cover
 success, failure and cancellation without changing retained panes/drafts. An active
 Task-link opening takes precedence over restored selection when the model binds.
+
+# LOO-415 assumptions
+
+October 17, 2026: use a fixed five-second acknowledgement deadline after connecting
+to the local owner socket. This bounds the identified silent-owner wait without a
+new configuration knob; it does not bound SSH startup or an established attachment.
+Cancellation uses the existing CLI signal handler and closes only the viewer.

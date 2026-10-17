@@ -100,6 +100,9 @@ pub(crate) fn preview_prompt(
 /// `lf -b connect ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
+    if crate::transport::delegate_current()? {
+        return Ok(());
+    }
     crate::data_clone::require_writable_session(id)?;
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -631,6 +634,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
+    crate::transport::report(crate::program_status::State::Working, false, None);
     if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
@@ -688,6 +692,12 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
     let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
     let result = run_headless_prompt(built, &capture, &agent_config);
+    // Explicit native resume can retire this provider while its executor waits.
+    // Settle our capture as interrupted; a failed Flow step would replay it.
+    if capture.attachment_replaced()? {
+        capture.finish("interrupted")?;
+        return Err(crate::process::CommandExit(130).into());
+    }
     let outcome = if result.is_ok() {
         "completed"
     } else {

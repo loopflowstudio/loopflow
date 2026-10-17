@@ -2087,6 +2087,9 @@ impl CaptureHandle {
                 )
             })?;
         let attachment = resume_session_agent_process(&store, &session.id, &lf_process_id)?;
+        if let Some(owner) = crate::transport::current() {
+            store.bind_session_transport(&session.id, &attachment, owner)?;
+        }
         capture.attachment = Some((session.id, attachment));
         drop(capture);
         self.register_interrupt();
@@ -2168,6 +2171,17 @@ impl CaptureHandle {
             .expect("Session capture mutex poisoned")
             .attachment
             .clone()
+    }
+
+    pub(crate) fn attachment_replaced(&self) -> StoreResult<bool> {
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        let Some((session, expected)) = &capture.attachment else {
+            return Ok(false);
+        };
+        Ok(row_store(&capture.dir)?
+            .session_attachment(session)?
+            .as_ref()
+            != Some(expected))
     }
 
     /// Only the invocation's capture owner advances its settlement snapshot.

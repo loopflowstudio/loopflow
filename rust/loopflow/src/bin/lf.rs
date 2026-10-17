@@ -1383,8 +1383,13 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
+    loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
-    let result = journal::with_process(run);
+    let result = journal::with_process(|| {
+        let result = run();
+        loopflow::transport::report_exit(journal::command_exit_code(&result));
+        result
+    });
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {
         if error
@@ -1635,6 +1640,9 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd: TaskCommand::Shell { issue, checkout },
         }) => {
+            ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+                .expect("failed to set Ctrl+C handler");
+            journal::admit_process(&std::env::current_dir()?, &args);
             return loopflow::ops::task::task_shell(issue, checkout);
         }
         Some(Commands::Task {
@@ -2146,6 +2154,17 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    let execution = cli.may_launch_agent()
+        && !matches!(
+            cli.command,
+            Some(Commands::Session { .. } | Commands::Discord { .. })
+        );
+    if execution {
+        journal::admit_process(&std::env::current_dir()?, args);
+        if loopflow::transport::delegate_current()? {
+            return Ok(());
+        }
+    }
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
@@ -2374,6 +2393,7 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
+        Some(Commands::Transport { cmd }) => loopflow::transport::run(cmd),
         Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");

@@ -142,11 +142,10 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
     let mut attempt = 1;
     loop {
         let mark = store.process_mark()?;
-        let mut child = std::process::Command::new(&lf)
-            .args(&args)
-            .current_dir(checkout)
-            .spawn()
-            .context("could not start the Task's Flow")?;
+        let mut command = std::process::Command::new(&lf);
+        command.args(&args).current_dir(checkout);
+        crate::transport::configure_child(&mut command);
+        let mut child = command.spawn().context("could not start the Task's Flow")?;
         ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
         let status = child.wait();
         ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
@@ -490,6 +489,7 @@ impl RunningFlow<'_> {
             .store
             .sqlite
             .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
+        crate::transport::configure_child(command.as_std_mut());
         let mut child = command.spawn().context("could not execute Flow step")?;
         drop(admission);
         let mut step = None;
@@ -721,6 +721,12 @@ impl SkillExecutor for &RunningFlow<'_> {
 }
 
 fn print_step_progress(progress: Option<StepProgress>, name: &str) {
+    crate::transport::report(crate::program_status::State::Clear, true, None);
+    crate::transport::report(
+        crate::program_status::State::Working,
+        true,
+        progress.map(|p| (p.index * 100 / p.total.max(1)) as u8),
+    );
     let position = match progress {
         Some(progress) => format!("{}/{}", progress.index + 1, progress.total),
         None => "*".to_owned(),

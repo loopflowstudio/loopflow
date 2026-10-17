@@ -1,0 +1,665 @@
+{
+  "native": {
+    "pid": 76773,
+    "alive_at_end": true,
+    "rss_kib": 295072,
+    "api_requests": 2,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "30eba6e9-997b-496a-b7a6-c020caf547de"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "30eba6e9-997b-496a-b7a6-c020caf547de",
+        "last_assistant_message": "PROBE_REPLY_1",
+        "stop_hook_active": false
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "e236bd52-5b21-4424-a0b3-cc745c977f3d"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "e236bd52-5b21-4424-a0b3-cc745c977f3d",
+        "last_assistant_message": "PROBE_REPLY_2",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "9644c010-abf1-48db-818e-285e264fc469",
+        "parentUuid": null,
+        "promptId": "30eba6e9-997b-496a-b7a6-c020caf547de",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "0341a6ee-4da7-4ddf-b1e6-42a7739cd78f",
+        "parentUuid": "85e78cce-7466-43e7-a72e-0275ed40b37a",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "8c2cb2e9-4a99-463c-a6f2-753e2af6a993",
+        "parentUuid": "ffec3c42-3bc7-4c85-b1e8-1258132f8e28",
+        "promptId": "e236bd52-5b21-4424-a0b3-cc745c977f3d",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "05f87849-a11d-414f-aae8-28f8d9dc867e",
+        "parentUuid": "f07f2800-5ef2-451f-8659-abe86cd2869d",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "stream": {
+    "pid": 72269,
+    "alive_at_end": true,
+    "rss_kib": 201008,
+    "api_requests": 2,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "288d9c5a-52a1-4223-9cae-455673bc20b1"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "288d9c5a-52a1-4223-9cae-455673bc20b1",
+        "last_assistant_message": "PROBE_REPLY_1",
+        "stop_hook_active": false
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "3f30834b-b0aa-4722-8d76-a0669ed3277e"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "3f30834b-b0aa-4722-8d76-a0669ed3277e",
+        "last_assistant_message": "PROBE_REPLY_2",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "2b9038ab-1e29-441a-b577-596d97be7e39",
+        "parentUuid": null,
+        "promptId": "288d9c5a-52a1-4223-9cae-455673bc20b1",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "e53dadf9-e859-4da2-90af-799fd3d79938",
+        "parentUuid": "6736946a-4547-4af3-919f-034bcdc74988",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "243c559a-d166-4562-bc69-6e22e908cd27",
+        "parentUuid": "5a4fd8f2-0ba0-4898-8101-3311df71a717",
+        "promptId": "3f30834b-b0aa-4722-8d76-a0669ed3277e",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "9cfc29d7-5ae5-4968-8497-2dbdafa7547c",
+        "parentUuid": "2362f294-d67a-44cf-b3de-fe819e2ec754",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "native-schema": {
+    "pid": 79327,
+    "alive_at_end": true,
+    "rss_kib": 295600,
+    "api_requests": 2,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "e79a1d44-6ca9-47e8-bf82-7a8ca6e9b7d0"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "e79a1d44-6ca9-47e8-bf82-7a8ca6e9b7d0",
+        "last_assistant_message": "PROBE_REPLY_1",
+        "stop_hook_active": false
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "4d73af97-2fcd-434d-916a-482ac45426e0"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "4d73af97-2fcd-434d-916a-482ac45426e0",
+        "last_assistant_message": "PROBE_REPLY_2",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "873c1f8c-0bcc-47b2-8d8e-dff4fb2471e5",
+        "parentUuid": null,
+        "promptId": "e79a1d44-6ca9-47e8-bf82-7a8ca6e9b7d0",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "73a8a6ed-2322-435e-9d40-5a88a5ea1008",
+        "parentUuid": "df4e7618-f925-4121-92d1-babab4a485af",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "debcada0-de2d-47be-8ac4-f07a8ce36943",
+        "parentUuid": "df827d98-2d53-4b88-95e5-6db1953f9bcb",
+        "promptId": "4d73af97-2fcd-434d-916a-482ac45426e0",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "b16e7a4d-750a-430d-a670-deeab3393276",
+        "parentUuid": "1f545cf8-e233-4f50-b0e0-791bf61883a4",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "stream-schema": {
+    "pid": 79375,
+    "alive_at_end": true,
+    "rss_kib": 206096,
+    "api_requests": 2,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "71c0e269-4e11-417a-ae48-765e6c040030"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "71c0e269-4e11-417a-ae48-765e6c040030",
+        "stop_hook_active": false
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "5aa40097-80f9-4c5d-917e-fbb266245a66"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "5aa40097-80f9-4c5d-917e-fbb266245a66",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "da043c30-b8aa-49b7-a2ce-7b499fa6b346",
+        "parentUuid": null,
+        "promptId": "71c0e269-4e11-417a-ae48-765e6c040030",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "834d5ed0-6892-4cb9-8db2-7fc3d8eea382",
+        "parentUuid": "05f7806d-9f58-4d64-a5ba-5c18d2c4ac36",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "f130ed5c-6dfa-4783-8952-644e5e599e99",
+        "parentUuid": "834d5ed0-6892-4cb9-8db2-7fc3d8eea382",
+        "promptId": "71c0e269-4e11-417a-ae48-765e6c040030",
+        "usage": null
+      },
+      {
+        "type": "user",
+        "uuid": "f2797a56-9a81-4c87-b770-893b50909061",
+        "parentUuid": "07d95a85-ea38-4045-9209-c209e7efc7be",
+        "promptId": "5aa40097-80f9-4c5d-917e-fbb266245a66",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "121f1822-8183-40ad-ad09-3620873c8e35",
+        "parentUuid": "3356fd68-753c-4080-9866-5e032fff426d",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "e8627fac-0c2d-431f-906e-b13e3cbe2a55",
+        "parentUuid": "121f1822-8183-40ad-ad09-3620873c8e35",
+        "promptId": "5aa40097-80f9-4c5d-917e-fbb266245a66",
+        "usage": null
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "native-question": {
+    "pid": 79288,
+    "alive_at_end": true,
+    "rss_kib": 294176,
+    "api_requests": 2,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "69b8f92b-1b28-4ff9-bae1-0fac6d076287"
+      },
+      {
+        "hook_event_name": "PermissionRequest",
+        "prompt_id": "69b8f92b-1b28-4ff9-bae1-0fac6d076287",
+        "tool_name": "AskUserQuestion"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "69b8f92b-1b28-4ff9-bae1-0fac6d076287",
+        "last_assistant_message": "PROBE_REPLY_2",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "a89a735d-e980-404d-802c-1dd1760bf757",
+        "parentUuid": null,
+        "promptId": "69b8f92b-1b28-4ff9-bae1-0fac6d076287",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "ac9f40d8-8b5e-4503-972d-44198bd206ca",
+        "parentUuid": "27f7309d-626f-492e-bed0-5b3e9fba8f3a",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "77cd2c70-8cae-4e1d-8cc0-86bee098216b",
+        "parentUuid": "ac9f40d8-8b5e-4503-972d-44198bd206ca",
+        "promptId": "69b8f92b-1b28-4ff9-bae1-0fac6d076287",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "eacc9946-090b-448a-9921-a22263c1f543",
+        "parentUuid": "77a29525-4249-49c1-853f-b79319a6a9e7",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "native-correction": {
+    "pid": 86251,
+    "alive_at_end": true,
+    "rss_kib": 299600,
+    "api_requests": 3,
+    "hooks": [
+      {
+        "hook_event_name": "SessionStart"
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "3fba87fc-8e22-4968-b3f8-52f513d14fc3"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "3fba87fc-8e22-4968-b3f8-52f513d14fc3",
+        "last_assistant_message": "INVALID_DECISION",
+        "stop_hook_active": false
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "3fba87fc-8e22-4968-b3f8-52f513d14fc3",
+        "last_assistant_message": "{\"decision\":\"advance\"}",
+        "stop_hook_active": true
+      },
+      {
+        "hook_event_name": "UserPromptSubmit",
+        "prompt_id": "ffea5134-056d-4632-a88f-f98e85061d08"
+      },
+      {
+        "hook_event_name": "Stop",
+        "prompt_id": "ffea5134-056d-4632-a88f-f98e85061d08",
+        "last_assistant_message": "{\"decision\":\"advance\"}",
+        "stop_hook_active": false
+      }
+    ],
+    "history_messages": [
+      {
+        "type": "user",
+        "uuid": "7279d0a4-3903-480e-a47d-04378e834c10",
+        "parentUuid": null,
+        "promptId": "3fba87fc-8e22-4968-b3f8-52f513d14fc3",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "93886ceb-794d-4f38-b6db-44238cdd9ebd",
+        "parentUuid": "7043c1b3-dc00-43e2-992a-e0ce667fd02f",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "ac16caa2-bafb-412e-b2da-1e3d13c41775",
+        "parentUuid": "af801c82-6b13-4f32-9736-1651483eaa9b",
+        "promptId": "3fba87fc-8e22-4968-b3f8-52f513d14fc3",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "7f93a4f2-290d-4480-b6cb-f99ab2ce58f2",
+        "parentUuid": "7a85730b-7fd1-431a-93b3-eaa765c081b4",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      },
+      {
+        "type": "user",
+        "uuid": "530d3cdb-35cd-47fe-8b4d-e006946c7c7c",
+        "parentUuid": "956dd65f-ed57-41c6-8444-b7ebcb313341",
+        "promptId": "ffea5134-056d-4632-a88f-f98e85061d08",
+        "usage": null
+      },
+      {
+        "type": "assistant",
+        "uuid": "cc6f8e6c-cd1f-4080-a47f-c642ecb4df37",
+        "parentUuid": "14d642f5-0efe-4c38-87b2-af70dea1434a",
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "output_tokens": 7,
+          "output_tokens_details": {
+            "thinking_tokens": 0
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard",
+          "fallback_credit": null
+        }
+      }
+    ],
+    "process_observation": "exited"
+  },
+  "cli": {
+    "version": "2.1.302 (Claude Code)",
+    "sha256": "eb7632414640f1028df538cd54f06874655aaadf05416167c829a0bfdc0b9275"
+  }
+}

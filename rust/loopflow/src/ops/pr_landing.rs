@@ -349,11 +349,6 @@ fn admit_ci_fix(
             incident.identity.clone(),
             launcher.to_string(),
         ];
-        let name = format!(
-            "lf-repair-{}-{}",
-            &hex::encode(Sha256::digest(incident.identity.as_bytes()))[..16],
-            reservation.retries + u32::from(retry)
-        );
         let work = landing
             .task_id
             .as_ref()
@@ -363,32 +358,13 @@ fn admit_ci_fix(
             (crate::lf::WORK_DECLARATION_ENV, work.as_str()),
             ("LF_USER_NAME", ""),
         ];
-        if let Some((lock, lease)) = release {
-            crate::os_process::start_lf_session_inheriting(
-                &name,
-                &landing.worktree,
-                &argv,
-                &environment,
-                &|command| {
-                    lock.inherit(command);
-                    lease.inherit(command);
-                },
-            )
-            .await
-            .map_err(repair_error)?;
-        } else {
-            crate::os_process::start_lf_session_with_env(
-                &name,
-                &landing.worktree,
-                &argv,
-                &[
-                    (crate::lf::WORK_DECLARATION_ENV, &work),
-                    ("LF_USER_NAME", ""),
-                ],
-            )
-            .await
-            .map_err(repair_error)?;
-        }
+        crate::os_process::start_lf_session(&landing.worktree, &argv, &environment, &|command| {
+            if let Some((lock, lease)) = release {
+                lock.inherit(command);
+                lease.inherit(command);
+            }
+        })
+        .map_err(repair_error)?;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
             let saved = store

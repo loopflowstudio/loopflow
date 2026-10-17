@@ -57,10 +57,11 @@ authorizes duplicate creation. No command retry semantics changed.
   reaches `CaptureHandle::begin_with_context` and the shared store. It does not
   depend on primary ensure, Task association, or Desktop. `journal` records nested
   Process/caller ancestry separately; ancestry is not lifetime/control authority.
-- Current headless launch keeps the provider lifeline in the launching lf invocation
-  (`os_process/lifeline.rs`). Its last holder's exit triggers provider-group cleanup.
-  Thus current persisted identity does not establish survival of the launching
-  process. Moving only Desktop launch to a holder would leave this gap.
+- Baseline headless launch kept the provider lifeline in the launching lf invocation
+  (`os_process/lifeline.rs`). The October 17 LOO-415 implementation delegates
+  execution before capture admission and retains that lifeline in its execution
+  child. Direct Codex and headless Flow fixtures cover creator death; uniform
+  primary readiness, nested callers and all admission boundaries remain unproved.
 
 Preserve explicit cancellation and Flow results. Completed Runs need not remain
 running interactive conversations.

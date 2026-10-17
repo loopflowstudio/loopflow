@@ -1,0 +1,78 @@
+{
+  "mode": "native",
+  "root": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f",
+  "pid": 71745,
+  "command": [
+    "/Users/jack/.cmuxterm/cmux-cli-shims/22F07152-2784-47B1-A654-E273C4BE2B33/claude",
+    "--setting-sources",
+    "",
+    "--settings",
+    "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/native/settings.json",
+    "--strict-mcp-config",
+    "--tools",
+    "",
+    "--model",
+    "haiku",
+    "--system-prompt",
+    "Return the requested short probe marker. No tools.",
+    "--name",
+    "LOO415 disposable probe"
+  ],
+  "requests": [],
+  "first_id": null,
+  "first_hooks": [
+    {
+      "session_id": "b0259a5d-8ac4-4fbf-b314-6503bc617726",
+      "transcript_path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/native/projects/-private-var-folders-m6-r3tllnrs1yq7yfbwm680tss40000gn-T-lf-claude-modes-ml2tbj0f-workspace/b0259a5d-8ac4-4fbf-b314-6503bc617726.jsonl",
+      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/workspace",
+      "hook_event_name": "SessionStart",
+      "source": "startup",
+      "model": "claude-haiku-5-5",
+      "session_title": "LOO415 disposable probe",
+      "observed_time": 13874.411606458
+    }
+  ],
+  "rss_first": "276832",
+  "second_id": null,
+  "pending_alive": true,
+  "pending_requests": 0,
+  "final_alive": true,
+  "hooks": [
+    {
+      "session_id": "b0259a5d-8ac4-4fbf-b314-6503bc617726",
+      "transcript_path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/native/projects/-private-var-folders-m6-r3tllnrs1yq7yfbwm680tss40000gn-T-lf-claude-modes-ml2tbj0f-workspace/b0259a5d-8ac4-4fbf-b314-6503bc617726.jsonl",
+      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/workspace",
+      "hook_event_name": "SessionStart",
+      "source": "startup",
+      "model": "claude-haiku-5-5",
+      "session_title": "LOO415 disposable probe",
+      "observed_time": 13874.411606458
+    },
+    {
+      "session_id": "b0259a5d-8ac4-4fbf-b314-6503bc617726",
+      "transcript_path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/native/projects/-private-var-folders-m6-r3tllnrs1yq7yfbwm680tss40000gn-T-lf-claude-modes-ml2tbj0f-workspace/b0259a5d-8ac4-4fbf-b314-6503bc617726.jsonl",
+      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/workspace",
+      "prompt_id": "65b4ac45-53ce-44a5-8381-fad177aa4418",
+      "permission_mode": "auto",
+      "hook_event_name": "UserPromptSubmit",
+      "prompt": "Reply with PROBE_TWO",
+      "session_title": "LOO415 disposable probe",
+      "observed_time": 13881.392952208
+    },
+    {
+      "session_id": "b0259a5d-8ac4-4fbf-b314-6503bc617726",
+      "transcript_path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/native/projects/-private-var-folders-m6-r3tllnrs1yq7yfbwm680tss40000gn-T-lf-claude-modes-ml2tbj0f-workspace/b0259a5d-8ac4-4fbf-b314-6503bc617726.jsonl",
+      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-claude-modes-ml2tbj0f/workspace",
+      "prompt_id": "65b4ac45-53ce-44a5-8381-fad177aa4418",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "StopFailure",
+      "error": "authentication_failed",
+      "last_assistant_message": "Not logged in \u00b7 Please run /login",
+      "observed_time": 13881.450212625
+    }
+  ],
+  "duration": 18.02019008299976,
+  "events": []
+}

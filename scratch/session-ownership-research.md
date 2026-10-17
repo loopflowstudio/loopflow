@@ -40,7 +40,7 @@ restoration, endpoint cost and executable-version handling remain to be proved.
 | lf Session identity, Work binding, title, primary selection, completion | Existing lfdb Session records; completion is separate from provider/viewer exit. |
 | Provider conversation/thread selection, provider/account route and native history locator | lfdb references opaque native identity and retains historical selections; provider owns its native conversation. Never recreate history by scraping terminal text. |
 | Owning lf Process and AgentProcess, Machine/path, PID with OS birth, endpoint, exit facts | Existing process records in lfdb. Endpoint/PID is evidence requiring current validation, not a durable claim of life. |
-| Input ownership and attachment generation | Existing fenced ownership transaction in lfdb. Viewing alone never transfers provider ownership. Reusing the same process still requires a fresh claim when control changes. |
+| Provider attachment and viewer control | Existing lfdb attachment fences the executor/provider. The October 17 implementation gives viewers separate fresh runtime tokens; passive viewing takes none. A → B → A fences stale viewer input without transferring provider authority. |
 | Captured input, provider turn IDs, observed outputs, pending decisions and outcomes | Existing Session event/capture owners. Persist meaningful boundaries and delivery uncertainty, not a second writable provider transcript. |
 | Work layout, pane membership, hidden/open set, zoom and selection | Candidate: one shared Work-keyed layout record accessible through Rust/lfdb and CLI/Desktop. Supersedes the draft's assumption that an app-only file is settled. Machine replication remains a separate policy. |
 | Shell heap, cwd/environment/jobs, PTY file descriptors, provider sockets | Live per-Session/per-shell owner; cannot be restored by serializing a Session row. Native provider history is recovery after loss, not live continuation. |
@@ -78,14 +78,14 @@ The external contract should distinguish:
 | Adapter at the source baseline | Evidence and implication |
 |---|---|
 | Codex | `harness/codex.rs` and `human_session::connect_live_codex` use the existing engine endpoint/native thread. `os_process/lifeline.rs` kills the provider group when its last lf holder exits. Keep a durable owner holding that lifeline; a live socket alone is insufficient. |
-| Claude | `harness/claude.rs` keeps a persistent stream-json process across turns. Current interrupt kills it and later input resumes native history. The generic Harness comment saying one subprocess per turn is stale; implementation is the evidence. Preserve the stream owner across UI detach. |
+| Claude | `harness/claude.rs` keeps a persistent stream-json process across turns. Current interrupt kills it and later input resumes native history. The generic Harness comments were corrected during October 16 reconciliation; runtime behavior is unchanged. Preserve the stream owner across UI detach. |
 | OpenCode | Current adapter owns an HTTP/SSE server and native session. Keeping its owner alive can retain that channel; the checkout's native-open route currently invokes stop-and-resume for headless work. Do not claim live native-client takeover without testing the provider path. |
 | Native terminal providers and shells | A surviving PTY owner preserves the actual process and TUI. A structured headless provider cannot be transformed into its native TUI by replaying text; either attach through a provider-supported protocol or retain the native TUI from launch. |
 
 Automatic restoration must replace `human_session::stop_headless_for_resume` as
 its route, while retaining explicit recovery behavior where intended. One stable
-provider owner and optional viewer input claims must remain distinct; creating a
-second authority over the same provider would violate current Session ownership.
+provider owner and optional viewer input claims must remain distinct; duplicate
+provider authority would violate Session ownership.
 
 ## Accepted direction and proof still needed
 

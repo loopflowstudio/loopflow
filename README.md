@@ -211,12 +211,18 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 lf session list
 lf resume                         # relevant conversation for this checkout
 lf connect SESSION                # Loopflow, Claude, or Codex ID
+lf session attach SESSION         # existing execution; Ctrl+] detaches
 lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
 lf session history SESSION --json
 lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
+
+Execution survives closing its terminal. Reattach with `lf session attach SESSION`;
+`--observe` leaves input control unchanged. `lf resume` opens the retained native
+terminal, or explicitly transitions a structured Run to native UI without replaying
+its input. [Transport details and restoration limits](rust/loopflow/src/transport/README.md).
 
 Codex terminal Sessions receive context and the first message through the provider
 protocol. Claude loads context from a system instructions file and the first

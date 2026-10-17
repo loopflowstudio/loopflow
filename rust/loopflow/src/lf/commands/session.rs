@@ -27,6 +27,17 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
+        SessionCommand::Attach { id, observe } => {
+            let store = open_shared_store().await?;
+            let session = crate::ops::human_session::session_by_id(&store, id)
+                .await?
+                .context("Session not found")?;
+            let owner = store
+                .sqlite
+                .session_transport(&session.id)?
+                .context("Session has no retained execution")?;
+            crate::transport::attach(&owner, *observe)
+        }
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
             let session = crate::ops::human_session::session_by_id(&store, id)

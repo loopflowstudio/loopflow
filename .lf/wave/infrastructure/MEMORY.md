@@ -206,8 +206,9 @@ Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
 shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
 creation and lifecycle, including nested CLI callers without Desktop. No shared
 daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
-transport; its multiplexer exemption and repaint-only brief still need alignment
-with this outcome. LOO-497 owns the shared layout API; LOO-489 integrates it.
+transport; PR #1581 supplies the independent owner and attach-only path, with
+terminal restoration limits still explicit. LOO-497 owns the shared layout API;
+LOO-489 integrates it.
 
 Application retention now keeps repository registries across window closure;
 headless tests cover twelve Work layouts/drafts, not twelve live providers.
@@ -335,6 +336,31 @@ approving landing with quieter output. Fenced native answers, replay/schema and
 fake-Flow proofs pass, not configured Task-to-publication or installation.
 Harness errors retain failed-result text for retries. CI owns the full matrix.
 
+## Live conversation ownership (LOO-415, curated 2026-10-17)
+
+Jack Heart accepted per-conversation owners for nested CLI, headless, terminal,
+shell and Flow execution. LOO-415 owns transport; LOO-416 owns lifecycle/readiness.
+Publication/review only, no landing, shared server or automatic turn/Flow replay.
+Jack requires native Claude UI; explicit resume may restart when necessary,
+preserving Session/history without resubmitting input. Viewer loss never transitions.
+Native-only Flow execution remains unselected; structured results retain their role.
+
+A surviving PID/socket cannot prove capture settlement or pending-request continuity.
+At `72dbe0344f`, viewer claims fenced out the harness, capture Drop settled early,
+and Codex client EOF closed its original request channel. The working owner now
+retains execution/capture and the native client; separate runtime viewer tokens
+leave provider attachment unchanged. Passive viewing takes no claim.
+
+Release's operation-entry lesson applies: public resume preserves Codex's original
+request after creator death; Flow fixtures preserve settlement without replay.
+Bound acknowledgement, not attachment lifetime: silent-owner timeout/cancellation
+exits only the viewer, preserves pending capture/provider ownership and submits no
+input; acknowledged controllers/observers outlive the deadline. These stand-ins
+prove no configured native Claude or installed continuity. Owner crash/startup
+uncertainty, SSH and full terminal restoration remain open in the handoff plan;
+unknown execution never authorizes replay. Explicit native transition retains
+the no-replay Flow interruption proof.
+
 ## Session steers (lf-9c03797, 2026-10-11)
 
 Jack Heart accepted Session-only delivery, repository/Work wrappers, downward
@@ -387,16 +413,12 @@ installed acceptance.
 Jack Heart selected LfSession/LfProcess (#1516) and AgentSession (#1517), both
 landed; AgentSessionId has no table. LOO-446 (PR #1520) is the cleanup he
 requested; after #1519 merged he asked for it to land (`dc87102b`). LfProcess
-identity is `id`, references `<role>_lf_process_id`, AgentProcess references
-`agent_process_id`; the two retired words name nothing. The lf attached to a
-Session is the attached LfProcess; the lf running a Flow is the Flow process;
-FlowRunner executes it. Main's unreleased `agent_process` draft is edited in
-place; LOO-446's draft renames released columns and exit receipt keys
-(`attachment:`). Without old-name readers an earlier build's live Codex lifeline
-and journal receipts are not adopted. `processes` holds both kinds: filter `kind`.
-Five Python gate cases await CI. Installation unproved. Plan: `scratch/loo-446.md`. Prior proofs,
-LOO-442's unexplained gate failures and LOO-400 history:
-`585cf52cd:wave/infrastructure/MEMORY.md`, LOO-441 and LOO-442 headings.
+identity is `id`, references `<role>_lf_process_id`; AgentProcess references
+`agent_process_id`. The attached lf and Flow process retain distinct roles;
+FlowRunner executes ordinary command steps. `processes` holds both kinds.
+Superseded migration/receipt cutover details and prior proof references remain at
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Five Python gate cases await CI; installation remains unproved.
 
 ## Terminal conversation recovery (curated 2026-10-12)
 

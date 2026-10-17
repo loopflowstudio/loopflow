@@ -417,19 +417,6 @@ Observe validated Program Status snapshots from an active local terminal
 | `--agent-process` | AgentProcess from the Session reading; omit when it reported none |
 | `--help / -h` | Print help |
 
-## lf session resume
-
-Resume the relevant existing conversation of this checkout or explicit Work
-
-| Argument | What it does |
-|---|---|
-| `--task` | task |
-| `--wave` | wave |
-| `--message` | With `-b`: send the conversation its next turn |
-| `--prepare` | Return connection data without starting the provider Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf session history
 
 Read this conversation's native start, usage and completion receipts
@@ -464,40 +451,20 @@ List Sessions
 
 ## lf session connect
 
-Connect to a Session, or find/prepare a Task or Wave's primary conversation
+Open the ongoing conversation of this scope, or an exact Session
 
 | Argument | What it does |
 |---|---|
 | `<id>` | Session ID or provider conversation ID |
 | `--task` | task |
 | `--wave` | wave |
+| `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |
+| `--choose` | Make this conversation of the selected Task its primary |
 | `--message` | With `-b`: send the conversation its next turn |
 | `--prepare` | Return connection data without starting the provider Default: false. |
 | `--json` | json Default: false. |
 | `--takeover` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
-| `--help / -h` | Print help |
-
-## lf session ensure
-
-Find or prepare the one ongoing conversation of this repository, a Wave or a Task
-
-| Argument | What it does |
-|---|---|
-| `--wave / -w` | The Wave's conversation instead of the repository's |
-| `--task` | The Task's: the one chosen, else its only or most recently used conversation |
-| `--choose` | Make this conversation of the Task its primary |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf session new
-
-Give a primary Session's scope a fresh conversation
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session rename

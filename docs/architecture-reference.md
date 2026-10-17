@@ -285,18 +285,20 @@ completion nor Flow authority.
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
-Task or planning provider. `lf session ensure` finds or admits it and prepares
-its first input; `lf session connect` owns the foreground launch.
-`lf session new` stops the predecessor's provider, then
-completes it and admits the successor in one transaction, so a scope never has
-two or none midway. Primary grants no Flow, review or process authority, and
+Task or planning provider. `lf connect` finds or admits it, prepares
+its first input and owns the foreground launch; `--prepare` stops before launch.
+`resume` is an alias. `connect --fresh` retires the predecessor as primary and
+admits the successor in one transaction, keeping the previous client and history.
+Scope locks serialize admission and fresh requests. Each explicit fresh request
+creates a new primary; ordinary connect recovers the current one. Primary grants no Flow, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
 A Task's primary is one of its own conversations, named by
 `tasks.primary_session_id`; its row carries no scope mark and it stays a Task
-member. `lf session ensure --task` keeps an explicit choice, else selects the
+member. `lf connect --task ISSUE` keeps the chosen primary, else selects the
 sole unfinished interactive conversation, else the most recently used by
-`lf resume`'s ranking, and creates one only when the Task has none.
+native human input, then last opening. It creates one when the Task has none.
+`--choose SESSION` selects an existing member explicitly.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs

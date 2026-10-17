@@ -1,5 +1,22 @@
 # infrastructure wave memory
 
+## Opening work conversations (LOO-499, 2026-10-17)
+
+Jack Heart selected `resume` as an exact `connect` alias, matching scope/session
+skills on first creation, and case-insensitive Task tickets everywhere; he
+authorized pursue while retaining demo and merge review. The working diff uses
+physical checkout scope or an explicit target, never global recency. Ordinary
+skills claim no primary. Fresh selects a successor without stopping the previous
+client; ordinary connect recovers it after an uncertain reply. Preparation launches
+no provider; explanation admits nothing.
+
+Clap aliases canonicalize before routing. Desktop reset preserves concurrent
+updates without restoring predecessor snapshots. Release's
+entry-point lesson applies to CLI, Desktop and remote callers: store/stand-in
+proofs establish no installed continuity. LOO-475 retains installed acceptance;
+LOO-415's retained transport and attachment fences remain intact. Publication and
+the full affected gate remain unproved.
+
 ## Native terminal diagnostics (LOO-501, 2026-10-17)
 
 Jack Heart authorized repair/delivery preserving input, diagnostics and native
@@ -311,13 +328,10 @@ counters stay unread. Stand-ins prove A → B → A rejection, not configured re
 Client/provider death differs; leader death or unknown descendants grants no signaling.
 LOO-447 excluded historical orphans, removal timing and configured-provider runs.
 
-Jack Heart's October 10 decision `fd830a3f` selected Claude/OpenCode stop/resume;
-he later approved #1524 and landing (`55bc3fcd`). This remains the implementation
-at `72dbe0344f`, but October 16's LOO-415 direction below supersedes it as the
-reconnect design. Preserve exact stop, native history and uncertainty for explicit
-recovery. Deleted replay/relay writers stay deleted. Source fixtures prove
-stop/resume, not live continuity or installed acceptance. Earlier decisions and
-checks: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
+LOO-415 supersedes the stop/resume design. Jack Heart's October 10 decisions,
+#1524 approval and source proofs: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Explicit recovery retains exact stop, native history and uncertainty;
+deleted replay/relay writers stay deleted.
 
 LOO-450: Jack selected ClaudeHarness, native schemas and predecessor deletion,
 approving landing with quieter output. Fenced native answers, replay/schema and
@@ -408,26 +422,14 @@ Superseded migration/receipt cutover details and prior proof references remain a
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 Five Python gate cases await CI; installation remains unproved.
 
-## Terminal conversation recovery (curated 2026-10-12)
+## Terminal conversation recovery (curated 2026-10-17)
 
-Jack Heart authorized both repairs through landing. LOO-409's discarded receipt
-contradicted the generation-mismatch theory; evidence/ownership:
-`9ccaac2e48:wave/infrastructure/MEMORY.md`, this section.
-Its legacy Session lacks exact process evidence.
-
-Record native identity at spawn and exit at wait; failed spawn proves non-start,
-launcher success proves no provider exit. Commit reservation with attachment;
-fallback shares first-launch authority and preserves fast-published native history.
-
-lf-8fed729 prepares primary input in ensure/replace; connect owns foreground
-launch, removing the tmux launcher. Exact interactive PID/birth observed dead
-permits fenced settlement without inventing success. Live/unknown providers grant
-no duplicate launch or signaling; headless group rules remain. Explicit retry of
-a retired Session without native history retains completion and successor selection.
-These are implementation choices under Jack's outcome, not separate approvals.
-Stand-in CLI/native-resume proofs pass; installed recovery of the two reported
-Sessions and real Codex interaction remain unproved. Release's operation-entry
-lesson applies: source proofs and installation alone establish no recovery.
+Jack Heart authorized both repairs through landing. LOO-409's discarded receipt,
+lf-8fed729's launch/retry invariants, implementation choices and stand-in proofs:
+`28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
+this heading. LOO-499 supersedes the ensure/replace entry points. Installed recovery
+of the two reported Sessions and real Codex interaction remain unproved.
+Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 

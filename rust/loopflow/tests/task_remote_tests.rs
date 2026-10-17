@@ -47,7 +47,7 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
     repo.create_branch(branch);
     let initial = repo.head_sha();
     std::env::set_var("LF_TASK_SOURCE", source(branch, &initial));
-    let missing = loopflow::ops::task::task_checkout(repo.path(), "FIX-1", Default::default())
+    let missing = loopflow::ops::task::task_checkout(repo.path(), "fix-1", Default::default())
         .unwrap_err()
         .to_string();
     assert!(
@@ -60,7 +60,7 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
     repo.commit("Unpushed work");
     let unpublished = repo.head_sha();
     std::env::set_var("LF_TASK_SOURCE", source(branch, &unpublished));
-    let missing = loopflow::ops::task::task_checkout(repo.path(), "FIX-1", Default::default())
+    let missing = loopflow::ops::task::task_checkout(repo.path(), "Fix-1", Default::default())
         .unwrap_err()
         .to_string();
     assert!(
@@ -107,11 +107,11 @@ fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legac
     let store = std::sync::Arc::new(fixture.store);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let binding = runtime
-        .block_on(resolve_work_binding(&store, repo.path(), "task:INF-123"))
+        .block_on(resolve_work_binding(&store, repo.path(), "task:inf-123"))
         .unwrap();
     assert_eq!(binding.work.id(), fixture.task.id.as_str());
     repo.create_file("unfinished.txt", "source work");
-    let args = ["--task", "INF-123", "skill", "implement"].map(str::to_string);
+    let args = ["--task", "Inf-123", "skill", "implement"].map(str::to_string);
     let cli = loopflow::lf::commands::ssh::parse_remote_command(&args).unwrap();
     let invoke = || {
         loopflow::lf::commands::ssh::run("unreachable.invalid", false, &cli, &args, None)

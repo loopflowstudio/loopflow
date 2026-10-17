@@ -9,3 +9,12 @@ routine implementation choices and remaining acceptance.
 No further product decision currently blocks implementation. Demo/review and
 merge approval remain with Jack Heart in primary Session
 83e6ebf1845641fcb7332b668465bd40.
+
+Jack Heart requested removing `--choose` on October 17 during implementation
+review. Keep ordinary scope connect, exact Session opening and fresh creation;
+remove the explicit primary-selection option and its plumbing.
+
+Removal checks: cargo fmt; two focused cargo tests (Task primary selection and
+contextual connect/resume/fresh); cargo clippy --all-targets -- -D warnings — passed.
+Review: exact Session opening preserves the existing Task primary; removing the
+CLI override leaves automatic selection and its store owner necessary.

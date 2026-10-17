@@ -1279,27 +1279,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
-    // An explicit choice wins, and keeps winning over later use.
-    let explained = fixture.json(&[
-        "connect",
-        "--task",
-        "inf-124",
-        "--choose",
-        &earlier,
-        "--explain",
-        "--json",
-    ]);
+    // Opening an exact conversation leaves the Task's primary unchanged.
     assert_eq!(
-        explained["resolution"]["session"]["value"],
+        fixture.json(&["connect", &earlier, "--prepare", "--json"])["id"],
         earlier.as_str()
     );
-    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
-    assert_eq!(
-        primary(&["INF-124", "--choose", &earlier])["id"],
-        earlier.as_str()
-    );
+    let explained = fixture.json(&["connect", "--task", "inf-124", "--explain", "--json"]);
+    assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
     let newest = converse(&several_path);
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
     let marked: Vec<String> = fixture
@@ -1310,43 +1298,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .filter(|session| session["task_primary"] == true)
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(marked, std::slice::from_ref(&earlier));
+    assert_eq!(marked, std::slice::from_ref(&later));
     assert!(members("INF-124").contains(&newest));
-
-    // Another Task's conversation cannot be chosen.
-    let explained = fixture.json(&[
-        "connect",
-        "--task",
-        "inf-124",
-        "--choose",
-        &sole,
-        "--explain",
-        "--json",
-    ]);
-    assert!(explained["action"].is_null());
-    assert!(explained["unavailable"][0]
-        .as_str()
-        .unwrap()
-        .contains("not an unfinished interactive conversation of this Task"));
-    let foreign = fixture.run(&[
-        "session",
-        "connect",
-        "--prepare",
-        "--task",
-        "INF-124",
-        "--choose",
-        &sole,
-        "--json",
-    ]);
-    assert!(!foreign.status.success(), "{foreign:?}");
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
 
     // A finished primary gives way to the Task's most recent conversation.
     fixture
         .db()
         .execute(
             "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
-            [&earlier],
+            [&later],
         )
         .unwrap();
     assert_eq!(primary(&["INF-124"])["id"], newest.as_str());

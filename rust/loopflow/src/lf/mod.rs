@@ -843,11 +843,8 @@ pub struct SessionConnectionArgs {
     #[arg(long)]
     pub wave: Option<String>,
     /// Create a fresh primary in this scope, keeping the previous client and history
-    #[arg(long, conflicts_with_all = ["id", "choose"])]
+    #[arg(long, conflicts_with = "id")]
     pub fresh: bool,
-    /// Make this conversation of the selected Task its primary
-    #[arg(long, value_name = "SESSION", conflicts_with = "id")]
-    pub choose: Option<String>,
     /// With `-b`: send the conversation its next turn
     #[arg(long)]
     pub message: Option<String>,
@@ -878,10 +875,6 @@ impl SessionConnectionArgs {
             self.task.as_deref().or(cli.task.as_deref()),
             self.wave.as_deref().or(cli.wave.as_deref()),
         )?;
-        anyhow::ensure!(
-            self.choose.is_none() || matches!(target, SessionTarget::Task(_)),
-            "--choose requires an explicit --task"
-        );
         Ok(
             if matches!(target, SessionTarget::Context)
                 && (cli.repo.is_some() || cli.repository.is_some())

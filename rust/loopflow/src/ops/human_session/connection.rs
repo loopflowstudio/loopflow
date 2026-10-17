@@ -103,7 +103,6 @@ pub(crate) async fn explain_connect(
     mode: OpenMode,
     prepare_only: bool,
     fresh: bool,
-    choose: Option<&str>,
 ) -> SessionConnectExplanation {
     use crate::session::PrimaryScope;
     let selected = async {
@@ -115,9 +114,7 @@ pub(crate) async fn explain_connect(
             None
         } else {
             match &scope {
-                PrimaryScope::Task(task) => {
-                    super::primary::task_conversation(store, task, choose).await?
-                }
+                PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
                 _ => store.sqlite.primary_session(&scope)?,
             }
         };

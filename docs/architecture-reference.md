@@ -298,7 +298,7 @@ A Task's primary is one of its own conversations, named by
 member. `lf connect --task ISSUE` keeps the chosen primary, else selects the
 sole unfinished interactive conversation, else the most recently used by
 native human input, then last opening. It creates one when the Task has none.
-`--choose SESSION` selects an existing member explicitly.
+Opening an exact Session leaves the Task's primary unchanged.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs

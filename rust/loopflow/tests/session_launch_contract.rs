@@ -1189,8 +1189,6 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
         vec!["connect", id, "--fresh"],
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "connect", id],
-        vec!["connect", "--choose", id],
-        vec!["connect", "--task", "missing", "--fresh", "--choose", id],
     ] {
         assert!(!fixture
             .command()

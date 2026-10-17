@@ -462,9 +462,8 @@ answered or canceled.
 launching the provider. Add `--json` for connection data. Remote preparation
 returns an SSH command in either format.
 
-A Task keeps its selected primary. `connect --task ISSUE --choose SESSION`
-selects another of its unfinished interactive conversations. Without a primary,
-connect selects the most recently used eligible conversation, or creates one in
+A Task keeps its selected primary. Opening an exact Session does not change it.
+Without a primary, connect selects the most recently used eligible conversation, or creates one in
 the Task's checkout when none exists. The others stay open, and listing Sessions
 never picks or starts one.
 

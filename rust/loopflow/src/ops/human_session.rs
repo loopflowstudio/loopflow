@@ -162,7 +162,6 @@ pub(crate) async fn select_connection(
     cwd: &Path,
     target: SessionTarget<'_>,
     fresh: bool,
-    choose: Option<&str>,
 ) -> Result<String> {
     use crate::session::PrimaryScope;
     if let SessionTarget::Session(id) = target {
@@ -174,9 +173,7 @@ pub(crate) async fn select_connection(
             primary::ensure(store, repo.as_path(), None, fresh).await?
         }
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str()), fresh).await?,
-        PrimaryScope::Task(task) => {
-            primary::ensure_task(store, cwd, task.as_str(), choose, fresh).await?
-        }
+        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), fresh).await?,
     };
     Ok(session.id)
 }

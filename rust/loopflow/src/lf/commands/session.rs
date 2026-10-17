@@ -317,7 +317,6 @@ async fn connect(
         &std::env::current_dir()?,
         target,
         connection.fresh,
-        connection.choose.as_deref(),
     )
     .await?;
     drop(progress);

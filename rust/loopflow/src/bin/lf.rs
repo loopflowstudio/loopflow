@@ -2060,7 +2060,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             *try_open,
             connection.prepare,
             connection.fresh,
-            connection.choose.as_deref(),
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);

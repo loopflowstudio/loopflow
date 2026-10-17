@@ -459,7 +459,6 @@ Open the ongoing conversation of this scope, or an exact Session
 | `--task` | task |
 | `--wave` | wave |
 | `--fresh` | Create a fresh primary in this scope, keeping the previous client and history Default: false. |
-| `--choose` | Make this conversation of the selected Task its primary |
 | `--message` | With `-b`: send the conversation its next turn |
 | `--prepare` | Return connection data without starting the provider Default: false. |
 | `--json` | json Default: false. |

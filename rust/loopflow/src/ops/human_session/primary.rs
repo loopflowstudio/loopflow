@@ -49,13 +49,11 @@ pub(crate) async fn ensure(
 
 /// A Task's primary is one of its own conversations: the one already chosen,
 /// else its sole unfinished interactive one, else the most recently used.
-/// Only a Task with none gets a new one, in its checkout. `choose` names the
-/// conversation outright; the others stay open.
+/// Only a Task with none gets a new one, in its checkout. The others stay open.
 pub(crate) async fn ensure_task(
     store: &SharedStore,
     repo: &Path,
     task: &str,
-    choose: Option<&str>,
     fresh: bool,
 ) -> Result<SessionRecord> {
     let binding = crate::ops::resolve_work_binding(store, repo, &format!("task:{task}")).await?;
@@ -67,7 +65,7 @@ pub(crate) async fn ensure_task(
     let chosen = if fresh {
         None
     } else {
-        task_conversation(store, id, choose).await?
+        task_conversation(store, id).await?
     };
     if !binding.cwd.try_exists()? {
         // Reuse Task preparation's recorded placement and restoration checks.
@@ -105,19 +103,7 @@ pub(crate) async fn ensure_task(
 pub(super) async fn task_conversation(
     store: &SharedStore,
     task: &crate::durable::TaskId,
-    choose: Option<&str>,
 ) -> Result<Option<LfSession>> {
-    if let Some(id) = choose {
-        return store
-            .task_conversations(task)
-            .await?
-            .into_iter()
-            .find(|(session, _)| session.id == id)
-            .map(|(session, _)| Some(session))
-            .with_context(|| {
-                format!("Session {id} is not an unfinished interactive conversation of this Task")
-            });
-    }
     if let Some(primary) = store.task_primary(task).await? {
         return Ok(Some(primary));
     }

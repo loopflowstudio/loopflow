@@ -2154,16 +2154,24 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
-    let execution = cli.may_launch_agent()
-        && !matches!(
-            cli.command,
-            Some(Commands::Session { .. } | Commands::Discord { .. })
-        );
-    if execution {
-        journal::admit_process(&std::env::current_dir()?, args);
-        if loopflow::transport::delegate_current()? {
-            return Ok(());
-        }
+    // Own direct conversations and Flows. Delivery controllers may launch an
+    // independently owned agent, but retain their own cancellation/lifetime.
+    let execution = matches!(
+        cli.command,
+        None | Some(Commands::External(_) | Commands::Inline { .. } | Commands::Skill { .. })
+            | Some(Commands::Flow {
+                cmd: FlowCommand::External(_)
+            })
+            | Some(Commands::Task {
+                cmd: TaskCommand::Run { .. }
+            })
+            | Some(Commands::History {
+                cmd: Some(loopflow::lf::commands::history::HistoryCommand::Replay { .. }),
+                ..
+            })
+    );
+    if execution && loopflow::transport::delegate_current()? {
+        return Ok(());
     }
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.

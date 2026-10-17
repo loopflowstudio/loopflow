@@ -31,6 +31,10 @@ After connecting, attachment waits up to five seconds for acknowledgement. Timeo
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
 acknowledged, the attachment has no time limit.
 
+For commands using pipes, the controlling viewer forwards stdin EOF after all
+accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
+attachments keep their PTY open; the running program interprets terminal EOF keys.
+
 Terminal snapshots retain a text grid and up to 2,000 scrollback rows. They restore
 alternate-screen state, application keys, bracketed paste and mouse modes supported
 by vt100. Images, hyperlinks, extended keyboard protocols and exact restoration of

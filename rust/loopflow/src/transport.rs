@@ -71,6 +71,9 @@ enum Request {
         token: String,
         bytes: Vec<u8>,
     },
+    EndInput {
+        token: String,
+    },
     Resize {
         token: String,
         rows: u16,
@@ -163,10 +166,13 @@ pub fn delegate_current() -> Result<bool> {
     #[cfg(not(test))]
     {
         let mut argv: Vec<String> = std::env::args().collect();
+        crate::journal::admit_process(&std::env::current_dir()?, &argv);
+        crate::journal::current_lf_process_id()
+            .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
         let owner = start(
             &argv,
-            io::stdin().is_terminal() && io::stdout().is_terminal(),
+            io::stdin().is_terminal() || io::stdout().is_terminal(),
             &std::env::current_dir()?,
             &|_| {},
         )?;
@@ -182,11 +188,13 @@ pub(crate) fn start(
     inherit: &dyn Fn(&mut Command),
 ) -> Result<LfProcessId> {
     let logs = crate::store::lf_home_dir().join("logs");
-    std::fs::create_dir_all(&logs)?;
+    std::fs::create_dir_all(&logs)
+        .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
     let log = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(logs.join("transport.log"))?;
+        .open(logs.join("transport.log"))
+        .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
     let mut command = Command::new(std::env::current_exe()?);
     command.args(["transport", "serve"]);
     if terminal {
@@ -225,16 +233,20 @@ pub(crate) fn start(
         .context("Owner exited before acknowledging execution; inspect transport.log")
 }
 
-fn endpoint(id: &LfProcessId) -> Result<PathBuf> {
+pub(crate) fn directory(home: &Path) -> Result<PathBuf> {
     // Keep sockaddr_un short even with a long LF_HOME or macOS temporary path.
-    let home = crate::store::lf_home_dir().canonicalize()?;
+    let home = home.canonicalize()?;
     let digest = hex::encode(Sha256::digest(home.as_os_str().as_encoded_bytes()));
     // SAFETY: geteuid has no preconditions.
-    let dir = PathBuf::from(format!(
-        "/tmp/lf-{}-{}",
+    Ok(Path::new("/tmp").canonicalize()?.join(format!(
+        "lf-{}-{}",
         unsafe { libc::geteuid() },
         &digest[..16]
-    ));
+    )))
+}
+
+fn endpoint(id: &LfProcessId) -> Result<PathBuf> {
+    let dir = directory(&crate::store::lf_home_dir())?;
     match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
@@ -280,7 +292,7 @@ fn terminal_pair() -> io::Result<(File, File)> {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut size,
+            &raw mut size,
         )
     } < 0
     {
@@ -375,8 +387,9 @@ impl Viewer {
 fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
-    let path = endpoint(&id)?;
-    let listener = UnixListener::bind(&path)?;
+    let path = endpoint(&id).context("Prepare transport socket")?;
+    let listener = UnixListener::bind(&path)
+        .with_context(|| format!("Bind transport socket {}", path.display()))?;
     listener.set_nonblocking(true)?;
     let control_key = uuid::Uuid::new_v4().to_string();
     let mut command = Command::new(&argv[0]);
@@ -408,9 +421,12 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         command.process_group(0);
     }
     let mut child = command.spawn()?;
+    // Command retains its configured slave descriptors after spawn. Close them
+    // so Linux reports PTY EOF when the execution closes its own descriptors.
+    drop(command);
     let group = crate::os_process::ProcessGroupGuard::new(child.id());
     let mut readers: Vec<(u8, File)> = Vec::new();
-    let mut input: File;
+    let input: File;
     if let Some((master, slave)) = pair {
         drop(slave);
         input = master.try_clone()?;
@@ -430,6 +446,8 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         nonblocking(reader.as_raw_fd())?;
     }
     nonblocking(input.as_raw_fd())?;
+    let mut input = Some(input);
+    let mut end_input = false;
     // The child and its capture now belong to this owner, even if acknowledgement is lost.
     let _ = writeln!(io::stdout(), "{id}");
     let _ = io::stdout().flush();
@@ -440,6 +458,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
     let mut announced = false;
+    let mut attached = false;
     loop {
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
@@ -480,13 +499,21 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 viewer.queue(&Response::Busy)?;
                                 continue;
                             }
+                            attached = true;
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
                                 viewer.token = Some(token);
                                 if terminal {
-                                    resize(input.as_raw_fd(), rows, cols)?;
+                                    resize(
+                                        input
+                                            .as_ref()
+                                            .expect("terminal input stays open")
+                                            .as_raw_fd(),
+                                        rows,
+                                        cols,
+                                    )?;
                                     output.resize(rows, cols);
                                 }
                             } else {
@@ -503,7 +530,12 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 // SAFETY: the descriptor is our PTY; only its current
                                 // foreground group receives the nonterminating signal.
                                 unsafe {
-                                    let foreground = libc::tcgetpgrp(input.as_raw_fd());
+                                    let foreground = libc::tcgetpgrp(
+                                        input
+                                            .as_ref()
+                                            .expect("terminal input stays open")
+                                            .as_raw_fd(),
+                                    );
                                     if foreground > 1 {
                                         libc::kill(-foreground, libc::SIGWINCH);
                                     }
@@ -517,7 +549,8 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         }
                         Request::Input { token, bytes }
                             if control.as_ref() == Some(&token)
-                                && viewer.token.as_ref() == Some(&token) =>
+                                && viewer.token.as_ref() == Some(&token)
+                                && !end_input =>
                         {
                             anyhow::ensure!(
                                 pending_input.len() + bytes.len() <= LIMIT,
@@ -525,13 +558,27 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             );
                             pending_input.extend(bytes);
                         }
+                        Request::EndInput { token }
+                            if !terminal
+                                && control.as_ref() == Some(&token)
+                                && viewer.token.as_ref() == Some(&token) =>
+                        {
+                            end_input = true;
+                        }
                         Request::Resize { token, rows, cols }
                             if terminal
                                 && control.as_ref() == Some(&token)
                                 && viewer.token.as_ref() == Some(&token) =>
                         {
                             let (rows, cols) = dimensions(rows, cols);
-                            resize(input.as_raw_fd(), rows, cols)?;
+                            resize(
+                                input
+                                    .as_ref()
+                                    .expect("terminal input stays open")
+                                    .as_raw_fd(),
+                                rows,
+                                cols,
+                            )?;
                             output.resize(rows, cols);
                         }
                         _ => {} // stale and passive viewers cannot write or release another claim
@@ -560,7 +607,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if let Some(response) = output.take_reports() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
-        if !pending_input.is_empty() {
+        if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
             match input.write(pending_input.as_slices().0) {
                 Ok(n) => {
                     pending_input.drain(..n);
@@ -568,6 +615,9 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                 Err(_) => pending_input.clear(),
             }
+        }
+        if end_input && pending_input.is_empty() {
+            input.take();
         }
         let mut drained = Vec::new();
         for (stream, reader) in &mut readers {
@@ -622,7 +672,12 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 announced = true;
             }
-            if announced && at.elapsed() > Duration::from_secs(2) {
+            // Once viewers have received the final output, release execution
+            // locks with the owner. Only never-viewed starts need a replay window.
+            if announced
+                && (at.elapsed() > Duration::from_secs(2)
+                    || (attached && viewers.iter().all(|viewer| viewer.output.is_empty())))
+            {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
                 return if code == 0 {
@@ -794,6 +849,16 @@ pub fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
             let n = io::stdin().read(&mut bytes)?;
             if n == 0 {
                 stdin_open = false;
+                if terminal.is_none() {
+                    if let Some(token) = &token {
+                        send(
+                            &mut socket,
+                            &Request::EndInput {
+                                token: token.clone(),
+                            },
+                        )?;
+                    }
+                }
             } else if terminal.is_some()
                 && (bytes[..n].contains(&0x1d) || (observe && bytes[..n].contains(&0x03)))
             {

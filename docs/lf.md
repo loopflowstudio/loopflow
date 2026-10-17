@@ -202,6 +202,10 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
+OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
+the terminal. Full stderr is retained in that private `opencode.stderr.log` file
+beside the Session's capture. Read or tail it from another terminal; native
+errors and retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.
@@ -1056,10 +1060,11 @@ and Session addresses together. Existing sibling worktree names and unpublished
 edits stay in place. Process paths and provider history retain their original
 values. Desktop reuses the repository's window and Session surfaces.
 
-For a checkout registered before locators, establish its identity with
+After upgrading, a retained local Task's linked checkout and branch can establish
+the original Git directory automatically. Otherwise, establish its identity with
 `lf repo identity --bind repo_ID` before moving it. If it has already moved, run
-`lf repo identity --relocate repo_ID` from the new location. A missing locator
-or reused old path requires explicit recovery. A copied Git directory cannot
+`lf repo identity --relocate repo_ID` from the new location. Ambiguous or reused
+paths require explicit recovery. A copied Git directory cannot
 replace its still-present source. Remote URLs and directory names never merge Work.
 Open the moved checkout before reusing its old path. Experimental Machines keep separate locators; disposable data
 clones observe copied addresses without claiming the source checkout.

@@ -1177,7 +1177,7 @@ exit 2
             launch
                 .env("TITLE_HOST", host)
                 .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
+                .stdout(Stdio::from(slave.try_clone().unwrap()))
                 .stderr(Stdio::from(slave));
             if host != "absent" {
                 launch
@@ -1266,7 +1266,10 @@ exit 2
                 1,
                 "no OSC writer alongside native output"
             );
-            assert!(String::from_utf8_lossy(&result.stdout).contains("latest agent message: done"));
+            assert!(
+                terminal.contains("latest agent message: done"),
+                "{terminal}"
+            );
             let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
             assert_eq!(
                 listed

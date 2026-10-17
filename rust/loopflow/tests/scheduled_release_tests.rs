@@ -1174,10 +1174,11 @@ exit 0
                 history.receipts.iter().find(|r| r.id == physical.id),
                 Some(physical)
             );
-            assert!(matches!(
-                attempt.outcome,
-                ScheduledReleaseOutcome::Published { .. }
-            ));
+            assert!(
+                matches!(attempt.outcome, ScheduledReleaseOutcome::Published { .. }),
+                "{scenario}: {:?}\n{log}",
+                attempt.outcome
+            );
             assert_eq!(history.summary.published, 1);
             assert_eq!(fs::read_to_string(&published).unwrap(), "published\n");
             assert_eq!(caller_state(), before);

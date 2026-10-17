@@ -50,3 +50,8 @@ provider warming policy was selected. Reconnect remains attach-only, with separa
 explicit recovery. Full restoration/readiness acceptance remains in the plan.
 Shared reads and naming recovered with released lf 0.14.4 pinned through LF_BIN;
 installation routing, not authentication, caused the initial read gap.
+
+October 17 sync resolution: retain the six conflicted scratch summaries because
+LOO-416 still uses their accepted direction and open questions. Parent scratch
+cleanup does not retire this branch’s active plan. Combine non-displacing viewer
+attachment with the parent’s EOF and owner-exit fixes; retain both test sets.

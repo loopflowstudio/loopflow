@@ -50,6 +50,9 @@ lf repo-operate             # canonical name for the same skill
 lf --wave designer wave-operate  # operate one Wave
 ```
 
+OpenCode keeps errors and retries in its native terminal UI. Loopflow prints a
+diagnostic log path before launch; full stderr stays there without covering your input.
+
 Give an external agent harness the Loopflow operating skill:
 
 ```bash
@@ -219,7 +222,8 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
-Execution survives closing its terminal. Reattach with `lf session attach SESSION`;
+Sessions, Flows and Task shells survive closing their terminal. Reattach to a
+Session with `lf session attach SESSION`;
 `--observe` leaves input control unchanged. `lf resume` opens the retained native
 terminal, or explicitly transitions a structured Run to native UI without replaying
 its input. [Transport details and restoration limits](rust/loopflow/src/transport/README.md).

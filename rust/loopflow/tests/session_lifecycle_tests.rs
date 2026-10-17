@@ -784,8 +784,13 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     let fixture = Fixture::new(true);
     let (mut child, input) = fixture.attach(&LAUNCH);
     let (id, ..) = fixture.session_row(&input);
-    // SAFETY: child is the live process this test spawned and has not reaped.
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let executor: i32 = fixture.db().query_row(
+        "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured' AND e.receipt_key=?1",
+        [&input], |row| row.get(0),
+    ).unwrap();
+    // SAFETY: the owner starts the captured executor in its own process group.
+    // Terminal Ctrl+C reaches that whole group, including the native provider.
+    assert_eq!(unsafe { libc::kill(-executor, libc::SIGINT) }, 0);
     let deadline = Instant::now() + PATIENCE;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -1501,7 +1506,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let origin: String = fixture
         .db()
         .query_row(
-            "SELECT id FROM processes WHERE kind='lf' ORDER BY rowid LIMIT 1",
+            "SELECT lf_process_id FROM session_events WHERE kind='captured' ORDER BY rowid LIMIT 1",
             [],
             |row| row.get(0),
         )
@@ -1564,8 +1569,22 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let work = fixture.run_parents(&capture);
         assert_eq!(work.0, expected);
         assert_eq!(work.2.as_deref(), source);
-        let parent: String = fixture.db().query_row("SELECT parent_lf_process_id FROM processes WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
-        assert_eq!(parent, origin.as_str());
+        let retained: bool = fixture
+            .db()
+            .query_row(
+                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
+                SELECT p.id,p.parent_lf_process_id FROM processes p
+                JOIN session_events e ON e.lf_process_id=p.id
+                WHERE e.kind='captured' AND e.receipt_key=?1
+                UNION ALL
+                SELECT p.id,p.parent_lf_process_id FROM processes p
+                JOIN ancestors a ON p.id=a.parent_lf_process_id
+             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
+                rusqlite::params![capture, origin],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
     store
@@ -1711,14 +1730,22 @@ fn declared_agent_can_start_another_tasks_flow() {
         format!("task:{}", target.task.id)
     );
     // The step ran in Y's checkout under a Flow process X's conversation started.
-    let observed: (String, String) = fixture.db().query_row(
-        "SELECT step.cwd,s.task_id FROM processes step JOIN processes flow_process ON flow_process.id=step.parent_lf_process_id
-         JOIN processes launch ON launch.id=flow_process.parent_lf_process_id
-         JOIN agent_sessions s ON s.id=launch.caller_session_id
-         JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let observed: (String, String) = fixture
+        .db()
+        .query_row(
+            "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
+            SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
+            FROM processes step
+            JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
+            UNION ALL
+            SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
+            FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
+         ) SELECT DISTINCT a.cwd,s.task_id FROM ancestors a
+         JOIN agent_sessions s ON s.id=a.caller_session_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     assert_eq!(observed, (y.display().to_string(), caller.id.to_string()));
 }
 
@@ -1801,7 +1828,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("AgentProcess requires an admitted invocation"),
+                .contains("Execution requires an admitted invocation"),
             "{output:?}"
         );
         assert!(
@@ -1835,7 +1862,7 @@ fn unavailable_store_starts_no_provider() {
         let output = launch.output().unwrap();
         assert!(!output.status.success(), "{output:?}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("unable to open database file"),
+            String::from_utf8_lossy(&output.stderr).contains("Cannot open execution transport log"),
             "{output:?}"
         );
         assert!(
@@ -2287,11 +2314,22 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
 }
 
 #[test]
-fn repository_move_resumes_the_same_native_conversation() {
+fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
     let identity = fixture.json(&["repo", "identity", "--json"]);
-    let launch = fixture.run(&["-i", "--agent", "codex", ":", "Keep this conversation"]);
+    let task = fixture.json(&["task", "create", "--title", "Retained checkout", "--json"]);
+    let task_id = task["id"].as_str().unwrap();
+    fixture.json(&["task", "checkout", task_id, "--json"]);
+    let launch = fixture.run(&[
+        "--task",
+        task_id,
+        "-i",
+        "--agent",
+        "codex",
+        ":",
+        "Keep this conversation",
+    ]);
     assert!(launch.status.success(), "{launch:?}");
     let session: String = fixture
         .db()
@@ -2303,6 +2341,27 @@ fn repository_move_resumes_the_same_native_conversation() {
         [&session], |row| row.get::<_, String>(0)).unwrap()
     };
     let before = native();
+    let machine: String = fixture
+        .db()
+        .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let locator = fixture
+        .repo
+        .path()
+        .join(".git/loopflow")
+        .join(machine)
+        .join("loopflow-repository");
+    std::fs::remove_file(&locator).unwrap();
+    let resumed = fixture.run(&["session", "connect", &session]);
+    assert!(resumed.status.success(), "{resumed:?}");
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(native(), before);
+    assert_eq!(
+        std::fs::read_to_string(locator).unwrap().trim(),
+        identity["id"].as_str().unwrap()
+    );
     fixture
         .repo
         .create_file("unfinished.txt", "Retain unpublished edits");

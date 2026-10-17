@@ -38,6 +38,41 @@ fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>>
     )))
 }
 
+// A retained linked Task checkout witnesses this physical Git directory even
+// before locators existed. A remote, basename, or main checkout path cannot.
+fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool> {
+    let mut statement = conn.prepare(
+        "SELECT t.worktree,t.branch FROM tasks t
+         JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+           AND t.worktree IS NOT NULL AND t.worktree<>?1 AND t.branch IS NOT NULL",
+    )?;
+    let retained = statement
+        .query_map([repo], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if retained.is_empty() {
+        return Ok(false);
+    }
+    let Ok(observed) = crate::git::worktrees::list_porcelain(Path::new(repo)) else {
+        return Ok(false);
+    };
+    let canonical = crate::repository::CanonicalRepo::discover(Path::new(repo))
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    Ok(retained.iter().any(|(path, branch)| {
+        let Ok(path) = Path::new(path).canonicalize() else {
+            return false;
+        };
+        path.join(".git").is_file()
+            && canonical.contains(&path)
+            && observed.iter().any(|(checkout, observed_branch)| {
+                checkout.canonicalize().ok().as_ref() == Some(&path)
+                    && observed_branch.as_deref() == Some(branch.as_str())
+            })
+    }))
+}
+
 pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult<RepositoryId> {
     let common = git_locator_in(conn, repo)?;
     let locator = if let Some(common) = &common {
@@ -47,10 +82,14 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         None
     };
     if let Some(id) = repository_id_in(conn, repo)? {
-        if common.is_some() && locator.is_none() {
-            return Err(StoreError::InvalidData(format!(
+        if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
+            if !retained_checkout_matches(conn, repo)? {
+                return Err(StoreError::InvalidData(format!(
                 "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo identity --bind {id}`, or recover the moved checkout with `lf repo identity --relocate {id}`"
-            )));
+                )));
+            }
+            crate::repository::location::write_locator(common, &id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         }
         if let Some(locator) = &locator {
             let path: Option<String> = conn
@@ -118,6 +157,9 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Planning routes reference destination addresses. Move both sides
+        // before checking the retained relationship at commit.
+        tx.pragma_update(None, "defer_foreign_keys", true)?;
         let source: String = tx.query_row(
             "SELECT repo FROM repository_plans WHERE id=?1",
             [id.as_str()],

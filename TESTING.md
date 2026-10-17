@@ -66,7 +66,14 @@ restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
 
-The disposable installation job also caches its Cargo target and registry on
+`uv run python scripts/test_task_installation.py --repository-upgrade`
+installs the checksum-verified 0.14.3 CLI, creates a Task checkout and Session,
+then promotes the candidate against that populated store. It checks automatic
+Git locator enrollment, retained identity, historical paths, unpublished edits
+and promotion retry without external network access during the proof. Native
+provider resume and macOS Desktop installation require separate acceptance.
+
+The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
 the first run is cold. Source, OS users, Homes and installations are recreated
@@ -195,6 +202,18 @@ accounts, host shims, or cmux windows participate.
 The probe uses native terminal-title defaults and checks the latest OSC title,
 so an earlier correct title cannot hide a later overwrite. The TUI probe does not
 cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
+
+`tests/e2e/opencode_terminal.py` probes installed OpenCode through the real lf
+interactive launch with a private home and local API. Prepare a disposable npm
+prefix with `@opencode-ai/plugin` matching `opencode --version`, then pass that
+prefix as `--dependencies` alongside `--lf`, `--native`, and `--output`. Run through
+`scripts/test_network.py` with `uv run --no-sync`. It retains raw terminal bytes,
+screen text, requests and diagnostic logs; checks repeated model-access failures,
+draft editing across resize, recovery, typed submission and a fresh successful
+launch. `--expect-overlay` reproduces the old stderr corruption against the
+installed lf release. The
+`session_launch_contract::opencode_` fixtures also cover early failure, arbitrary
+stderr bytes, subprocess diagnostics and resume identity without a provider install.
 
 `uv run python scripts/test_task_installation.py --native-titles` builds a
 release-shaped candidate only inside Docker and exercises published promotion
@@ -1427,6 +1446,13 @@ Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
 `launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
+Retained terminal changes also run Linux Clippy, `transport_tests`,
+`interactive_flow_keeps_input_and_advances_only_after_each_provider_exits`, and
+the disposable installation proof `declared_agent_can_start_another_tasks_flow`.
+Assert that attachment returns after execution exits, as well as checking its
+output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
+Process ancestry assertions follow the recorded chain through transport owners
+rather than assuming a fixed number of launch processes.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

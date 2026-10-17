@@ -22,10 +22,15 @@ Invocation-owned account failover now settles the old process and preserves its
 history before replacement. Top and Task gates share unfinished-row selection
 and identity judgment; unknown agents and receipt-less lf rows remain visible.
 Sampling failure retains Unknown rows, not an empty inventory. Public Task-status
-and scheduled-entry agreement remain unproved. Native launch retains its frozen provider attachment under a detached terminal
+and scheduled-entry agreement remain unproved. Native launch retains its frozen
+provider attachment under a detached terminal
 owner. Replacing an outer viewer changes only its input token. Whole-path stand-ins
 cover creator exit, zero viewers and the original pending Codex request/channel;
-configured native connection remains unproved.
+on October 17, 2026, Jack Heart also confirmed that public Session attachment
+restored an unanswered native Claude question after closing its terminal. Answering
+it completed the original interaction with the same Claude PID and AgentProcess.
+That demo used the branch binary and a disposable Machine home with the installed
+provider account; installed-store integration and SSH remain unproved.
 The LfProcess/LfSession rename is integrated from #1516. The
 [execution guide](architecture/execution.md#record-actual-processes) records this
 boundary; record fixtures do not establish installed acceptance.
@@ -45,7 +50,8 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 Current CLI examples use supported spellings. `lf connect` selects a Session ID,
 Task or Wave. Retained native terminals attach without replacing their provider.
 Explicit native resume of a structured Run may restart the provider while preserving
-Session/history, without resubmitting input. `session attach` never restarts. A Flow whose process died leaves its
+Session/history, without resubmitting input. `session attach` never restarts.
+A Flow whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
@@ -248,7 +254,8 @@ A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
-Sessions without one remain unknown; client files are not read. The Session's `transport_lf_process_id` names its detached terminal owner. The
+Sessions without one remain unknown; client files are not read. The Session's
+`transport_lf_process_id` names its detached terminal owner. The
 execution child owns capture settlement and the frozen provider attachment;
 viewers receive separate revocable input tokens. Passive viewing takes no claim.
 Saved sockets are offered only for live records; a live endpoint's connection
@@ -571,9 +578,9 @@ effects. The unconditional-update race remains a protocol limit.
 | **Steer** — message guiding work | Immutable source/revision UUID; existing associations select Sessions | [`Steer`](../rust/loopflow/src/steer.rs), [`SessionSteerStatus`](../rust/loopflow/src/steer.rs) | `steers`, `session_steers`, `steer_batches`, `steer_deliveries`; `steer_adapters` binds provider callbacks. `task_comments` and `task_comment_deliveries` retain the separate planning thread and Linear sync | Foreground Task connections acquire comments independently of pending writes | `lf comment`, Linear issue comments | SQLite |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **LfSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds attachment stream readings and terminal-reported status | Native turn observation retains start/usage/completion; Codex protocol replies record native identity; Claude retains its supplied ID and OpenCode observes its startup log; `lf __session-title` supplies new plain-native names; Session operations own state | `lf session`, interactive `lf` | `process:cmux` projects the attached Session name without owning it |
-| **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
+| **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh` |
 | **Session history projections** — captured events and exact provider evidence | LfSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects LfSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf history show`, `lf history replay`, `lf usage`, `lf history`; Work/status history | `process:lf`, provider harnesses |
-| **LfProcess** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`LfProcessId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs) | `processes` (`kind='lf'`) | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf history list`; ordinary parsed CLI commands | — |
+| **LfProcess** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. A detached transport Process owns execution and terminal state; viewers hold separate revocable input tokens. | [`LfProcessId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs), [`transport`](../rust/loopflow/src/transport.rs) | `processes` (`kind='lf'`); Session rows reference their transport Process | Foreground commands and detached execution owners; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf history list`, `lf transport`; ordinary parsed CLI commands | — |
 | **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | LfProcess's table, rows of `kind='agent'`; Session retains its current record reference | Provider launch and observed settlement; typed admission remains open | `lf top`, Task execution inventory; LfProcess's process readers | Provider OS process |
 | **Disposable data clone** — offline development data and explicit provider-history archives | SQLite backup and clone-only draft preparation own the disposable schema. A fresh Machine and removed credentials/claims separate retained history from authority; the inherited macOS sandbox confines descendants. Ordinary opens remain validation-only. | [`CloneCommand`](../rust/loopflow/src/data_clone.rs), [usage and proof limits](data-clones.md) | Private clone directory and manifest; copied Machine-local SQLite, captures and archival provider JSONL | Explicit foreground create/run/dispose; no resident service | `lf clone` | `process:/usr/bin/sandbox-exec` |
 | **Local process observation** — recorded processes joined to OS facts | Lf receipts and AgentProcess PID/birth establish observations, not new ownership. Detached records and unknown identities remain visible; failed OS sampling never proves absence. Duplicate or unknown identities grant no signal authority. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Process rows and Machine-local lf receipts; no provider registry | Foreground observation and scheduled record settlement | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `process:/bin/ps`, `process:ps`, `process:sysctl`, `process:lsof`, `process:kill`, `process:which` |
@@ -679,6 +686,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf <skill>` and `lf flow` | Direct Skill execution and Flow composition | Current process and Machine |
 | `lf wave`, `repo`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf session` | Sessions and explicit resolution | Current Machine LfSession state |
+| `lf transport` | Retained command execution and viewer attachment | One detached owner on the current Machine |
 | `lf wt`, `commit`, `sync`, `scratch`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf monitor`, `usage`, `ps`, `top`, `mon prune`, `doctor` | Execution and process observation | Current Machine only |
 | `lf machine`, `lf wave place` | Machine identity and Work placement | Current Machine unless routed explicitly |
@@ -1161,7 +1169,7 @@ model.
 ## Appendix: historical-only vocabulary
 
 The scanner matches exact phrases, not overloaded words. Provider resume
-sessions and tmux sessions are current. The authored chat
+sessions are current. The authored chat
 reference `project:<slug>` is also current; it is not the old Linear-label PM
 model.
 

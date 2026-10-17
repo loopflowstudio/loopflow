@@ -244,7 +244,7 @@ fn mechanical_failure_retains_earlier_step_success() {
 }
 
 #[test]
-fn ordinary_flow_crash_retains_effects_without_repository_restart() {
+fn ordinary_flow_crash_allows_only_selected_remaining_work() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
     let scripts = repo.path().join("scripts");
@@ -339,6 +339,40 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         &["session", "list", "--all", "--history", "--json"],
     );
     assert_eq!(sessions, serde_json::json!([]));
+
+    // The operator has observed the runner's exit and the completed effect.
+    // Select just the unfinished work through the public Flow entry point.
+    let retained = read();
+    write_flow(repo.path(), "remaining", "- cmd: sync --plan\n");
+    let continued = run_lf(
+        repo.path(),
+        home.path(),
+        &["flow", "remaining", "--batch"],
+        None,
+    );
+    assert!(
+        continued.status.success(),
+        "{}",
+        String::from_utf8_lossy(&continued.stderr)
+    );
+    let flows = flow_details(repo.path(), home.path());
+    assert_eq!(flows.len(), 2);
+    let original = flows
+        .iter()
+        .find(|flow| flow["entry"]["id"] == retained["entry"]["id"])
+        .unwrap();
+    assert_eq!(original["steps"], retained["steps"]);
+    assert_ne!(original["entry"]["state"], "completed");
+    let replacement = flows
+        .iter()
+        .find(|flow| flow["entry"]["id"] != retained["entry"]["id"])
+        .unwrap();
+    assert_eq!(step_fields(replacement, "label"), ["sync --plan"]);
+    assert_eq!(step_fields(replacement, "outcome"), ["succeeded"]);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("effects")).unwrap(),
+        "started\n"
+    );
 }
 
 fn expand_named_flow(repo: &Path, name: &str) -> Vec<ConcreteStep> {

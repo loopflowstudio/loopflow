@@ -240,9 +240,22 @@ An already running provider keeps its existing environment when reattached.
 
 Executable selection and data selection are independent. A development app can
 use compatible main-Machine data; the store validates its released schema and
-ordinary opens never initialize or advance it. An incompatible schema remains
-an explicit error, not a reason to fall back to another binary. Development
-builds retain validation-only migration authority.
+ordinary opens never initialize or advance it. An incompatible or missing
+executable selection falls back to a compatible installed CLI on the same
+Machine when the command reaches the installed entry or a CLI with automatic
+dispatch support. Direct pre-fix executables cannot perform that handoff.
+Selection checks use the migration validator and bounded candidate
+preflight; ordinary calls never migrate or change stores. If neither executable
+is compatible, the error names the recovery condition. Development builds retain
+validation-only migration authority. New installed hook declarations use the stable
+installation entry gate so their address survives promotion. After settlement,
+installation recovers proven-incompatible native clients through a new detached
+owner and the same saved conversation, after observing exact provider exit.
+The winning owner presents its viewer through the Machine's terminal setting;
+settled reinstall checks again for missed scheduling. Compatible clients retain
+their original execution. Flow continuation and old terminal viewer migration
+remain separate from this native recovery boundary.
+See [Session recovery](../lf.md#inspect-and-continue).
 
 `LF_HOME` explicitly selects an empty, disposable experiment. Its database is
 always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable

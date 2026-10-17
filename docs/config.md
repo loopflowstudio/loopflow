@@ -74,7 +74,7 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
-| Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
+| Recovered Session terminal | — | global-only `session.terminal: Ghostty` |
 
 ## Scratch lifecycle
 
@@ -172,7 +172,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 session:
-  terminal: Ghostty       # presents review FlowStep sessions on this Machine
+  terminal: Ghostty       # presents recovered native Sessions on this Machine
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -183,6 +183,11 @@ context:
 `crons` is one list of scheduled `lf` commands; a repository list replaces the
 global list. Definitions activate only through explicit `lf cron sync`. See
 [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+
+Recovery opens Terminal on macOS or `x-terminal-emulator` elsewhere by default.
+`session.terminal` accepts a macOS application name or an executable path;
+terminals other than macOS Terminal must accept `-e COMMAND ARGS...`.
+The viewer attaches to the recovered execution without starting another provider.
 
 Example repo config:
 

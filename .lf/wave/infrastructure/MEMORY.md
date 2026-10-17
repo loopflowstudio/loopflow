@@ -83,19 +83,17 @@ complete Task/Project planning with machine-local execution linked by Task ID.
 LOO-412's October 10 accepted redesign now owns that reduction; shared completion
 does not move or stop the local Flow.
 
-Jack Heart authorized this regression repair. Tests distinguish observed reopening
-(adopt Linear, retain both values, retire delivery, preserve execution) from unseen
-reopening (unconditional writes can overwrite it). This supersedes frozen test
-disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
-has no expected-revision update. [Rationale](../../../docs/architecture/planning.md).
-Linux: 54 tests, fmt/Clippy pass; CI remains open.
+Jack Heart authorized reopening repair: observed Linear reopening retains both
+values and retires delivery without changing execution; unseen reopening can be
+overwritten. Readback is not atomicity. Exact schema and test evidence:
+`72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
+Plan ownership; full CI remains open.
 
-Comments retain provider authorship and losing edits without echo. Cancellation
-resolves the Team's lowest-position state before attempting; failed discovery stays
-retryable. Deletion settles only on trash or acknowledgement, never absence.
-Newer explicitly active Linear evidence restores visibility and retains the loser;
-inventory grants neither restoration nor execution authority. Exact slice proofs:
-`078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
+Comments preserve authorship, losing edits and pending direction. Cancellation
+resolves the Team's lowest-position state; deletion requires trash/acknowledgment,
+never absence. Newer active Linear evidence restores visibility without granting
+execution authority. Detailed writer proofs: `078a6642e:wave/infrastructure/MEMORY.md`,
+Plan ownership; installed acceptance remains unproved.
 
 Jack Heart's LOO-449 decision makes checkout files own goal, memory and ancestor
 Markdown; edit directly, without a document cache or CLI. Canonical identity
@@ -109,17 +107,12 @@ checkout and stand-in launch proofs preserve LOO-444; installed acceptance remai
 unproved. Jack approved #1521 and landing with the default-branch fix (`05b04fa8`).
 Plan: `scratch/read-wave-goals-and-memory.md`.
 
-Export saves UUIDs before inventory and separates creation/link attempts,
-retaining uncertainty and later saves. Export acceptance remains unproved.
-Writer cuts and superseded split proofs:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Plan ownership.
-
-Jack selected unambiguous Git-like Task prefixes (4+ hex digits, bare/prefixed);
-retain full IDs and lengthen display prefixes. Identity, receipts, mappings and
-placement stay distinct. No landing/install. Design:
-`scratch/explore-loopflow-s-own-store.md`. Disposable workers prove no backup/export.
-
-Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
+Export saves UUIDs before acquisition and retains uncertain creates/links;
+acceptance remains unproved. Jack selected unambiguous Task prefixes (4+ hex
+characters), preserving full IDs, receipts and placement; no landing/install.
+Writer/prefix evidence:
+`72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
+Plan ownership. Backup/export remains unproved.
 
 ## On-demand Linear acquisition (lf-6f396c0, 2026-10-11)
 
@@ -328,26 +321,22 @@ Harness errors retain failed-result text for retries. CI owns the full matrix.
 
 Jack Heart accepted per-conversation owners for nested CLI, headless, terminal,
 shell and Flow execution. LOO-415 owns transport; LOO-416 owns lifecycle/readiness.
-Publication/review only, no landing, shared server or automatic turn/Flow replay.
-Jack requires native Claude UI; explicit resume may restart when necessary,
-preserving Session/history without resubmitting input. Viewer loss never transitions.
-Native-only Flow execution remains unselected; structured results retain their role.
+#1581 merged as `28dc141671`.
+No shared server or automatic turn/Flow replay. Explicit native resume may restart
+when necessary, preserving Session/history without resubmitting input. Viewer loss
+never transitions; native-only Flow execution remains unselected.
 
-A surviving PID/socket cannot prove capture settlement or pending-request continuity.
-At `72dbe0344f`, viewer claims fenced out the harness, capture Drop settled early,
-and Codex client EOF closed its original request channel. The working owner now
-retains execution/capture and the native client; separate runtime viewer tokens
-leave provider attachment unchanged. Passive viewing takes no claim.
+The owner retains execution, capture and native client; viewer tokens leave
+provider attachment unchanged. Passive viewing takes no claim. Acknowledgement
+timeout/cancellation exits only the viewer; unknown execution never authorizes replay.
+Release's entry-point lesson applies: Flow fixtures prove no installed use.
 
-Release's operation-entry lesson applies: public resume preserves Codex's original
-request after creator death; Flow fixtures preserve settlement without replay.
-Bound acknowledgement, not attachment lifetime: silent-owner timeout/cancellation
-exits only the viewer, preserves pending capture/provider ownership and submits no
-input; acknowledged controllers/observers outlive the deadline. These stand-ins
-prove no configured native Claude or installed continuity. Owner crash/startup
-uncertainty, SSH and full terminal restoration remain open in the handoff plan;
-unknown execution never authorizes replay. Explicit native transition retains
-the no-replay Flow interruption proof.
+`28dc141671` records Jack Heart's October 17 disposable-Home Claude walkthrough:
+the restored interaction completed with the same provider PID and AgentProcess.
+Installed-store/Desktop, SSH, owner-crash/startup and twelve-Session acceptance
+remain unproved. Earlier limits: `28dc141671:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Reattachment retains hooks; LOO-502 adds conditional native restart
+in source, with installed continuity still unproved.
 
 ## Session steers (lf-9c03797, 2026-10-11)
 
@@ -911,12 +900,36 @@ completion and target-first resolution. Distinguish non-Git folders from Git err
 never invent repositories/routes. Setup and receipt redesign remain unselected;
 a phase alone proves no advancement.
 
-October 11: Jack Heart approved #1529 for landing (`ff9c03dd`). ECR throttling
-failed job 114410351377. `243ed91a36` adds local reuse/bounded retries with
-separate release deadlines. Cached disposable paths pass; hosted recovery is
-unproved. Checks/limits: `6016eca305:wave/infrastructure/MEMORY.md`, this heading.
-Persistent throttling fails as infrastructure. [Release memory](release/MEMORY.md)
+Jack Heart approved #1529 for landing October 11 (`ff9c03dd`). ECR quota
+failure and bounded-retry evidence: `72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
+Installation and command scope. Cached disposable proofs establish no hosted
+recovery; persistent throttling fails as infrastructure. [Release memory](release/MEMORY.md)
 retains cold-download/operation-entry evidence; reporting proves no operation success.
+
+## Upgrade continuity (LOO-502, 2026-10-17)
+
+Jack Heart requested automatic same-Machine continuity; PR review only. October 17
+direction rejects deferred installation and permits restart of proven-broken
+processes after observed ownership release. Version difference or unknown liveness
+proves no failure. Preserve identity, history, authority and uncertain steers.
+
+Promotion and settled reinstall schedule recovery in source. Retained immutable
+bytes must return an incompatible-schema verdict. Under the launch lock, the winner
+fences exit and presents the same Session through `session.terminal`, without input.
+Stand-ins prove viewer output, preservation and stale-owner rejection. Upgrade
+release must not retire Sessions. Original viewers are not redirected.
+
+Actual 0.14.2 rejects disposable 0.14.4 stores despite new LF_BIN. Old cursors and
+executable inputs cannot be reconstructed from display graphs. A public Flow test
+preserves receipts and runs only selected remaining work after exit/effect inspection.
+No replay or invented receipts; automatic upgrade continuity remains unproved.
+
+MTG-137/LOO-497 manual recovery proves no automatic continuity; preserve uncertain
+receipts. MTG-117's unknown exit is
+not proven upgrade-caused. #1583 repairs retained locator enrollment. Release's
+entry-point lesson applies: direct recovery tests, stable gates and empty legacy
+`active_runs` prove no live-upgrade success. Gate/CI retains real released migration,
+installer scheduling and live-provider/Flow acceptance.
 
 ## Shipped history
 
@@ -1032,14 +1045,11 @@ acceptance follows; cmux/pointer judgment remains with demo/review.
 LOO-428/429 history and proof limits:
 `30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
 
-Flow output prints position/name and messages; verbose adds accounting/INFO,
-never prompts. Started commits with Flow registration. Jack removed `--tui`
-October 8: terminal defaults interactive, `-i` forces it, `-b` stays headless;
-`default`'s override and #1500's stale forwarding are removed. Dated gate/PTY,
-website and static proofs: `9ab5b6a52:wave/infrastructure/MEMORY.md`, this heading;
-CI owns the full materialized matrix. LOO-422 owns OSC 7501 simplification after
-adoption. Preserve caller checkpoints/common invocation loading. Codex rejected-turn
-recovery remains unresolved; homepage capture follows installation.
+Jack's October 8 terminal-default decision and retired `--tui` cutover evidence:
+`28dc141671:.lf/wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+Preserve caller checkpoints/common invocation loading. LOO-422 owns OSC 7501
+simplification after adoption. Codex rejected-turn recovery and installed homepage
+capture remain open; CI owns the full materialized matrix.
 
 Jack Heart narrowed LOO-420 to ordinary installed-skill invocation, matching
 help/list, native same-harness execution, translated ports, exact arguments,
@@ -1055,10 +1065,9 @@ subagent names do not select lf's harness. Independent fixes preserve saved Sess
 placement, active captures on refused continuation and unpublished reservations on
 publication failure. Launcher success proves no provider exit.
 
-Native/sibling history, stale-client rejection, exact arguments and lossless JSON
-remain required. Snapshot native declarations and escape argument/preprocessing
-syntax. Rejected hook/preprocessing approaches changed first-request context
-ownership. Exact compression/source-audit commits and counterexamples:
+Preserve native/sibling history, stale-client rejection, exact arguments, lossless
+JSON and snapshotted declarations. Escape argument/preprocessing syntax. Rejected
+hook/preprocessing approaches and source audits remain at
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 Direct invocation and large inputs.
 
@@ -1074,15 +1083,12 @@ managed context or excerpts. Captured input identifies a Flow; ordinary selectio
 also retains an in-memory invocation. PATH discovery replaces availability's
 `--version` subprocess/cache without changing actual launch failure handling.
 
-Fixtures prove native model/argument/context fidelity, catalog collisions,
-translated ports, fake-API asset reads and home/reconnect continuity. October 8
-gate repaired Codex's missing `--` before YAML; later resume fixtures read the
-system file. [Benchmarks](../../../scripts/benchmarks/skill-invocation/README.md)
-retain timing: base's post-provider Git failure limits comparison, plain-native
-overhead remains, and no production speedup or live compliance is proved.
-Hosted CI, merge and completion remain unproved. Exact checks and prior-cost
-references: `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Direct invocation and large inputs.
+Earlier native argument/context, catalog, asset and reconnect fixture results,
+October 8 gate repairs and benchmark limits remain at
+`72dbe0344f73722bd90a4f392c3e801cd976b80f:.lf/wave/infrastructure/MEMORY.md`,
+Direct invocation and large inputs. Plain-native overhead, failed base Git timing
+and absent configured acceptance prohibit a production-speedup claim.
+Hosted CI, merge and completion remain unproved.
 
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 

@@ -30,11 +30,12 @@ def build_environment(home: Path, lf: Path | None) -> dict[str, str]:
 
 
 def start_sampler(pid: int, output: Path) -> subprocess.Popen:
-    return subprocess.Popen(
-        ["/usr/bin/sample", str(pid), "5", "1", "-mayDie", "-file", str(output / "sample.txt")],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with (output / "sampler.private").open("wb") as log:
+        return subprocess.Popen(
+            ["/usr/bin/sample", str(pid), "5", "1", "-file", str(output / "sample.txt")],
+            stdout=log,
+            stderr=log,
+        )
 
 
 def _terminal() -> None:
@@ -51,11 +52,14 @@ def measure(
     timeout: float = 45,
     profile: bool = False,
     trust_fixture: bool = False,
+    interrupt_after_ready: bool = False,
 ) -> dict:
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
     start = time.monotonic()
+    wall_start = time.time()
+    env = {**env, "LOOPFLOW_AGENT_INPUT_TRACE": str(output / "milestones.private")}
     child = subprocess.Popen(
         command, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave, preexec_fn=_terminal
     )
@@ -69,6 +73,7 @@ def measure(
     trusted = False
     marker = b"zzlfprobezz"
     status = "timeout"
+    stages = {}
     try:
         while time.monotonic() - start < timeout:
             if select.select([master], [], [], 0.05)[0]:
@@ -82,6 +87,9 @@ def measure(
                 if not data:
                     break
                 transcript.extend(data)
+                for stage in ("Preparing codex", "Starting Codex", "Opening codex terminal"):
+                    if stage.encode() in data:
+                        stages.setdefault(stage, (time.monotonic() - start) * 1000)
                 terminal.feed(data)
                 if b"\x1b[6n" in data:
                     os.write(master, b"\x1b[1;1R")
@@ -113,6 +121,11 @@ def measure(
                 elif marker_at and marker.decode() in plain:
                     ready = time.monotonic() - start
                     status = "ready"
+                    if interrupt_after_ready:
+                        # Only this benchmark invocation's newly created group.
+                        # Its retained attachment exercises ordinary crash recovery.
+                        os.killpg(child.pid, signal.SIGKILL)
+                        break
                     os.write(master, b"\x15")
                     time.sleep(0.1)
                     if provider == "codex":
@@ -161,7 +174,15 @@ def measure(
         "returncode": child.returncode,
         "load1": os.getloadavg()[0],
         "dialog_handled": trusted,
+        "stages_ms": stages,
     }
+    milestones = output / "milestones.private"
+    if milestones.exists():
+        result["milestones_ms"] = [
+            {"phase": event["phase"], "elapsed_ms": (event["wall"] - wall_start) * 1000}
+            for line in milestones.read_text().splitlines()
+            if (event := json.loads(line))
+        ]
     (output / "result.json").write_text(json.dumps(result) + "\n")
     return result
 

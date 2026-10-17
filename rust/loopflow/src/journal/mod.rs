@@ -1017,12 +1017,37 @@ pub(crate) fn process_evidence(
     let Ok(Some(record)) = store.process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    let receipts = if record.kind == crate::process::ProcessKind::Agent {
-        None
+    let receipt = if record.kind == crate::process::ProcessKind::Agent {
+        Some(None)
     } else {
-        read_process_receipts_at(&crate::store::lf_home_dir()).ok()
+        read_process_receipt_at(&crate::store::lf_home_dir(), process).ok()
     };
-    recorded_process_evidence(&record, receipts.as_deref(), process_identity_evidence)
+    recorded_process_evidence(
+        &record,
+        receipt.as_ref().map(Option::as_slice),
+        process_identity_evidence,
+    )
+}
+
+fn read_process_receipt_at(
+    lf_home: &Path,
+    process: &LfProcessId,
+) -> Result<Option<ProcessReceipt>, std::io::Error> {
+    // Receipts are atomically published at their Process ID. Attachment checks
+    // need only this identity, regardless of how many other receipts remain.
+    let path = lf_home
+        .join(PROCESS_RECEIPT_ROOT)
+        .join(format!("{process}.json"));
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let receipt: ProcessReceipt = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    if receipt.schema_version != 1 {
+        return Err(std::io::Error::other("unsupported Process receipt schema"));
+    }
+    Ok(Some(receipt))
 }
 
 /// Completion is final. Otherwise only the recorded OS identity proves liveness;
@@ -1796,6 +1821,98 @@ mod tests {
         assert!(super::read_process_receipts_at(guard.home())
             .expect("read terminal receipt state")
             .is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn attachment_identity_needs_no_receipt_directory_listing() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        emit(
+            repo.path(),
+            LfNode::Process,
+            LfEventType::Started,
+            started_fields(&["lf".into()], repo.path(), "runtime"),
+        );
+        let context = super::current_context().unwrap();
+        let store = super::open_ledger().unwrap();
+        let root = guard.home().join(super::PROCESS_RECEIPT_ROOT);
+        let permissions = std::fs::metadata(&root).unwrap().permissions();
+        // Traversal permits the ID-keyed read; enumerating unrelated receipts
+        // is unavailable. This bounds the work without a wall-time assertion.
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o111)).unwrap();
+        let evidence = super::process_evidence(&store, &context.lf_process_id);
+        std::fs::set_permissions(&root, permissions).unwrap();
+        assert_eq!(evidence, ProcessIdentityEvidence::Live);
+    }
+
+    #[test]
+    fn attachment_receipt_failures_never_invent_process_identity() {
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        emit(
+            repo.path(),
+            LfNode::Process,
+            LfEventType::Started,
+            started_fields(&["lf".into()], repo.path(), "runtime"),
+        );
+        let context = super::current_context().unwrap();
+        let store = super::open_ledger().unwrap();
+        let path = guard
+            .home()
+            .join(super::PROCESS_RECEIPT_ROOT)
+            .join(format!("{}.json", context.lf_process_id));
+        let original = std::fs::read(&path).unwrap();
+        let receipt: super::ProcessReceipt = serde_json::from_slice(&original).unwrap();
+        for changed in [
+            super::ProcessReceipt {
+                schema_version: 2,
+                ..receipt.clone()
+            },
+            super::ProcessReceipt {
+                trace_id: "another-trace".into(),
+                ..receipt.clone()
+            },
+            super::ProcessReceipt {
+                lf_process_id: LfProcessId::new().to_string(),
+                ..receipt
+            },
+        ] {
+            std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+            assert_eq!(
+                super::process_evidence(&store, &context.lf_process_id),
+                ProcessIdentityEvidence::Unknown
+            );
+        }
+        std::fs::write(&path, b"partial json").unwrap();
+        assert_eq!(
+            super::process_evidence(&store, &context.lf_process_id),
+            ProcessIdentityEvidence::Unknown
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            super::process_evidence(&store, &context.lf_process_id),
+            ProcessIdentityEvidence::Unknown
+        );
+        std::fs::create_dir(&path).unwrap();
+        assert_eq!(
+            super::process_evidence(&store, &context.lf_process_id),
+            ProcessIdentityEvidence::Unknown
+        );
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, original).unwrap();
+        emit(
+            repo.path(),
+            LfNode::Process,
+            LfEventType::Completed,
+            LfEventFields::default(),
+        );
+        assert_eq!(
+            super::process_evidence(&store, &context.lf_process_id),
+            ProcessIdentityEvidence::Dead
+        );
     }
 
     #[test]

@@ -1,0 +1,31 @@
+{
+  "binaries": {
+    "baseline": "78e1ae96b4a46dead5ca2423b2608b28deaf7510a550b6a90036992e48a3752d",
+    "candidate": "2178076a185ae2490b3d3f967925b8ee4930342cf31b58602167d012867f43c7"
+  },
+  "fixture": {
+    "counts": {
+      "agent_sessions": 3790,
+      "processes": 788632,
+      "session_events": 2033513,
+      "provider_accounts": 0
+    },
+    "drafts": [],
+    "credential_files_copied": false,
+    "managed_account_routes_removed": true
+  },
+  "receipts": 234484,
+  "provider_version": "codex-cli 0.163.0",
+  "short": {
+    "seed_turns": 1,
+    "seed_message_bytes": 76,
+    "provider_seed_input_tokens": 26699
+  },
+  "long": {
+    "seed_turns": 1,
+    "seed_message_bytes": 56766,
+    "provider_seed_input_tokens": 39525
+  },
+  "source_base": "b78e877f881e87945d6c62a311a8c27f8de1f6f6",
+  "build_command": "cargo build --release -p loopflow --bin lf"
+}

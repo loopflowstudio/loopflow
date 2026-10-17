@@ -879,13 +879,14 @@ async fn connect_live_codex(
             store: store.sqlite.clone(), session_id: session.id.clone(), thread_id: Some(thread), attachment: Some(attachment.clone()), account_id: provider.account_id.clone(),
         };
         let empty = connection.recover_history(Path::new(&endpoint)).await?;
+        let (_, manifest) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(), &session.artifact_key,
+        )?;
+        let context = manifest.process.as_ref().and_then(|request| request.conversation_context.clone());
         let initial = if empty {
-            let (_, manifest) = crate::session_record::resolve_manifest(
-                &crate::store::lf_home_dir(), &session.artifact_key,
-            )?;
             manifest.process.map(|request| request.codex_initial_input()).filter(|input| !input.is_empty())
         } else { None };
-        let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput { params: None, text: initial }));
+        let initial = std::sync::Arc::new(tokio::sync::Mutex::new(crate::harness::codex_connection::NativeInput { params: None, text: initial, context }));
         let upstream = PathBuf::from(&endpoint);
         let relay = tokio::spawn(async move {
             let mut clients = tokio::task::JoinSet::new();

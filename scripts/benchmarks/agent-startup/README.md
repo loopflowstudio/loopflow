@@ -1,5 +1,8 @@
 # Agent startup
 
+[October 16 interrupted Codex reconnect repair](20261016/README.md) measures the
+large receipt-directory stall, its exact lookup repair and released acceptance.
+
 Open the [interactive flamegraph viewer](index.html) to compare all three changes.
 
 ```sh

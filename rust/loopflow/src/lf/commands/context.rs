@@ -308,8 +308,16 @@ fn load_delivery(
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
         })?;
-    let mut delivery: crate::context_block::ContextDelivery =
-        serde_json::from_slice(&std::fs::read(path)?)?;
+    let bytes = std::fs::read(&path).map_err(|error| {
+        anyhow!("Read provider context delivery {}: {error}; reconnect the Loopflow Session to restore its binding", path.display())
+    })?;
+    let mut delivery: crate::context_block::ContextDelivery = serde_json::from_slice(&bytes)
+        .map_err(|error| {
+            anyhow!(
+                "Decode provider context delivery {}: {error}",
+                path.display()
+            )
+        })?;
     delivery.relocate()?;
     Ok(delivery)
 }
@@ -533,6 +541,25 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::load_delivery;
     use crate::context_block::{ContextDelivery, ContextMoment};
+
+    #[test]
+    fn missing_and_invalid_delivery_name_the_source_without_printing_contents() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("delivery.json");
+        let error = load_delivery(Some(&path), &serde_json::json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&path.display().to_string()));
+        assert!(error.contains("Read provider context delivery"));
+        assert!(error.contains("reconnect"));
+        std::fs::write(&path, "PRIVATE_MALFORMED_CONTENT").unwrap();
+        let error = load_delivery(Some(&path), &serde_json::json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&path.display().to_string()));
+        assert!(error.contains("Decode provider context delivery"));
+        assert!(!error.contains("PRIVATE_MALFORMED_CONTENT"));
+    }
 
     #[test]
     fn callbacks_select_exact_session_after_other_tasks_and_resume() {

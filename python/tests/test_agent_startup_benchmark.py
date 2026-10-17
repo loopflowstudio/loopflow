@@ -1,3 +1,4 @@
+import json
 import runpy
 import sqlite3
 from pathlib import Path
@@ -28,9 +29,14 @@ def test_dense_fixture_keeps_source_and_history_but_drops_external_account_route
         """)
     before = source.read_bytes()
     home = tmp_path / "fixture"
-    receipt = prepare(source, home, False)
+    receipt = prepare(source, home, False, receipts=2)
     assert source.read_bytes() == before
     assert receipt["managed_account_routes_removed"]
+    identities = [
+        json.loads(path.read_text()) for path in (home / "runtime/exec-processes").glob("*.json")
+    ]
+    assert len(identities) == 2
+    assert all(identity["pid"] == 2147483647 for identity in identities)
     with sqlite3.connect(home / "loopflow.db") as db:
         for table in (
             "provider_accounts",

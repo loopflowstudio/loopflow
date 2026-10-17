@@ -24,12 +24,21 @@ import tomllib
 
 
 class Model(http.server.BaseHTTPRequestHandler):
+    requests: list[bytes] = []
+
     def log_message(self, *_args: object) -> None:
         pass
 
     def do_POST(self) -> None:
         request = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.requests.append(request)
         answer = "FOLLOWUP_DONE" if b"typed reconnect follow-up" in request else "FIXTURE_DONE"
+        payload = json.loads(request)
+        call_id = "tool-followup" if answer == "FOLLOWUP_DONE" else "tool-initial"
+        tool_finished = any(
+            item.get("type") == "function_call_output" and item.get("call_id") == call_id
+            for item in payload.get("input", [])
+        )
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -39,6 +48,14 @@ class Model(http.server.BaseHTTPRequestHandler):
             "role": "assistant",
             "content": [{"type": "output_text", "text": answer}],
         }
+        if not tool_finished:
+            item = {
+                "id": f"fc_{call_id}",
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": call_id,
+                "arguments": json.dumps({"cmd": "/bin/echo NATIVE_TOOL_DONE"}),
+            }
         response = {"id": "resp_fixture", "status": "in_progress", "output": []}
         events = [
             ("response.created", {"response": response}),
@@ -127,6 +144,9 @@ def _terminal(
 
 def _case(root: Path, lf: Path, codex: Path, port: int, wrapped: bool) -> None:
     root.mkdir()
+    Model.requests.clear()
+    (root / "scratch").mkdir()
+    (root / "scratch/context.md").write_text("NATIVE_CONTEXT_BEFORE_RESUME")
     home, native, bin_dir = root / "home", root / "codex", root / "bin"
     for directory in [home, native, bin_dir]:
         directory.mkdir()
@@ -163,10 +183,39 @@ trust_level="trusted"
             json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         key = json.dumps(f"/<session-flags>/config.toml:{event_name}:0:0")
+        if wrapped:
+            states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
+    # Trust Loopflow's stable declarations as well: an untrusted hook never runs,
+    # so checking only the host callbacks would conceal broken context delivery.
+    command = f"env LF_HOME='{root / 'lf'}' '{lf}'"
+    for event, index, matcher, suffix, timeout in [
+        ("session_start", int(wrapped), "startup|resume", "__context-block --moment start", 30),
+        ("session_start", int(wrapped) + 1, "compact", "__context-block --moment compact", 30),
+        ("user_prompt_submit", 0, None, "__context-block --moment tool", 30),
+        ("post_tool_use", 0, None, "__context-block --moment tool", 30),
+        ("stop", int(wrapped), None, "__planning-check", 10),
+    ]:
+        declaration = {
+            "event_name": event,
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"{command} {suffix}",
+                    "timeout": timeout,
+                    "async": False,
+                }
+            ],
+        }
+        if matcher:
+            declaration["matcher"] = matcher
+        digest = hashlib.sha256(
+            json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        key = json.dumps(f"/<session-flags>/config.toml:{event}:{index}:0")
         states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
-    # Trust only this wrapper's declarations. The same IDs must survive resume.
+    # Keep the same hook identities across resume.
     hooks.append("state={" + ",".join(states) + "}")
-    host_args = ["-c", "hooks={" + ",".join(hooks) + "}"] if wrapped else []
+    host_args = ["-c", "hooks={" + ",".join(hooks if wrapped else [hooks[-1]]) + "}"]
     wrapper = (
         "#!/bin/sh\nexec " + shlex.join([str(codex), "--no-alt-screen", *host_args]) + ' "$@"\n'
     )
@@ -195,15 +244,31 @@ trust_level="trusted"
     if wrapped:
         for event in ["SessionStart", "Stop"]:
             assert json.loads((root / event).read_text())["session_id"] == native_id
+    binding = (
+        root
+        / "lf"
+        / "context-deliveries"
+        / (hashlib.sha256(native_id.encode()).hexdigest() + ".json")
+    )
+    assert binding.exists(), f"Native context binding missing: {binding}"
+    assert b"Hook failed" not in (root / "launch.txt").read_bytes()
     # Native UI onboarding may add its own preferences; supplied settings survive.
     saved = tomllib.loads((native / "config.toml").read_text())
     for key, value in tomllib.loads(config).items():
         assert saved[key] == value, key
     assert not (native / "hooks.json").exists()
+    assert any(b"NATIVE_CONTEXT_BEFORE_RESUME" in request for request in Model.requests)
+    binding.unlink()  # Reconnect must restore this Session's context, not another's.
+    (root / "scratch/context.md").write_text("NATIVE_CONTEXT_AFTER_RESUME")
     status = _terminal(
         [str(lf), "session", "connect", session_id], env, root, root / "resume.txt", follow_up=True
     )
     assert status == 0, (status, root / "resume.txt")
+    assert binding.exists(), "resume did not restore its context binding"
+    assert any(b"NATIVE_CONTEXT_AFTER_RESUME" in request for request in Model.requests)
+    (root / "model-requests.json").write_text(
+        json.dumps([json.loads(request) for request in Model.requests])
+    )
     assert native_id.encode() in (root / "resume.txt").read_bytes()
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
         answers = database.execute(
@@ -218,6 +283,14 @@ trust_level="trusted"
         live = database.execute(
             "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
         ).fetchone()[0]
+        callbacks = database.execute(
+            "SELECT command, exit_code, error FROM processes "
+            "WHERE command LIKE '%__context-block%' OR command LIKE '%__planning-check%'"
+        ).fetchall()
+    assert len(callbacks) >= 8, callbacks
+    assert all(code == 0 and error is None for _, code, error in callbacks), callbacks
+    assert sum("__planning-check" in command for command, _, _ in callbacks) == 2, callbacks
+    assert any(b"NATIVE_TOOL_DONE" in request for request in Model.requests)
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed
     assert live == 0, live

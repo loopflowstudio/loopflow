@@ -66,7 +66,14 @@ restores the shared caches and runs each job whose cache misses; those jobs
 refresh their caches and must pass. Candidate PRs and merge groups always execute
 every check.
 
-The disposable installation job also caches its Cargo target and registry on
+`uv run python scripts/test_task_installation.py --repository-upgrade`
+installs the checksum-verified 0.14.3 CLI, creates a Task checkout and Session,
+then promotes the candidate against that populated store. It checks automatic
+Git locator enrollment, retained identity, historical paths, unpublished edits
+and promotion retry without external network access during the proof. Native
+provider resume and macOS Desktop installation require separate acceptance.
+
+The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
 the first run is cold. Source, OS users, Homes and installations are recreated
@@ -195,6 +202,18 @@ accounts, host shims, or cmux windows participate.
 The probe uses native terminal-title defaults and checks the latest OSC title,
 so an earlier correct title cannot hide a later overwrite. The TUI probe does not
 cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
+
+`tests/e2e/opencode_terminal.py` probes installed OpenCode through the real lf
+interactive launch with a private home and local API. Prepare a disposable npm
+prefix with `@opencode-ai/plugin` matching `opencode --version`, then pass that
+prefix as `--dependencies` alongside `--lf`, `--native`, and `--output`. Run through
+`scripts/test_network.py` with `uv run --no-sync`. It retains raw terminal bytes,
+screen text, requests and diagnostic logs; checks repeated model-access failures,
+draft editing across resize, recovery, typed submission and a fresh successful
+launch. `--expect-overlay` reproduces the old stderr corruption against the
+installed lf release. The
+`session_launch_contract::opencode_` fixtures also cover early failure, arbitrary
+stderr bytes, subprocess diagnostics and resume identity without a provider install.
 
 `uv run python scripts/test_task_installation.py --native-titles` builds a
 release-shaped candidate only inside Docker and exercises published promotion

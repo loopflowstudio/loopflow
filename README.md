@@ -50,6 +50,9 @@ lf repo-operate             # canonical name for the same skill
 lf --wave designer wave-operate  # operate one Wave
 ```
 
+OpenCode keeps errors and retries in its native terminal UI. Loopflow prints a
+diagnostic log path before launch; full stderr stays there without covering your input.
+
 Give an external agent harness the Loopflow operating skill:
 
 ```bash

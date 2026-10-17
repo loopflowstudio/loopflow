@@ -79,7 +79,13 @@ def main() -> None:
     parser.add_argument(
         "--native-titles", action="store_true", help="prove published title hook installation"
     )
+    parser.add_argument(
+        "--repository-upgrade",
+        action="store_true",
+        help="prove populated released repository upgrade",
+    )
     args = parser.parse_args()
+    published_proof = args.native_titles or args.repository_upgrade
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
     try:
@@ -163,13 +169,13 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         '
 """
         prepare = "nice -n 10 cargo build -p loopflow --bin lf"
-        if not args.native_titles:
+        if not published_proof:
             # Integration targets build the CLI too. A library-only selection
             # still needs an explicit build before entering network isolation.
             build_tests = f"nice -n 10 cargo test -p loopflow --lib {targets} --no-run"
             prepare = build_tests if targets else f"{build_tests}\n{prepare}"
         command = command.replace("PREPARE", prepare)
-        if args.native_titles:
+        if published_proof:
             command = command.replace(
                 "LOOPFLOW_BUILD_PROVENANCE=development",
                 "LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published",
@@ -177,6 +183,19 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
         )
+        if args.repository_upgrade:
+            subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "python3",
+                    "/source/tests/e2e/repository_upgrade.py",
+                    "--fetch-prior",
+                ],
+                check=True,
+                timeout=300,
+            )
         # Dependency downloads and compilation are complete. Docker keeps loopback
         # while disconnecting the only external interface, including descendants.
         subprocess.run(["docker", "network", "disconnect", "bridge", container], check=True)
@@ -198,6 +217,12 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
                 "cd /source && PYTHONPATH=scripts python3 -c "
                 "'from test_network import _probe; _probe()' && "
                 "python3 tests/e2e/native_title_install.py /source/target/debug/lf"
+            )
+        if args.repository_upgrade:
+            isolated = (
+                "cd /source && PYTHONPATH=scripts python3 -c "
+                "'from test_network import _probe; _probe()' && "
+                "python3 tests/e2e/repository_upgrade.py /source/target/debug/lf"
             )
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", isolated], check=True, timeout=1800

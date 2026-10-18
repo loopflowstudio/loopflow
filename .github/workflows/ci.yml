@@ -242,9 +242,6 @@ jobs:
       - name: Prove populated released repository upgrade
         if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --repository-upgrade
-      - name: Prove live Session recovery through released upgrade
-        if: needs.merge-proof.outputs.reuse != 'true' || steps.installation-cache.outputs.cache-hit != 'true'
-        run: uv run python scripts/test_task_installation.py --cache-dir "$RUNNER_TEMP/installation-cargo" --session-upgrade
       - name: Return Cargo cache ownership to the runner
         if: always() && steps.installation-cache.outcome == 'success'
         run: |

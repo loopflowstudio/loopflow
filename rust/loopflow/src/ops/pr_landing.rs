@@ -317,9 +317,8 @@ fn admit_ci_fix(
         }
         drop(lock);
         let context = crate::os_process::execution_context().map_err(repair_error)?;
-        let bin = crate::os_process::pin_control_binary(&context.lf_bin);
         let argv = vec![
-            bin.to_string_lossy().to_string(),
+            context.lf_bin.to_string_lossy().to_string(),
             "task".into(),
             "__repair".into(),
             incident.identity.clone(),

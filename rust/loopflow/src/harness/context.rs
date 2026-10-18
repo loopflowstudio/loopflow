@@ -55,7 +55,7 @@ pub(crate) fn add_opencode_context(
     context: &ContextDelivery,
     instructions: &str,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_hook_binary()?, "delivery":context, "instructions":instructions});
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,

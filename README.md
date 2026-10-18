@@ -24,9 +24,10 @@ lf schedule daily   # also accepts weekly, hourly, 5min
 
 Run `lf install` from any checkout, including a Task checkout. Promotion checks
 the candidate release against the installed database before changing it.
-See [Session recovery](docs/lf.md#inspect-and-continue) for executable selection
-and conversations opened before an upgrade.
 Use `lf sync` inside a repository to update its checkout.
+
+Session launches retain the installed entry for later commands and hooks. Existing
+processes keep running and may fail if they cannot use the upgraded database.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),

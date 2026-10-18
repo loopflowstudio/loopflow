@@ -176,59 +176,56 @@ pub(crate) fn stop_session_agent(store: &SqliteStore, session: &str) -> Result<(
         return Ok(());
     }
     store.finish_session_attachment(session, &attachment, "interrupted", || {
-        terminate_session_agent(&agent)
-            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+        let stop = || -> Result<()> {
+            let (pid, birth) = agent
+                .process
+                .pid
+                .zip(agent.process.os_started_at)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
+                })?;
+            match process_identity_evidence(pid, birth) {
+                ProcessIdentityEvidence::Dead => return Ok(()),
+                ProcessIdentityEvidence::Unknown => {
+                    anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
+                }
+                ProcessIdentityEvidence::Live => {}
+            }
+            if !agent.interactive {
+                return terminate_agent_process(pid, birth, agent.provider.as_deref());
+            }
+            for signal in [libc::SIGTERM, libc::SIGKILL] {
+                match process_identity_evidence(pid, birth) {
+                    ProcessIdentityEvidence::Dead => return Ok(()),
+                    ProcessIdentityEvidence::Unknown => {
+                        anyhow::bail!("AgentProcess identity became unknown")
+                    }
+                    ProcessIdentityEvidence::Live => {}
+                }
+                anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
+                let pid = libc::pid_t::try_from(pid)?;
+                // SAFETY: a positive PID whose recorded birth was just checked;
+                // never target the shared foreground process group.
+                if unsafe { libc::kill(pid, signal) } != 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.raw_os_error() != Some(libc::ESRCH) {
+                        return Err(error.into());
+                    }
+                }
+                for _ in 0..20 {
+                    if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead
+                    {
+                        return Ok(());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+            anyhow::bail!("AgentProcess did not exit; resume was not started")
+        };
+        stop().map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
         Ok(true)
     })?;
     Ok(())
-}
-
-/// Caller holds the exact attachment fence. Stop the provider without settling
-/// its Session; native clients share a terminal group and receive PID-only signals.
-pub(crate) fn terminate_session_agent(agent: &crate::process::AgentProcess) -> Result<()> {
-    let (pid, birth) = agent
-        .process
-        .pid
-        .zip(agent.process.os_started_at)
-        .ok_or_else(|| {
-            anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
-        })?;
-    if !agent.interactive {
-        match process_identity_evidence(pid, birth) {
-            ProcessIdentityEvidence::Dead => return Ok(()),
-            ProcessIdentityEvidence::Unknown => {
-                anyhow::bail!("AgentProcess liveness is unknown; resume was not started")
-            }
-            ProcessIdentityEvidence::Live => {}
-        }
-        return terminate_agent_process(pid, birth, agent.provider.as_deref());
-    }
-    for signal in [libc::SIGTERM, libc::SIGKILL] {
-        match process_identity_evidence(pid, birth) {
-            ProcessIdentityEvidence::Dead => return Ok(()),
-            ProcessIdentityEvidence::Unknown => {
-                anyhow::bail!("AgentProcess identity became unknown")
-            }
-            ProcessIdentityEvidence::Live => {}
-        }
-        anyhow::ensure!(pid > 1, "invalid AgentProcess PID");
-        let pid = libc::pid_t::try_from(pid)?;
-        // SAFETY: a positive PID whose recorded birth was just checked;
-        // never target the shared foreground process group.
-        if unsafe { libc::kill(pid, signal) } != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                return Err(error.into());
-            }
-        }
-        for _ in 0..20 {
-            if process_identity_evidence(pid as u32, birth) == ProcessIdentityEvidence::Dead {
-                return Ok(());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    }
-    anyhow::bail!("AgentProcess did not exit; resume was not started")
 }
 
 /// Stop a harness's provider without settling its invocation. Group death and

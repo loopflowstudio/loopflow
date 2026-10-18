@@ -354,8 +354,8 @@ Release's entry-point lesson applies: Flow fixtures prove no installed use.
 the restored interaction completed with the same provider PID and AgentProcess.
 Installed-store/Desktop, SSH, owner-crash/startup and twelve-Session acceptance
 remain unproved. Earlier limits: `28dc141671:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Reattachment retains hooks; LOO-502 adds conditional native restart
-in source, with installed continuity still unproved.
+this heading. Reattachment retains hooks; LOO-502's later October 17 direction
+removes automatic restart and selects stable entries for future commands.
 
 ## Session steers (lf-9c03797, 2026-10-11)
 
@@ -911,28 +911,31 @@ retains cold-download/operation-entry evidence; reporting proves no operation su
 
 ## Upgrade continuity (LOO-502, 2026-10-17)
 
-Jack Heart requested automatic same-Machine continuity; PR review only. October 17
-direction rejects deferred installation and permits restart of proven-broken
-processes after observed ownership release. Version difference or unknown liveness
-proves no failure. Preserve identity, history, authority and uncertain steers.
+After PR #1587 review, Jack Heart selected removing ordinary executable pinning,
+accepting natural failure of existing processes and retrying in the same Session
+and checkout. This supersedes automatic incompatible-client recovery; delivery
+remains review only. Earlier design/proofs:
+`4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
 
-Promotion and settled reinstall schedule recovery in source. Retained immutable
-bytes must return an incompatible-schema verdict. Under the launch lock, the winner
-fences exit and presents the same Session through `session.terminal`, without input.
-Stand-ins prove viewer output, preservation and stale-owner rejection. Upgrade
-release must not retire Sessions. Original viewers are not redirected.
+Source now carries the stable installed entry through providers, hooks, prepared
+Session commands and Flow children. The existing gate selects/verifies artifacts
+at execution. Main-Machine dispatch ignores inherited LF_BIN; explicit private
+Homes retain executable selection. Compatibility probing, installer-triggered
+native restart and replacement viewers are removed. Schema checks remain.
 
-Actual 0.14.2 rejects disposable 0.14.4 stores despite new LF_BIN. Old cursors and
-executable inputs cannot be reconstructed from display graphs. A public Flow test
-preserves receipts and runs only selected remaining work after exit/effect inspection.
-No replay or invented receipts; automatic upgrade continuity remains unproved.
+Disposable-account proof retries exit 42 after switching installation in one live
+fixture provider/checkout, retaining history, steers and attribution. Saved hooks
+and a subsequent Flow use the replacement. Release's entry-point lesson applies:
+a failing script and source CLI prove no released migration, configured native
+client, already-running Flow survival or installed acceptance.
 
-MTG-137/LOO-497 manual recovery proves no automatic continuity; preserve uncertain
-receipts. MTG-117's unknown exit is
-not proven upgrade-caused. #1583 repairs retained locator enrollment. Release's
-entry-point lesson applies: direct recovery tests, stable gates and empty legacy
-`active_runs` prove no live-upgrade success. Gate/CI retains real released migration,
-installer scheduling and live-provider/Flow acceptance.
+Pre-fix binaries/hooks retain their old behavior; reattachment cannot change their
+environment. Explicit same-Session resume after provider exit refreshes it. Old
+Flow cursors cannot be reconstructed from display graphs; inspect receipts/effects
+before selecting remaining work. No replay or invented exits.
+MTG-117's unknown exit is not proven upgrade-caused.
+#1583's locator repair remains separate. An empty legacy `active_runs` proves no
+liveness or continuity.
 
 ## Shipped history
 

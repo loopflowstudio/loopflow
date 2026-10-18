@@ -232,30 +232,16 @@ uv run python scripts/install.py local # build an experimental CLI
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
 
-Ordinary terminal commands default to the installed CLI and `~/.lf`. Desktop
-uses its bundled CLI for queries, actions and newly launched Sessions, through
-explicit `LF_BIN` selection. Provider children inherit that executable and put
-its directory first on PATH. No global installation or shell configuration changes.
-An already running provider keeps its existing environment when reattached.
+Ordinary commands, provider children, hooks, Session connections and Flow steps
+use the stable installed entry. Each new execution selects the current installed
+CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
+Machine and Session context stay intact. Installation does not restart existing
+processes or wait for their exit; they may continue or fail naturally. Clients
+and hooks launched before this behavior may retain their old executable paths.
 
-Executable selection and data selection are independent. A development app can
-use compatible main-Machine data; the store validates its released schema and
-ordinary opens never initialize or advance it. An incompatible or missing
-executable selection falls back to a compatible installed CLI on the same
-Machine when the command reaches the installed entry or a CLI with automatic
-dispatch support. Direct pre-fix executables cannot perform that handoff.
-Selection checks use the migration validator and bounded candidate
-preflight; ordinary calls never migrate or change stores. If neither executable
-is compatible, the error names the recovery condition. Development builds retain
-validation-only migration authority. New installed hook declarations use the stable
-installation entry gate so their address survives promotion. After settlement,
-installation recovers proven-incompatible native clients through a new detached
-owner and the same saved conversation, after observing exact provider exit.
-The winning owner presents its viewer through the Machine's terminal setting;
-settled reinstall checks again for missed scheduling. Compatible clients retain
-their original execution. Flow continuation and old terminal viewer migration
-remain separate from this native recovery boundary.
-See [Session recovery](../lf.md#inspect-and-continue).
+Private-Home development and tests retain explicit `LF_BIN` selection. Store
+schema validation and migration authority still apply to every build; ordinary
+main-Machine opens never initialize or advance its schema.
 
 `LF_HOME` explicitly selects an empty, disposable experiment. Its database is
 always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable

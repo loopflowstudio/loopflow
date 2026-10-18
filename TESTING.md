@@ -73,15 +73,16 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
-`uv run python scripts/test_task_installation.py --session-upgrade` starts a
-live Session with the real 0.14.3 CLI before promoting the candidate. Disposable
-provider and terminal executables check automatic same-conversation recovery,
-hooks, nested commands, pending direction, history, concurrent installers and
-recovery after a missed first probe. Compatible reinstall preserves the provider.
-A live released Flow remains untouched during installation; after its observed
-exit, selecting remaining work preserves its receipts without repeating an effect.
-The installation and migration are real; configured provider and GUI behavior
-remain separate acceptance.
+`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_flow`
+starts a fixture provider, observes a controlled command failure, switches the
+installed CLI, and retries the same command in the same provider and checkout.
+Saved hooks and later Flow children also use the replacement. The proof preserves
+Session history, pending steers and caller attribution, and checks stale inherited
+`LF_BIN` selections through the real installation gate.
+The initial CLI is a failing script and the replacement is the source build;
+this does not prove released-version migration or configured native-provider
+behavior. The Flow starts after the switch, so it does not prove survival of an
+already-running Flow.
 
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and

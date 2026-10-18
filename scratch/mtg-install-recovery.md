@@ -24,6 +24,11 @@ MTG-117 is an earlier independent recovery gap: its pane was already at a shell 
 
 ## Prevention and remaining proof
 
+Historical proposals below predate Jack Heart's October 17 PR #1587 review.
+For LOO-502, `loo-502.md` supersedes automatic recovery and compatible-binary
+selection with stable installed entries, natural process failure and same-Session
+retry. The incident observations and independent locator/MTG-117 limits remain.
+
 - **LOO-502, already running:** new commands/hooks should resolve through the installed compatible entry before reading the shared store, while preserving explicit compatible development/private-home selection and caller/Session identity. Stable hooks remove future immutable-path pinning. Pre-fix native clients still need the verified same-Session relaunch; an already-running old process cannot acquire new compiled migrations. Require a real old-release → new-release test with an open Session, hooks, nested commands and retained history/pending steers. Changing immutable files underneath live processes is not the repair.
 - **LOO-495, same unfinished outcome:** complete upgrade acceptance for existing registered repositories with no locator. Adapt using established identity and Git evidence rather than requiring routine manual enrollment. Preserve distinct clones, reused paths, symlink aliases and unknown/offline locations; do not blindly bind every matching remote. A real populated released-store fixture must survive install and ordinary CLI/Desktop reads without manual bind.
 - **Proportional installation coverage:** prove the entire upgrade sequence with existing clients and preexisting repository metadata. An empty `active_runs` legacy field must never serve as liveness evidence. Preserve data, never weaken unknown-migration validation, and avoid duplicate execution or replaying effects. Whether running Flow processes need an explicit compatible handoff remains an acceptance question, not solved merely by changing hooks.

@@ -24,9 +24,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-mod dispatch;
-pub(crate) mod recovery;
-
 const SCHEMA_VERSION: u32 = 1;
 const ACTIVE_FILE: &str = "active.json";
 const SWITCH_FILE: &str = "switch.json";
@@ -758,7 +755,7 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Honor a compatible selected CLI, otherwise use the installed CLI.
+/// Use the installed CLI for the main Machine; private Homes keep their caller.
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
@@ -766,30 +763,21 @@ pub fn dispatch_default_cli() -> Result<()> {
         return Ok(());
     }
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let installed = if let Some(cli) = installed_cli(&root()?)? {
+    std::env::remove_var("LF_BIN");
+    let destination = if let Some(cli) = installed_cli(&root()?)? {
         cli.verify()?;
-        Some(cli.path)
+        cli.path
     } else {
         let installed = account_home()?.join(".local/bin/lf");
         match fs::canonicalize(&installed) {
-            Ok(path) => Some(path),
-            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Ok(path) => path,
+            Err(error) if error.kind() == ErrorKind::NotFound && crate::build_info::provenance().is_release() => return Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Err(anyhow!(
+                "no installed lf; install a published release or select an explicit disposable LF_HOME for this build"
+            )),
             Err(error) => return Err(error.into()),
         }
     };
-    let selected = std::env::var_os("LF_BIN")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    if installed.is_none() && selected.is_none() && crate::build_info::provenance().is_release() {
-        return Ok(());
-    }
-    let destination = dispatch::select_cli(
-        &crate::store::default_db_path(),
-        &current,
-        selected.as_deref(),
-        installed.as_deref(),
-    )?;
-    std::env::set_var("LF_BIN", &destination);
     if current == destination {
         return Ok(());
     }
@@ -869,11 +857,6 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
     let mut command = Command::new(&artifact.path);
     command.args(std::env::args_os().skip(1));
-    // Resolve a pin to this gate at the handoff, so the artifact cannot dispatch
-    // back here. Other preferences remain for its compatibility-aware selection.
-    if std::env::var_os("LF_BIN").and_then(|path| fs::canonicalize(path).ok()) == Some(gate) {
-        command.env("LF_BIN", &artifact.path);
-    }
     #[cfg(unix)]
     {
         Err(command.exec()).with_context(|| {

@@ -186,7 +186,6 @@ impl Cli {
                     }
                     | SessionCommand::Ensure { .. }
                     | SessionCommand::New { .. }
-                    | SessionCommand::Recover { .. }
             ),
             Some(Commands::Commit { message, .. }) => message.is_none(),
             Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
@@ -889,13 +888,6 @@ impl SessionConnectionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
-    /// Recover one installation-broken native attachment under a detached owner.
-    #[command(hide = true)]
-    Recover {
-        id: String,
-        #[arg(long)]
-        agent_process: crate::id::LfProcessId,
-    },
     /// Attach to the current execution without restarting or submitting input
     Attach {
         id: String,

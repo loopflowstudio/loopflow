@@ -7,7 +7,9 @@ import time
 from pathlib import Path
 
 PROOFS = {
-    "installed_entry_keeps_session_history_and_pending_steers": "installation::dispatch::tests",
+    "running_provider_uses_updated_install_for_commands_hooks_and_flow": (
+        "os_process::installation_tests"
+    ),
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_flow_history": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
@@ -18,7 +20,7 @@ PROOFS = {
 }
 
 
-LIB_PROOFS = {"task_adoption_tests", "flow_tests", "installation::dispatch::tests"}
+LIB_PROOFS = {"task_adoption_tests", "flow_tests", "os_process::installation_tests"}
 
 
 def _prepare_image(image: str) -> None:
@@ -85,11 +87,8 @@ def main() -> None:
         action="store_true",
         help="prove populated released repository upgrade",
     )
-    parser.add_argument(
-        "--session-upgrade", action="store_true", help="prove live released Session upgrade"
-    )
     args = parser.parse_args()
-    published_proof = args.native_titles or args.repository_upgrade or args.session_upgrade
+    published_proof = args.native_titles or args.repository_upgrade
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
     try:
@@ -187,7 +186,7 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
         )
-        if args.repository_upgrade or args.session_upgrade:
+        if args.repository_upgrade:
             subprocess.run(
                 [
                     "docker",
@@ -227,12 +226,6 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
                 "cd /source && PYTHONPATH=scripts python3 -c "
                 "'from test_network import _probe; _probe()' && "
                 "python3 tests/e2e/repository_upgrade.py /source/target/debug/lf"
-            )
-        if args.session_upgrade:
-            isolated = (
-                "cd /source && PYTHONPATH=scripts python3 -c "
-                "'from test_network import _probe; _probe()' && "
-                "python3 tests/e2e/session_upgrade.py /source/target/debug/lf"
             )
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", isolated], check=True, timeout=1800

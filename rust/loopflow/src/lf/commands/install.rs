@@ -2428,7 +2428,6 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         crate::installation::settle_switch(&root, &receipt, &active)?;
         prune_superseded_artifacts(&root, &lf_bin_dir(), &active);
         drop(lock);
-        recover_native_sessions(&receipt.target);
         return Ok(());
     }
 
@@ -2496,14 +2495,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
         remove_path(legacy)?;
     }
     drop(lock);
-    recover_native_sessions(&receipt.target);
     Ok(())
-}
-
-fn recover_native_sessions(selection: &crate::installation::InstallSelection) {
-    if let Err(error) = crate::installation::recovery::schedule(selection) {
-        eprintln!("Installed successfully; native Session recovery unavailable: {error:#}");
-    }
 }
 
 fn promote_published_from_installation(
@@ -2583,8 +2575,6 @@ fn promote_published_from_installation(
                 preview.candidate.display_version(),
                 prior.selection.store.display()
             );
-            drop(lock);
-            recover_native_sessions(&prior.selection);
             return Ok(());
         }
     }
@@ -2687,7 +2677,6 @@ fn promote_published_from_installation(
         }
     }
     drop(lock);
-    recover_native_sessions(&switch.target);
     Ok(())
 }
 

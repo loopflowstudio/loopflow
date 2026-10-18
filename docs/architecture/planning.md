@@ -648,9 +648,10 @@ review feedback remains Session evidence. No Ready/Complete operation closes the
 conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
-Saved handoffs retain executable, Machine and database together. Renaming, binding
-and takeover retain conversation identity and feedback. Desktop reads
-the same record and keys its terminal surface on LfSession identity.
+Saved handoffs retain the Machine and stable installed entry; private-Home
+handoffs retain their explicit executable. Renaming, binding and takeover retain
+conversation identity and feedback. Desktop reads the same record and keys its
+terminal surface on LfSession identity.
 
 ## Work, steering and execution
 

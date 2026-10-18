@@ -486,29 +486,14 @@ running its remaining work fresh, and names what waits on you, including a Task
 at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
-After an upgrade, commands reaching the installed entry or a CLI with automatic
-dispatch support replace incompatible executable pins before reading Work.
-Compatible development builds stay selected. New installed hook declarations use
-the stable entry gate. Dispatch does not restart workers or resend steers.
-
-After promotion, installation checks native clients launched from retained
-immutable executables. An explicit incompatible-schema verdict starts a detached
-replacement terminal, which rechecks ownership, observes the old provider's exit,
-and reopens the same saved conversation with current hooks and no new input.
-Compatible clients, mutable development executables and unknown evidence are
-left alone. Recovery preserves pending and uncertain steer receipts.
-
-Installation presents the recovered terminal using the Machine's `session.terminal`
-setting. A repeated install checks again for missed recovery; the exact attachment
-and Session launch lock prevent duplicate providers and viewers. If presentation
-fails, `lf session attach SESSION` opens the retained execution. Existing viewers
-are not redirected. Structured Runs and Flow
-steps also retain their original execution: native resume cannot reconstruct a
-released Flow's cursor. Inspect their Task, history and receipts with the installed
-`~/.local/bin/lf`. After observed exit, select only authorized unfinished work in a
-fresh Flow; keep completed effects and uncertain outcomes in the original history.
-`lf session connect SESSION` resumes native history after its provider exits.
-Do not create a replacement Session or repeat uncertain steers.
+New commands, hooks and Flow children select the current CLI through the stable
+installed entry. Retry a failed command in the same Session and checkout.
+Installation does not restart existing processes; they may fail naturally.
+Clients launched before this behavior can retain old executable paths. After
+their provider exits, use `lf session connect SESSION` through the installed
+`~/.local/bin/lf` to reopen the same native history with fresh hooks. Reattaching
+to a live provider retains its environment. Inspect failed Flow history and
+effects before selecting remaining work; do not repeat uncertain steers.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs

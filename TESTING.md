@@ -1484,6 +1484,9 @@ Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
 Process ancestry assertions follow the recorded chain through transport owners
 rather than assuming a fixed number of launch processes.
+Terminal-status isolation assertions match the escaped OSC sequence, not its
+numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
+fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

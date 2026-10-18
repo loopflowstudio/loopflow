@@ -95,6 +95,16 @@ and the JavaScript context-hook check passed. The native commands above passed
 their ordinary, routing/failure and resize probes. Paid live tests, remaining
 native acceptance in the matrix, and supported installation are not claimed passed.
 
+Merge-queue CI exposed a false positive in terminal-status isolation: the test
+matched any `7501` in Session event JSON, including an ordinary path or random
+identity. A fixture Home named with `7501` reproduced the same failure locally.
+The assertion now matches the JSON-escaped OSC sequence; the deliberate path
+remains in the transport fixture as regression coverage.
+The old assertion failed deterministically with that path; all ten materialized
+transport tests passed after repair, as did formatting and all-target Clippy.
+Nextest reported a leaked handle in `headless_flow_settles_its_original_step_after_creator_teardown`;
+that separate lifecycle warning is retained, not suppressed or claimed fixed.
+
 The independent repository operator used the existing configured account without
 reading credentials: native initial answer, shell tool, normal exit, unchanged
 `connect --prepare` argv, resumed history and remembered token all passed.

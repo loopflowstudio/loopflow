@@ -22,7 +22,11 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         Self {
-            home: tempfile::tempdir_in("/tmp").unwrap(),
+            // An OSC opcode in an ordinary path is not terminal status.
+            home: tempfile::Builder::new()
+                .prefix("lf-7501-")
+                .tempdir_in("/tmp")
+                .unwrap(),
             repo: TestRepo::new(),
         }
     }
@@ -533,8 +537,8 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert!(terminal.contains("/step:state=clear\x1b\\"), "{terminal}");
     let injected: i64 = sql
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%7501%'",
-            [&session],
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND instr(payload, ?2)>0",
+            [session.as_str(), r"\u001b]7501;"],
             |r| r.get(0),
         )
         .unwrap();

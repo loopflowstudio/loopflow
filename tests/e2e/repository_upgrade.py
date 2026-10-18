@@ -117,7 +117,7 @@ def main() -> None:
             )
         )
         assert urlparse(navigation["url"]).path == f"/{task['id']}"
-    resumed = json.loads(invoke(entry, "session", "ensure", "--task", task["id"], "--json"))
+    resumed = json.loads(invoke(entry, "connect", "--prepare", "--task", task["id"], "--json"))
     for field in ["id", "workspace", "work", "provider", "title", "cwd"]:
         assert resumed[field] == session[field]
     assert unpublished.read_text() == "retained edit\n"

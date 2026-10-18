@@ -19,7 +19,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -400,7 +404,8 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   },
   "done": {
     "task": {
@@ -422,7 +427,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -803,7 +812,8 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   },
   "none": {
     "task": {
@@ -825,7 +835,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1206,7 +1220,8 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   },
   "due": {
     "task": {
@@ -1228,7 +1243,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1270,7 +1289,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "unrelated": {
     "task": {
@@ -1292,7 +1312,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1334,7 +1358,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "conversion": {
     "task": {
@@ -1356,7 +1381,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1737,7 +1766,8 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   },
   "completed_running": {
     "task": {
@@ -1759,7 +1789,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -2140,6 +2174,7 @@
       },
       "merge_commit": "merged-head",
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   }
 }

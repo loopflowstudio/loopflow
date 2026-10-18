@@ -54,18 +54,18 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 /// directories, while cron add saves a command whose own selectors name its Work.
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
 
-/// Primary conversations default to the repository unless `--wave` is explicit.
-/// `human_session::primary::tests` proves ambient Wave context cannot redirect them.
-const REPOSITORY_DEFAULT: &[&[&str]] = &[&["session", "ensure"]];
-
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
-const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"], &["session", "resume"]];
+const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
+
+/// Membership changes name an explicit destination and preserve execution context.
+const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
+    &["task", "list"],
     &["history"],
     &["repo", "ci"],
     &["wave", "cron", "list"],
@@ -238,13 +238,17 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
+    // Creation ignores ambient context and may register an explicit destination.
+    if cmd.id == "task create" {
+        return Outcome::Resolved;
+    }
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && matches!(cmd.id, "repo connect" | "task create") {
+    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
         return Outcome::Resolved;
     }
 
     if env.id == "absent" {
-        if cmd.global_default || cmd.id == "task create" {
+        if cmd.global_default {
             return Outcome::Resolved;
         }
         return Outcome::NoContext;
@@ -352,10 +356,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     git(&["add", "."]);
     std::fs::write(
         repo.join("plan.json"),
-        serde_json::to_vec(
-            &serde_json::json!({"metric_targets":[], "workflow":"feature", "krs":[]}),
-        )
-        .unwrap(),
+        serde_json::to_vec(&serde_json::json!({"metric_targets":[], "krs":[]})).unwrap(),
     )
     .unwrap();
     git(&["add", "plan.json"]);
@@ -453,15 +454,7 @@ fn matrix_every_command_every_environment() {
             let output = run_lf(&home, &repo, cmd, &env);
             std::fs::remove_dir_all(&cell).unwrap();
             let outcome = classify(&output);
-            let expected = if cmd.id == "task create"
-                && matches!(
-                    env.default_expected,
-                    Outcome::NoContext | Outcome::UnknownExplicit
-                ) {
-                Outcome::Resolved
-            } else {
-                expected_outcome(cmd, &env)
-            };
+            let expected = expected_outcome(cmd, &env);
             if outcome != expected {
                 failures.push(format!(
                     "  `{}` in `{}` → {:?} (expected {:?})\n    exit: {}\n    stdout: {}\n    stderr: {}",
@@ -547,8 +540,8 @@ fn registry_is_complete() {
         .iter()
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_DEFAULT)
         .chain(SESSION_TARGETS)
+        .chain(MEMBERSHIP_TARGETS)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
     let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
@@ -595,8 +588,8 @@ fn registry_is_complete() {
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
-        .chain(REPOSITORY_DEFAULT)
         .chain(SESSION_TARGETS)
+        .chain(MEMBERSHIP_TARGETS)
     {
         assert!(
             find_clap_command(&root, path).is_some(),

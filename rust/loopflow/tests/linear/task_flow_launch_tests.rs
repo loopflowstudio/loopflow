@@ -168,7 +168,11 @@ for line in sys.stdin:
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let workflow = fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml")).unwrap();
     store
-        .select_project_workflow(&registered.task.project_id, "feature", &workflow)
+        .select_wave_workflow(
+            registered.task.wave_id.as_ref().unwrap(),
+            "feature",
+            &workflow,
+        )
         .unwrap();
     // Direct Task binding used to prefer the saved Task agent over -a.
     for args in [
@@ -403,6 +407,15 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
     ] {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
+        let config = repo.path().join(".lf/config.yaml");
+        fs::write(
+            &config,
+            format!(
+                "{}\nworkflow: proof\n",
+                fs::read_to_string(&config).unwrap()
+            ),
+        )
+        .unwrap();
         repo.create_branch("launch-proof");
         let home = tempfile::tempdir().unwrap();
         let _env = support::EnvGuard::new(&[
@@ -416,19 +429,16 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             &repo.head_sha(),
         );
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-        // `feature` is the fixture Project's Flow.
-        for flow in ["proof", "feature"] {
-            fs::write(
-                repo.path().join(format!(".lf/flows/{flow}.yaml")),
-                "- cmd: task sync --plan\n",
-            )
-            .unwrap();
-        }
+        // The repository selects `proof`, initially only a Flow.
+        fs::write(
+            repo.path().join(".lf/flows/proof.yaml"),
+            "- cmd: task sync --plan\n",
+        )
+        .unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
         let mut record: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(&registered.database, &scope, "INF-123");
-        record.project.as_mut().unwrap().workflow = "proof".into();
         record.project.as_mut().unwrap().revision = Some("2026-10-07T12:00:00Z".into());
         record.item.revision = Some("2026-10-04T12:00:00Z".into());
         if condition == "terminal" {
@@ -438,11 +448,11 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             record.item.team_id = Some("another-team".into());
         }
         if condition == "moved" {
-            // The retained parent still selects feature; give that Workflow a proof edge
+            // The repository still selects proof; give that Workflow a proof edge
             // so this fixture reaches the planning mismatch admission check.
             fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
             fs::write(
-                repo.path().join(".lf/workflows/feature.yaml"),
+                repo.path().join(".lf/workflows/proof.yaml"),
                 "edges:\n  - {from: start, to: end, flow: proof}\n",
             )
             .unwrap();
@@ -526,14 +536,13 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
-        // The Project names a repository Flow, which is not a workflow: a
+        // The repository names a Flow, which is not a Workflow: a
         // run that names nothing is refused and starts no Flow.
         let output = run(&["-b", "task", "run", "INF-123"]);
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("which is not a workflow"), "{error}");
         assert!(
-            error.contains("lf wave workflow set <name> <wave>"),
+            error.contains("repository Workflow \"proof\" is unavailable"),
             "{error}"
         );
         assert_eq!(support::recorded_flows(home.path()).len(), 3);
@@ -742,28 +751,32 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(flows[0]["state"], "current");
         assert_eq!(flows[0]["task_id"], task.registered.task.id.as_str());
         let flow_process = flows[0]["id"].as_str().unwrap();
-        let recorded: (String, String) = db
+        let recorded: String = db
             .query_row(
-                "SELECT cwd,parent_lf_process_id FROM processes WHERE id=?1",
+                "SELECT cwd FROM processes WHERE id=?1",
                 [flow_process],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
         assert_eq!(
-            Path::new(&recorded.0),
+            Path::new(&recorded),
             task.repo.path().canonicalize().unwrap()
         );
-        let ancestor = if launch == "task" {
-            db.query_row(
-                "SELECT parent_lf_process_id FROM processes WHERE id=?1",
-                [&recorded.1],
-                |row| row.get::<_, String>(0),
+        // Execution retains the caller through its viewer and transport owner;
+        // the number of intervening Processes is not the attribution contract.
+        let caller_retained: bool = db
+            .query_row(
+                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
+                    SELECT id,parent_lf_process_id FROM processes WHERE id=?1
+                    UNION ALL
+                    SELECT p.id,p.parent_lf_process_id FROM processes p
+                    JOIN ancestors a ON p.id=a.parent_lf_process_id
+                 ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
+                rusqlite::params![flow_process, parent],
+                |row| row.get(0),
             )
-            .unwrap()
-        } else {
-            recorded.1
-        };
-        assert_eq!(ancestor, parent.as_str());
+            .unwrap();
+        assert!(caller_retained, "{launch}: Flow lost its original caller");
         let original: String = db
             .query_row("SELECT cwd FROM processes WHERE id=?1", [parent], |row| {
                 row.get(0)
@@ -832,7 +845,7 @@ impl WorkflowTask {
                 ".lf/workflows/gated.yaml",
                 "nodes:\n  review: demo\n  accepted: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: accepted, flow: gate}\n  - {from: accepted, to: end}\n",
             ),
-            // The Project's workflow, `feature`, as this repository defines it.
+            // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/workflows/feature.yaml",
                 "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end}\n",
@@ -869,6 +882,7 @@ impl WorkflowTask {
             _env: env,
         };
         fixture.ok(&["task", "checkout", "INF-123"]);
+        fixture.select_workflow("feature");
         fixture
     }
 
@@ -880,7 +894,11 @@ impl WorkflowTask {
             fs::read_to_string(self.repo.path().join(format!(".lf/workflows/{name}.yaml")))
                 .unwrap();
         store
-            .select_project_workflow(&self.registered.task.project_id, name, &content)
+            .select_wave_workflow(
+                self.registered.task.wave_id.as_ref().unwrap(),
+                name,
+                &content,
+            )
             .unwrap();
     }
 
@@ -1045,8 +1063,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         .unwrap()
         .unwrap();
     let select = |name: &str| {
-        sqlite.select_project_workflow(
-            &task.project_id,
+        sqlite.select_wave_workflow(task.wave_id.as_ref().unwrap(),
             name,
             "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
         ).unwrap();
@@ -1070,8 +1087,8 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
 }
 
 #[test]
-fn a_task_takes_up_its_projects_workflow_and_keeps_one_it_named() {
-    // Nothing named, no Workflow yet: the Project's.
+fn a_task_takes_up_its_waves_workflow_and_keeps_one_it_named() {
+    // Nothing named, no Workflow yet: the Wave default.
     let task = WorkflowTask::new();
     let preview = task.run(&["task", "run", "--explain", "--json"]);
     assert!(
@@ -1188,6 +1205,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     // The work finished elsewhere; a person says so.
     task.finish_after_provider_observation(&[
         "task",
+        "workflow",
         "move",
         "INF-123",
         "end",
@@ -1240,6 +1258,7 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
     // The demo was not good enough after all: go back and take the loop.
     task.ok(&[
         "task",
+        "workflow",
         "move",
         "INF-123",
         "review",
@@ -1255,7 +1274,7 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
         kinds,
         ["took_up", "chose", "arrived", "chose", "chose", "arrived", "set", "chose", "arrived"]
     );
-    let error = refusal(task.run(&["task", "move", "INF-123", "nowhere"]));
+    let error = refusal(task.run(&["task", "workflow", "move", "INF-123", "nowhere"]));
     assert!(
         error.contains("Nodes: start, review, accepted, end"),
         "{error}"
@@ -1464,11 +1483,12 @@ fn completion_is_independent_of_workflow_readiness() {
         .success());
     assert_eq!(task.workflow()["position"]["kind"], "edge");
     assert_eq!(task.state(), "active");
-    task.ok(&["task", "move", "INF-123", "start"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "start"]);
     assert_eq!(task.state(), "ready");
     // Moving away from end does not reopen a completed Task.
     task.finish_after_provider_observation(&[
         "task",
+        "workflow",
         "move",
         "INF-123",
         "end",
@@ -1479,7 +1499,7 @@ fn completion_is_independent_of_workflow_readiness() {
     let text =
         String::from_utf8_lossy(&task.run(&["task", "status", "INF-123"]).stdout).to_string();
     assert!(text.contains("\nINF-123  done\n"), "{text}");
-    task.ok(&["task", "move", "INF-123", "review"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "review"]);
     assert_eq!(task.state(), "done");
     // The retired completion flags do not return with the alias.
     assert!(!task
@@ -1491,7 +1511,7 @@ fn completion_is_independent_of_workflow_readiness() {
 #[test]
 fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
     let task = WorkflowTask::new();
-    task.finish_after_provider_observation(&["task", "move", "INF-123", "end"]);
+    task.finish_after_provider_observation(&["task", "workflow", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "unplanned");
@@ -1507,7 +1527,7 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     // Arrival is retained while each completion retry still refuses unsettled delivery.
     for reach in [
         &["task", "run", "INF-123"][..],
-        &["task", "move", "INF-123", "end"],
+        &["task", "workflow", "move", "INF-123", "end"],
         &["task", "complete", "INF-123"],
     ] {
         let error = refusal(task.run(reach));
@@ -1523,7 +1543,7 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
     task.publish(false);
     assert!(!task
-        .run(&["task", "move", "INF-123", "end"])
+        .run(&["task", "workflow", "move", "INF-123", "end"])
         .status
         .success());
     assert!(!task.status()["completion_pending"].is_null());
@@ -1557,7 +1577,7 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
             .unwrap(),
         pr
     );
-    task.ok(&["task", "move", "INF-123", "end"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
     assert!(task.status()["completion_pending"].is_null());
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
@@ -1578,7 +1598,7 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
     assert_eq!(task.state(), "done");
     assert_eq!(task.workflow(), workflow);
     assert!(task.status()["completion_pending"].is_null());
-    task.ok(&["task", "move", "INF-123", "end"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
     let ended = task.workflow();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let scope = task
@@ -1602,7 +1622,7 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
     assert_eq!(task.state(), "active");
     assert_eq!(task.workflow(), ended);
     assert!(task.status()["completion_pending"].is_null());
-    task.ok(&["task", "move", "INF-123", "end"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "active");
 }
 
@@ -1662,7 +1682,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
         rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
     db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
         VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",
-        rusqlite::params![now, task.registered.task.id.as_str(), task.registered.task.wave_id.as_str(), task.repo.path().to_str().unwrap()]).unwrap();
+        rusqlite::params![now, task.registered.task.id.as_str(), task.registered.task.wave_id.as_ref().unwrap().as_str(), task.repo.path().to_str().unwrap()]).unwrap();
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('retained-input','captured',?1,1,'{}')", [uuid::Uuid::new_v4().simple().to_string()]).unwrap();
     db.execute(
         "UPDATE agent_sessions SET current_capture=?1 WHERE id='retained-input'",
@@ -1674,7 +1694,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     assert!(task.workflow().is_null());
     for args in [
         &["task", "complete", "INF-123"][..],
-        &["task", "move", "INF-123", "end"][..],
+        &["task", "workflow", "move", "INF-123", "end"][..],
         &["task", "complete", "INF-123"][..],
     ] {
         task.ok(args);
@@ -1741,7 +1761,7 @@ fn unmerged_completion_in_flow_is_retryable_without_replaying_it() {
     assert!(task.status()["completion_pending"].is_string(), "{error}");
     task.publish(true);
     task.ok(&["task", "complete", "INF-123"]);
-    task.ok(&["task", "move", "INF-123", "end"]);
+    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("end"));
@@ -1800,9 +1820,8 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         "wave",
         "workflow",
         "set",
-        "--project",
-        task.registered.task.project_id.as_str(),
         "live-workflow",
+        task.registered.task.wave_id.as_ref().unwrap().as_str(),
         "--file",
         worktree
             .join(".lf/workflows/live-workflow.yaml")
@@ -1835,6 +1854,34 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     }
     let before = task.workflow();
     assert_eq!(before["position"]["running"], true);
+    task.publish(false);
+    let placement = task.status();
+    assert!(placement["pr"]["id"].is_string());
+    task.ok(&["wave", "ensure", "other", "--json"]);
+    task.ok(&["task", "move", "INF-123", "--wave", "other"]);
+    let moved = task.status();
+    assert_eq!(moved["wave"], "other");
+    assert_eq!(moved["pr"], placement["pr"]);
+    assert_eq!(moved["worktree"], placement["worktree"]);
+    assert_eq!(moved["branch"], placement["branch"]);
+    assert_eq!(task.workflow(), before);
+    assert!(held.child.try_wait().unwrap().is_none());
+    task.ok(&["task", "move", "INF-123", "--no-wave"]);
+    assert_eq!(task.status()["pr"], placement["pr"]);
+    assert_eq!(task.workflow(), before);
+    assert!(held.child.try_wait().unwrap().is_none());
+    task.ok(&[
+        "task",
+        "move",
+        "INF-123",
+        "--wave",
+        task.registered.task.wave_id.as_ref().unwrap().as_str(),
+    ]);
+    assert_eq!(task.workflow(), before);
+    assert_eq!(task.status()["worktree"], placement["worktree"]);
+    assert_eq!(task.status()["branch"], placement["branch"]);
+    assert_eq!(task.status()["pr"], placement["pr"]);
+    assert!(held.child.try_wait().unwrap().is_none());
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
     assert_eq!(task.workflow(), before);
@@ -1843,6 +1890,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());
+    task.publish(true);
     fs::write(&held.release, "").unwrap();
     assert!(
         held.child.wait().unwrap().success(),

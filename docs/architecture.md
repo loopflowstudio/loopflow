@@ -205,7 +205,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Running Flow | One Flow process and the steps it starts, including taskless execution | The Flow process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs, targets and workflow | Linear Project and its synchronized `projects` row |
+| Project | A Wave's plan, KRs and targets | Linear Project and its synchronized `projects` row |
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
@@ -241,7 +241,8 @@ Process captured. Mechanical work creates no agent conversation. A Session reach
 its Flow through the step Process that captured its input. A killed Flow process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.
 
-Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
+Task requires repository identity and may belong to a Project; its Wave is derived
+from that Project. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
 or change Flow membership. Done and landed Tasks remain valid targets. Earlier

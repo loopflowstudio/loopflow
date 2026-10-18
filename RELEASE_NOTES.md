@@ -1,23 +1,26 @@
-# v0.14.4
+# v0.14.5
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.4 keeps repository Work and native Sessions connected when a checkout moves or its directory is renamed. Loopflow retains the repository’s identity and updates its current address, so Desktop navigation and Session recovery can follow the move without losing Task membership or native conversation identity.
+v0.14.5 repairs two interruptions to ongoing work: repositories stranded by the 0.14.4 upgrade and OpenCode diagnostics covering unfinished terminal input. Existing Task checkouts can restore their retained repository identity through ordinary reads, while OpenCode errors remain available in a private log without obscuring the composer.
 
-## Keep working after a directory move
+## Keep existing Tasks usable after upgrading
 
-A moved checkout previously received a new repository identity, leaving Desktop navigation and Session callbacks pointing at the old address. Loopflow now retains identity in the Git common directory and reconciles current addresses together, while Desktop refreshes the existing workspace without replacing Session owners. (#1578)
+The repository relocation support in 0.14.4 could leave older repositories without the Git locator needed to recognize their retained identity. Ordinary reads now enroll that identity when a retained local Task checkout still matches the Git common directory and branch, avoiding manual binding when that evidence is available. (#1583)
 
-- Preserve historical paths, Task membership, native conversation IDs, sibling worktrees and unpublished edits.
-- Distinguish a repository move from an independent clone or a different checkout reusing an old path through machine-scoped location records.
-- Resume native conversations after a rename; newly launched provider callbacks resolve relocated references from their recorded launch information.
+- Keep existing repository identity and Task work connected, including through symlink aliases and concurrent reads.
+- Relocate populated planning destinations and their routes in one transaction without premature foreign-key failures.
+- Preserve explicit recovery when evidence is missing or ambiguous; repository names and remote URLs do not establish identity.
+
+## Keep typing through OpenCode retries
+
+Raw OpenCode errors could overwrite the terminal composer during errors and retries. Launch and resume now capture stderr separately, leaving OpenCode in control of its native error display and keeping unfinished input readable. (#1582)
+
+- Find full diagnostics in the announced `opencode.stderr.log`, opened with owner-only permissions. Capture preserves arbitrary bytes and subprocess diagnostics.
+- Resume with the supplied native Session identity intact.
+- Keep the provider running if a log write fails: capture continues draining stderr and reports the failure after the provider exits.
 
 ## Operational notes
 
-- Existing checkouts without a location record have explicit recovery through the `repo identity` command’s `--bind` and `--relocate` options. (#1578)
-- Already running older providers retain their existing hook environments. The callback change does not rewrite those live environments. (#1578)
-- The PR records repository preservation, native resume, callback, migration and Desktop navigation checks. Coordinated release/install and acceptance with the installed CLI and Desktop remained outstanding at implementation delivery; the Docker installation harness was unavailable locally. (#1578)
-
-## Small changes
-
-- Disposable data clones remain isolated from repository relocation. Historical linked-checkout registrations preserve unrelated checkout context and Task placement without writing a location record into the main Git directory. (#1578)
+- The OpenCode change fixes diagnostic overlays, not model-access denial. An installed OpenCode 1.19.3 probe with synthetic local responses reproduced three overlays on lf 0.14.4 and none on the candidate, with all three errors retained in the log. Paid-account access, OpenCode 1.18.33 and approval UI were not verified in that PR. (#1582)
+- A new CI installation proof starts with checksum-verified lf 0.14.3 and a real Task checkout and Session. The recorded run verified identity, historical Process paths, unpublished edits, CLI and Desktop destination reads, a later directory move and promotion retry. Configured macOS installation and real native-provider acceptance remained outstanding at implementation delivery. (#1583)

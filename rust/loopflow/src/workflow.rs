@@ -189,16 +189,33 @@ pub fn names_workflow(name: &str, repo: &Path) -> bool {
 
 /// Load a Workflow; a local Workflow overrides only a builtin Workflow.
 pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinition>, LoadError> {
-    let content = match workflow_path(name, repo) {
-        Some(path) => fs::read_to_string(path)?,
-        None => match builtin_workflow(name) {
-            Some(content) => content.to_string(),
-            None => return Ok(None),
-        },
+    let Some(content) = read_workflow_source(name, repo)? else {
+        return Ok(None);
     };
     parse_workflow(name, &content, repo)
         .map(Some)
         .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
+}
+
+pub(crate) fn read_workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
+    for extension in ["yaml", "yml"] {
+        let path = repo
+            .join(".lf/workflows")
+            .join(format!("{name}.{extension}"));
+        match fs::read_to_string(path) {
+            Ok(content) => return Ok(Some(content)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(builtin_workflow(name).map(str::to_owned))
+}
+
+pub(crate) fn validate_workflow_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.chars().any(char::is_whitespace) || name.contains([':', '/', '\\']) {
+        return Err("invalid Workflow name".into());
+    }
+    Ok(())
 }
 
 pub fn parse_workflow(

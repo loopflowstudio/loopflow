@@ -104,7 +104,6 @@ async fn pm_read_linear_oauth_recovers() {
         id: ProjectId::new(),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: crate::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("project-1").unwrap()),
         slug: "reliability".into(),
@@ -182,7 +181,7 @@ async fn pm_read_linear_oauth_recovers() {
         refreshed.status,
         crate::work::project::ProjectStatus::Started
     );
-    assert_eq!(refreshed.workflow, "feature");
+
     assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
     assert!(refreshed.pm_snapshot_synced_at > project.pm_snapshot_synced_at);
     assert_eq!(

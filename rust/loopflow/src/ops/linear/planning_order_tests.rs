@@ -16,7 +16,7 @@ use crate::work::task::TaskUpdate;
 
 fn saved_order(fixture: &Fixture, task: &Task) -> (String, serde_json::Value) {
     let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-    let (id,value):(String,String)=conn.query_row("SELECT id,value_json FROM project_changes WHERE project_id=?1 AND field='task_order' ORDER BY seq DESC LIMIT 1", [task.project_id.as_str()], |r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    let (id,value):(String,String)=conn.query_row("SELECT id,value_json FROM project_changes WHERE project_id=?1 AND field='task_order' ORDER BY seq DESC LIMIT 1", [task.project_id.as_ref().unwrap().as_str()], |r|Ok((r.get(0)?,r.get(1)?))).unwrap();
     (id, serde_json::from_str(&value).unwrap())
 }
 
@@ -105,7 +105,7 @@ async fn deliver(store: &Store, repo: &Path, task: &Task) -> crate::ops::OpsResu
     crate::ops::planning_delivery::sync_fields(
         store,
         repo,
-        &WorkRef::Project(task.project_id.clone()),
+        &WorkRef::Project(task.project_id.clone().unwrap()),
     )
     .await
 }
@@ -125,7 +125,7 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
             let receipt = fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap()
                 .id;
@@ -142,7 +142,7 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
             assert_eq!(
                 reopened
                     .sqlite
-                    .project_order_delivery(&tasks[0].project_id)
+                    .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                     .unwrap()
                     .unwrap()
                     .id,
@@ -158,7 +158,7 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
             assert_eq!(local_order(&reopened, &tasks), remote_order(&state).await);
             assert!(reopened
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .is_none());
             assert_no_conflicts(fixture);
@@ -329,7 +329,7 @@ fn planning_order_stale_list_cannot_undo_confirmed_reorder() {
                 .await
                 .unwrap();
             let stale = crate::test_linear_input::InventoryFixture {
-                wave_id: tasks[0].wave_id.clone(),
+                wave_id: tasks[0].wave_id.clone().unwrap(),
                 provider: "linear".into(),
                 initiative: initiative.clone(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -375,7 +375,7 @@ fn planning_order_confirmed_removal_does_not_strand_saved_reorder() {
             assert!(fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .is_none());
             assert_no_conflicts(fixture);
@@ -404,7 +404,7 @@ fn planning_order_new_member_survives_pending_reorder() {
             assert!(fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .is_none());
             assert_no_conflicts(fixture);
@@ -423,7 +423,12 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
             fixture
                 .store
                 .sqlite
-                .edit_project(&tasks[0].project_id, Some("Independent title"), None, None)
+                .edit_project(
+                    tasks[0].project_id.as_ref().unwrap(),
+                    Some("Independent title"),
+                    None,
+                    None,
+                )
                 .unwrap();
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
             assert_eq!(
@@ -433,13 +438,13 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
             let pending = fixture
                 .store
                 .sqlite
-                .pending_project_changes(&tasks[0].project_id)
+                .pending_project_changes(tasks[0].project_id.as_ref().unwrap())
                 .unwrap();
             assert!(pending.is_empty());
             assert!(fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .is_some());
             assert_no_conflicts(fixture);
@@ -451,7 +456,7 @@ fn planning_order_uncertainty_does_not_stall_project_field_delivery() {
 fn linear_rate_limit_retries_rejected_order_move() {
     with_order(|runtime, fixture, repo, tasks, state| {
         reorder(&fixture.store, &tasks[3], 0);
-        let work = WorkRef::Project(tasks[0].project_id.clone());
+        let work = WorkRef::Project(tasks[0].project_id.clone().unwrap());
         runtime.block_on(async {
             state.lock().await.rate_limit_query = Some("mutation DeliverTaskField");
             assert!(
@@ -462,7 +467,7 @@ fn linear_rate_limit_retries_rejected_order_move() {
             let receipt = fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .unwrap();
             assert!(
@@ -476,7 +481,7 @@ fn linear_rate_limit_retries_rejected_order_move() {
             assert!(fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .project_order_delivery(tasks[0].project_id.as_ref().unwrap())
                 .unwrap()
                 .is_none());
             assert_eq!(

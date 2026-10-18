@@ -24,7 +24,7 @@ lf task run INF-123
 
 A Skill supplies instructions; a Flow composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Linear Project holds the plan and its Tasks' workflow.
+and memory; its current Linear Project holds the plan; the Wave owns its default Workflow.
 
 Process records an actual lf command process. LfSession keeps the conversation,
 including headless work. A running Flow is one lf process and the step processes

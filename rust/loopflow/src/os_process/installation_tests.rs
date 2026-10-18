@@ -1,0 +1,214 @@
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use rusqlite::Connection;
+use serde_json::json;
+
+use crate::installation::{
+    self, ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet,
+    InstallSelection, InstallSource, RecoveryOwner, SwitchPhase, SwitchReceipt,
+};
+use crate::store::sqlite::SqliteStore;
+
+#[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
+    assert!(Path::new("/.dockerenv").is_file());
+    let account = installation::account_home().unwrap();
+    assert_eq!(account, Path::new("/home/lf-task-proof"));
+    let root = installation::root().unwrap();
+    let home = account.join(".lf");
+    assert!(!root.exists());
+    assert!(!home.exists());
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN", "LF_AGENT_CALLER"]);
+    fs::create_dir(&home).unwrap();
+    let database = home.join("loopflow.db");
+    crate::store::migrations::apply_sqlite(&Connection::open(&database).unwrap()).unwrap();
+    let store = SqliteStore::new(&database).unwrap();
+    let session = store.test_session(
+        "upgrade-session",
+        &crate::session_record::new_artifact_key(),
+    );
+    let steer = store
+        .save_session_steer(&session.id, "Fixture", "Keep this pending")
+        .unwrap();
+    let history = store.session_history(&session.id, 0, 100).unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let binary = loopflow_test_support::lf_binary();
+    let failing = files.path().join("failed-lf");
+    fs::write(
+        &failing,
+        "#!/bin/sh\nprintf 'fixture CLI failure\\n' >&2\nexit 42\n",
+    )
+    .unwrap();
+    fs::set_permissions(&failing, fs::Permissions::from_mode(0o755)).unwrap();
+    let replacement = files.path().join("updated/lf");
+    fs::create_dir(replacement.parent().unwrap()).unwrap();
+    fs::copy(binary, &replacement).unwrap();
+    let selection = |binary: &Path| {
+        let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, binary).unwrap();
+        let set = ArtifactSet {
+            id: "entry-proof".into(),
+            source: InstallSource::Published,
+            source_revision: "fixture".into(),
+            source_identity: "fixture".into(),
+            content_sha256: installation::artifact_set_sha256(binary, None, None).unwrap(),
+            artifacts: vec![artifact],
+        };
+        ActiveInstall {
+            schema_version: 1,
+            selection: InstallSelection {
+                installation_id: binary.display().to_string(),
+                source: InstallSource::Published,
+                artifact_set: set.clone(),
+                store: database.clone(),
+            },
+            published_fallback: set.clone(),
+            retained_published_sets: vec![set],
+        }
+    };
+    let prior = selection(&failing);
+    installation::write_active(&root, &prior).unwrap();
+    let gate =
+        installation::install_entry_gate(&root, &ArtifactRole::Cli, Path::new(binary)).unwrap();
+    std::env::set_var("LF_BIN", &failing);
+    assert_eq!(super::resolve_lf_binary().unwrap(), gate);
+    let repo = loopflow_test_support::TestRepo::new();
+    repo.create_file(".lf/flows/entry-proof.yaml", "- cmd: sync --plan\n");
+    let delivery = crate::context_block::ContextDelivery {
+        repository: None,
+        repo: repo.path().to_path_buf(),
+        home: home.clone(),
+        wave: None,
+        skill_file: None,
+        references: Vec::new(),
+    };
+    let delivery_path = files.path().join("delivery.json");
+    fs::write(&delivery_path, serde_json::to_vec(&delivery).unwrap()).unwrap();
+    let hooks = delivery.hook_settings().unwrap();
+    let hook = hooks["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(hook.contains(gate.to_str().unwrap()));
+    let caller = json!({"session_id":session.id,"agent_process_id":null,"origin_exec_id":"e3904e02-0219-45fd-8c4e-c7f289c60552"}).to_string();
+    let mut command = Command::new("/bin/sh");
+    command
+        .env_clear()
+        .env("HOME", &account)
+        .env("LF_AGENT_CALLER", &caller)
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::harness::configure_vendor_std_env(&mut command).unwrap();
+    command.args(["-ec", &format!(
+        "if lf session list --all --json; then exit 93; else test \"$?\" -eq 42; fi\nprintf 'retry-ready\\n'\nread ready\nlf session list --all --json\n{hook} --delivery {}\n\"$LF_BIN\" flow entry-proof --batch\n",
+        super::shell_escape(&delivery_path.to_string_lossy()),
+    )]);
+    let mut provider = command.spawn().unwrap();
+    let mut stdout = BufReader::new(provider.stdout.take().unwrap());
+    let mut ready = String::new();
+    stdout.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "retry-ready\n");
+    provider.stdout = Some(stdout.into_inner());
+    // Retry the failed command from this same live provider and checkout.
+    let active = selection(&replacement);
+    let receipt = SwitchReceipt {
+        schema_version: 1,
+        id: "entry-switch".into(),
+        prior: Some(prior.selection.clone()),
+        target: active.selection.clone(),
+        published_fallback: Some(prior.published_fallback.clone()),
+        target_published_fallback: Some(active.published_fallback.clone()),
+        phase: SwitchPhase::Settled,
+        recovery_owner: RecoveryOwner::Candidate,
+        target_store_advance_started: true,
+        target_store_advanced: true,
+        active_selection_committed: true,
+        coordinator: prior
+            .selection
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .clone(),
+        candidate: active
+            .selection
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .clone(),
+        activation: ActivationTargets {
+            cli: gate.clone(),
+            daemon: None,
+            app: None,
+            legacy_app: None,
+        },
+        app_was_running: false,
+        disposable_store_owned: false,
+    };
+    installation::write_switch(&root, &receipt).unwrap();
+    installation::settle_switch(&root, &receipt, &active).unwrap();
+    provider
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"continue\n")
+        .unwrap();
+    let output = provider.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("fixture CLI failure"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains(&session.id));
+
+    // A direct old CLI or a gate launch must ignore a stale main-Machine pin.
+    for entry in [Path::new(binary), &gate] {
+        let mut command = Command::new(entry);
+        command
+            .env_clear()
+            .env("HOME", &account)
+            .env("LF_HOME", &home)
+            .env("LF_BIN", "/missing/old/lf")
+            .env("LF_AGENT_CALLER", &caller)
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(repo.path())
+            .args(["session", "list", "--all", "--json"]);
+        let output = super::bounded_output(&mut command, Duration::from_secs(30)).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(&session.id));
+    }
+    assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    assert_eq!(store.session_history(&session.id, 0, 100).unwrap(), history);
+    let pending = store.session_steers(&session.id, 0, 100).unwrap();
+    assert_eq!(pending.pending, 1);
+    assert_eq!(pending.items[0].steer.id, steer.id);
+    let connection = Connection::open(&database).unwrap();
+    let child_command: String = connection.query_row(
+        "SELECT p.command FROM flow_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert!(
+        child_command.contains(replacement.to_str().unwrap()),
+        "{child_command}"
+    );
+    let attributed: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM processes WHERE caller_session_id=?1 AND via_agent=1",
+            [&session.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(attributed >= 2);
+    drop(connection);
+    drop(store);
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(home).unwrap();
+}

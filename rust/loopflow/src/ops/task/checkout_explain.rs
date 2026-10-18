@@ -130,8 +130,7 @@ async fn read_checkout(
     if !report.impediments.is_empty() {
         return Ok(());
     }
-    let wave = super::owning_wave(store, &task).await?;
-    let repo = crate::git::worktrees::main_repo_root(Path::new(wave.repo()))?;
+    let repo = crate::git::worktrees::main_repo_root(&super::repository_for_task(store, &task)?)?;
     report.unavailable.push("Checkout leases, placement admission and concurrent changes are rechecked only during execution; this reading reserves nothing".into());
     if let Some(worktree) = &task.worktree {
         let present = worktree.join(".git").try_exists()?;

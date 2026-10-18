@@ -959,6 +959,17 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
                 .unwrap();
             // SAFETY: this PID names the fixture's nested CLI, held alive at the provider barrier.
             assert_eq!(unsafe { libc::kill(pid, libc::SIGKILL) }, 0);
+            let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+            let executor: i32 = database
+                .query_row(
+                    "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            // SAFETY: the capture identifies this fixture's live execution CLI;
+            // the notes.pid launcher above is now only its transport viewer.
+            assert_eq!(unsafe { libc::kill(executor, libc::SIGKILL) }, 0);
         } else {
             let deadline = Instant::now() + Duration::from_secs(20);
             while parent.child.try_wait().unwrap().is_none() {

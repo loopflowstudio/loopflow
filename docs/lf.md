@@ -89,7 +89,7 @@ lf --wave exports : "Review the goal" # add context in the current directory
 lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
-lf task move EXP-12 demo     # put the Task at a node, running nothing
+lf task workflow move EXP-12 demo     # put the Task at a node, running nothing
 lf --task EXP-12 flow incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
@@ -164,12 +164,12 @@ capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
 untrusted hooks. Loopflow never writes provider trust decisions.
 
-A Task takes up its Project's workflow and moves through its nodes.
+A Task takes up its Wave's workflow or repository default and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
 one whose Flow you name. At a node the Task waits on you in its conversation;
 no command approves a node. A Flow that does not leave the node is refused
 with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
-you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
+you choose again or `lf task workflow move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
@@ -240,8 +240,10 @@ a different commit. Without an explicit recovery commit, a lost started branch
 is not recreated from its old base.
 
 
-Without a selected Wave, explicit creation uses `inbox`. A Task gets its
-identity before placement; creation starts no agent and requires no Linear login.
+Creation defaults to a standalone repository Task, including inside Wave/Task-bound
+Sessions and checkouts. Only explicit `--wave <wave>` selects membership;
+`--no-wave` is equivalent to omitting both flags. A Task gets its identity before
+placement; creation starts no agent and requires no Linear login.
 Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
 Reads create nothing.
 
@@ -256,7 +258,9 @@ a distinct Task, even with the same title. Use the saved ID to inspect or edit i
 Task references accept unique UUID prefixes of at least four hex digits, bare or
 prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
 Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
-add digits to select one. Full IDs and exact Linear ticket aliases still work.
+add digits to select one. Full IDs and Linear ticket aliases still work.
+Ticket aliases are case-insensitive: `loo-498`, `Loo-498`, and `LOO-498`
+select the same Task. Output retains the recorded spelling.
 Displayed local selectors start at seven digits and extend when needed; retain
 full IDs in automation.
 
@@ -275,13 +279,13 @@ lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
 
-Use `--project ID` instead of a Wave on `workflow show/set/source` or `edit-plan`
-to address an exact retained chapter. An explicit `wave show WAVE` includes history;
+Use `--project ID` on `edit-plan` to address an exact retained chapter.
+Workflow commands select the Wave directly. An explicit `wave show WAVE` includes history;
 `wave show --all` reads current Waves across repositories. Neither starts work.
 
-Project names, summaries, Workflow selections and complete plan replacements save
+Project names, summaries and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
-`lf wave workflow show WAVE --json` includes `sync`: pending changes,
+`lf wave status WAVE --json` includes `sync`: pending changes,
 uncertain attempts, errors and retained losing values. Project reads keep the local
 `id` in both transports, with an optional `linear_id` binding; adding or removing
 that binding does not change identity. Task edits and status use
@@ -292,7 +296,7 @@ or Desktop connection exports saved Projects and delivers their fields. Lost cre
 or Initiative-attachment replies retain uncertainty until exact readback.
 Readback cannot protect against unseen concurrent provider writes.
 
-Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
+Ranks are zero-based within a Project, or within the repository’s standalone Tasks. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
 Nested Waves use names such as `parser/tokenizer`. Edit `.lf/wave/<name>/GOAL.md`
@@ -412,11 +416,11 @@ never allocate replacement identities. Later local edits survive creation readba
 The local ID works before a Linear alias arrives.
 
 ```bash
-lf task refile <task-id> --wave exports
+lf task move <task-id> --wave exports
 ```
 
-Move unplaced work to the Wave's selected Project. Membership saves locally during
-an outage and retains pending sync; recorded work keeps its owner. An active Task
+Move a Task to the Wave's selected Project, or detach with `--no-wave`. Membership saves locally during
+an outage and retains pending sync; existing Sessions, checkout, PR and Workflow remain intact. An active Task
 Session or Desktop connection delivers the move when both Task and destination
 Project have Linear mappings. The same active connection exports unmapped records.
 
@@ -433,42 +437,50 @@ lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
 lf history show SESSION --context       # input cost by source
 lf history show SESSION --instructions  # why guidance was included or omitted
-lf session ensure                   # this repository's one ongoing conversation
+lf connect                         # this repository's one ongoing conversation
 lf connect --wave growth            # open a Wave's primary conversation
 lf connect --task EXP-12 --prepare  # prepare a Task conversation without launching
 lf --task EXP-12 skill task-session # another conversation about that Task
-lf session connect SESSION         # stop headless Claude/OpenCode and resume history
-lf session new SESSION         # fresh conversation for the same scope
+lf connect SESSION                 # continue this exact conversation
+lf connect --fresh                 # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
-The repository and each Wave have one ongoing conversation. `session ensure`
-finds it or prepares it, a Wave's with its goal and memory, and repeats return the
-same Session. `session new` stops that conversation, keeps it as history, and prepares
-a fresh one. Neither launches a provider; `session connect SESSION` opens it in
-the current terminal. First-use trust or sign-in prompts stay open until answered
-or canceled; waiting for input does not time out the foreground conversation.
+`lf connect` opens the repository, Wave or Task's ongoing conversation for this
+checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
+`--wave`, `--task`, or a Session ID overrides the checkout's scope. Unassociated
+linked checkouts require an explicit target; ordinary `lf` starts a conversation
+there. First creation uses the matching scope's session skill, including its
+operating instructions. Reopening keeps those instructions and native history.
+
+`connect --fresh` selects a new primary in the same scope and checkout. The previous
+client and history survive. Each explicit fresh request creates another; ordinary
+connect recovers the current primary after an uncertain reply. Fresh accepts scope
+selection, not a Session ID. First-use trust or sign-in prompts stay open until
+answered or canceled.
 
 `connect --prepare` and `resume --prepare` print a terminal command without
 launching the provider. Add `--json` for connection data. Remote preparation
 returns an SSH command in either format.
+Preparation cannot be combined with `--message`.
 
-A Task's primary is one of its own conversations: the one named with
-`--choose SESSION`, else its only unfinished interactive conversation, else the
-most recently used. A Task with none gets a new one in its checkout. The others
-stay open, and listing Sessions never picks or starts one.
+A Task keeps its selected primary. Opening an exact Session does not change it.
+Without a primary, connect selects the most recently used eligible conversation, or creates one in
+the Task's checkout when none exists. The others stay open, and listing Sessions
+never picks or starts one.
 
-Use `lf resume` in the Task checkout, or `lf session connect SESSION`,
+Use `lf connect` in the Task checkout, or `lf connect SESSION`,
 to reopen the same conversation after a failed terminal launch. Retained native
 history survives retries. A recorded interactive provider observed dead can reopen
 without manual repair; a live or unknown provider cannot be started twice.
 Explicitly connecting to a replaced Session preserves its history and leaves
 the successor as primary, even when the old launch never acquired native history.
-For headless Claude and OpenCode, connect stops the run and resumes its saved
-native conversation; it is not live takeover. Codex retains
-its live connection. Missing process or conversation identity needs recovery before
-a headless run can be stopped and resumed.
+Interactive Sessions with a retained execution owner reconnect to that terminal
+without restarting the provider. For headless Claude and OpenCode, connect stops
+the run and resumes its saved native conversation; it is not live takeover.
+Codex retains its live connection. Missing process or conversation identity needs
+recovery before a headless run can be stopped and resumed.
 
 Session connect, rename and bind take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
@@ -476,9 +488,9 @@ inspection and replay; they do not select these Session actions.
 
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
-| Repository | `lf operate` | `lf session ensure` |
-| Wave | `lf --wave growth wave-operate` | `lf session ensure -w growth` |
-| Task | `lf task-operate EXP-12` | `lf session ensure --task EXP-12` |
+| Repository | `lf operate` | `lf connect` |
+| Wave | `lf --wave growth wave-operate` | `lf connect --wave growth` |
+| Task | `lf task-operate EXP-12` | `lf connect --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
 procedure. It leaves running Flows alone, reads a stopped or failed Flow before
@@ -486,8 +498,17 @@ running its remaining work fresh, and names what waits on you, including a Task
 at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
-An open conversation keeps the instructions it launched with; `replace` it
-after an upgrade.
+New commands, hooks and Flow children select the current CLI through the stable
+installed entry. Retry a failed command in the same Session and checkout.
+Installation does not restart existing processes; they may fail naturally.
+Clients launched before this behavior can retain old executable paths. After
+their provider exits, use `lf connect SESSION` through the installed
+`~/.local/bin/lf` to reopen the same native history with fresh hooks. Reattaching
+to a live provider retains its environment. Inspect failed Flow history and
+effects before selecting remaining work; do not repeat uncertain steers.
+
+An open conversation keeps the instructions it launched with. To start a new
+conversation with current instructions, use `lf connect --fresh` in its scope.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs
@@ -541,8 +562,9 @@ sync unrelated upstream changes. Continued publication automatically carries wor
 past already-merged history, including squash merges. PR operations also work on
 ordinary branches without creating a Task.
 Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
-its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
-timeout or interruption leaves the intent intact. Repeating land for a merged
+its PR every 15 seconds until verified merge, closure, a concrete blocker or
+interruption, including with Desktop closed. Elapsed time never ends the wait or
+triggers a rerun. Interruption leaves the intent intact. Repeating land for a merged
 Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
@@ -652,14 +674,14 @@ continue when the schedule is disabled or a Task is held.
 Set repository defaults in `.lf/config.yaml`:
 
 ```yaml
-automation: {retries: 1, timeout_reruns: 1}
+automation: {retries: 1}
 ```
 
 Use `lf task automate EXP-12 off` to hold future CI repair, and
 `lf task automate EXP-12 on` to enable it again. These settings never resume a
 Flow. One failed repair startup may retry; a completed blocked repair waits for
 changed evidence.
-Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
+Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
 
 ## Accounts and children
@@ -745,7 +767,7 @@ nothing: previews never fetch, allocate a checkout, take a lease, change a stack
 or contact a provider. Missing branch recovery and finalization remain unperformed;
 previews read admission without claiming it.
 
-`task move TASK NODE --explain` and `task workflow restart TASK --explain`
+`task workflow move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
 (including the exact prior node/edge and reason), `impediments` and
 `unavailable` to `resolution`. Restart means move to `start`, not run a Flow.
@@ -753,9 +775,9 @@ Moving to `end` records arrival before requesting completion. Settlement checks 
 gates and may clean an eligible checkout; preview performs none of these effects.
 Missing or remote execution evidence stays unavailable.
 
-`task create/edit/comment/refile/save --explain` validates mutation input through the same
+`task create/edit/comment/move/save --explain` validates mutation input through the same
 owners as saving. JSON separates `resolution`, intended `action`, `effects`,
-`impediments` and `unavailable`. Creation reads the current Project and derives a
+`impediments` and `unavailable`. Creation resolves optional Wave membership and derives a
 title from piped notes normally; new Task identity and execution stay unallocated.
 Editing reports fields and the observed revision, preserving empty descriptions
 and explicit unassignment. Comment explanation distinguishes appending from reading:
@@ -779,8 +801,8 @@ installed-app and retained-window state remain uninspected.
 
 `session connect SESSION --explain` reports start, native resume or possible live
 connection, takeover/try intent and the shared Session actions.
-`resume --explain` uses the same Task preference and checkout/repository recency
-as ordinary resume; explicit `--task` or `--wave` overrides discovery. JSON adds `action`, `state`, `actions`, `impediments` and
+`connect --explain` and `resume --explain` resolve the same scope as opening,
+including first creation and fresh intent; explicit `--task` or `--wave` overrides discovery. JSON adds `action`, `state`, `actions`, `impediments` and
 `unavailable` to `resolution`. `connect --prepare` prepares launch
 arguments without takeover, with or without `--json`. JSON changes representation only. Live
 endpoints are not probed, unrecorded native conversations are not admitted, and
@@ -1011,9 +1033,8 @@ the checkout. A stopped Flow is history and blocks nothing.
 ## Keep a document workspace
 
 ```bash
-lf session ensure                    # persistent repository conversation
-lf session ensure --wave product     # separate persistent Wave conversation
-lf session connect SESSION           # open the prepared conversation
+lf connect                       # persistent repository conversation
+lf connect --wave product         # separate persistent Wave conversation
 ```
 
 Inside the conversation's persistent checkout:

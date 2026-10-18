@@ -175,7 +175,11 @@
           "acquisition": {
             "state": "available",
             "observed_at": null
-          }
+          },
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/src/loopflow",
+          "project_id": "proj_0123456789ab40008000000000000001",
+          "wave_id": "wave-1"
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
@@ -565,7 +569,8 @@
           },
           "merge_commit": null,
           "abandoned_at": null
-        }
+        },
+        "workflow_source": "task"
       },
       {
         "task": {
@@ -640,7 +645,11 @@
           "acquisition": {
             "state": "available",
             "observed_at": null
-          }
+          },
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/src/loopflow",
+          "project_id": "proj_0123456789ab40008000000000000001",
+          "wave_id": "wave-1"
         },
         "reference": {
           "issue_url": null,
@@ -682,7 +691,8 @@
         "run_control": {
           "unavailable": null
         },
-        "pr": null
+        "pr": null,
+        "workflow_source": "task"
       }
     ],
     "truncated": false
@@ -705,7 +715,6 @@
         "id": "proj_0123456789ab40008000000000000001",
         "slug": "release-feedback",
         "name": "current",
-        "workflow": "task-design",
         "status": "started",
         "current": true,
         "metric_targets": [

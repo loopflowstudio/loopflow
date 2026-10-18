@@ -15,7 +15,7 @@ struct WorkSurfaceView: View {
 
     @Environment(\.palette) private var palette
     @State private var controlError: String?
-    @State private var editingTask: TaskSelection?
+    @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -52,8 +52,8 @@ struct WorkSurfaceView: View {
         .sheet(item: $model.historyWave) { wave in
             ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
-        .sheet(item: $editingTask) { selection in
-            TaskDirectiveEditor(model: model, task: selection.task, wave: selection.wave)
+        .sheet(item: $editingTask) { task in
+            TaskDirectiveEditor(model: model, task: task)
         }
     }
 
@@ -75,7 +75,7 @@ struct WorkSurfaceView: View {
                 description: Text("Couldn't read the latest work. Refresh to try again.")
             )
             .accessibilityIdentifier("loopflow-work-unavailable")
-        } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty {
+        } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
@@ -158,11 +158,8 @@ struct WorkSurfaceView: View {
                     }
                 }
 
-                if let project = roadmap.currentProject {
-                    let name = project.workflow.trimmingCharacters(in: .whitespacesAndNewlines)
-                    section { WaveWorkflowView(model: model, wave: roadmap.wave, name: name) }
-                        .task { await model.loadWorkflowCatalog() }
-                }
+                section { WaveWorkflowView(model: model, wave: roadmap.wave, name: roadmap.workflow ?? "") }
+                    .task { await model.loadWorkflowCatalog() }
 
                 switch roadmap.tasks {
                 case .unavailable(let reason):
@@ -288,10 +285,10 @@ struct WorkSurfaceView: View {
                     }
                     PlanningSyncView(sync: task.task.sync)
                 }
-                if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
+                if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
                 }
-                TaskHistoryView(model: model, task: task, wave: found.wave.wave)
+                TaskHistoryView(model: model, task: task)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Flow process log disagree with them.
                 TaskDiagnosticsView(model: model, task: task)
@@ -311,7 +308,7 @@ struct WorkSurfaceView: View {
                 section {
                     WorkSectionHeading(title: "Description") {
                         Button("Edit description") {
-                            editingTask = TaskSelection(wave: found.wave.wave, task: task)
+                            editingTask = task
                         }
                         .buttonStyle(WorkPlainButtonStyle())
                         .font(Typography.body(12.5))
@@ -328,7 +325,7 @@ struct WorkSurfaceView: View {
                     .frame(maxWidth: 680, alignment: .leading)
                     .accessibilityIdentifier("work-task-directive")
                 }
-                TaskCommentsView(model: model, task: task, wave: found.wave.wave)
+                TaskCommentsView(model: model, task: task)
             }
             .onChange(of: task.id, initial: true) { _, id in
                 Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id)
@@ -481,13 +478,6 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct TaskSelection: Identifiable {
-        let wave: WaveSnapshot
-        let task: RoadmapTask
-
-        var id: String { "\(wave.id):\(task.id)" }
-    }
-
     private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
         var components = URLComponents()
         components.scheme = "warp"
@@ -556,7 +546,6 @@ struct WaveObjectiveView: View {
 struct TaskDirectiveEditor: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
@@ -564,10 +553,9 @@ struct TaskDirectiveEditor: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
-    init(model: WorkModel, task: RoadmapTask, wave: WaveSnapshot) {
+    init(model: WorkModel, task: RoadmapTask) {
         self.model = model
         self.task = task
-        self.wave = wave
         _draft = State(initialValue: task.task.description)
     }
 
@@ -601,7 +589,7 @@ struct TaskDirectiveEditor: View {
                     Task {
                         defer { isSaving = false }
                         do {
-                            try await model.updateTaskDirective(task: task, wave: wave, text: draft)
+                            try await model.updateTaskDirective(task: task, text: draft)
                             dismiss()
                         } catch {
                             saveError = error.localizedDescription
@@ -619,7 +607,7 @@ struct TaskDirectiveEditor: View {
         .interactiveDismissDisabled(isSaving)
     }
 }
-/// The Project's workflow, taken up by a Task's first `lf task run`: what it
+/// The Wave's default Workflow, taken up by a Task's first `lf task run`: what it
 /// draws and its authored definition.
 struct WaveWorkflowView: View {
     let model: WorkModel
@@ -634,7 +622,7 @@ struct WaveWorkflowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Workflow") {
-                // A Project may name no workflow; the menu is where one is chosen.
+                // A Wave may have no default Workflow; the menu is where one is chosen.
                 Menu(name.isEmpty ? "None" : name) {
                     ForEach(catalog) { choice in
                         Button(choice.unavailable == nil ? choice.name : "\(choice.name) (invalid)") {

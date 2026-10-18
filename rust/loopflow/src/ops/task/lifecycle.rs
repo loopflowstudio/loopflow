@@ -10,7 +10,7 @@ use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{Task, TaskPr};
 
-use super::{block_on_task, owning_wave, task_error, task_store};
+use super::{block_on_task, repository_for_task, task_error, task_store};
 
 /// Completion is durable before cleanup; failure never reverses the outcome.
 pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -41,8 +41,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         return Ok(());
     }
     let result = async {
-        let wave = owning_wave(store, task).await?;
-        let repo = main_repo_root(Path::new(wave.repo()))?;
+        let repo = main_repo_root(&repository_for_task(store, task)?)?;
         if task.worktree.as_ref().is_some_and(|path| path == &repo) {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
@@ -94,8 +93,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
         return Ok(None);
     };
     // Branch names are only unique inside their repository.
-    let wave = owning_wave(&store, &task).await?;
-    if main_repo_root(repo)? != main_repo_root(Path::new(wave.repo()))? {
+    if main_repo_root(repo)? != main_repo_root(&repository_for_task(&store, &task)?)? {
         return Err(task_error("branch belongs to a Task in another repository"));
     }
     Ok(Some((store, task)))
@@ -210,8 +208,11 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
         .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
         .await
         .map_err(task_error)?;
-    let wave = owning_wave(store, task).await?;
-    crate::ops::planning_sync::sync_after_save(store, wave.repo()).await;
+    crate::ops::planning_sync::sync_after_save(
+        store,
+        &repository_for_task(store, task)?.to_string_lossy(),
+    )
+    .await;
     Ok(())
 }
 
@@ -229,8 +230,11 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
             }
         };
         store.sqlite.delete_task(&task.id).map_err(task_error)?;
-        let wave = owning_wave(&store, &task).await?;
-        crate::ops::planning_sync::sync_after_save(&store, wave.repo()).await;
+        crate::ops::planning_sync::sync_after_save(
+            &store,
+            &repository_for_task(&store, &task)?.to_string_lossy(),
+        )
+        .await;
         Ok(task.identifier)
     })
 }
@@ -441,8 +445,7 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
             let Some(task) = resolve_task(&store, scope.as_deref(), selector).await? else {
                 return Ok(None);
             };
-            let wave = owning_wave(&store, &task).await?;
-            Ok(Some(std::path::PathBuf::from(wave.repo())))
+            Ok(Some(repository_for_task(&store, &task)?))
         })?;
         if let Some(repo) = retained {
             return main_repo_root(&repo).map_err(Into::into);

@@ -42,9 +42,11 @@ conversation. No account probe, login or credential transfer takes place.
 homes, temporary files and executable search paths. Descendants inherit the OS
 boundary even if they alter environment variables. Selecting the copied `bin/lf`
 also selects its clone, including from a shell with the source `LF_HOME`. Files outside the clone are
-read-only; external networking, source Unix sockets, source-client signals and
-Apple-event/most Mach service calls are denied. Only clone-local Unix sockets are
-available. Real providers requiring external APIs cannot operate in this mode.
+read-only except its private temporary transport directory. External networking,
+source Unix sockets, source-client signals and Apple-event/most Mach service calls
+are denied. Unix sockets are available inside the clone and its transport directory;
+the latter uses a short path to fit the OS socket limit. Real providers requiring
+external APIs cannot operate in this mode.
 No unsupported-platform or unsandboxed fallback exists.
 
 Source repositories keep their original paths and remain read-only. Create a

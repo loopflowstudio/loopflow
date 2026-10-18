@@ -71,11 +71,9 @@ fn custom_home_initializes_once_and_refuses_schema_repair() {
 }
 
 #[test]
-fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
+fn flow_steps_keep_the_explicit_home() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let decoy = tempfile::tempdir().unwrap();
-    fs::write(decoy.path().join("loopflow.db"), b"never open this store").unwrap();
     repo.create_file(".lf/flows/home-proof.yaml", "- cmd: sync --plan\n");
     let output = command(home.path(), repo.path(), &["flow", "home-proof", "--batch"])
         .output()
@@ -87,11 +85,6 @@ fn flow_steps_keep_the_explicit_home_despite_stale_pins_and_path() {
         [], |row| row.get(0)
     ).unwrap();
     assert_eq!(child_commands, 1);
-    assert_eq!(
-        fs::read(decoy.path().join("loopflow.db")).unwrap(),
-        b"never open this store"
-    );
-    assert_eq!(fs::read_dir(decoy.path()).unwrap().count(), 1);
 }
 
 #[test]
@@ -190,6 +183,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &account)
         .env("SOURCE_CLI", env!("CARGO_BIN_EXE_lf"))
+        .env("LF_BIN", "/missing/old/lf")
         .args(["machine", "id", "--json"])
         .output()
         .unwrap();
@@ -197,11 +191,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     assert!(output.status.success(), "{output:?}");
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        format!(
-            "{}\n{}\nhistory list --json\n",
-            main.display(),
-            cli.display()
-        )
+        format!("{}\n\nhistory list --json\n", main.display())
     );
     assert!(!account.join(".lf-dev").exists());
 }

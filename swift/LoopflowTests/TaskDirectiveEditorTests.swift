@@ -20,14 +20,14 @@ struct TaskDirectiveEditorTests {
         let selected = try #require(model.task(id: "issue-review"))
         let original = selected.task.task.description
         #expect(throws: Never.self) { try WorkSurfaceView(model: model).inspect().find(button: "Edit description") }
-        let editor = TaskDirectiveEditor(model: model, task: selected.task, wave: selected.wave.wave)
+        let editor = TaskDirectiveEditor(model: model, task: selected.task)
         #expect(try editor.inspect().find(ViewType.TextEditor.self).input() == original)
         let draft = "--Keep the human's wording\nIncluding `code`, $variables and \"quotes\"."
         // The editor captures its target; navigation cannot redirect the write.
         model.setRepoPath("/src/context")
         await source.setOutcome(outcome)
         do {
-            try await model.updateTaskDirective(task: selected.task, wave: selected.wave.wave, text: draft)
+            try await model.updateTaskDirective(task: selected.task, text: draft)
             Issue.record("An unconfirmed update must surface an error")
         } catch {
             #expect(error.localizedDescription.contains(outcome == .rejected
@@ -38,7 +38,7 @@ struct TaskDirectiveEditorTests {
         if outcome == .unreadable { #expect(model.roadmap.errorMessage == "Planning offline") }
 
         await source.setOutcome(.success)
-        try await model.updateTaskDirective(task: selected.task, wave: selected.wave.wave, text: draft)
+        try await model.updateTaskDirective(task: selected.task, text: draft)
         // Returned provider text deliberately differs from the submitted text.
         let authoritative = draft + "\nProvider-normalized."
         #expect(model.task(id: "issue-review")?.task.task.description == authoritative)
@@ -97,7 +97,7 @@ struct TaskDirectiveEditorTests {
         await source.holdNextRead(gate)
         let poll = Task { await model.refresh() }
         await gate.started()
-        try await model.updateTaskDirective(task: selected.task, wave: selected.wave.wave, text: "New focus")
+        try await model.updateTaskDirective(task: selected.task, text: "New focus")
         await gate.release()
         await poll.value
         #expect(model.task(id: "issue-review")?.task.task.description == "New focus\nProvider-normalized.")
@@ -126,14 +126,14 @@ private actor DirectiveSource {
     func read(_ args: [String], cwd: String?) async throws -> String {
         switch args.first {
         case "task":
-            guard Array(args.prefix(5)) == ["task", "edit", "issue-review", "--wave", "product"],
-                  args.count == 6, args[5].hasPrefix("--notes="), cwd == "/src/loopflow" else {
+            guard Array(args.prefix(3)) == ["task", "edit", "issue-review"],
+                  args.count == 4, args[3].hasPrefix("--notes="), cwd == "/src/loopflow" else {
                 throw RegistryQueryError("Wrong Task update target")
             }
             if outcome == .rejected { throw RegistryQueryError("Write rejected") }
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(original.utf8))
             let old = snapshot.waves[0].tasks.items.first { $0.id == "issue-review" }!.task.description
-            let text = String(args[5].dropFirst("--notes=".count)) + "\nProvider-normalized."
+            let text = String(args[3].dropFirst("--notes=".count)) + "\nProvider-normalized."
             let oldJSON = String(decoding: try JSONEncoder().encode(old), as: UTF8.self)
             let newJSON = String(decoding: try JSONEncoder().encode(text), as: UTF8.self)
             roadmap = original.replacingOccurrences(of: oldJSON, with: newJSON)

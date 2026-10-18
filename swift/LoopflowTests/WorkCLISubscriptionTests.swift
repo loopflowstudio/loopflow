@@ -15,11 +15,11 @@ struct WorkCLISubscriptionTests {
         let fixture = try WorkCLIFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try await fixture.prepare()
-        let seed = try await fixture.json(["task", "create", "--title", "Backlog", "--json"])
+        let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "status", seedID, "--json"])
-        let project = try #require((status["project"] as? [String: Any])?["id"] as? String)
-        _ = try await fixture.run(["wave", "workflow", "set", "--project", project, "proof", "--file",
+        let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
+        _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName, "--file",
                                    fixture.root.appendingPathComponent("proof.yaml").path])
         let query = RegistryQuery(watchWork: {
             try LocalWorkObservation.start(
@@ -45,7 +45,7 @@ struct WorkCLISubscriptionTests {
         originalDraft.editor.string = "retain original draft"
 
         // The reader and selected workspace are already open before either CLI mutation.
-        let created = try await fixture.json(["task", "create", "--title", "Arrives through CLI", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         #expect(rows(model).allSatisfy { $0.task == nil }) // Unstarted backlog stays hidden.
@@ -89,7 +89,7 @@ struct WorkCLISubscriptionTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(id)")
         let terminalTask = try #require(model.task(id: id)?.task)
-        let header = TaskWorkflowHeader(model: model, task: terminalTask, wave: wave.wave, work: model.taskWork[id])
+        let header = TaskWorkflowHeader(model: model, task: terminalTask, work: model.taskWork[id])
         let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
         #expect(label == (action == "complete" ? "Completed" : "Canceled"))
         #expect(FileManager.default.fileExists(atPath: checkout.worktree))
@@ -114,7 +114,7 @@ struct WorkCLISubscriptionTests {
         #expect(model.selection == .task(id: id))
         #expect(rows(model).filter { $0.task?.id == id }.count == 1)
         let returned = TaskWorkflowHeader(model: model, task: try #require(model.task(id: id)?.task),
-                                          wave: wave.wave, work: model.taskWork[id])
+                                          work: model.taskWork[id])
         #expect(try returned.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status")
             .text().string() == label)
         #expect(registry.selectedWork == workspace.key)
@@ -125,6 +125,48 @@ struct WorkCLISubscriptionTests {
         #endif
         #expect(files.document("notes.txt") === draft)
         #expect(draft.editor.string == "unsaved Task draft")
+        keeping.cancel()
+        await keeping.value
+    }
+
+    @Test("Standalone membership moves reach the retained workspace through the CLI stream")
+    func standaloneMovesKeepWorkspace() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])
+        let id = try #require(created["id"] as? String)
+        _ = try await fixture.run(["checkout", id, "--json"])
+        let query = RegistryQuery(watchWork: {
+            try LocalWorkObservation.start(process: fixture.process(["monitor", "work", "--watch", "--json"]), configurationChanged: { false })
+        }) { args, _ in try await fixture.run(args) }
+        let model = WorkModel(query: query, repoPath: fixture.repo.path)
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+        let machine = try await fixture.json(["machine", "id", "--json"])
+        let machineId = try #require(machine["id"] as? String)
+        let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
+        model.confirmMachine(machineId)
+        model.bindWorkspaces(registry, repository: "repo")
+        model.select(.task(id: id))
+        let key = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(key))
+        let location = try #require(workspace.location)
+        let draft = workspace.files(taskId: id, issue: id, cwd: location.worktree).document("notes.txt")
+        draft.editor.string = "Unsent direction"
+        let layout = workspace.multiplexer.layout
+        _ = try await fixture.run(["wave", "ensure", "product", "--json"])
+        _ = try await fixture.run(["task", "move", id, "--wave", "product"])
+        try await eventually { model.task(id: id)?.task.task.waveId != nil }
+        #expect(model.visibleWork.standaloneTasks.isEmpty)
+        _ = try await fixture.run(["task", "move", id, "--no-wave"])
+        try await eventually { model.visibleWork.standaloneTasks.count == 1 }
+        #expect(model.selection == .task(id: id))
+        #expect(registry.selectedWork == key)
+        #expect(registry.retained(key) === workspace)
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(draft.editor.string == "Unsent direction")
         keeping.cancel()
         await keeping.value
     }
@@ -150,8 +192,9 @@ private struct WorkCLIFixture: Sendable {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("work-cli-\(UUID().uuidString)")
             .resolvingSymlinksInPath()
         repo = root.appendingPathComponent("repo")
-        binary = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("target/debug/lf")
+        binary = ProcessInfo.processInfo.environment["LOOPFLOW_TEST_LF"].map(URL.init(fileURLWithPath:))
+            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().appendingPathComponent("target/debug/lf")
         try #require(FileManager.default.isExecutableFile(atPath: binary.path), "Build the source CLI with cargo build -p loopflow --bin lf")
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
     }

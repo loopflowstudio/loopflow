@@ -27,7 +27,6 @@ fn project(id: &str, name: &str, status: ProjectStatus) -> LinearProject {
         name: name.into(),
         slug: name.into(),
         summary: String::new(),
-        workflow: "feature".into(),
         status,
         metric_targets: Vec::new(),
         krs: Vec::new(),
@@ -161,6 +160,18 @@ async fn graphql(
             project["archivedAt"].is_null() && project["initiatives"]["nodes"].as_array().unwrap().iter().any(|node| &node["id"] == initiative)).cloned().collect())}})
     } else if query.contains("query ListProjectIssues") {
         json!({"project":{"issues":page(provider.issues.values().filter(|issue| issue["project"]["id"] == vars["projectId"]).cloned().collect())}})
+    } else if query.contains("query TeamChanges") {
+        let issues = provider
+            .issues
+            .values()
+            .cloned()
+            .map(|mut issue| {
+                issue["project"] =
+                    provider.projects[issue["project"]["id"].as_str().unwrap()].clone();
+                issue
+            })
+            .collect();
+        json!({"issues":page(issues), "comments":page(Vec::new())})
     } else if query.contains("query FindProject") {
         json!({"projects":page(provider.projects.get(id).cloned().into_iter().collect())})
     } else if query.contains("query ProjectOwnership") {
@@ -174,7 +185,9 @@ async fn graphql(
             json!({"id":kind,"type":kind,"teamId":null,"position":0.0})).collect())})
     } else if query.contains("mutation AdoptProject") {
         let project = provider.projects.get_mut(id).unwrap();
-        project["content"] = vars["input"]["content"].clone();
+        if let Some(content) = vars["input"].get("content") {
+            project["content"] = content.clone();
+        }
         if let Some(status) = vars["input"].get("statusId") {
             project["status"]["type"] = status.clone();
         }
@@ -285,7 +298,6 @@ async fn seed_project(
         krs: plan.krs.clone(),
         metric_targets: plan.metric_targets.clone(),
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
-        workflow: plan.workflow.clone(),
         status: plan.status,
         abandon_intent: None,
         created_at: now,
@@ -317,6 +329,7 @@ async fn local_task(
     .await;
     let now = OffsetDateTime::now_utc();
     let task = Task {
+        repository_id: context.store.sqlite.ensure_repository(wave.repo()).unwrap(),
         id: TaskId::new(),
 
         revision: 0,
@@ -327,8 +340,8 @@ async fn local_task(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         pm_writeback: LinearWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: parent.id,
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(parent.id),
         worktree: Some(worktree.into()),
         workspace_slug: issue.into(),
         branch: issue.into(),
@@ -498,7 +511,7 @@ async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::
 #[tokio::test]
 // Each test has its own runtime; serialize process-global environment for its full lifetime.
 #[allow(clippy::await_holding_lock)]
-async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content() {
+async fn explicit_sync_adopts_project_status_without_changing_historical_content() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
@@ -534,7 +547,6 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     old["content"] = json!(original);
     old["status"]["type"] = json!("planned");
     let mut expected = old.clone();
-    expected["content"] = json!(original.replace("recommended:", "workflow:"));
     expected["status"]["type"] = json!("started");
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
@@ -570,8 +582,12 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
         provider.lock().await.projects["00000000-0000-4000-8000-000000000001"].clone();
     assert_ne!(observed.as_object_mut().unwrap().remove("updatedAt"), None);
     assert_eq!(observed, expected);
-    let synced = store.get_project(&task.project_id).await.unwrap().unwrap();
-    assert_eq!(synced.workflow, "custom");
+    let synced = store
+        .get_project(task.project_id.as_ref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+
     assert_eq!(synced.krs.len(), 1);
     assert_eq!(synced.krs[0].text, "Keep this KR");
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
@@ -686,157 +702,151 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
     let original =
         "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n";
     for status in ["backlog", "planned"] {
-        for stop in 1..=3 {
-            for second_home in [false, true] {
-                {
-                    let mut state = provider.lock().await;
-                    *state = provider_fixture();
-                    let old = state
-                        .projects
-                        .get_mut("00000000-0000-4000-8000-000000000001")
-                        .unwrap();
-                    old["status"]["type"] = json!(status);
-                    old["content"] = json!(original);
-                    for (id, name, archived, flow) in [
-                        (
-                            "00000000-0000-4000-8000-000000000003",
-                            "next",
-                            false,
-                            "future-custom",
-                        ),
-                        ("a-archived", "archive", true, "historical-custom"),
-                    ] {
-                        let mut project =
-                            state.projects["00000000-0000-4000-8000-000000000001"].clone();
-                        project["id"] = json!(id);
-                        project["name"] = json!(format!("A — {name}"));
-                        project["status"]["type"] =
-                            json!(if archived { "started" } else { "planned" });
-                        project["content"] = json!(original.replace("custom", flow));
-                        project["archivedAt"] = if archived {
-                            json!("2026-09-01T00:00:00Z")
-                        } else {
-                            Value::Null
-                        };
-                        state.projects.insert(id.into(), project);
-                    }
-                    state.interrupt_after = Some(stop);
+        for second_home in [false, true] {
+            {
+                let mut state = provider.lock().await;
+                *state = provider_fixture();
+                let old = state
+                    .projects
+                    .get_mut("00000000-0000-4000-8000-000000000001")
+                    .unwrap();
+                old["status"]["type"] = json!(status);
+                old["content"] = json!(original);
+                for (id, name, archived, flow) in [
+                    (
+                        "00000000-0000-4000-8000-000000000003",
+                        "next",
+                        false,
+                        "future-custom",
+                    ),
+                    ("a-archived", "archive", true, "historical-custom"),
+                ] {
+                    let mut project =
+                        state.projects["00000000-0000-4000-8000-000000000001"].clone();
+                    project["id"] = json!(id);
+                    project["name"] = json!(format!("A — {name}"));
+                    project["status"]["type"] = json!(if archived { "started" } else { "planned" });
+                    project["content"] = json!(original.replace("custom", flow));
+                    project["archivedAt"] = if archived {
+                        json!("2026-09-01T00:00:00Z")
+                    } else {
+                        Value::Null
+                    };
+                    state.projects.insert(id.into(), project);
                 }
-                let first = legacy_home(
-                    &directory
-                        .path()
-                        .join(format!("legacy-{status}-{stop}-{second_home}")),
+                state.interrupt_after = Some(1);
+            }
+            let first = legacy_home(
+                &directory
+                    .path()
+                    .join(format!("legacy-{status}-{second_home}")),
+                &repo,
+                &url,
+            )
+            .await;
+            LINEAR_TEST_CONTEXT
+                .scope(
+                    LinearTestContext {
+                        path: first.path.clone(),
+                        store: first.store.clone(),
+                        graphql_url: first.graphql_url.clone(),
+                    },
+                    async {
+                        let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+                        let plans =
+                            crate::ops::linear::checked_projects(&repo, &ctx, &initiative, "a")
+                                .await
+                                .unwrap();
+                        let current = plans
+                            .iter()
+                            .find(|p| p.id == "00000000-0000-4000-8000-000000000001")
+                            .unwrap();
+                        assert_eq!(&*current.id, "00000000-0000-4000-8000-000000000001");
+                        assert_eq!(
+                            plans
+                                .iter()
+                                .find(|p| p.id == "00000000-0000-4000-8000-000000000003")
+                                .unwrap()
+                                .status,
+                            ProjectStatus::Planned
+                        );
+                        assert_eq!(provider.lock().await.mutations, 0);
+                        assert!(super::adopt_legacy_projects(
+                            &repo,
+                            &first.store,
+                            "a",
+                            &ctx,
+                            &initiative,
+                            true
+                        )
+                        .await
+                        .is_err());
+                    },
+                )
+                .await;
+            {
+                let mut state = provider.lock().await;
+                state.unavailable = false;
+                state.interrupt_after = None;
+            }
+            let resumed = if second_home {
+                legacy_home(
+                    &directory.path().join(format!("resume-{status}")),
                     &repo,
                     &url,
                 )
+                .await
+            } else {
+                first
+            };
+            LINEAR_TEST_CONTEXT
+                .scope(resumed, async {
+                    let store = super::planning_store().await.unwrap();
+                    let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
+                    let prs = store.task_prs(&task.id).await.unwrap();
+                    let flow = store.sqlite.task_flows(&task.id).unwrap();
+                    let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
+                    super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
+                        .await
+                        .unwrap();
+                    assert!(store
+                        .projects_pending_adoption(task.wave_id.as_ref().unwrap())
+                        .await
+                        .unwrap()
+                        .is_empty());
+                    let mutations = provider.lock().await.mutations;
+                    super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
+                        .await
+                        .unwrap();
+                    assert_eq!(provider.lock().await.mutations, mutations);
+                    assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+                    assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
+                    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
+                    {
+                        let state = provider.lock().await;
+                        assert_eq!(state.projects.len(), 4);
+                        assert_eq!(state.issues.len(), 6);
+                        assert_eq!(
+                            state.projects["00000000-0000-4000-8000-000000000001"]["content"],
+                            original
+                        );
+                        assert_eq!(
+                            state.projects["00000000-0000-4000-8000-000000000001"]["status"]
+                                ["type"],
+                            "started"
+                        );
+                        assert_eq!(
+                            state.projects["00000000-0000-4000-8000-000000000003"]["status"]
+                                ["type"],
+                            "planned"
+                        );
+                        assert_eq!(
+                            state.issues["a-started"]["project"]["id"],
+                            "00000000-0000-4000-8000-000000000001"
+                        );
+                    }
+                })
                 .await;
-                LINEAR_TEST_CONTEXT
-                    .scope(
-                        LinearTestContext {
-                            path: first.path.clone(),
-                            store: first.store.clone(),
-                            graphql_url: first.graphql_url.clone(),
-                        },
-                        async {
-                            let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
-                            let plans =
-                                crate::ops::linear::checked_projects(&repo, &ctx, &initiative, "a")
-                                    .await
-                                    .unwrap();
-                            let current = plans
-                                .iter()
-                                .find(|p| p.id == "00000000-0000-4000-8000-000000000001")
-                                .unwrap();
-                            assert_eq!(
-                                (&*current.id, &*current.workflow),
-                                ("00000000-0000-4000-8000-000000000001", "custom")
-                            );
-                            assert_eq!(
-                                plans
-                                    .iter()
-                                    .find(|p| p.id == "00000000-0000-4000-8000-000000000003")
-                                    .unwrap()
-                                    .status,
-                                ProjectStatus::Planned
-                            );
-                            assert_eq!(provider.lock().await.mutations, 0);
-                            assert!(super::adopt_legacy_projects(
-                                &repo,
-                                &first.store,
-                                "a",
-                                &ctx,
-                                &initiative,
-                                true
-                            )
-                            .await
-                            .is_err());
-                        },
-                    )
-                    .await;
-                {
-                    let mut state = provider.lock().await;
-                    state.unavailable = false;
-                    state.interrupt_after = None;
-                }
-                let resumed = if second_home {
-                    legacy_home(
-                        &directory.path().join(format!("resume-{status}-{stop}")),
-                        &repo,
-                        &url,
-                    )
-                    .await
-                } else {
-                    first
-                };
-                LINEAR_TEST_CONTEXT
-                    .scope(resumed, async {
-                        let store = super::planning_store().await.unwrap();
-                        let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
-                        let prs = store.task_prs(&task.id).await.unwrap();
-                        let flow = store.sqlite.task_flows(&task.id).unwrap();
-                        let (ctx, initiative) = resolve_context(&repo, "a").await.unwrap();
-                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
-                            .await
-                            .unwrap();
-                        assert!(store
-                            .projects_pending_adoption(&task.wave_id)
-                            .await
-                            .unwrap()
-                            .is_empty());
-                        let mutations = provider.lock().await.mutations;
-                        super::adopt_legacy_projects(&repo, &store, "a", &ctx, &initiative, true)
-                            .await
-                            .unwrap();
-                        assert_eq!(provider.lock().await.mutations, mutations);
-                        assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
-                        assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
-                        {
-                            let state = provider.lock().await;
-                            assert_eq!(state.projects.len(), 4);
-                            assert_eq!(state.issues.len(), 6);
-                            assert_eq!(
-                                state.projects["00000000-0000-4000-8000-000000000001"]["content"],
-                                original.replace("recommended:", "workflow:")
-                            );
-                            assert_eq!(
-                                state.projects["00000000-0000-4000-8000-000000000001"]["status"]
-                                    ["type"],
-                                "started"
-                            );
-                            assert_eq!(
-                                state.projects["00000000-0000-4000-8000-000000000003"]["status"]
-                                    ["type"],
-                                "planned"
-                            );
-                            assert_eq!(
-                                state.issues["a-started"]["project"]["id"],
-                                "00000000-0000-4000-8000-000000000001"
-                            );
-                        }
-                    })
-                    .await;
-            }
         }
     }
     server.abort();
@@ -957,7 +967,6 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
                     .await
                     .unwrap();
             assert_eq!(projects[0].status, ProjectStatus::Started);
-            assert_eq!(projects[0].workflow, "custom");
             {
                 let mut state = provider.lock().await;
                 let mut future = state.projects["00000000-0000-4000-8000-000000000001"].clone();

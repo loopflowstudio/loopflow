@@ -999,6 +999,7 @@ struct DesktopPerformanceTests {
         waveInfo["repo"] = checkout
         wave["wave"] = waveInfo
         snapshot["waves"] = [wave]
+        snapshot["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)
@@ -1077,11 +1078,11 @@ struct DesktopPerformanceFixtureTests {
             try #require(ContinuousClock.now < deadline)
             try await Task.sleep(for: .milliseconds(5))
         }
-        await model.loadTaskContext(task: task.task, wave: task.wave.wave)
+        await model.loadTaskContext(task: task.task)
         #expect(model.flowCatalog.errorMessage == nil)
         #expect(model.taskWork[task.task.id].errorMessage == nil)
         #expect(model.taskContext[task.task.id].errorMessage == nil)
-        await model.loadSessionHistory(task: task.task, wave: task.wave.wave)
+        await model.loadSessionHistory(task: task.task)
         #expect(model.sessionHistory[task.task.id].value?.count == 256)
         #expect(model.sessionHistory[task.task.id].errorMessage == nil)
         let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
@@ -1097,7 +1098,7 @@ struct DesktopPerformanceFixtureTests {
         #expect(document.text == "Preserved draft")
         #expect(store.changedPaths == ["notes.txt"])
         await #expect(throws: RegistryQueryError.self) {
-            try await query.updateTaskDirective(id: "PERF-0", wave: "product", text: "denied", cwd: "/src/loopflow")
+            try await query.updateTaskDirective(id: "PERF-0", text: "denied", cwd: "/src/loopflow")
         }
     }
 }

@@ -17,7 +17,7 @@ pub(crate) struct PlanningExport {
     pub task_state: Option<String>,
     pub through: i64,
     pub input: Value,
-    pub initiative: String,
+    pub initiative: Option<String>,
     pub link_id: String,
 }
 
@@ -37,8 +37,7 @@ impl SqliteStore {
             "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
             JOIN project_transitions c ON c.successor_id=p.id AND c.wave_id=p.wave_id
             WHERE w.repo=?1 AND p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL
-            UNION ALL SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-            JOIN waves w ON w.id=p.wave_id JOIN task_creation_intents c ON c.task_id=t.id
+            UNION ALL SELECT 'task',t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id JOIN task_creation_intents c ON c.task_id=t.id
             WHERE w.repo=?1 AND t.external_issue_id IS NULL
             AND (t.planning_deleted_at IS NULL OR c.export_attempted=1)",
         )?;
@@ -76,7 +75,7 @@ impl SqliteStore {
         &self,
         owner: PlanningChanges<'_>,
         team: &str,
-        initiative: &str,
+        initiative: Option<&str>,
     ) -> StoreResult<PlanningExport> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -97,12 +96,14 @@ impl SqliteStore {
             PlanningChanges::Task(id) => {
                 let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
                 let external: Option<String> = tx.query_row(
-                    "SELECT p.external_project_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+                    "SELECT p.external_project_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
                     [id.as_str()], |row| row.get(0),
                 )?;
-                let external = external.ok_or_else(|| {
-                    StoreError::InvalidData("Task export awaits its Project mapping".into())
-                })?;
+                if task.project_id.is_some() && external.is_none() {
+                    return Err(StoreError::InvalidData(
+                        "Task export awaits its Project mapping".into(),
+                    ));
+                }
                 let input = json!({"id":uuid,"teamId":team,"projectId":external,"title":task.title,
                     "description":task.description,"assigneeId":task.assignee,"dueDate":task.due_date});
                 (task_creation_baseline(&task), task.state.clone(), input)
@@ -111,14 +112,13 @@ impl SqliteStore {
                 let project = super::children::project_in(&tx, id)?;
                 let description = &project.description;
                 let input = json!({"id":uuid,"teamIds":[team],"name":project.name,"description":project.summary,
-                    "content":format!("{}\n{}", description, crate::linear::project_document::render_project_content(&project.workflow, &project.krs, &project.metric_targets)),"useDefaultTemplate":false});
+                    "content":format!("{}\n{}", description, crate::linear::project_document::render_project_content(&project.krs, &project.metric_targets)),"useDefaultTemplate":false});
                 (
                     vec![
                         WorkValue::ProjectName(Some(project.name)),
                         WorkValue::ProjectSummary(project.summary),
                         WorkValue::ProjectDescription(Some(project.description)),
                         WorkValue::ProjectStatus(project.status),
-                        WorkValue::Workflow(project.workflow),
                         WorkValue::Krs(project.krs),
                         WorkValue::MetricTargets(project.metric_targets),
                     ],
@@ -138,7 +138,7 @@ impl SqliteStore {
             task_state,
             through,
             input,
-            initiative: initiative.into(),
+            initiative: initiative.map(str::to_owned),
             link_id: uuid::Uuid::new_v4().to_string(),
         };
         tx.execute(
@@ -315,13 +315,13 @@ pub(super) fn retain_filing_export_in(
             WorkValue::TaskTitle(Some(intent.title.clone())),
             WorkValue::TaskDescription(Some(intent.notes.clone())),
             WorkValue::TaskDueDate(intent.due.clone()),
-            WorkValue::TaskProject(project.unwrap_or_else(|| intent.project_id.clone())),
+            WorkValue::TaskProject(Some(project.unwrap_or_else(|| intent.project_id.clone()))),
         ],
         task_state: None,
         through: 0,
         input: json!({"id":intent.issue_id,"teamId":intent.team_id,"projectId":intent.project_id,
             "stateId":intent.state_id,"title":intent.title,"description":intent.notes,"dueDate":intent.due}),
-        initiative: String::new(),
+        initiative: None,
         link_id: intent.relation_id.clone(),
     };
     conn.execute(
@@ -341,7 +341,7 @@ fn task_creation_baseline(task: &crate::work::task::Task) -> Vec<WorkValue> {
         WorkValue::TaskDescription(Some(task.description.clone())),
         WorkValue::TaskAssignee(task.assignee.clone()),
         WorkValue::TaskDueDate(task.due_date.clone()),
-        WorkValue::TaskProject(task.project_id.to_string()),
+        WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
     ]
 }
 
@@ -419,7 +419,7 @@ mod tests {
             .contains(&WorkValue::TaskTitle(Some("Attempted title".into()))));
         assert!(export
             .baseline
-            .contains(&WorkValue::TaskProject("project-proof".into())));
+            .contains(&WorkValue::TaskProject(Some("project-proof".into()))));
         assert_eq!(export.task_state, None); // A state UUID does not prove a semantic state.
         assert_eq!(export.link_id, "historical-relation");
         assert!(attempted);
@@ -523,7 +523,7 @@ mod tests {
                 if !project {
                     assert!(export
                         .baseline
-                        .contains(&WorkValue::TaskProject("project-proof".into())));
+                        .contains(&WorkValue::TaskProject(Some("project-proof".into()))));
                     assert_eq!(export.task_state.as_deref(), Some("unstarted"));
                 }
                 conn.execute(

@@ -241,7 +241,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
     assert!(customized.status.success());
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let project = store
+    store
         .ensure_wave_project(
             repo.path().canonicalize().unwrap().to_str().unwrap(),
             "proof",
@@ -257,9 +257,8 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         "wave",
         "workflow",
         "set",
-        "--project",
-        project.id.as_str(),
         "feature",
+        "proof",
         "--file",
         definition.to_str().unwrap(),
     ]);
@@ -275,9 +274,8 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         "wave",
         "workflow",
         "set",
-        "--project",
-        project.id.as_str(),
         "feature",
+        "proof",
         "--file",
         definition.to_str().unwrap()
     ])
@@ -295,13 +293,7 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
 #[test]
 fn showing_one_definition_does_not_require_catalog_enumeration() {
     let repo = tempfile::tempdir().unwrap();
-    let run = |name: &str| {
-        Command::new(env!("CARGO_BIN_EXE_lf"))
-            .current_dir(repo.path())
-            .args(["flow", "show", name, "--json"])
-            .output()
-            .unwrap()
-    };
+    let run = |name: &str| command(repo.path(), &["flow", "show", name, "--json"]);
     std::fs::create_dir(repo.path().join(".lf")).unwrap();
     std::fs::write(repo.path().join(".lf/flows"), "not a directory").unwrap();
     let shown = run("pursue");

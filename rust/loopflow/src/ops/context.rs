@@ -243,7 +243,19 @@ async fn read_context(
         } else {
             source
         };
-        report.wave = ContextFact::bound(selected.wave.id(), provenance);
+        report.wave = selected
+            .wave
+            .as_ref()
+            .map(|wave| ContextFact::bound(wave.id(), provenance))
+            .unwrap_or(ContextFact::Unbound);
+        let selected_repo = match &selected.task {
+            Some(task) => Some(
+                crate::ops::task::repository_for_task(store, task)?
+                    .display()
+                    .to_string(),
+            ),
+            None => selected.wave.as_ref().map(|wave| wave.repo().to_owned()),
+        };
         if let Some(task) = selected.task {
             report.task = ContextFact::bound(&task.id, provenance);
             report.planning_observed_at = task.pm_snapshot_synced_at;
@@ -261,7 +273,11 @@ async fn read_context(
                 );
             }
         } else if work.wave.is_some() {
-            let repo = Path::new(selected.wave.repo());
+            let repo = Path::new(
+                selected_repo
+                    .as_deref()
+                    .expect("selected Wave has a repository"),
+            );
             if !crate::repository::CanonicalRepo::discover(repo)
                 .is_ok_and(|repo| repo.contains(&directory))
             {
@@ -269,7 +285,7 @@ async fn read_context(
                 source = "wave_repository";
             }
         }
-        Some(selected.wave.repo().to_string())
+        selected_repo
     } else {
         crate::repository::CanonicalRepo::discover(&directory)
             .ok()

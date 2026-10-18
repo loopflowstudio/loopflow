@@ -73,6 +73,17 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
+`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_flow`
+starts a fixture provider, observes a controlled command failure, switches the
+installed CLI, and retries the same command in the same provider and checkout.
+Saved hooks and later Flow children also use the replacement. The proof preserves
+Session history, pending steers and caller attribution, and checks stale inherited
+`LF_BIN` selections through the real installation gate.
+The initial CLI is a failing script and the replacement is the source build;
+this does not prove released-version migration or configured native-provider
+behavior. The Flow starts after the switch, so it does not prove survival of an
+already-running Flow.
+
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
@@ -115,6 +126,10 @@ credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
+Run this check when changing transport ownership or process journaling: every
+added CLI process pays connection and schema setup costs, including at exit.
+Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
+to preserve completion and interruption receipts after database contention.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -798,6 +813,9 @@ Run these through the same external-network denial wrapper as other CLI fixtures
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
+Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
+`LF_BIN`, even when they never execute the declared hook. When changing executable
+selection, run these fixtures with installed `lf` directories removed from PATH.
 
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;
@@ -1123,6 +1141,8 @@ local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
 setting, so reconnect executes only on Linux. The Rust harness still compiles on
 macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+Include its Python command calls when renaming Task controls; Rust CLI parsing
+tests alone cannot catch stale commands in the Linux-only fixture.
 Include this fixture when changing Work storage or receipt field names: its SQL
 must read canonical Task fields, not retired provider JSON. To prove pending saves
 across a closed connection, make the peer unavailable during the save; short CLI
@@ -1446,6 +1466,13 @@ Headless shutdown checks run on Linux as well as macOS: fast provider exit must
 settle its owned lifeline watchdog without mistaking it for foreign work. Include
 `launch_nonzero_exit`, bare/default launch, mixed-provider Flow and headless resume;
 Session interactivity must not select an individual launch’s process-group policy.
+Retained terminal changes also run Linux Clippy, `transport_tests`,
+`interactive_flow_keeps_input_and_advances_only_after_each_provider_exits`, and
+the disposable installation proof `declared_agent_can_start_another_tasks_flow`.
+Assert that attachment returns after execution exits, as well as checking its
+output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
+Process ancestry assertions follow the recorded chain through transport owners
+rather than assuming a fixed number of launch processes.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

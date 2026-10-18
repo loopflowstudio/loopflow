@@ -16,7 +16,7 @@ SINCE = UNTIL - 14 * 86400
 
 
 def _policy() -> dict:
-    return json.loads((ROOT / "performance/budgets.json").read_text())
+    return json.loads((ROOT / "scripts/performance-budgets.json").read_text())
 
 
 def _connection(repo: Path, database: str = ":memory:") -> sqlite3.Connection:
@@ -270,13 +270,15 @@ def test_recorded_repair_breaches_even_when_other_coverage_is_missing(tmp_path: 
     assert (row["eligible"], row["measured"], row["p50"], row["verdict"]) == (2, 1, 1, "fail")
 
 
-@pytest.mark.parametrize("missing", [None, "loopflow.db", "runs.json", "performance/budgets.json"])
+@pytest.mark.parametrize(
+    "missing", [None, "loopflow.db", "runs.json", "scripts/performance-budgets.json"]
+)
 def test_generator_runs_with_current_tables_and_current_run_projection(
     tmp_path: Path, capsys, missing: str | None
 ) -> None:
-    policy_dir = tmp_path / "performance"
+    policy_dir = tmp_path / "scripts"
     policy_dir.mkdir()
-    (policy_dir / "budgets.json").write_text(json.dumps(_policy()))
+    (policy_dir / "performance-budgets.json").write_text(json.dumps(_policy()))
     database = tmp_path / "loopflow.db"
     connection = _connection(tmp_path, str(database))
     now = int(datetime.now(timezone.utc).timestamp())

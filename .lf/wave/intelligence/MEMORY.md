@@ -14,14 +14,12 @@ capable gate/CI, judgment to demo/review. Scratch keeps one command/result line.
 Historical measurements below describe their original scope; they do not impose
 new verification obligations on each pass. Desktop's default Swift checks build
 the app and inspect production views without launching windows; native window
-and terminal diagnostics are opt-in. The September 30 baseline and repeatable
-collector live in `performance/check-cost.md`.
+and terminal diagnostics are opt-in. `scripts/check_cost.py` collects check costs.
 
 ## Launch context ablation (2026-10-01)
 
 Jack Heart requested a study of which launch sources change outcomes (LOO-349).
-Findings, method and limits live in `performance/context-ablation.md`; the
-collector is `scripts/context_ablation.py`.
+The collector is `scripts/context_ablation.py`; the historical findings follow.
 
 - Verdicts from a 31-replay pilot: keep Wave memory at 16,000 tokens, keep the
   Task's own scratch notes, trim older scratch (scratch budget now 12,000),
@@ -48,8 +46,7 @@ collector is `scripts/context_ablation.py`.
 Jack Heart requested weekly context cost and turn latency (LOO-348). `lf usage
 --weekly` reads Session history from the store in seven-day weeks from
 2026-09-30 and publishes the latest complete week to the four
-`metrics/context-*.md` contracts; `telemetry-daily` runs it. Baselines and the
-KR/target plan live in `performance/context-cost.md`. The branch could not read
+`metrics/context-*.md` contracts; `telemetry-daily` runs it. The branch could not read
 Jack's Home: installed 0.12.28 predates `session_events`, so the first real
 reading and the chapter targets wait on a release carrying it. The hand
 baseline's silent hours cover 1,349 records, not one week; compare the report's
@@ -61,9 +58,8 @@ Jack Heart requested re-evaluating prospective usage attribution (LOO-336).
 `lf usage --binds` reads Session history and shows each bound Session's usage
 before, during and after its bind, with Task and Wave totals under both rules.
 The 2026-10-01 reading is empty: installed 0.12.28 has neither `lf session bind`
-nor Session tables, so no bind exists to measure. Prospective stays; the
-recommendation and the reports post-hoc would move are in
-`performance/bind-attribution.md`. The choice is Jack's once real binds appear.
+nor Session tables, so no bind exists to measure. Prospective stays;
+the choice is Jack's once real binds appear.
 
 ## Attribution and feedback evidence (curated 2026-09-25)
 
@@ -159,8 +155,7 @@ branch placement, live acceptance, or a prompting-outcome KR.
 
 ## Current evidence boundary (2026-09-23)
 
-The [accepted chapter](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
-requires exact authored/submitted context, causal identities, an honest attempted-
+The accepted chapter requires exact authored/submitted context, causal identities, an honest attempted-
 operation population, and usable reconstruction against long-lived records.
 Intelligence owns evidence; Infrastructure owns execution repair; Product judges
 external user value. The broad replay and monitoring proposals in the summer
@@ -233,9 +228,8 @@ research were not all accepted commitments. Current Task directives govern scope
 
 ## Lessons from the retired SQLite ledger
 
-The [pre-chapter memory](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/intelligence/MEMORY.md)
-retains exact migration, schema, dashboard and historical code-map details.
-Do not restore those paths to satisfy a present evidence gap.
+Do not restore retired migration, schema, dashboard or code-map paths to satisfy
+a present evidence gap. Git retains the pre-chapter memory.
 
 - One identity cannot stand for multiple processes: 134 old run ids carried
   several commands, mixing labels and cost. Terminal evidence must describe what

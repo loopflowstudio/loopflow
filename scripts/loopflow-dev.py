@@ -16,7 +16,6 @@ Commands:
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
     logs            Tail the app logs
-    agent-image     Build the Docker agent image
 
     screenshots     Generate app screenshots
 
@@ -452,25 +451,6 @@ def cmd_logs() -> int:
     return 1
 
 
-def _ensure_agent_image() -> int:
-    """Build the agent image if it doesn't exist."""
-    result = run_capture(["docker", "image", "inspect", "loopflow/agent:latest"])
-    if result.returncode == 0:
-        print("Agent image exists (loopflow/agent:latest)")
-        return 0
-    return cmd_agent_image()
-
-
-def cmd_agent_image() -> int:
-    """Build the Docker agent image."""
-    print("Building loopflow/agent:latest...")
-    return run(
-        ["docker", "build", "-t", "loopflow/agent:latest", "docker/agent"],
-        cwd=REPO_ROOT,
-        check=False,
-    ).returncode
-
-
 def _find_stable_signing_identity() -> str | None:
     """Pick a stable codesigning identity already in the keychain.
 
@@ -731,7 +711,6 @@ COMMANDS = {
         "Build validation-only control tools into an app bundle",
     ),
     "prepare-control-tools": (cmd_prepare_control_tools, "Prepare validation-only control tools"),
-    "agent-image": (cmd_agent_image, "Build the Docker agent image"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
 }
 

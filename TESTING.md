@@ -176,10 +176,6 @@ with missing context evidence.
 OpenCode context-hook changes also run
 `node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` for refreshed
 system context after compaction, preserved user messages and child-session isolation.
-The native OpenCode 2 probe in `docs/reviews/opencode-2/loopflow_turns.py` accepts
-`--routing-and-failure` for JSON Flow routing and explicit input after model failure
-or provider death, and `--resize` for editable Unicode draft preservation;
-run it through `scripts/test_network.py` with the built candidate as its first argument.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when
@@ -203,7 +199,7 @@ lf telemetry-daily                                     # maintainer report
 ```
 
 The opt-in desktop command exercises the native outline and retained Task panes.
-Use it for relevant UI changes; see [performance measurements](performance/README.md)
+Use it for relevant UI changes; see [performance measurements](scripts/benchmarks/desktop-performance/README.md)
 for full sampling, comparison and the explicit capture-versus-presentation boundary.
 
 Escalate from a focused behavior to affected suites when crossing a component
@@ -301,16 +297,6 @@ Fixtures still create their own disposable Homes. Source and materialized schema
 frontiers stay separate; a version/schema mismatch is invalid verification
 evidence, never permission to alter an installed database.
 
-October 13 matched local-planning/startup runs, including preparation, improved
-from 113.05s to 79.72s median (29.5%, three pairs). The isolated verification root
-retained 4.49 GiB in addition to source/control output. Two further fixed-input
-pairs, including a small Rust edit, improved edit/test median from 106.34s to
-70.02s (34.2%). Fresh prepared targets used 3.39 GiB versus fallback's 4.47 GiB;
-existing warm targets retain older variants until eligible cleanup. Cold totals
-favored preparation but varied widely. Unchanged Swift/control warm builds took
-0.36s/0.23s median; no app speedup is claimed. See the
-[measurements and limits](docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
-
 Runner/materializer changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.
 
@@ -331,7 +317,7 @@ uv run python scripts/resource_envelope.py --recover
 
 The resource preflight names the owner and budget for every worktree build,
 gate-artifact root, the Machine-local Session artifact store, uv cache, Cargo cache, and
-free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
+free disk. `scripts/performance-budgets.json` sets a 64 GiB cleanup target, a 32 GiB
 emergency disk reserve, and four
 low-priority verification workers. Total build size is measured, not capped.
 Individual root thresholds are cleanup signals, not gates: an oversized sibling names its
@@ -436,7 +422,10 @@ task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.
 
 “Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
-to the exact PR. See [metric definitions and coverage limits](performance/README.md).
+to the exact PR. It is a lower bound on implementation time: unrecorded or
+standalone work is outside that cohort. Compare equivalent cohorts before
+attributing changes to an optimization. `scripts/performance-budgets.json`
+owns thresholds; complete samples without a threshold are `UNBUDGETED`.
 
 Desktop's `swift` suite builds the app through the test-target dependency and
 runs model and production-view tests through `scripts/test_desktop.sh`, which

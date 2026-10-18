@@ -1127,6 +1127,8 @@ local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
 setting, so reconnect executes only on Linux. The Rust harness still compiles on
 macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+Include its Python command calls when renaming Task controls; Rust CLI parsing
+tests alone cannot catch stale commands in the Linux-only fixture.
 Include this fixture when changing Work storage or receipt field names: its SQL
 must read canonical Task fields, not retired provider JSON. To prove pending saves
 across a closed connection, make the peer unavailable during the save; short CLI

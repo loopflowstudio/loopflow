@@ -274,6 +274,16 @@ changes authored context only and reuses the preceding focused results.
 
 ## Remaining implementation, verification and transport
 
+October 18 native demo attempt: [desktop-dashboard-demo.md](desktop-dashboard-demo.md)
+records a failure before app launch. The supported populated clone first failed
+with SQLite temporary-path error 6410, then a retry with clone-local temp paths
+fell below the documented disk reserve while preparing its database/WAL. The
+incomplete clone was disposed. No native behavior or new product acceptance was
+established. Before repeating the walkthrough, repair/budget that preview path
+and resolve candidate CLI/native targeting: live control currently addresses the
+installed bundle, not the separate preview. These are engineering recommendations
+from the failed demonstration, not agreed UX changes or a new execution request.
+
 The October 18 composition correction is implemented. Saved and ad hoc live query
 links use Dashboard presentation. Ordinary repository/Wave/Task navigation selects
 one destination, including Command-click. Removed the independent outer-split,

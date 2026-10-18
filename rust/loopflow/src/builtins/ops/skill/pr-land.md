@@ -25,11 +25,13 @@ another landing watcher.
 
 Bare land and `lf arm` return after recording intent. `lf pr reconcile` checks
 recorded landings once; `lf ci watch` repairs actionable CI while installed and
-running. `--wait-and-fix` observes and repairs its own PR every 15 seconds for at most
-30 minutes, including with Desktop closed. It shares the incident reservation
-with the watcher, so an unchanged incident receives one repair. Each check
-releases the landing lock. Timeout leaves intent intact and returns held;
-interruption returns stopped. Neither reports merge.
+running. `--wait-and-fix` observes and repairs its own PR every 15 seconds until
+verified merge, closure, a concrete blocker or interruption, including with
+Desktop closed. It shares the incident reservation with the watcher, so an
+unchanged incident receives one repair. Each check
+releases the landing lock. Elapsed time never stops waiting or triggers a rerun.
+Interruption retains intent and returns stopped; a concrete blocker returns held.
+Neither reports merge.
 A successful handoff proves neither merge nor Task completion.
 
 For an associated Task, verified merge leaves an open Task available for optional follow-up work. Register

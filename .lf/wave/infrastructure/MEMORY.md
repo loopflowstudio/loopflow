@@ -1,5 +1,24 @@
 # infrastructure wave memory
 
+## Waited landing (LOO-503, 2026-10-17)
+
+Jack Heart requires no elapsed-time termination or synthetic reruns in
+wait-and-fix supervision/repair. Source removes the outer, operation, admission
+and check-page cutoffs plus pending-CI timeout policy. Preserve real provider
+failures, explicit cancellation, exact-head intent and incident reservations.
+A repair can expose its new head before exiting; landing-wide worker liveness
+prevents duplicate admission and a false checkout-busy exit.
+
+Required failures outrank pending required checks; optional failures alone do
+not override a pending required aggregate. LOO-415's later failure snapshot
+cannot establish what was observable when its waiter exited.
+One paused-clock waiter now proves long-pending → repair → merge → requested
+Task completion with provider doubles. CLI/Flow fixtures separately publish a
+real Git head, retain review and complete at `end` before any status command.
+Merge cannot invent completion intent. Release's entry-point lesson still applies:
+configured GitHub delivery and installed upgrade remain unproved. Native repair
+startup also waits without a cutoff; viewer and release publication policies stay separate.
+
 ## Native terminal diagnostics (LOO-501, 2026-10-17)
 
 Jack Heart authorized repair/delivery preserving input, diagnostics and native

@@ -96,26 +96,6 @@ pub struct CiObservation {
     pub observed_at: OffsetDateTime,
 }
 
-impl CiObservation {
-    /// The current failing required checks by name, sorted — the content half of
-    /// a [`CiIncident`]'s identity. Empty unless `state` is `Failing`.
-    pub fn failure_set(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .failing_checks
-            .iter()
-            .map(|check| check.name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-
-    /// Failed required checks are actionable; repository job names confer no exemption.
-    pub fn repair_legal(&self) -> bool {
-        self.state == CiState::Failing
-    }
-}
-
 /// One failed CI head carried forward after the PR's current observation moves
 /// on. This is evidence about the recovery loop, never a wake queue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1008,65 +988,6 @@ mod tests {
                 .merge_checks_passed()
         );
         assert!(!open_pr("current", None).merge_checks_passed());
-    }
-
-    fn failing(head: &str, checks: &[&str]) -> super::CiObservation {
-        super::CiObservation {
-            head_sha: head.to_string(),
-            state: super::CiState::Failing,
-            failing_checks: checks
-                .iter()
-                .map(|name| super::CiCheck {
-                    name: name.to_string(),
-                    url: None,
-                })
-                .collect(),
-            observed_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    /// The observation answers whether this head is repairable now. Admission is
-    /// keyed separately by the landing generation and incident identity.
-    #[test]
-    fn ci_repair_legality_follows_only_the_current_reading() {
-        let obs = failing("h1", &["build", "lint"]);
-        assert!(obs.repair_legal());
-
-        // The failing set is order-independent and deduplicated: it is the content
-        // half of the incident identity, so two readings of one failure must hash
-        // the same however GitHub ordered them.
-        assert_eq!(
-            obs.failure_set(),
-            vec!["build".to_string(), "lint".to_string()]
-        );
-        assert_eq!(
-            failing("h1", &["lint", "build"]).failure_set(),
-            obs.failure_set()
-        );
-        assert_eq!(
-            failing("h1", &["build", "build"]).failure_set(),
-            vec!["build".to_string()]
-        );
-
-        // A passing or pending reading is never legal to wake on.
-        let mut green = obs.clone();
-        green.state = super::CiState::Passing;
-        assert!(!green.repair_legal());
-        let mut pending = obs.clone();
-        pending.state = super::CiState::Pending;
-        assert!(!pending.repair_legal());
-    }
-
-    #[test]
-    fn repository_check_names_do_not_suppress_required_failures() {
-        for checks in [vec!["scratch-clear"], vec!["rust-test"], vec![]] {
-            let mut observation = failing("h1", &checks);
-            assert!(observation.repair_legal());
-            observation.state = super::CiState::Passing;
-            assert!(!observation.repair_legal());
-            observation.state = super::CiState::Pending;
-            assert!(!observation.repair_legal());
-        }
     }
 
     #[test]

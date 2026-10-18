@@ -4477,6 +4477,8 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
     use crate::linear::{LinearIssueId, LinearProjectId};
+    use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingObservation};
+    use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
     use crate::test_linear_input::SeedLinear;
     use crate::work::project::{Project, ProjectId};
@@ -4487,6 +4489,9 @@ mod tests {
     use crate::work::wave::Wave;
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     struct TaskFixture {
         _database: tempfile::TempDir,
@@ -5720,6 +5725,254 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Machine is unknown"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn waited_landing_survives_pending_and_repair_then_completes_requested_task() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let restore = EnvRestore::capture(&["PATH"]);
+        let repository = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("LOO-503", repository.path().canonicalize().unwrap()).await;
+        ledger.set_db_path(fixture.database_path.clone());
+        let store = &fixture.store;
+        let task = &fixture.task;
+        repository.create_branch(&task.branch);
+        assert!(std::process::Command::new("git")
+            .args([
+                "config",
+                &format!("url.{}.insteadOf", repository.bare_path().display()),
+                "https://github.com/loopflowstudio/loopflow.git",
+            ])
+            .current_dir(repository.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .args([
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/loopflowstudio/loopflow.git"
+            ])
+            .current_dir(repository.path())
+            .status()
+            .unwrap()
+            .success());
+
+        // Task settlement independently reads GitHub. No test writes a merged
+        // PR or completed Task into the database.
+        let github = ledger.home().join("github.json");
+        std::fs::write(&github, "{}").unwrap();
+        let gh = ledger.home().join("gh");
+        std::fs::write(
+            &gh,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\ncat '{}'\n",
+                github.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var(
+            "PATH",
+            format!(
+                "{}:{}",
+                ledger.home().display(),
+                std::env::var("PATH").unwrap()
+            ),
+        );
+
+        let now = time::OffsetDateTime::now_utc();
+        let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            presentation: Some(PrPresentation {
+                title: "Wait through repair".into(),
+                body: "Complete only after verified delivery.".into(),
+                head_sha: "original".into(),
+            }),
+            github: Some(GithubPr {
+                number: 503,
+                url: "https://github.com/loopflowstudio/loopflow/pull/503".into(),
+                head_sha: Some("original".into()),
+            }),
+            merge: Some(PrMergeRequest {
+                mode: PrMergeMode::Auto,
+                requested_at: now,
+                head_sha: "original".into(),
+            }),
+        });
+        store.update_task_pr(&pr).await.unwrap();
+        store
+            .sqlite
+            .request_task_completion(&task.id, Some("Accepted delivery"))
+            .unwrap();
+        let landing = PrLanding::new(
+            NewPrLanding {
+                repo: "loopflowstudio/loopflow".into(),
+                pr_number: 503,
+                worktree: task.worktree.clone().unwrap(),
+                branch: task.branch.clone(),
+                task_id: Some(task.id.clone()),
+                requested_head_sha: "original".into(),
+            },
+            now,
+        )
+        .unwrap();
+        let landing = store.start_or_join_pr_landing(&landing).await.unwrap();
+
+        let phase = Arc::new(AtomicUsize::new(0));
+        let (observed, mut observations) = tokio::sync::mpsc::unbounded_channel();
+        let observe: crate::ops::pr_landing::ObservePr = {
+            let phase = phase.clone();
+            Arc::new(move |_| {
+                let phase = phase.load(Ordering::SeqCst);
+                observed.send(phase).unwrap();
+                Ok(match phase {
+                    0 => LandingObservation::Pending {
+                        head_sha: "original".into(),
+                    },
+                    1 => LandingObservation::Failing {
+                        head_sha: "original".into(),
+                        failing_checks: vec![crate::work::task::CiCheck {
+                            name: "rust".into(),
+                            url: None,
+                        }],
+                    },
+                    2 => LandingObservation::Pending {
+                        head_sha: "repaired".into(),
+                    },
+                    _ => LandingObservation::Merged {
+                        head_sha: "repaired".into(),
+                        merge_commit: "merge".into(),
+                    },
+                })
+            })
+        };
+        let repairs = Arc::new(AtomicUsize::new(0));
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let repair: crate::ops::pr_landing::RepairCi = {
+            let started = Mutex::new(Some(started));
+            let held = Mutex::new(held);
+            let repairs = repairs.clone();
+            let store = store.clone();
+            let phase = phase.clone();
+            Arc::new(move |landing, _| {
+                repairs.fetch_add(1, Ordering::SeqCst);
+                started.lock().unwrap().take().unwrap().send(()).unwrap();
+                held.lock().unwrap().recv().map_err(super::task_error)?;
+                // Model the repair provider's publication through the same
+                // persisted head/request boundary used by arm.
+                let mut pr = store
+                    .sqlite
+                    .active_task_pr(landing.task_id.as_ref().unwrap())
+                    .unwrap()
+                    .unwrap();
+                let publication = pr.publication.as_mut().unwrap();
+                publication.presentation.as_mut().unwrap().head_sha = "repaired".into();
+                publication.github.as_mut().unwrap().head_sha = Some("repaired".into());
+                publication.merge.as_mut().unwrap().head_sha = "repaired".into();
+                store.sqlite.update_task_pr(&pr).unwrap();
+                let mut requested = landing.clone();
+                requested.requested_head_sha = "repaired".into();
+                store.sqlite.start_or_join_pr_landing(&requested).unwrap();
+                phase.store(2, Ordering::SeqCst);
+                Ok(())
+            })
+        };
+        let mut waiter = tokio::spawn({
+            let store = store.clone();
+            let id = landing.id.clone();
+            let observe = observe.clone();
+            let repair = repair.clone();
+            async move { wait_with_io(&store, &id, observe, repair).await }
+        });
+
+        assert_eq!(
+            tokio::select! {
+                observation = observations.recv() => observation,
+                result = &mut waiter => panic!("waiter stopped before pending observation: {result:?}"),
+            },
+            Some(0)
+        );
+        tokio::time::advance(Duration::from_secs(24 * 60 * 60)).await;
+        assert_eq!(
+            tokio::select! {
+                observation = observations.recv() => observation,
+                result = &mut waiter => panic!("waiter stopped during pending CI: {result:?}"),
+            },
+            Some(0)
+        );
+        assert!(!waiter.is_finished());
+        assert_eq!(repairs.load(Ordering::SeqCst), 0);
+        assert!(store
+            .ci_incidents_since(time::OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_ne!(store.task_state(&task.id).await.unwrap(), TaskState::Done);
+
+        phase.store(1, Ordering::SeqCst);
+        tokio::select! {
+            result = running => result.unwrap(),
+            result = &mut waiter => panic!("waiter stopped before repair: {result:?}"),
+        }
+        tokio::time::advance(Duration::from_secs(24 * 60 * 60)).await;
+        assert!(!waiter.is_finished());
+        let competing = reconcile_pr_landing(store.clone(), landing.clone(), observe, Some(repair))
+            .await
+            .unwrap();
+        assert_eq!(
+            competing, landing,
+            "the competing observer cannot claim the landing"
+        );
+        assert_eq!(
+            store
+                .get_pr_landing(&landing.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            PrLandingState::Repairing
+        );
+        assert_eq!(repairs.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        loop {
+            let observation = tokio::select! {
+                observation = observations.recv() => observation,
+                result = &mut waiter => panic!("waiter stopped before observing publication: {result:?}"),
+            };
+            match observation {
+                Some(2) => break,
+                Some(_) => {}
+                None => panic!("waiter stopped before observing the repaired head"),
+            }
+        }
+        assert!(!waiter.is_finished());
+        assert_ne!(store.task_state(&task.id).await.unwrap(), TaskState::Done);
+        let pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        assert_eq!(pr.head_sha(), Some("repaired"));
+        assert_eq!(pr.merge_request().unwrap().head_sha, "repaired");
+
+        std::fs::write(&github, r#"{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge","merged_at":"2026-10-17T00:00:00Z","number":503,"html_url":"https://github.com/loopflowstudio/loopflow/pull/503","head":{"sha":"repaired"}}"#).unwrap();
+        phase.store(3, Ordering::SeqCst);
+        waiter.await.unwrap().unwrap();
+        assert_eq!(store.task_state(&task.id).await.unwrap(), TaskState::Done);
+        let saved = store.get_pr_landing(&landing.id).await.unwrap().unwrap();
+        assert_eq!(saved.state, PrLandingState::Merged);
+        assert_eq!(saved.requested_head_sha, "repaired");
+        assert_eq!(saved.observed_head_sha, "repaired");
+        assert_eq!(saved.merge_commit.as_deref(), Some("merge"));
+        let incidents = store
+            .ci_incidents_since(time::OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .unwrap();
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].incident.failure_set, ["rust"]);
+        assert!(incidents[0].incident.merged_at.is_some());
+        assert_eq!(repairs.load(Ordering::SeqCst), 1);
+        drop(restore);
     }
 
     #[tokio::test]

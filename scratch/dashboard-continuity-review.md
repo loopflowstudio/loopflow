@@ -133,6 +133,41 @@ Agent interpretation and action:
   started from the zoomed Task view runs a real provider against disposable lf data.
   Pending Jack's look.
 
+## Jack Heart's release and design notes — October 18, 2026 (later afternoon)
+
+Installed release 0.14.7 (`3429242a3b`), Jack's loopflow window. Jack's statements:
+
+1. “Updating... in top left” — sidebar stuck on Updating….
+2. “no working tests found” — Working Tasks showed 0 (“No working Tasks in this list”).
+3. “the chevron by the repo name is weird, would expect it to be a rop own launcher. ux
+   needs to imply more that its breadcrumbs/search”
+4. On zooming FIX-2 in the candidate (Brief/Changes, “Select a file”, no Session):
+   “it should t be possible to get to a state where theres no session view, i.e. we
+   shouldnt show task workspacdes for unstarted tasks”; “i am tempted to say you cant see
+   unstarted tasks in queries, though its a bit tricky because its similar with completed
+   tasks (may not have sessions left) but you probably DO want to be able to see sessions
+   for recently completed tasks”; “could look at having sessions for unstarted tasks, or
+   auto starting tasks, but i dont like either of those particularly”
+5. “antoher thing i want to flag for review is the idea that queries have two purposes:
+   what shows in teh sidebar and waht shows in the main pane” / “probably need to look
+   more at the sidebar version first?”
+
+Agent findings for 1–2 (diagnosis, not yet fixed): `lf desktop list` reports the window's
+planning reading unavailable — “Workspace reader sent no observation for ten seconds”.
+The installed app had no live `lf monitor work` child. Run directly, the first planning
+frame (`lf monitor work --json`) was still streaming at 60 s: 8.2 MB, one line, 1,233
+Tasks, unfinished, identically for 0.14.7 and this branch. It includes Waves whose
+repositories are deleted test temp dirs (`/var/folders/.../T/.tmp…`), i.e. test fixtures
+leaked into the production registry. So “Updating…” and the empty Working Tasks are one
+failure: the machine-wide planning frame is too large/slow, the reader times out, and
+the sidebar keeps the saved snapshot. Open: why the first frame is machine-wide rather
+than repository-scoped, and where the leaked test Waves came from.
+
+Open design tension (4), not resolved: an unstarted Task opened as a workspace has no
+Session view. Options Jack named and disliked: Sessions for unstarted Tasks; auto-start.
+Jack's leaning: queries exclude unstarted Tasks — but completed Tasks share the
+no-Session property and recently completed ones should stay visible.
+
 ## Review disposition and next action
 
 No design change was agreed with Jack Heart. Retain the current accepted contract;

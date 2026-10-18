@@ -55,7 +55,11 @@ The later operator transfers it with `lf checkout <child> --stack-on <parent>
 From the destination repository, file with `lf task create --wave <owner>` without
 `--run`. Supply the title and complete brief through `--title` and stdin or
 `--notes`; use `lf task edit` for refinements to a confirmed Task.
-Return each actual Task link, repository and owning Wave.
+Return each actual Task as one readable link from
+`lf --task <issue> open --link --format markdown` (`[ID · title](loopflow://…)`),
+with its repository and owning Wave; keep the provider issue link separate.
+Run `lf open '<url>'` only when the person asks to open a Task now, and report
+its receipt; a printed link opens nothing.
 
 If the repository is inaccessible, ownership unresolved, or its Project unavailable,
 leave an explicit unfiled brief in the conversation. Report provider failures

@@ -46,8 +46,8 @@ an already authorized concrete check in a due follow-up's brief (see below).
 | --- | --- |
 | moving | A live Flow process was observed. Leave it alone. A connected conversation or review Session is not a Flow process. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
-| waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
-| waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
+| available | Work the person can take up now: a review, demo, concrete choice or merge click, with its conversation link or PR. Never completed or approved for them. |
+| dependency or capacity | The named Task, PR, running check, account or limit. |
 | paused | The person's instruction to stop, or an explicit hold (`lf task automate <issue> off`) on work nothing else is moving. |
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Flow process. |
 
@@ -70,7 +70,7 @@ and due follow-ups have been checked for selection or authorized execution.
 - **A Flow ends where authored.** A finished Flow or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
   a decision. A Task on a workflow (`execution.work.workflow`) at a node its
-  last edge reached waits on a person there; rerun an edge that stopped or
+  last edge reached is available to the person there; rerun an edge that stopped or
   failed with `lf task run <issue> <flow>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
 - **Retry completion alone.** A durable completion request at end retries with
@@ -85,7 +85,7 @@ and due follow-ups have been checked for selection or authorized execution.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --available --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
-  Headless, required judgment is a waiting disposition.
+  Headless, required judgment leaves the Task available for the person.
 
 Start authorized remaining work without asking. Do not approve reviews,
 arm a merge, cancel or abandon Tasks, or change direction.
@@ -201,9 +201,9 @@ reconstructed starting membership. Do not introduce competing current Projects.
 Reply in this conversation with each started Task once, grouped under these
 headings in this order, omitting an empty group:
 
-1. **Available** — each review, decision or merge, with what to open.
+1. **Available** — each review, demo, choice or merge the person can take up, with its link.
 2. **Moving** — live work left alone, and what this pass acted on with its result.
-3. **Stuck** — waiting on a dependency or capacity, paused, or unknown, with
+3. **Stuck** — a dependency or capacity, paused, or unknown, with
    the named cause or missing evidence.
 
 Then list due follow-ups with their selection or authorized-check disposition,
@@ -215,14 +215,15 @@ this skill does not automatically send the reply to a channel.
 
 When reporting more than one Task, use the status/roadmap reads above and render
 operational rows as
-`[identifier · Task title](provider URL) — status; next action/owner · [PR #n](PR URL)`.
-
-Use this ID-first form in operational lists. In prose, use
-`[Task title · identifier](provider URL)` on first mention; shorten later
+`[identifier · Task title](Work URL) — status; next action/owner · [PR #n](PR URL)`.
+`lf open --task <issue> --link --format markdown` prints that label with its
+Work URL, which opens the Task's conversation through `lf open`; the provider
+issue (`reference.issue_url`) is a separate link when provider navigation is
+the point. Where links may not activate, add the `lf open '<url>'` it prints.
+Use this ID-first form in operational lists; in prose, shorten later
 references when unambiguous.
 
-Fill the link from `task.identifier` and `reference.issue_url`, and the readable
-title from `task.name`. Give the Task's disposition as its status, not
+Take the readable title from `task.name`. Give the Task's disposition as its status, not
 `runtime.status` alone, and take the next owner from `next_move.owner`. An
 owner of `wave` names work this pass acts on, not a handoff: report its result.
 Link the Task's optional `pr` using its recorded GitHub number and URL; omit

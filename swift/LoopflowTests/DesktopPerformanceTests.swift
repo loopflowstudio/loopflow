@@ -228,10 +228,8 @@ struct DesktopPerformanceTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
         let router = WorkLinkRouter()
-        var link = URLComponents()
-        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
-        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo)]
-        router.deliver(try #require(link.url), repository: "fixture-plan")
+        let link = TaskLink(issue: fixture.issue, repo: fixture.repo)
+        router.deliver(.task(link), repository: "fixture-plan")
         let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                        styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -701,10 +699,8 @@ struct DesktopPerformanceTests {
         try #require(document.snapshot != nil)
         document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
         document.editor.setSelectedRange(NSRange(location: 2, length: 3))
-        var link = URLComponents()
-        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
-        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo), URLQueryItem(name: "session", value: fixture.sessionId)]
-        let url = try #require(link.url)
+        let link = TaskLink(issue: fixture.issue, repo: fixture.repo, session: fixture.sessionId)
+        let url = link
         // RepoView owns keepWorkCurrent. A full soak requires its observation stream; starting another reader
         // here would invalidate the very idle measurement this test collects.
         try journal.write(["event": "memory_phase", "phase": "owned_setup_end"])
@@ -1334,12 +1330,7 @@ extension DesktopPerformanceTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
 #endif
-        var components = URLComponents()
-        components.scheme = "loopflow"
-        components.host = "task"
-        components.path = "/" + issue
-        components.queryItems = [URLQueryItem(name: "repo", value: repo)]
-        let url = try #require(components.url)
+        let url = TaskLink(issue: issue, repo: repo)
         for attempt in 0..<samples {
             let reads = SnapshotReads()
             let query = RegistryQuery { args, cwd in
@@ -1375,12 +1366,12 @@ extension DesktopPerformanceTests {
                 var lastState = ""
                 do {
                     if scenario == "cold_workspace" {
-                        router.deliver(url, repository: "fixture-plan")
+                        router.deliver(.task(url), repository: "fixture-plan")
                         window.contentView = NSHostingView(rootView: view)
                         window.makeKeyAndOrderFront(nil)
                     } else {
                         if scenario == "warm_task" { model?.select(nil) }
-                        router.deliver(url, repository: "fixture-plan")
+                        router.deliver(.task(url), repository: "fixture-plan")
                     }
                     // The receiver schedules its async resolution on the main actor.
                     // Do not accept the previous destination before that request starts.

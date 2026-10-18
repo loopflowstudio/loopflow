@@ -26,16 +26,6 @@ struct WorkDestinationTests {
         return model.sessions.value?.first { $0.id == id }
     }
 
-    @Test func taskLinksRetainLiteralTargetsWhenChangingRepositoryLocator() throws {
-        let original = TaskLink(issue: "LOO-427", repo: "/src/a #?&% repo", session: "session+&%", diff: true)
-        let parsed = try TaskLink(url: #require(original.url))
-        #expect(parsed == original)
-        let relocated = TaskLink(issue: parsed.issue, repo: "/peer/other #repo", session: parsed.session, diff: parsed.diff)
-        #expect(try TaskLink(url: #require(relocated.url)) == relocated)
-        #expect(try TaskLink(url: #require(TaskLink(issue: "LOO-427", repo: nil).url))
-            == TaskLink(issue: "LOO-427", repo: nil))
-    }
-
     @Test(arguments: [false, true])
     func taskEntryOpensConversationThenRetainsWorkspace(standalone: Bool) async throws {
         var data = try fixture()
@@ -110,7 +100,7 @@ struct WorkDestinationTests {
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         if explicitSession {
-            await model.openTaskLink(try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id).url))
+            await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id))
         } else {
             await model.openTaskConversation(task.id)
         }
@@ -309,7 +299,7 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: nil, diff: false,
                             machine: remote ? "peer" : nil, repository: remote ? "repository" : nil)
-        await model.openTaskLink(try #require(link.url))
+        await model.openTaskLink(link)
         #expect(model.selection == .task(id: task.id))
         #expect(model.roadmap.value == snapshot)
         #expect(model.navigation.selectedSessionId == nil)
@@ -405,8 +395,7 @@ struct WorkDestinationTests {
         document.editor.string = "unfinished local draft"
         let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id, diff: true,
                             machine: "peer", repository: "repository")
-        #expect(try TaskLink(url: #require(link.url)) == link)
-        await model.openTaskLink(try #require(link.url))
+        await model.openTaskLink(link)
         #expect(model.repoPath == wave.wave.repo)
         #expect(model.roadmap.value == snapshot)
         #expect(local.multiplexer.layout == layout)
@@ -482,7 +471,7 @@ struct WorkDestinationTests {
             await barrier.wait("read")
             return exact
         })
-        let url = try #require(URL(string: "loopflow://task/\(task.task.identifier)"))
+        let url = TaskLink(issue: task.task.identifier, repo: nil)
         let opening = Task { await model.openTaskLink(url) }
         while !(await barrier.contains("read")) { await Task.yield() }
         #expect(model.taskLinkReading.isLoading)
@@ -510,9 +499,8 @@ struct WorkDestinationTests {
         model.select(.task(id: selectedID))
         model.navigation.selectedSessionId = "retained-conversation"
         model.navigation.content = .terminals
-        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
-        await model.openTaskLink(try #require(url.url))
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo)
+        await model.openTaskLink(url)
         #expect(model.selection == .task(id: selectedID))
         #expect(model.navigation.selectedSessionId == "retained-conversation")
         #expect(model.navigation.content == .terminals)
@@ -522,12 +510,12 @@ struct WorkDestinationTests {
         // Reopening what is already open changes nothing, so nothing redraws.
         let invalidations = OSAllocatedUnfairLock(initialState: 0)
         withObservationTracking {
-            _ = (model.repoPath, model.taskLinkURL, model.showsTaskLink,
+            _ = (model.repoPath, model.taskLink, model.showsTaskLink,
                  model.navigation.selectedTaskEvidence?.task, model.navigation.recentDestinations)
         } onChange: {
             invalidations.withLock { $0 += 1 }
         }
-        await model.openTaskLink(try #require(url.url))
+        await model.openTaskLink(url)
         #expect(invalidations.withLock { $0 } == 0)
         #expect(model.navigation.selectedSessionId == "retained-conversation")
     }
@@ -544,12 +532,11 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in
             await reads.next() == 1 ? exact : empty
         }, repoPath: wave.wave.repo)
-        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
-        await model.openTaskLink(try #require(url.url))
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo)
+        await model.openTaskLink(url)
         model.applyFixture(roadmap: .available(removed), waves: .available([]),
                            workActivity: .loading, repos: [])
-        await model.openTaskLink(try #require(url.url))
+        await model.openTaskLink(url)
         #expect(model.showsTaskLink)
         #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
     }
@@ -572,14 +559,13 @@ struct WorkDestinationTests {
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
                            workActivity: .loading, repos: [])
-        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
-        await model.openTaskLink(try #require(url.url))
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
+        await model.openTaskLink(url)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.taskLinkReading.errorMessage == nil)
         // Reopening from retained evidence must preserve the conversation too.
-        await model.openTaskLink(try #require(url.url))
+        await model.openTaskLink(url)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.sessions.value?.map(\.id) == [record.id, other.id])
     }
@@ -604,27 +590,27 @@ struct WorkDestinationTests {
         model.bindWorkspaces(workspaceRegistry, repository: "repo")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let sessionOnly = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
-        await model.openTaskLink(try #require(sessionOnly.url))
+        await model.openTaskLink(sessionOnly)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         // Adding a companion reuses the installed terminal and its pane.
         let link = TaskLink(issue: try #require(task.runtime?.workId), repo: wave.wave.repo, session: record.id, diff: true)
-        await model.openTaskLink(try #require(link.url))
+        await model.openTaskLink(link)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(model.taskOpening?.status != .usable) // placement is not native readiness
         let workspace = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
         let files = workspace.files(issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
-        await model.openTaskLink(try #require(link.url))
+        await model.openTaskLink(link)
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
         #expect(workspace.multiplexer.layout.pane(for: terminal.id) == terminal)
         #expect(workspace.multiplexer.focusedPane.content == .files(taskId: task.id, location: identity))
         #expect(files.selection == "retained-draft.rs")
         #expect(files.showsChanges)
         let failure = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: "missing", diff: true)
-        await model.openTaskLink(try #require(failure.url))
+        await model.openTaskLink(failure)
         #expect(model.taskOpening?.status == .failed)
-        #expect(model.taskOpening?.url == failure.url?.absoluteString)
+        #expect(model.taskOpening?.url == failure.address)
         #expect(model.navigation.selectedSessionId == record.id)
         // Retrying through the chooser uses the same failure receipt as a direct link.
         await model.chooseLinkedTask(wave: wave, task: task)
@@ -662,7 +648,7 @@ struct WorkDestinationTests {
         if outcome != "usable" {
             #expect(model.taskOpening?.reason == (reasons[outcome] ?? "Opening panes were hidden, closed or replaced."))
         }
-        #expect(model.taskOpening?.url == url.absoluteString)
+        #expect(model.taskOpening?.url == url.address)
         #expect(files.selection == "retained-draft.rs")
     }
 
@@ -688,12 +674,12 @@ struct WorkDestinationTests {
         let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
         // New request to the same Session, without its still-reading companion.
         let task = try #require(model.selection.flatMap { model.task(id: $0.id)?.task })
-        let next = try #require(TaskLink(issue: task.task.identifier, repo: model.repoPath, session: record.id).url)
+        let next = TaskLink(issue: task.task.identifier, repo: model.repoPath, session: record.id)
         await model.openTaskLink(next)
         #expect(!workspace.openingConversation)
         await barrier.release("comparison")
         await opening.value
-        #expect(model.taskOpening?.url == next.absoluteString)
+        #expect(model.taskOpening?.url == next.address)
         #expect(model.taskOpening?.status == .opening)
         #expect(workspace.multiplexer.focusedPane == originalPane)
         store.recordPaneLive(record.id)
@@ -721,7 +707,7 @@ struct WorkDestinationTests {
         }
     }
 
-    private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionsWorkspaceRegistry, SessionRecord, URL, RegistryQuery) {
+    private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionsWorkspaceRegistry, SessionRecord, TaskLink, RegistryQuery) {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
@@ -755,7 +741,7 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
         model.bindWorkspaces(registry, repository: "repo")
-        return (model, registry, record, try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true).url), query)
+        return (model, registry, record, TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id, diff: true), query)
     }
 
     @Test(arguments: [false, true]) func delayedPrimarySessionPreparationDoesNotOpenChangesInAnotherTask(conversation: Bool) async throws {
@@ -772,7 +758,7 @@ struct WorkDestinationTests {
             return encoded
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true).url)
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, diff: true)
         let opening = Task {
             if conversation { await model.openTaskConversation(task.id) }
             else { await model.openTaskLink(url) }
@@ -802,22 +788,6 @@ struct WorkDestinationTests {
         }
     }
 
-    @Test func taskLinkParsesOneDecodedIdentifier() throws {
-        let link = try TaskLink(url: #require(URL(string: "loopflow://task/LOO-303?repo=%2Fsrc%2Fspace%20here")))
-        #expect(link.issue == "LOO-303")
-        #expect(link.repo == "/src/space here")
-        let sessionLink = try TaskLink(url: #require(URL(string: "loopflow://task/LOO-303?session=review%201&repo=%2Fsrc")))
-        #expect(sessionLink.session == "review 1")
-        #expect(sessionLink.repo == "/src")
-        for value in ["loopflow://task/A?session=", "loopflow://task/A?session=x&session=y"] {
-            #expect(throws: (any Error).self) { try TaskLink(url: #require(URL(string: value))) }
-        }
-        for value in ["loopflow://task/", "loopflow://task/A/B", "loopflow://task/A%2FB", "loopflow://task/A%0AB", "loopflow://task/A?repo=", "loopflow://task/A?repo=x&repo=y", "loopflow://task/A#node"] {
-            let url = try #require(URL(string: value))
-            #expect(throws: (any Error).self) { try TaskLink(url: url) }
-        }
-    }
-
     @Test func taskLinkOpensExactSessionFromLaterPage() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -836,17 +806,15 @@ struct WorkDestinationTests {
             }
             throw RegistryQueryError("No mutation permitted")
         })
-        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
-        await model.openTaskLink(try #require(url.url))
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)
+        await model.openTaskLink(url)
         #expect(model.navigation.selectedSessionId == record.id)
         #expect(model.navigation.content == .terminals)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(!model.showsTaskLink)
 
         for session in ["missing", unrelated.id] {
-            url.queryItems = [URLQueryItem(name: "session", value: session)]
-            await model.openTaskLink(try #require(url.url))
+            await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: nil, session: session))
             #expect(model.navigation.selectedSessionId == record.id)
             #expect(model.taskLinkReading.errorMessage?.contains(session) == true)
             #expect(model.showsTaskLink)
@@ -868,7 +836,7 @@ struct WorkDestinationTests {
             throw RegistryQueryError("No mutation permitted")
         }
         let destination = WorkModel(query: exactQuery)
-        await destination.openTaskLink(try #require(URL(string: "loopflow://task/\(task.task.identifier)")))
+        await destination.openTaskLink(TaskLink(issue: task.task.identifier, repo: nil))
         #expect(destination.selection == .task(id: task.id))
         #expect(destination.navigation.content == .details)
         #expect(destination.navigation.selectedSessionId == nil)
@@ -919,7 +887,7 @@ struct WorkDestinationTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }, repoPath: wave.wave.repo)
-        await model.openTaskLink(try #require(URL(string: "loopflow://task/\(task.task.identifier)")))
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: nil))
         model.select(.wave(id: wave.wave.id))
         await model.refresh()
         #expect(model.navigation.selectedTaskEvidence == nil)
@@ -1004,7 +972,7 @@ struct WorkDestinationTests {
         let data = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let exact = try oneTask(data, taskId: "issue-available")
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in exact })
-        await model.openTaskLink(try #require(URL(string: "loopflow://task/PRD-52")))
+        await model.openTaskLink(TaskLink(issue: "PRD-52", repo: nil))
         #expect(model.selection == .task(id: "issue-available"))
         #expect(model.paletteRows.contains { $0.id == .flowLog("issue-available") })
     }
@@ -1025,7 +993,7 @@ struct WorkDestinationTests {
             await model.refresh()
             let wave = try #require(model.visibleRoadmaps.first)
             model.select(.wave(id: wave.wave.id))
-            await model.openTaskLink(try #require(URL(string: "loopflow://task/LOO-303")))
+            await model.openTaskLink(TaskLink(issue: "LOO-303", repo: nil))
             #expect(model.selection == .wave(id: wave.wave.id))
             #expect(model.showsTaskLink)
             if response == "transport-error" {
@@ -1053,9 +1021,7 @@ struct WorkDestinationTests {
         result["waves"] = waves
         let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in response })
-        var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
-        await model.openTaskLink(try #require(link.url))
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: scoped ? wave.wave.repo : nil))
         #expect(model.selection == .task(id: task.id))
         #expect(!model.showsTaskLink)
     }
@@ -1207,7 +1173,7 @@ struct WorkDestinationTests {
             throw RegistryQueryError("No Session preparation is required to show a Task page")
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let url = try #require(TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
+        let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo)
         await model.openTaskLink(url)
         let old = try #require(model.linkedTaskPage)
         #expect(model.taskOpening?.status == .opening)
@@ -1246,22 +1212,22 @@ struct WorkDestinationTests {
         let path = repositoryFixturePath()
         let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
         let window = UUID()
-        var received: [TaskLink] = []
+        var received: [LinkedWork] = []
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
             controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
-            do { received.append(try TaskLink(url: url)) } catch { Issue.record(error) }
+            received.append(url)
         }
         for machine in ["local-owner", "peer-owner"] {
-            let link = TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)", diff: true,
-                                machine: machine, repository: "plan")
-            let url = try #require(link.url)
-            _ = try await router.openRepository(path: path, link: url, query: query) { _ in
+            let link = LinkedWork.task(TaskLink(issue: "task-\(machine)", repo: path, session: "session-\(machine)", diff: true,
+                                machine: machine, repository: "plan"))
+            _ = try await router.openRepository(path: path, link: link, query: query) { _ in
                 Issue.record("Execution Machine must not create another repository window")
             }
         }
         while received.count < 2 { await Task.yield() }
-        #expect(received.map(\.machine) == ["local-owner", "peer-owner"])
-        #expect(received.allSatisfy { $0.repository == "plan" && $0.diff })
+        let tasks = received.compactMap { if case .task(let link) = $0 { link } else { nil } }
+        #expect(tasks.map(\.machine) == ["local-owner", "peer-owner"])
+        #expect(tasks.allSatisfy { $0.repository == "plan" && $0.diff })
         #expect(router.inspect().windows.map(\.window) == [window.uuidString])
     }
 
@@ -1386,11 +1352,11 @@ struct WorkDestinationTests {
         let path = repositoryFixturePath()
         let before = RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }
         let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
-        let first = try #require(TaskLink(issue: "FIRST", repo: path).url)
-        let second = try #require(TaskLink(issue: "SECOND", repo: path).url)
+        let first = LinkedWork.task(TaskLink(issue: "FIRST", repo: path))
+        let second = LinkedWork.task(TaskLink(issue: "SECOND", repo: path))
         let scene = try await router.openRepository(path: path, link: first, query: before) { _ in }
-        let deliveredFirst = try #require(TaskLink(issue: "FIRST", repo: scene.path).url)
-        let deliveredSecond = try #require(TaskLink(issue: "SECOND", repo: scene.path).url)
+        let deliveredFirst = LinkedWork.task(TaskLink(issue: "FIRST", repo: scene.path))
+        let deliveredSecond = LinkedWork.task(TaskLink(issue: "SECOND", repo: scene.path))
         let registry = SessionsWorkspaceRegistry(localMachineId: "fixture-machine")
         let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
         let oldKey = WorkWorkspaceKey(repository: "old-plan", kind: .repository, id: "old-plan")
@@ -1409,7 +1375,7 @@ struct WorkDestinationTests {
         let window = UUID()
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No Work reads") })
         model.bindWorkspaces(registry, repository: "old-plan")
-        var received: [URL] = []
+        var received: [LinkedWork] = []
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
             inspect: { repository, incarnation in
                 model.inspectDesktop(repository: repository, window: incarnation, workspaces: registry)
@@ -1553,7 +1519,7 @@ struct WorkDestinationTests {
         let alias = parent.appendingPathComponent(repository.lastPathComponent)
         try #require(RepositoryPath().mainRepository(alias) != nil)
         let window = UUID()
-        var received: [URL] = []
+        var received: [LinkedWork] = []
         let register: (RepositoryWorkspace) -> Void = { scene in
             router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
                 focus: {}, inspect: windowInspection,
@@ -1563,7 +1529,7 @@ struct WorkDestinationTests {
             _ = try await router.openRepository(path: path, link: nil,
                 query: RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }, openWindow: register)
         }
-        let link = try #require(TaskLink(issue: "PENDING", repo: alias.path).url)
+        let link = LinkedWork.task(TaskLink(issue: "PENDING", repo: alias.path))
         let delayed = Task {
             try await router.openRepository(path: alias.path, link: link, query: RegistryQuery { _, _ in
                 await barrier.wait("alias")
@@ -1582,7 +1548,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().windows == rebound)
         try #require(router.inspect().windows.count == 1)
         while received.isEmpty { await Task.yield() }
-        #expect(received == [TaskLink(issue: "PENDING", repo: scene.path).url])
+        #expect(received == [.task(TaskLink(issue: "PENDING", repo: scene.path))])
         #expect(router.inspect().openings.allSatisfy { $0.status == .usable })
     }
 
@@ -1657,14 +1623,14 @@ struct WorkDestinationTests {
 
     @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() async throws {
         let router = WorkLinkRouter()
-        let a = try #require(URL(string: "loopflow://task/A"))
-        let a2 = try #require(URL(string: "loopflow://task/A2"))
-        let b = try #require(URL(string: "loopflow://task/B"))
+        let a = LinkedWork.task(TaskLink(issue: "A", repo: nil))
+        let a2 = LinkedWork.task(TaskLink(issue: "A2", repo: nil))
+        let b = LinkedWork.task(TaskLink(issue: "B", repo: nil))
         #expect(!router.deliver(a, repository: "plan-a"))
         #expect(!router.deliver(b, repository: "plan-b"))
         #expect(!router.deliver(a2, repository: "plan-a"))
-        var first: [URL] = []
-        var second: [URL] = []
+        var first: [LinkedWork] = []
+        var second: [LinkedWork] = []
         router.register(UUID(), repository: "plan-b", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { second.append($0) }
         while second.isEmpty { await Task.yield() }
         #expect(second == [b])
@@ -1682,8 +1648,8 @@ struct WorkDestinationTests {
         #expect(a != RepositoryWorkspace(id: "another-plan", path: a.path))
         let router = WorkLinkRouter()
         var focused: [String] = []
-        var received: [URL] = []
-        let url = try #require(URL(string: "loopflow://task/A"))
+        var received: [LinkedWork] = []
+        let url = LinkedWork.task(TaskLink(issue: "A", repo: nil))
         router.register(UUID(), repository: a.id, focus: { focused.append("retained") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
         router.register(UUID(), repository: "other", focus: { focused.append("other") }, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in
             Issue.record("A repository must never receive another repository's link")
@@ -1699,10 +1665,10 @@ struct WorkDestinationTests {
         let router = WorkLinkRouter()
         let old = UUID(), replacement = UUID()
         router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in }
-        var received: [URL] = []
+        var received: [LinkedWork] = []
         router.register(replacement, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { received.append($0) }
         router.remove(old, repository: "plan")
-        let url = try #require(URL(string: "loopflow://task/A"))
+        let url = LinkedWork.task(TaskLink(issue: "A", repo: nil))
         #expect(router.deliver(url, repository: "plan"))
         while received.isEmpty { await Task.yield() }
         #expect(received == [url])
@@ -1712,13 +1678,13 @@ struct WorkDestinationTests {
 
     @Test func delayedDeliveryKeepsOneQueueAcrossReceiverReplacement() async throws {
         let router = WorkLinkRouter()
-        let first = try #require(URL(string: "loopflow://task/first"))
-        let second = try #require(URL(string: "loopflow://task/second"))
-        let third = try #require(URL(string: "loopflow://task/third"))
-        let other = try #require(URL(string: "loopflow://task/other"))
+        let first = LinkedWork.task(TaskLink(issue: "first", repo: nil))
+        let second = LinkedWork.task(TaskLink(issue: "second", repo: nil))
+        let third = LinkedWork.task(TaskLink(issue: "third", repo: nil))
+        let other = LinkedWork.task(TaskLink(issue: "other", repo: nil))
         let old = UUID(), replacement = UUID()
         let barrier = LinkedDestinationBarrier()
-        var delivered: [URL] = []
+        var delivered: [LinkedWork] = []
         router.register(old, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { link in
             await barrier.wait("first")
             guard !Task.isCancelled else { return }
@@ -1747,10 +1713,10 @@ struct WorkDestinationTests {
 
     @Test func reattachingTheSameReceiverDoesNotLetItsCanceledReadClearTheNewQueue() async throws {
         let router = WorkLinkRouter(), id = UUID()
-        let first = try #require(URL(string: "loopflow://task/first"))
-        let second = try #require(URL(string: "loopflow://task/second"))
+        let first = LinkedWork.task(TaskLink(issue: "first", repo: nil))
+        let second = LinkedWork.task(TaskLink(issue: "second", repo: nil))
         let barrier = LinkedDestinationBarrier()
-        var delivered: [URL] = []
+        var delivered: [LinkedWork] = []
         router.register(id, repository: "plan", focus: {}, inspect: windowInspection, controlPane: { _ in throw RegistryQueryError("No panes in this fixture") }, readText: { _ in throw RegistryQueryError("No panes in this fixture") }) { _ in await barrier.wait("old") }
         router.deliver(first, repository: "plan")
         while !(await barrier.contains("old")) { await Task.yield() }
@@ -1783,7 +1749,7 @@ struct WorkDestinationTests {
             return exact
         }, repoPath: "/origin")
         model.navigation.selectedSessionId = "retained-session"
-        let link = try #require(URL(string: "loopflow://task/\(task.task.identifier)"))
+        let link = TaskLink(issue: task.task.identifier, repo: nil)
         let opening = Task { await model.openTaskLink(link) }
         while !(await barrier.contains("read")) { await Task.yield() }
         opening.cancel()
@@ -1801,14 +1767,14 @@ struct WorkDestinationTests {
         let task = try #require(wave.tasks.items.first)
         let (model, _) = destinationModel(query: RegistryQuery { _, _ in "" }, repoPath: "/origin")
         model.navigation.selectedSessionId = "retained-session"
-        var requests: [(String, URL?)] = []
+        var requests: [(String, LinkedWork?)] = []
         model.openRepository = { requests.append(($0, $1)) }
         model.setRepoPath("/other")
         model.openTaskDestination(wave: wave, task: task)
         #expect(model.repoPath == "/origin")
         #expect(model.navigation.selectedSessionId == "retained-session")
         #expect(requests.map { $0.0 } == ["/other", wave.wave.repo])
-        #expect(try TaskLink(url: #require(requests.last?.1)).issue == task.task.identifier)
+        #expect(requests.last?.1 == .task(TaskLink(issue: task.task.identifier, repo: wave.wave.repo)))
     }
 
     @Test(arguments: [false, true])
@@ -1836,8 +1802,8 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: query, repoPath: wave.wave.repo)
         await model.refresh()
         model.select(.wave(id: wave.wave.id))
-        let firstURL = try #require(URL(string: "loopflow://task/\(first.task.identifier)"))
-        let secondURL = try #require(URL(string: "loopflow://task/\(second.task.identifier)"))
+        let firstURL = TaskLink(issue: first.task.identifier, repo: nil)
+        let secondURL = TaskLink(issue: second.task.identifier, repo: nil)
         let firstRead = Task { await model.openTaskLink(firstURL) }
         while !(await barrier.contains(first.task.identifier)) { await Task.yield() }
         let secondRead = Task { await model.openTaskLink(secondURL) }

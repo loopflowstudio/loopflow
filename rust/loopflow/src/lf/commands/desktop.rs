@@ -222,7 +222,7 @@ pub enum DesktopTextUnavailable {
 const DESKTOP_EVENT: &str = r#"
 on run argv
     if application id "com.loopflow.mac" is not running then
-        error "Loopflow Desktop is not running. Open it with lf desktop open, or inspect Work with lf task status <task>."
+        error "Loopflow Desktop is not running. Open it with lf open, or inspect Work with lf task status <task>."
     end if
     with timeout of 5 seconds
         if (count of argv) is 0 then
@@ -239,7 +239,7 @@ on run argv
 end run
 "#;
 
-/// Output schemas are generated from the same DTOs that decode Desktop replies.
+/// Output schemas are generated from the same DTOs that decode Desktop and opening replies.
 /// Serialization context keeps nullable fields present, matching emitted JSON.
 pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
     fn schema<T: schemars::JsonSchema>() -> schemars::Schema {
@@ -255,7 +255,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         .as_slice()
     {
         ["desktop", "list"] => Some(schema::<DesktopInspection>()),
-        ["desktop", "open"] => Some(schema::<DesktopOpening>()),
+        ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log" | "move"
         | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
@@ -287,282 +287,22 @@ pub enum DesktopOpeningStatus {
     Failed,
 }
 
-/// A proposed opening, not a LaunchServices or native-readiness receipt.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DesktopOpenExplanation {
-    pub resolution: crate::ops::context::ContextExplanation,
-    pub url: Option<String>,
-    pub impediments: Vec<String>,
-    pub unavailable: Vec<String>,
-}
-
-impl DesktopOpenExplanation {
-    pub fn render(&self) -> String {
-        let mut text = self.resolution.render();
-        if let Some(url) = &self.url {
-            text.push_str(&format!(
-                "\nOpen on this Machine, reusing the repository window: {url}"
-            ));
-        }
-        for reason in &self.impediments {
-            text.push_str(&format!("\nImpediment: {reason}"));
-        }
-        for reason in &self.unavailable {
-            text.push_str(&format!("\nUnavailable: {reason}"));
-        }
-        text.push_str("\nNothing was executed; no app, checkout or Session was prepared.");
-        text
-    }
-}
-
-pub fn explain_open(
-    cli: &crate::lf::Cli,
-    session: Option<&str>,
-    diff: bool,
-) -> DesktopOpenExplanation {
-    let mut impediments = Vec::new();
-    if let Err(error) = require_supported() {
-        impediments.push(error.to_string());
-    }
-    let (resolution, url) = match opening_context(cli, session) {
-        Ok(resolution) => {
-            let url = match opening_url(&resolution, diff) {
-                Ok(url) => Some(url.into()),
-                Err(error) => {
-                    impediments.push(error.to_string());
-                    None
-                }
-            };
-            (resolution, url)
-        }
-        Err(error) => {
-            impediments.push(error.to_string());
-            (
-                crate::ops::context::ContextExplanation::unavailable(error),
-                None,
-            )
-        }
-    };
-    DesktopOpenExplanation {
-        resolution,
-        url,
-        impediments,
-        unavailable: vec![
-            "Desktop installation, retained windows and native readiness were not inspected. Opening re-resolves Work; a URL does not reserve a window or an input target.".into(),
-        ],
-    }
-}
-
-fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool) -> Result<()> {
-    let resolution = opening_context(cli, session)?;
-    let url = opening_url(&resolution, diff)?;
-    let status = std::process::Command::new("open")
-        .args(["-a", "Loopflow", url.as_str()])
-        .status()
-        .context("launch Loopflow.app with the macOS `open` command")?;
-    if !status.success() {
-        bail!("cannot open Work in Loopflow.app: macOS open exited with {status}");
-    }
-    let opening = DesktopOpening {
-        url: url.into(),
-        status: DesktopOpeningStatus::Opening,
-        reason: None,
-    };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&opening)?);
-    } else {
-        println!("Opening {}\nInspect with `lf desktop list --json`; launch acceptance does not establish usability.", opening.url);
-    }
-    Ok(())
-}
-
-fn opening_context(
-    cli: &crate::lf::Cli,
-    session: Option<&str>,
-) -> Result<crate::ops::context::ContextExplanation> {
-    // A plain Git repository can open before planning has ever been initialized.
-    // Only an absent registry allows this path; unreadable is not absent.
-    if session.is_none()
-        && cli.task.is_none()
-        && cli.wave.is_none()
-        && crate::store::read_existing_registry()?.is_none()
-    {
-        let repo = crate::repository::CanonicalRepo::current()?
-            .context("select a Git repository with --repo before opening Desktop")?;
-        let mut resolution = crate::ops::context::ContextExplanation::empty();
-        resolution.repository_path = crate::ops::context::ContextFact::Bound {
-            value: repo.to_string(),
-            source: "local_locator".into(),
-        };
-        return Ok(resolution);
-    }
-    use crate::ops::context::ContextFact;
-    let mut resolution = if cli.task.is_none() && session.is_some() {
-        let selected = super::context::explain(None, None, session, None)?;
-        if let Some(wave) = cli.wave.as_deref() {
-            let work = super::context::explain(Some(wave), None, None, None)?;
-            anyhow::ensure!(
-                matches!((&work.wave, &selected.wave),
-                (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
-                "Session does not belong to the selected Work. No app was opened."
-            );
-        }
-        selected
-    } else {
-        super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?
-    };
-    if cli.repo.is_some() || cli.repository.is_some() {
-        if let crate::ops::context::ContextFact::Bound { value, .. } = &resolution.repository_path {
-            anyhow::ensure!(
-                crate::repository::CanonicalRepo::current()?.as_ref()
-                    == Some(&crate::repository::CanonicalRepo::discover(
-                        std::path::Path::new(value)
-                    )?),
-                "Work does not belong to the selected repository. No app was opened."
-            );
-        }
-    }
-    if let crate::ops::context::ContextFact::Bound { value, .. } = &resolution.task {
-        let task = crate::durable::TaskId::parse(value)?;
-        if let Some(store) = crate::store::read_existing_registry()? {
-            // The shared reader retains failures in the explanation; opening_url
-            // refuses unavailable execution without losing the other Work facts.
-            let _ = tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::explain(
-                &store.sqlite,
-                &task,
-                &mut resolution,
-            ));
-        }
-    }
-    if let Some(session) = session.filter(|_| cli.task.is_some()) {
-        let remote = matches!((&resolution.execution_machine, &resolution.machine),
-            (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. }) if owner != local);
-        if remote {
-            // Native opening validates membership on this owner. A Session ID
-            // absent from the presentation Machine is not a missing conversation.
-            resolution.session = ContextFact::Bound {
-                value: session.into(),
-                source: "explicit_session_on_execution_machine".into(),
-            };
-        } else {
-            let selected = super::context::explain(None, None, Some(session), None)?;
-            anyhow::ensure!(
-                matches!((&resolution.task, &selected.task),
-                (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
-                "Session does not belong to the selected Work. No app was opened."
-            );
-            resolution.session = selected.session;
-            resolution.process = selected.process;
-        }
-    }
-    Ok(resolution)
-}
-
-fn opening_url(
-    resolution: &crate::ops::context::ContextExplanation,
-    diff: bool,
-) -> Result<reqwest::Url> {
-    use crate::ops::context::ContextFact;
-    let ContextFact::Bound { value: repo, .. } = &resolution.repository_path else {
-        bail!("Repository location is unavailable; select a local repository with --repo. No app was opened.");
-    };
-    let task = match &resolution.task {
-        ContextFact::Bound { value, .. } => Some(value.as_str()),
-        ContextFact::Unbound => None,
-        ContextFact::Unavailable { reason } => {
-            bail!("Task resolution unavailable: {reason}. No app was opened.")
-        }
-    };
-    let session = match &resolution.session {
-        ContextFact::Bound { value, .. } => Some(value.as_str()),
-        ContextFact::Unbound => None,
-        ContextFact::Unavailable { reason } => {
-            bail!("Session resolution unavailable: {reason}. No app was opened.")
-        }
-    };
-    anyhow::ensure!(
-        !diff || task.is_some(),
-        "--diff needs a Task; select --task or a Task-associated --session. No app was opened."
-    );
-    anyhow::ensure!(session.is_none() || task.is_some(), "This Session has no single Task workspace; use `lf session connect` in a terminal. No app was opened.");
-    let remote = if task.is_some() {
-        match (&resolution.execution_machine, &resolution.machine) {
-            (ContextFact::Bound { value: owner, .. }, ContextFact::Bound { value: local, .. })
-                if owner != local =>
-            {
-                let ContextFact::Bound {
-                    value: repository, ..
-                } = &resolution.repository
-                else {
-                    bail!("Shared repository identity unavailable; no app was opened.");
-                };
-                anyhow::ensure!(
-                    matches!(&resolution.checkout, ContextFact::Bound { .. }),
-                    "Recorded checkout unavailable on Machine {owner}; no app was opened."
-                );
-                Some((owner, repository))
-            }
-            (ContextFact::Unavailable { reason }, _) if session.is_some() || diff => {
-                bail!("Task execution location unavailable: {reason}. No app was opened.");
-            }
-            // Opening the Work page needs no execution admission. Its unavailable
-            // checkout remains visible; Session and Changes requests still need it.
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let mut url = reqwest::Url::parse(if task.is_some() {
-        "loopflow://task"
-    } else {
-        "loopflow://open"
-    })?;
-    if let Some(task) = task {
-        url.path_segments_mut()
-            .expect("Task URL supports paths")
-            .push(task);
-    }
-    url.query_pairs_mut().append_pair("repo", repo);
-    if let Some((owner, repository)) = remote {
-        url.query_pairs_mut()
-            .append_pair("machine", owner)
-            .append_pair("repository", repository);
-    }
-    if let Some(session) = session {
-        url.query_pairs_mut().append_pair("session", session);
-    }
-    if diff {
-        url.query_pairs_mut().append_pair("diff", "true");
-    }
-    // Foundation URLComponents follows URI encoding, not form encoding:
-    // '+' is literal there. Preserve spaces as %20 across the native boundary.
-    let query = url.query().map(|query| query.replace('+', "%20"));
-    url.set_query(query.as_deref());
-    Ok(url)
-}
-
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     require_supported()?;
-    match command {
-        DesktopCommand::Open {
-            session,
-            diff,
-            json,
-        } => return open_work(cli, session.as_deref(), *diff, *json || cli.json),
-        DesktopCommand::List { json } => return inspect(*json || cli.json),
-        _ => {}
+    if let DesktopCommand::List { json } = command {
+        return inspect(*json || cli.json);
     }
     // Work selects the repository/checkout. One live reading supplies every
     // lifetime token; dispatch never reinterprets this request using later focus.
-    let resolution = opening_context(cli, None)?;
+    let resolution = super::open::selected_context(cli, None)?;
     let inspection: DesktopInspection = serde_json::from_slice(&contact(None, false)?)
         .context("Desktop returned an invalid reading")?;
     let caller = crate::session_record::current_terminal_id();
     let selected = inspection.resolve_pane(&resolution, command, caller.as_deref())?;
     let target = selected.target()?;
     let (action, json) = match command {
-        DesktopCommand::Open { .. } | DesktopCommand::List { .. } => unreachable!("handled above"),
+        DesktopCommand::List { .. } => unreachable!("handled above"),
         DesktopCommand::Text { text, json, .. } => {
             validate_literal_text(text)?;
             (
@@ -702,7 +442,7 @@ impl DesktopInspection {
             | DesktopCommand::Files { pane, .. }
             | DesktopCommand::FlowLog { pane, .. }
             | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
-            DesktopCommand::Open { .. } | DesktopCommand::List { .. } => {
+            DesktopCommand::List { .. } => {
                 bail!("This command does not address a pane")
             }
         };
@@ -1103,7 +843,7 @@ impl DesktopTextUnavailable {
 
 #[cfg(test)]
 mod tests {
-    use super::{opening_url, validate_literal_text};
+    use super::validate_literal_text;
     use crate::ops::context::{ContextExplanation, ContextFact};
 
     fn pane_fixture() -> (super::DesktopInspection, ContextExplanation) {
@@ -1309,94 +1049,6 @@ mod tests {
         assert_eq!(destination.work, target.work);
         assert!(selected.peer("session-pane").is_err());
         assert!(selected.peer("other-workspace").is_err());
-    }
-
-    #[test]
-    fn opening_keeps_exact_work_and_literal_locators_without_claiming_usability() {
-        let mut resolution = ContextExplanation::empty();
-        resolution.repository_path = ContextFact::Bound {
-            value: "/src/a #?&% repo".into(),
-            source: "local_locator".into(),
-        };
-        resolution.task = ContextFact::Bound {
-            value: "task_exact".into(),
-            source: "explicit".into(),
-        };
-        resolution.session = ContextFact::Bound {
-            value: "session+&%".into(),
-            source: "explicit".into(),
-        };
-        let url = opening_url(&resolution, true).unwrap();
-        assert_eq!(url.path(), "/task_exact");
-        assert!(!url.as_str().contains('+'));
-        assert!(url.as_str().contains("a%20%23%3F%26%25%20repo"));
-        assert_eq!(
-            url.query_pairs().collect::<Vec<_>>(),
-            vec![
-                ("repo".into(), "/src/a #?&% repo".into()),
-                ("session".into(), "session+&%".into()),
-                ("diff".into(), "true".into())
-            ]
-        );
-        resolution.task = ContextFact::Unbound;
-        assert!(opening_url(&resolution, true).is_err());
-        assert!(opening_url(&resolution, false).is_err());
-        resolution.session = ContextFact::Unbound;
-        assert_eq!(
-            opening_url(&resolution, false).unwrap().host_str(),
-            Some("open")
-        );
-        resolution.task = ContextFact::Unavailable {
-            reason: "offline".into(),
-        };
-        assert!(opening_url(&resolution, false).is_err());
-    }
-
-    #[test]
-    fn remote_opening_carries_the_validated_owner_and_repository() {
-        let (_, mut work) = pane_fixture();
-        work.repository_path = ContextFact::Bound {
-            value: "/presentation/repo".into(),
-            source: "local_locator".into(),
-        };
-        work.machine = ContextFact::Bound {
-            value: "presentation-machine".into(),
-            source: "local".into(),
-        };
-        let url = opening_url(&work, true).unwrap();
-        let query = url
-            .query_pairs()
-            .collect::<std::collections::HashMap<_, _>>();
-        assert_eq!(query["repo"], "/presentation/repo");
-        assert_eq!(
-            query["machine"],
-            super::bound(&work.execution_machine, "Machine").unwrap()
-        );
-        assert_eq!(
-            query["repository"],
-            super::bound(&work.repository, "Repository").unwrap()
-        );
-        assert_eq!(query["diff"], "true");
-
-        work.checkout = ContextFact::Unavailable {
-            reason: "owner offline".into(),
-        };
-        assert!(opening_url(&work, true)
-            .unwrap_err()
-            .to_string()
-            .contains("Recorded checkout unavailable"));
-        work.repository = ContextFact::Unbound;
-        assert!(opening_url(&work, true)
-            .unwrap_err()
-            .to_string()
-            .contains("Shared repository identity unavailable"));
-        work.execution_machine = ContextFact::Unavailable {
-            reason: "conflicting owners".into(),
-        };
-        assert!(opening_url(&work, true)
-            .unwrap_err()
-            .to_string()
-            .contains("conflicting owners"));
     }
 
     #[test]

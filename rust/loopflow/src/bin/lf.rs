@@ -1423,16 +1423,9 @@ fn init_tracing(verbose: bool) {
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
-    // Opening previews report the platform impediment without attempting control.
-    // Actual Desktop commands still refuse before repository lookup or preparation.
-    let opening_preview = cli.explain
-        && matches!(
-            cli.command,
-            Some(Commands::Desktop {
-                cmd: loopflow::lf::DesktopCommand::Open { .. }
-            })
-        );
-    if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview && !cli.context {
+    // Desktop pane control refuses before repository lookup or preparation.
+    // Opening chooses its destination per platform in `lf open`.
+    if matches!(cli.command, Some(Commands::Desktop { .. })) && !cli.context {
         loopflow::lf::commands::desktop::require_supported().inspect_err(|_| {
             journal::mark_effect_free_read();
         })?;
@@ -1854,17 +1847,8 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     } else {
         cli.task.as_deref()
     };
-    if let Some(Commands::Desktop {
-        cmd: loopflow::lf::DesktopCommand::Open { session, diff, .. },
-    }) = &cli.command
-    {
-        let report = loopflow::lf::commands::desktop::explain_open(cli, session.as_deref(), *diff);
-        if json {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            println!("{}", report.render());
-        }
-        return Ok(());
+    if let Some(Commands::Open(args)) = &cli.command {
+        return loopflow::lf::commands::open::explain(cli, args, json);
     }
     if let Some(Commands::Task {
         cmd:
@@ -2183,15 +2167,15 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {
-        let _cwd = if matches!(cmd, loopflow::lf::DesktopCommand::Open { .. }) {
-            cli.wt
-                .as_deref()
-                .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
-                .transpose()?
-        } else {
-            None
-        };
         return loopflow::lf::commands::desktop::run(&cli, cmd);
+    }
+    if let Some(Commands::Open(args)) = &cli.command {
+        let _cwd = cli
+            .wt
+            .as_deref()
+            .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+            .transpose()?;
+        return loopflow::lf::commands::open::run(&cli, args);
     }
 
     let _worktree_cwd = cli
@@ -2418,8 +2402,8 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Desktop { .. }) => {
-            unreachable!("Desktop dispatch precedes Work preparation")
+        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
+            unreachable!("Desktop and opening dispatch precede Work preparation")
         }
         Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
         Some(Commands::Config {

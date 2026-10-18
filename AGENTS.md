@@ -50,6 +50,11 @@ uses names. Refer to other participants by name. Use known preferred names,
 never infer authorship from a machine owner or account. Ask when a necessary
 name is missing, or record that attribution is unresolved.
 
+Describe agents as available for people to do their work with. Name the work,
+the available interaction, and actual constraints. Never portray people as
+blockers or as owing agents attention. Availability is independent of a pending
+question, review or Task dependency. Preserve real authorization and failures.
+
 Write in language the user would use themselves. Never refer to a person as
 “the human.” Generic role labels belong in instructions where the role matters,
 not in place of known names in authored artifacts.

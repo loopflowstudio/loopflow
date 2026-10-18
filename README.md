@@ -42,7 +42,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf desktop open`. Bare `lf` starts the
+It bundles `lf`; `lf open loopflow://<repo>/task/<id>` puts a Task's conversation there. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -274,7 +274,7 @@ No resume hooks repair old conversations. Native providers own their terminal ou
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
-ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
+ones, and `--available` keeps those available for you to work with. `--all` means all repositories.
 
 `lf connect` opens this scope's ongoing conversation, creating one when absent.
 From the canonical checkout or the repository's persistent checkout it opens the
@@ -334,7 +334,7 @@ each `.md` URL, use the curated
 | [Get Started](docs/getting-started.md) | Install, first commands, building features, going remote |
 | [Waves](docs/waves.md) | The planning model, goals, memory, KRs, Linear, crons |
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
-| [Conducting](docs/conducting.md) | Seeing what got done, what needs you, and how to step in |
+| [Conducting](docs/conducting.md) | Seeing what got done, what you can pick up, and how to step in |
 | [Authoring](docs/authoring.md) | Writing skills, flows, and goals |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |

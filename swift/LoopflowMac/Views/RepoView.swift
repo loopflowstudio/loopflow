@@ -24,7 +24,7 @@ struct RepoView: View {
         taskLinks: WorkLinkRouter? = nil,
         repository: String? = nil,
         openingRequests: Set<UUID> = [],
-        openRepository: ((String, URL?) -> Void)? = nil
+        openRepository: ((String, LinkedWork?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
@@ -90,13 +90,13 @@ struct RepoView: View {
                 WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
-                   readText: { try sessionWorkspaces.readText($0) }) { url in
+                   readText: { try sessionWorkspaces.readText($0) }) { link in
                     if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
                     if let machine = sessionWorkspaces.localMachineId {
                         model.confirmMachine(machine)
                         model.bindWorkspaces(sessionWorkspaces, repository: repository)
                     }
-                    await model.receiveWorkLink(url)
+                    await model.receiveWorkLink(link)
                 }.frame(width: 0, height: 0)
             }
         }

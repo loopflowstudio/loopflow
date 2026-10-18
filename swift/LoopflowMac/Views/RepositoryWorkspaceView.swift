@@ -2,12 +2,6 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-struct TaskWindowChoice: Identifiable {
-    let path: String
-    let url: URL
-    var id: String { path }
-}
-
 /// The unbound launch scene is a loading/error surface, never a second workspace.
 struct WorkspaceLaunchView: View {
     let open: () async throws -> Void
@@ -43,7 +37,7 @@ struct RepositoryWorkspaceView: View {
     let portfolioService: PortfolioService
     let query: RegistryQuery
     let router: WorkLinkRouter
-    let openRepository: (String, URL?) -> Void
+    let openRepository: (String, LinkedWork?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var reading: WorkReading<RepositoryWorkspace> = .loading
     @State private var openingRequests: Set<UUID> = []
@@ -101,33 +95,17 @@ struct RepositoryWorkspaceView: View {
 /// One utility window owns opening feedback, not a sheet duplicated on every repo.
 struct WorkspaceOpeningFeedback: View {
     @Binding var error: String?
-    @Binding var choices: [[TaskWindowChoice]]
-    let openRepository: (String, URL?) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading) {
             if let error {
                 Text(error).textSelection(.enabled)
-                Button("OK") { self.error = nil; closeIfFinished() }
-            } else if let candidates = choices.first {
-                Text("Choose the Task's repository").font(.headline)
-                ForEach(candidates) { choice in
-                    Button(choice.path) {
-                        choices.removeFirst()
-                        openRepository(choice.path, choice.url)
-                        closeIfFinished()
-                    }
-                }
-                Button("Cancel") { choices.removeFirst(); closeIfFinished() }
+                Button("OK") { self.error = nil; dismiss() }
             } else {
                 Text("No pending workspace requests")
                 Button("Close") { dismiss() }
             }
         }.padding()
-    }
-
-    private func closeIfFinished() {
-        if error == nil, choices.isEmpty { dismiss() }
     }
 }

@@ -67,13 +67,19 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func desktopOpenExplanationsPreserveProposalsAndImpediments() throws {
-        let data = try loadFixtureData("desktop_open_explanations.json")
-        let reports = try JSONDecoder().decode([DesktopOpenExplanation].self, from: data)
-        #expect(reports[0].url?.contains("diff=true") == true)
-        #expect(reports[1].url == nil)
-        #expect(!reports[1].impediments.isEmpty)
-        #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    @Test func workLinksCarryReadableLabelsRoutesAndConversationRelation() throws {
+        let data = try loadFixtureData("work_links.json")
+        let links = try JSONDecoder().decode([WorkLink].self, from: data)
+        #expect(links[0].conversation == .otherConversation)
+        #expect(links[0].target.executionMachine != nil)
+        #expect(links[1].target.kind == .wave)
+        #expect(links[1].route.hosts == [.terminal])
+        #expect(try JSONDecoder().decode([WorkLink].self, from: JSONEncoder().encode(links)) == links)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "fallback_argv")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([WorkLink].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test func taskPlanningExplanationsPreserveIntentAndEffects() throws {

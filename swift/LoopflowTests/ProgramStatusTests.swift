@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Observation
 import Testing
@@ -5,7 +6,7 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Program Status")
+@Suite("Program Status", .serialized)
 struct ProgramStatusTests {
     private func report(_ state: ProgramStatusState, id: String? = nil,
                         app: String? = nil, msg: String? = nil) -> ProgramStatusReport {
@@ -131,6 +132,69 @@ struct ProgramStatusTests {
         try await Task.sleep(for: .milliseconds(300))
         #expect(surface.snapshot.records.isEmpty)
         #expect(surface.snapshot.seen)
+    }
+
+    @Test("A later status event recovers an exited observer without replacing the Session")
+    @MainActor func observationFailureRecovers() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let helper = bin.appendingPathComponent("lf")
+        try Data("""
+        #!/bin/sh
+        if [ ! -f "$LF_HOME/failed" ]; then
+            IFS= read -r frame
+            touch "$LF_HOME/failed"
+            exit 1
+        fi
+        while IFS= read -r frame; do
+            printf '%s' "$frame" > "$LF_HOME/received.tmp"
+            mv "$LF_HOME/received.tmp" "$LF_HOME/received"
+        done
+        touch "$LF_HOME/closed"
+        """.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let environment = ProcessInfo.processInfo.environment
+        for (key, value) in ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path] {
+            setenv(key, value, 1)
+        }
+        let surface = ProgramStatusSurface()
+        defer {
+            surface.close()
+            for key in ["LF_CLONE_ROOT", "LF_HOME", "LF_BIN"] {
+                if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
+            }
+            try? FileManager.default.removeItem(at: directory)
+        }
+        surface.associate(sessionId: "retained", terminalId: "terminal", provider: .init(agentProcessId: "agent"))
+        surface.receive(.report(report(.working, msg: "First turn")), incarnation: surface.incarnation)
+        try await eventually { surface.observationError != nil }
+        #expect(surface.sessionId == "retained")
+        #expect(surface.observationError?.contains("ended (1)") == true)
+        // The new turn clears the previous report before its fresh result arrives.
+        surface.receive(.reset, incarnation: surface.incarnation)
+        try await eventually {
+            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
+                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
+            return records.seen && records.records.isEmpty && surface.observationError == nil
+        }
+        surface.receive(.report(report(.blocked, msg: "New result")), incarnation: surface.incarnation)
+        try await eventually {
+            guard let data = try? Data(contentsOf: directory.appendingPathComponent("received")),
+                  let records = try? JSONDecoder().decode(ProgramStatusRecords.self, from: data) else { return false }
+            return records.summary?.msg == "New result"
+        }
+        #expect(surface.sessionId == "retained")
+        surface.close()
+        try await eventually { FileManager.default.fileExists(atPath: directory.appendingPathComponent("closed").path) }
+    }
+
+    @MainActor private func eventually(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition() {
+            try #require(ContinuousClock.now < deadline, "Status observation did not settle")
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     @Test @MainActor func labelRendersProgramTextLiterally() throws {

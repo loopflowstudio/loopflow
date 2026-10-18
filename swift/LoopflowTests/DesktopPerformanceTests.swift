@@ -117,7 +117,7 @@ struct DesktopPerformanceTests {
         }
         // The outline lists started Tasks only, so the renamed Task is one of those.
         let current = model.projection.waves.flatMap { wave in wave.tasks.map { (wave.roadmap.wave.id, $0) } }
-        guard let (wave, listed) = current.first(where: { $0.1.inWorkingSet && !$0.1.task.task.isTerminal }) else {
+        guard let (wave, listed) = current.first(where: { $0.1.task.runtime?.started == true && !$0.1.task.task.isTerminal }) else {
             try journal.write(["event": "setup", "outcome": "unavailable",
                                "reason": "No started Task in \(repo) to rename and model a new one on"])
             throw PerformanceFailure("unavailable", "No started Task in this repository")
@@ -135,8 +135,7 @@ struct DesktopPerformanceTests {
                                     "Rows are written with sqlite3, not lf: no lf process, sync or provider is involved.",
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
-        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
-        let search = try navigator.inspect().find(ViewType.TextField.self)
+        model.select(.task(id: listed.task.id))
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let shows = { (text: String) in window.outlineText.contains { $0.contains(text) } }
         let restore = "UPDATE pm_items SET body=json_set(body,'$.name','\(template.name.sqlQuoted)') WHERE id='\(template.id.sqlQuoted)';"
@@ -145,8 +144,8 @@ struct DesktopPerformanceTests {
             for attempt in 0..<samples {
                 let label = String(format: "Probe %03d", attempt)
                 let task = "bench-\(run)-\(attempt)"
-                // The filter keeps the written row on screen whatever the Machine holds.
-                try search.setInput("Probe")
+                // Explicitly retain the measured Task at its stable working position.
+                model.select(.task(id: listed.task.id))
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
                     UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
@@ -394,7 +393,7 @@ struct DesktopPerformanceTests {
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(checkout.path))
-        let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
+        let files = workspace.files(issue: "perf-work-0", cwd: checkout.path, query: query)
         files.autosave = false
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
@@ -414,6 +413,7 @@ struct DesktopPerformanceTests {
         }
         let surfaces = try terminals.map { try #require($0.surface) }
         multiplexer.setFocusedPane(sessionPane)
+        for index in 0..<taskCount { model.select(.task(id: "perf-task-\(index)")) }
         model.select(.task(id: "perf-task-0"))
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: checkout.path, workspaces: registry, query: query)
@@ -425,23 +425,22 @@ struct DesktopPerformanceTests {
         defer { window.contentView = nil; window.close() }
         try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()
-        let search = try navigator.inspect().find(ViewType.TextField.self)
         let records = try #require(model.sessions.value)
         let first = try #require(records.first { $0.id == "perf-session-0" })
         let other = try #require(records.first { $0.id == "perf-session-2" })
-        let openTask = try #require(navigator.onOpenTask)
-        let selected = try #require(model.task(id: "perf-task-0"))
-
+        let openTask: (WorkReference) throws -> Void = { work in
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(work.id)").button().tap()
+        }
         for attempt in 0..<samples {
             // Reset outside the measured interval; every attempt starts from the
             // same visible population and retained surfaces, including the first.
-            try search.setInput("")
+            model.navigation.sidebarFilter = .working
             try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
             try await sample("filter", population, attempt, journal, window, action: {
-                try search.setInput("Task 002")
-            }, ready: { hasRendered(window, "work-task-perf-task-2") && !hasRendered(window, "work-task-perf-task-0") })
+                model.navigation.sidebarFilter = .running
+            }, ready: { model.sidebarTaskIDs.isEmpty && !hasRendered(window, "work-task-perf-task-0") })
             try #require(model.selection == .task(id: "perf-task-0"))
-            try search.setInput("")
+            model.navigation.sidebarFilter = .working
             // Keep the same population; a shorter viewport makes both sizes
             // scrollable. Resize and start the held read outside the interval.
             window.setContentSize(NSSize(width: 1400, height: 300))
@@ -498,7 +497,7 @@ struct DesktopPerformanceTests {
             try await wait(window) { terminalText(surfaces[0]).contains(draft) }
             navigator.onOpenSession(other)
             try await wait(window) { window.firstResponder === terminals[2] && multiplexer.focusedPaneId == otherPane }
-            openTask(.task(id: "perf-task-0"))
+            try openTask(.task(id: "perf-task-0"))
             // These Tasks share a checkout, so Task navigation retains that
             // workspace's selected pane. Select the first Session explicitly
             // before measuring its Monitor; neither pane nor draft is replaced.
@@ -519,7 +518,7 @@ struct DesktopPerformanceTests {
             let logPane = multiplexer.focusedPaneId
             try await sample("flow_log_empty", population, attempt, journal, window, action: {
                 // A Task no Flow has run for: scoping the reader to it is part of the wait.
-                openTask(.task(id: "perf-task-1"))
+                try openTask(.task(id: "perf-task-1"))
                 model.syncWorkScope()
                 multiplexer.show(.flowLog(taskId: "perf-task-1"))
             }, ready: { hasRendered(window, "task-flow-processes-empty") })
@@ -694,7 +693,7 @@ struct DesktopPerformanceTests {
             registry.surfaces.release(identity)
             registry.surfaces.release(companionIdentity)
         }
-        let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
+        let files = workspace.files(issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
         files.selection = "notes.txt"
         await files.loadFile()

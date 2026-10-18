@@ -252,6 +252,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
@@ -483,6 +484,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
         program_status: session.program_status.clone(),
@@ -665,11 +667,10 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
-    if resume
-        && store
-            .sqlite
-            .input_provider_session(&session.artifact_key)?
-            .is_some()
+    if store
+        .sqlite
+        .input_provider_session(&session.artifact_key)?
+        .is_some()
     {
         if let Some(provider) = session.provider.as_deref() {
             if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
@@ -677,14 +678,18 @@ pub(crate) async fn open(
                 session.model.as_deref(),
                 crate::config::agent_override().as_deref(),
             ) {
-                mode.require_action(surface(store, session).await?.state)?;
-                drop(progress);
-                import(store, &session.id, &agent).await?;
-                let session = store
-                    .session(&session.id)
-                    .await?
-                    .ok_or_else(|| session_not_found(&session.id))?;
-                return surface(store, &session).await;
+                if !resume {
+                    conversation_log::read(&store.sqlite, session)?;
+                } else {
+                    mode.require_action(surface(store, session).await?.state)?;
+                    drop(progress);
+                    import(store, &session.id, &agent).await?;
+                    let session = store
+                        .session(&session.id)
+                        .await?
+                        .ok_or_else(|| session_not_found(&session.id))?;
+                    return surface(store, &session).await;
+                }
             }
         }
     }
@@ -951,6 +956,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         },
     };
     let mut reading = SessionRecord {
+        preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         program_status: metadata.program_status.clone(),
@@ -1557,6 +1563,23 @@ mod tests {
     }
 
     #[test]
+    fn session_preview_preserves_native_provenance() {
+        let sessions: Vec<super::SessionRecord> =
+            serde_json::from_str(include_str!("../../../../tests/fixtures/dto/sessions.json"))
+                .unwrap();
+        let preview = sessions[0].preview.as_ref().unwrap();
+        assert_eq!(preview.provider_turn, "turn-fixture");
+        assert_eq!(preview.observed_at, 1700000000);
+        assert_eq!(
+            serde_json::from_value::<Vec<super::SessionRecord>>(
+                serde_json::to_value(&sessions).unwrap()
+            )
+            .unwrap(),
+            sessions
+        );
+    }
+
+    #[test]
     fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
         let session: super::SessionRecord = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/session_metadata.json"
@@ -1590,6 +1613,7 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            preview: None,
             program_status: None,
             agent_process_id: None,
             primary_scope: None,

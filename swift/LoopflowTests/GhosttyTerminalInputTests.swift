@@ -351,7 +351,7 @@ struct GhosttyTerminalInputTests {
         var records: [SessionRecord] = []
         for id in ["one", "two"] {
             workspace.multiplexer.newShell(location: workspace.location)
-            let pane = workspace.multiplexer.focusedPaneId
+            let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
             let view = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             view.frame = CGRect(x: 0, y: 0, width: 600, height: 300)
             view.workingDirectory = NSTemporaryDirectory()

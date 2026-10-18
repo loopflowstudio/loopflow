@@ -64,7 +64,8 @@ lf task run LOO-438 pursue -a claude:opus
 `harness[:model]` for the entire invocation, overriding agents named in Tasks,
 Flows and skills, including nested Flows and child `lf` commands. Without it,
 definitions and defaults apply. Put literal skill arguments after `--`.
-Resuming native history keeps its provider; changing providers requires a new Session.
+Use `lf connect SESSION -a codex` to continue the same Session on another provider
+from its saved conversation history. Missing history leaves the Session unchanged.
 
 ## Run a Flow interactively
 
@@ -905,15 +906,13 @@ of following new focus. There is no public JSON target or surface-token argument
 
 ```sh
 lf --task LOO-427 desktop focus --pane "$pane"
-lf --task LOO-427 desktop split --pane "$pane" --axis vertical
 lf --task LOO-427 desktop move --pane "$pane" --destination "$other" --axis horizontal
 lf --task LOO-427 desktop resize --pane "$pane" --toward "$other" --ratio 0.6
 lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Split creates a shell beside the addressed pane on its execution Machine and checkout.
-It preserves the selected pane; a missing remote location refuses before changing layout.
+Shell adds a tab to the Task’s single Shell tool on its recorded execution Machine and checkout; a missing remote location refuses before changing layout.
 
 ```sh
 pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
@@ -931,12 +930,12 @@ before input, and do not repeat creation after a lost reply.
 
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
-share (0.1–0.9). Split, move, resize, zoom, hide and restore retain drafts and
+share (0.1–0.9). Move, resize, zoom, hide and restore retain drafts and
 selection. Focus selects the addressed pane without changing Work or foregrounding
 a window. Closing a view does not end a Session. Mutations print the affected
 pane ID; `--json` adds its repository, window, Machine, checkout and observation
-time. Split returns the new pane; companions return the created or reused pane.
-A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; split is not safe to replay.
+time. Companions return the created or reused pane.
+A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; shell creation is not safe to replay.
 
 ```sh
 lf --task LOO-427 desktop shell --pane "$pane"

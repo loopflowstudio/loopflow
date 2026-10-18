@@ -3,8 +3,9 @@
 Jack Heart selected stopping ordinary lf executable pinning after reviewing
 PR #1587 on October 17. Existing processes may fail naturally. The current design
 in loo-502.md supersedes automatic recovery and its earlier acceptance plan.
-No additional judgment is pending. Keep publication-only delivery and private
-fixture isolation; do not control LOO-497 or rewrite uncertain receipts.
+No additional judgment is pending. Jack Heart's later shipping authorization in
+loo-502.md supersedes publication-only delivery. Keep private fixture isolation;
+do not control LOO-497 or rewrite uncertain receipts.
 
 October 17 operator steer d865f2c4-f245-48a7-b4e3-6d7038f09f10 was read
 during implementation. Jack Heart's fail-once/retry-in-place criterion is now

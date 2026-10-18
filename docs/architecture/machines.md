@@ -235,9 +235,10 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 Ordinary commands, provider children, hooks, Session connections and Flow steps
 use the stable installed entry. Each new execution selects the current installed
 CLI; main-Machine dispatch ignores inherited `LF_BIN` selections. The caller's
-Machine and Session context stay intact. Installation does not restart existing
-processes or wait for their exit; they may continue or fail naturally. Clients
-and hooks launched before this behavior may retain their old executable paths.
+Machine selection and Session attribution stay intact. Installation does not
+restart existing processes or wait for their exit; they may continue or fail
+naturally. Clients and hooks launched before this behavior may retain their old
+executable paths.
 
 Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary

@@ -324,7 +324,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             )
             assert flow.poll() is None, (root / "flow.log").read_text()
         run("task", "edit", "INF-123", "--title", "Pending local title")
-        run("task", "move", "INF-124", "end", "--reason", "Saved offline")
+        run("task", "workflow", "move", "INF-124", "end", "--reason", "Saved offline")
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
         comment_id = saved["pending_sync"][0]
         receipt = db.execute(

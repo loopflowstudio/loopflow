@@ -88,7 +88,9 @@ impl SqliteStore {
             "SELECT i.id,i.revision,i.observed_at,
              p.initiative_ids,
              p.team_ids,i.team_id,
-             i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
+             i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0)
+             OR NOT i.project_id_observed OR i.claimed_project_id IS NOT i.project_id
+             OR (i.project_id IS NOT NULL AND p.id IS NULL),
              EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
                     WHERE w.repo=i.repo AND d.issue_id=i.id)
              OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id

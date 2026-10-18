@@ -204,29 +204,27 @@ BRIEF
 When execution is intended, start the captured Task or reuse an existing one:
 
 ```bash
-lf task run <existing-issue>   # its workflow's next edge, or its Project's Flow
+lf task run <existing-issue>   # its workflow's next edge, or its Wave/repository default
 ```
 
 Stdin becomes the durable Task description; `--directive` supplies
 direction and does not replace that brief.
 
-A Project names a workflow: nodes where a person takes part
+A Workflow has nodes where a person takes part
 in the Task conversation, joined by edges that each run one Flow. A Task on a
 workflow takes only an edge leaving its current node. Bare
 `lf task run <issue>` takes the only one or names the choices,
 `lf task run <issue> <flow>` picks one, and `lf task run <issue> end` takes an
-edge that runs nothing. A Task with no workflow takes up its Project's; naming one
+edge that runs nothing. A Task with no workflow takes up its Wave default, then repository `workflow:`; naming one
 (`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> flow <flow>` runs any Flow
 without moving the Task.
 
-Use the workflow or Flow the user selected; otherwise the current Linear
-Project's required `workflow:`. Read the actual Flow before describing its
+Use the workflow or Flow the user selected; otherwise the Wave default, then repository `workflow:`. Read the actual Flow before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
 Current planning edits use `lf update-plan --wave <wave> --plan <plan.json>`.
-The complete content object has `metric_targets`, a nonempty `workflow` string and
-`krs`; for example, `{"metric_targets":[],"workflow":"feature","krs":[]}`.
+The complete content object has `metric_targets` and `krs`; for example, `{"metric_targets":[],"krs":[]}`.
 It updates the Wave's one In Progress Linear Project. Planned Projects hold
 future plans; Completed Projects retain history. Future plan edits require an
 available Linear writer, not a current-plan update.

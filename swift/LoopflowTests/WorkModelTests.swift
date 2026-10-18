@@ -117,6 +117,7 @@ struct WorkModelTests {
         tasks["items"] = items
         waves[0]["tasks"] = tasks
         wire["waves"] = waves
+        wire["tasks"] = tasks
         let updated = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(updated), waves: .available(fixture.waves),
             workActivity: .available(fixture.workActivity), repos: [])
@@ -138,7 +139,7 @@ struct WorkModelTests {
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
         #expect(model.task(id: "issue-now")?.task.task.name == "Updated while selected")
-        #expect(model.task(id: "issue-now")?.wave.projects.items.last?.id == "next")
+        #expect(model.task(id: "issue-now")?.wave!.projects.items.last?.id == "next")
     }
 
     @Test("Chapter history remains reachable when the current plan is unavailable")
@@ -459,8 +460,8 @@ struct WorkModelStreamTests {
         #expect(model.observingMachineId == "machine-local")
     }
 
-    @Test("Failed or truncated planning retains saved rows, selection, panes and cache")
-    func incompletePlanningRetainsSavedWork() async throws {
+    @Test("Failed or truncated planning retains saved rows, selection, panes and cache", arguments: [false, true])
+    func incompletePlanningRetainsSavedWork(repositoryInventory: Bool) async throws {
         let fixture = try WorkTestFixture.load()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -496,11 +497,16 @@ struct WorkModelStreamTests {
         #expect(workspace.multiplexer.layout == layout)
         for (index, truncated) in [false, true].enumerated() {
             var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
-            var waves = try #require(wire["waves"] as? [[String: Any]])
-            waves[0]["tasks"] = truncated
+            let failure: [String: Any] = truncated
                 ? ["state": "ok", "items": [], "truncated": true]
                 : ["state": "unavailable", "reason": "Task snapshot: no such column: t.paused"]
-            wire["waves"] = waves
+            if repositoryInventory {
+                wire["tasks"] = failure
+            } else {
+                var waves = try #require(wire["waves"] as? [[String: Any]])
+                waves[0]["tasks"] = failure
+                wire["waves"] = waves
+            }
             let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
             await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
                 body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
@@ -547,7 +553,7 @@ struct WorkModelStreamTests {
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage != nil }
         #expect(model.taskWork[found.task.id].value?.workflow == workflow)
-        let header = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: model.taskWork[found.task.id])
+        let header = TaskWorkflowHeader(model: model, task: found.task, work: model.taskWork[found.task.id])
         #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
         #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
         await feed.fail(RegistryQueryError("reader exited"))
@@ -822,7 +828,7 @@ struct WorkModelStreamTests {
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
         let owner = model.navigation
-        let action = Task { await model.pauseTask(found.task, wave: found.wave.wave, paused: true) }
+        let action = Task { await model.pauseTask(found.task, paused: true) }
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
         await feed.send(try fixture.planningFrame(sequence: 2, answers: request.id, renaming: "Committed"))
@@ -852,7 +858,7 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
-        let action = Task { await model.completeTask(found.task, wave: found.wave.wave) }
+        let action = Task { await model.completeTask(found.task) }
         try await eventually { model.navigation.taskRunDrafts[found.task.id]?.phase == .runningCommand }
         let request = try await feed.request(2)
         #expect(model.navigation.taskRunDrafts[found.task.id]?.phase == .awaitingObservation)
@@ -1111,6 +1117,9 @@ private struct WorkTestFixture {
                 waves[wave]["tasks"] = evidence
             }
             root["waves"] = waves
+            root["tasks"] = ["state": "ok", "truncated": false, "items": waves.flatMap {
+                ($0["tasks"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
+            }]
             roadmap = try #require(String(data: JSONSerialization.data(withJSONObject: root), encoding: .utf8))
         }
         return try frame("planning", sequence: sequence, answers: answers, home: home,

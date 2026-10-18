@@ -23,15 +23,15 @@ struct NowProjectionTests {
     @Test("NOW flattens across waves and drops empty groups")
     func nowSectionsAreFlatAndGrouped() throws {
         let snapshot = try loadRoadmapFixture()
-        let sections = nowSections(from: snapshot.waves)
+        let sections = nowSections(from: snapshot.tasks.items, waves: snapshot.waves)
 
         #expect(sections.map(\.group) == [.waiting])
         // The unavailable `context` wave contributes no rows.
-        #expect(sections.flatMap(\.rows).allSatisfy { $0.wave.name == "product" })
+        #expect(sections.flatMap(\.rows).allSatisfy { $0.wave!.name == "product" })
         // Rows carry their Wave/Project as context.
         let input = try #require(sections.first)
         #expect(input.rows.first?.task.task.identifier == "W2-131")
-        #expect(input.rows.first?.wave.name == "product")
+        #expect(input.rows.first?.wave!.name == "product")
     }
 
     @Test("Shared fixture preserves all Task conditions and the spoken reason")

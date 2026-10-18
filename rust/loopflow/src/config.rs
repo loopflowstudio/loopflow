@@ -260,6 +260,8 @@ pub struct CronDef {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Default Workflow for Tasks without an explicit or Wave selection.
+    pub workflow: Option<String>,
     #[serde(default)]
     pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
@@ -373,6 +375,7 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            workflow: None,
             planning: None,
             crons: None,
             context_budgets: Default::default(),

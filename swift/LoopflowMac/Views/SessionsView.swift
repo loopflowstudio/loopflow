@@ -1120,8 +1120,8 @@ struct SessionsContentView: View {
             .help("Choose Work (⌘K)").accessibilityIdentifier("work-location-picker")
             .accessibilityValue(title(for: currentKey))
             Spacer(minLength: 0)
-            if let task = fileTask, let wave = model.breadcrumb?.wave?.roadmap.wave {
-                TaskLifecycleActions(model: model, task: task.task, wave: wave,
+            if let task = fileTask {
+                TaskLifecycleActions(model: model, task: task.task,
                     work: model.taskWork[task.task.id])
                 workspaceCreation(for: workspace, task: task.task)
                 if multiplexer.zoomedPaneId != nil {

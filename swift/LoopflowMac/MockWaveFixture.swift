@@ -320,6 +320,10 @@ enum MockWaveFixture {
             "items": [
               {
                 "task": {
+                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo": "/src/loopflow",
+                  "project_id": "project-1",
+                  "wave_id": "wave-1",
                   "id": "issue-1",
                   "identifier": "INF-123",
                   "name": "Surface nightly failures",
@@ -409,6 +413,10 @@ enum MockWaveFixture {
               },
               {
                 "task": {
+                  "repository_id": "repo_00000000000040008000000000000001",
+                  "repo": "/src/loopflow",
+                  "project_id": "project-1",
+                  "wave_id": "wave-1",
                   "id": "issue-2",
                   "identifier": "INF-124",
                   "name": "Classify publish failures",

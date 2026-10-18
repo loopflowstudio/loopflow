@@ -48,7 +48,11 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     }
     let wave = wave
         .map(str::to_owned)
-        .or_else(|| binding.as_ref().map(|binding| binding.wave_name.clone()))
+        .or_else(|| {
+            binding
+                .as_ref()
+                .and_then(|binding| binding.wave_name.clone())
+        })
         .or_else(crate::work::wave::context::resolve_ambient_wave_name);
     let task = binding.as_ref().and_then(|binding| match &binding.work {
         crate::durable::WorkRef::Task(id) => Some(id.to_string()),

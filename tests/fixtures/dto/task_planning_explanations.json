@@ -322,7 +322,7 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "refile",
+      "kind": "move",
       "wave": "destination-wave",
       "project": "destination-project",
       "previous_project": "source-project"

@@ -71,26 +71,34 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Project is missing"))?;
-                (project.wave_id, project.linear_id.is_some())
+                (Some(project.wave_id), project.linear_id.is_some())
             }
         };
         if mapped {
             return Ok(());
         }
-        let wave = store
-            .get_wave(&wave_id)
-            .await
-            .map_err(message)?
-            .ok_or_else(|| message("Wave is missing"))?;
-        let initiative = super::linear::read_initiative(repo, wave.slug())
-            .ok_or_else(|| message("Wave has no Linear Initiative; export remains pending"))?;
+        let initiative = match &wave_id {
+            Some(id) => {
+                let wave = store
+                    .get_wave(id)
+                    .await
+                    .map_err(message)?
+                    .ok_or_else(|| message("Wave is missing"))?;
+                Some(
+                    super::linear::read_initiative(repo, wave.slug()).ok_or_else(|| {
+                        message("Wave has no Linear Initiative; export remains pending")
+                    })?,
+                )
+            }
+            None => None,
+        };
         let team = super::linear::repository_team_id(repo)?;
         let export = store
             .sqlite
-            .prepare_planning_export(owner, &team, &initiative)
+            .prepare_planning_export(owner, &team, initiative.as_deref())
             .map_err(message)?;
         let client = super::linear::linear_client(repo).await?;
-        if observe(store, repo, owner, &client, &export, &wave_id).await? {
+        if observe(store, repo, owner, &client, &export, wave_id.as_ref()).await? {
             return Ok(());
         }
         let (attempted, _) = store
@@ -148,7 +156,17 @@ async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool
         };
         match response {
             crate::linear::PlanningResponse::Project { project, .. } => {
-                attach_project(store, owner, &client, &export, &wave_id, *project).await?;
+                attach_project(
+                    store,
+                    owner,
+                    &client,
+                    &export,
+                    wave_id
+                        .as_ref()
+                        .ok_or_else(|| message("Project export has no Wave"))?,
+                    *project,
+                )
+                .await?;
             }
             response => {
                 super::planning_delivery::apply_response(store, repo, owner, response).await?
@@ -175,7 +193,7 @@ async fn observe(
     owner: PlanningChanges<'_>,
     client: &LinearClient,
     export: &PlanningExport,
-    wave: &crate::id::WaveId,
+    wave: Option<&crate::id::WaveId>,
 ) -> OpsResult<bool> {
     let (attempted, _) = store
         .sqlite
@@ -189,7 +207,15 @@ async fn observe(
             if project.id != export.id || !attempted {
                 return Err(message("Project identity already exists without an attempted creation; receipt retained"));
             }
-            attach_project(store, owner, client, export, wave, project).await?;
+            attach_project(
+                store,
+                owner,
+                client,
+                export,
+                wave.ok_or_else(|| message("Project export has no Wave"))?,
+                project,
+            )
+            .await?;
         }
         PlanningChanges::Task(_) => {
             let Some((item, project)) = client
@@ -225,6 +251,10 @@ async fn attach_project(
     wave: &crate::id::WaveId,
     mut project: crate::linear::LinearProject,
 ) -> OpsResult<()> {
+    let initiative = export
+        .initiative
+        .as_deref()
+        .ok_or_else(|| message("Project export has no Initiative"))?;
     if project.initiative_ids.is_empty() {
         let (_, attempted) = store
             .sqlite
@@ -243,7 +273,7 @@ async fn attach_project(
             return Ok(());
         }
         project = match client
-            .deliver_project_attachment(&export.link_id, &export.id, &export.initiative)
+            .deliver_project_attachment(&export.link_id, &export.id, initiative)
             .await
         {
             Ok(project) => project,
@@ -258,8 +288,7 @@ async fn attach_project(
             }
         };
     }
-    if project.id != export.id || project.initiative_ids.as_slice() != [export.initiative.as_str()]
-    {
+    if project.id != export.id || project.initiative_ids.as_slice() != [initiative] {
         return Err(message(
             "Created Project has conflicting Initiative membership; receipt retained",
         ));
@@ -267,7 +296,7 @@ async fn attach_project(
     crate::linear::acceptance::accept_linear_project_in(
         &store.sqlite,
         wave,
-        &export.initiative,
+        initiative,
         &project,
         time::OffsetDateTime::now_utc().unix_timestamp(),
     )

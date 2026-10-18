@@ -27,7 +27,9 @@ pub(crate) async fn ensure(
         None => None,
     };
     let scope = match &binding {
-        Some(binding) => PrimaryScope::Wave(binding.wave_id.clone()),
+        Some(binding) => {
+            PrimaryScope::Wave(binding.wave_id.clone().expect("explicit Wave selection"))
+        }
         None => PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(repo)?),
     };
     let _lock = lock_scope(&scope).await?;
@@ -205,13 +207,13 @@ pub(super) async fn admit_workspace(
 
 fn wave_session(binding: &crate::ops::WorkBinding) -> Result<LfSession> {
     Ok(LfSession {
-        wave_id: Some(binding.wave_id.clone()),
+        wave_id: binding.wave_id.clone(),
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
             "wave/session",
-            binding.wave_name.clone(),
+            binding.wave_name.clone().expect("Wave primary has a Wave"),
         )?
     })
 }
@@ -228,7 +230,7 @@ fn task_session(
     let title = crate::naming::generated_session_title(None, None, Some(&plan.title), &binding.cwd);
     Ok(LfSession {
         task_id: Some(task.clone()),
-        wave_id: Some(binding.wave_id.clone()),
+        wave_id: binding.wave_id.clone(),
         work_source: Some(WorkSource::Declared),
         ..conversation(
             &binding.cwd,

@@ -320,7 +320,7 @@ public struct RegistryQuery: Sendable {
 
     /// Put the Task at a node of its Workflow without running anything.
     public func moveTask(issue: String, node: String, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node], cwd)
+        _ = try await run(["task", "workflow", "move", issue, node], cwd)
     }
 
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
@@ -341,8 +341,8 @@ public struct RegistryQuery: Sendable {
 
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
-    public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
-        let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
+    public func taskComments(id: String, cwd: String) async throws -> TaskComments {
+        let stdout = try await run(["task", "comment", id, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
@@ -360,9 +360,9 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ContextReport.self, from: stdout)
     }
 
-    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+    public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
         _ = try await run([
-            "task", "edit", id, "--wave", wave, "--notes=\(text)",
+            "task", "edit", id, "--notes=\(text)",
         ], cwd)
     }
 
@@ -627,14 +627,16 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: String
     public let waves: [WaveRoadmap]
+    public let tasks: WorkEvidence<RoadmapTask>
 
     enum CodingKeys: String, CodingKey {
-        case waves
+        case waves, tasks
         case generatedAt = "generated_at"
     }
 }
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let workflow: String?
     public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
@@ -645,7 +647,7 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
-        case wave, projects, tasks
+        case wave, projects, tasks, workflow
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }

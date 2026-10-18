@@ -74,6 +74,92 @@ Open Loopflow or run its CLI
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
+## lf transport
+
+Retain command execution independently of terminal viewers
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf transport start
+
+Start an independently owned command and print its Process identity
+
+| Argument | What it does |
+|---|---|
+| `--terminal` | terminal Default: false. |
+| `<argv>` | argv |
+| `--help / -h` | Print help |
+
+## lf transport serve
+
+Own a command's transport until it exits (normally launched by start)
+
+| Argument | What it does |
+|---|---|
+| `--terminal` | terminal Default: false. |
+| `<argv>` | argv |
+| `--help / -h` | Print help |
+
+## lf transport attach
+
+Attach to an existing execution; Ctrl+] detaches without stopping it
+
+| Argument | What it does |
+|---|---|
+| `<process>` | process |
+| `--observe` | observe Default: false. |
+| `--help / -h` | Print help |
+
+## lf clone
+
+Create and use an offline, isolated development data clone (macOS)
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf clone create
+
+Snapshot a source Machine without copying credentials or live authority
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--source` | source |
+| `--codex-home` | Explicit Codex history home; credentials and configuration are excluded |
+| `--claude-home` | Explicit Claude history home; credentials and configuration are excluded |
+| `--help / -h` | Print help |
+
+## lf clone run
+
+Run lf (or a Desktop executable after --) inside the offline clone
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `<command>` | command |
+| `--help / -h` | Print help |
+
+## lf clone show
+
+Show the snapshot inventory and continuation limitations
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--help / -h` | Print help |
+
+## lf clone dispose
+
+Remove only this owned disposable directory (close its clients first)
+
+| Argument | What it does |
+|---|---|
+| `<directory>` | directory |
+| `--help / -h` | Print help |
+
 ## lf pr
 
 Pull request lifecycle
@@ -382,6 +468,16 @@ Inspect and continue Sessions
 |---|---|
 | `--help / -h` | Print help |
 
+## lf session attach
+
+Attach to the current execution without restarting or submitting input
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--observe` | observe Default: false. |
+| `--help / -h` | Print help |
+
 ## lf session steer
 
 Save a steer for this Session without starting a turn
@@ -605,7 +701,7 @@ Establish or print this repository's selected planning identity
 |---|---|
 | `--bind` | Associate this checkout with a repository identity, retaining prior IDs |
 | `--relocate` | Reconnect retained Work after a move predating its Git locator |
-| `--path` | Print the selected repository’s current local directory |
+| `--path` | Print the selected repository's current local directory Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -848,6 +944,58 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | Argument | What it does |
 |---|---|
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf portfolio
+
+Select repositories for the Machine-local portfolio
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf portfolio folder
+
+Discover immediate main checkouts in a folder (defaults to the saved folder)
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--help / -h` | Print help |
+
+## lf portfolio manual
+
+Use only explicitly selected repositories
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf portfolio add
+
+Add repositories to the saved manual selection
+
+| Argument | What it does |
+|---|---|
+| `<paths>` | paths |
+| `--help / -h` | Print help |
+
+## lf portfolio remove
+
+Remove manual membership, preserving files and open workspaces
+
+| Argument | What it does |
+|---|---|
+| `<path>` | path |
+| `--help / -h` | Print help |
+
+## lf portfolio import
+
+Import previous Desktop membership only when no selection has been saved
+
+| Argument | What it does |
+|---|---|
+| `<paths>` | paths |
 | `--help / -h` | Print help |
 
 ## lf config
@@ -1180,7 +1328,7 @@ Read chapter plans and Tasks without starting work; an explicit Wave includes hi
 
 ## lf wave workflow
 
-Select and inspect the chapter Workflow
+Select and inspect the Wave default Workflow
 
 | Argument | What it does |
 |---|---|
@@ -1193,8 +1341,7 @@ Read the authored definition without creating a repository file
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<wave>` | Wave name or ID (default: the ambient Wave) |
-| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `<wave>` | wave |
 | `--help / -h` | Print help |
 
 ## lf wave workflow list
@@ -1203,18 +1350,17 @@ List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Include this Project's stored Wave Workflow definitions |
+| `--wave` | Include this Wave's stored Workflow definitions |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave workflow show
 
-Show the selected chapter's Workflow
+Show the Wave's default Workflow
 
 | Argument | What it does |
 |---|---|
-| `<wave>` | Wave name or ID (default: the ambient Wave) |
-| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `<wave>` | wave |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1225,8 +1371,7 @@ Select the Workflow future Tasks take up; captured Tasks stay unchanged
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<wave>` | Wave name or ID (default: the ambient Wave) |
-| `--project` | Exact retained Project ID, provider ID or unique name instead of current selection |
+| `<wave>` | wave |
 | `--file` | Store this definition in the Wave |
 | `--help / -h` | Print help |
 
@@ -1434,7 +1579,7 @@ Rename or relocate an authored Wave and its provider mapping
 
 ## lf wave update-plan
 
-Replace the current chapter's KRs, targets and workflow
+Replace the current chapter's KRs and targets
 
 | Argument | What it does |
 |---|---|
@@ -1450,6 +1595,34 @@ Concrete work and Task lifecycle
 |---|---|
 | `--help / -h` | Print help |
 
+## lf task list
+
+List every Task in the selected repository
+
+| Argument | What it does |
+|---|---|
+| `--wave` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task pause
+
+Pause future Task execution without stopping live processes
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--help / -h` | Print help |
+
+## lf task resume
+
+Clear a Task pause without starting execution
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--help / -h` | Print help |
+
 ## lf task sync
 
 Synchronize a Task; observed planning conflicts adopt Linear
@@ -1457,6 +1630,8 @@ Synchronize a Task; observed planning conflicts adopt Linear
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
+| `--retry-creation` | Retry an uncertain issue creation with its saved ID; may recreate a deleted issue Default: false. |
+| `--retry-updates` | Retry uncertain saved field/state updates after observing current Linear values Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task workflow
@@ -1465,6 +1640,17 @@ Inspect or reset this Task's captured Workflow
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf task workflow move
+
+Move Workflow position without running anything; `end` requests completion
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<node>` | `start`, `end` or one of the workflow's nodes |
+| `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 
 ## lf task workflow show
@@ -1525,6 +1711,7 @@ Ensure tracked Task Work and its worktree without launching a Flow
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--design` | Hand off a child-specific design from the caller's checkout |
+| `--recover-from` | Restore a missing Task branch from a deliberately recovered commit; never reset existing work |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1535,7 +1722,7 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<flow>` | The edge's Flow, or a workflow to take up; the Task's only edge or its Project's workflow when omitted |
+| `<flow>` | The edge's Flow, or a workflow to take up; the Task's only edge or its Wave or repository default when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
@@ -1562,24 +1749,14 @@ Reopen local planning without moving Workflow or replacing the PR
 | `--reason` | reason |
 | `--help / -h` | Print help |
 
-## lf task move
-
-Move Workflow position without running anything; `end` requests completion
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<node>` | `start`, `end` or one of the workflow's nodes |
-| `--reason` | Why, kept in the Task's workflow history |
-| `--help / -h` | Print help |
-
 ## lf task create
 
 Create a planning Task without allocating a checkout or starting work
 
 | Argument | What it does |
 |---|---|
-| `--wave` | Wave name; defaults to the bound Wave |
+| `--no-wave` | Create without a Wave (the default) Default: false. |
+| `--wave` | Explicit Wave membership; omitted creates a standalone Task |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
 | `--json` | json Default: false. |
@@ -1735,14 +1912,15 @@ Edit a Task's title or notes, before or after placement
 | `--wave / -w` | wave |
 | `--help / -h` | Print help |
 
-## lf task refile
+## lf task move
 
-Move a Task that has no recorded work to another Wave's current Project
+Change Task membership while preserving its recorded work
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--wave / -w` | The Wave to file it under |
+| `--wave / -w` | wave |
+| `--no-wave` | no wave Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task comment
@@ -1938,7 +2116,3 @@ Run a skill explicitly
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
-
-## lf scratch clear
-
-Remove committed scratch additions relative to the Task or branch base. Existing files, edits and renames remain. Checkpoint intended notes before clearing.

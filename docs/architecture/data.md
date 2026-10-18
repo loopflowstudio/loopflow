@@ -39,7 +39,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Flow's identity, state and step results | Its Flow process and child step processes in `processes` |
 | A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the Flow process |
-| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
+| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task workflow move` |
 | A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Machine |
@@ -115,8 +115,9 @@ private writes back to the installation.
 
 ## Attribution and Started
 
-Typed ancestry belongs to LfSession and Process. Task implies Wave;
-constructors fill omitted ancestors and reject contradictions in the transaction.
+Typed ancestry belongs to LfSession and Process. Tasks require repository identity
+and have optional Project membership, which determines their optional Wave.
+Constructors derive ancestors and reject contradictions in the transaction.
 Flow members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or attachment.
 

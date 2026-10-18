@@ -15,8 +15,8 @@ pub enum TaskPlanningRequest<'a> {
         notes: Option<&'a str>,
     },
     Edit(TaskUpdate),
-    Refile {
-        wave: &'a str,
+    Move {
+        wave: Option<&'a str>,
     },
     Save {
         path: &'a str,
@@ -41,10 +41,10 @@ pub enum TaskPlanningAction {
         revision: u64,
         fields: Vec<String>,
     },
-    Refile {
-        wave: String,
-        project: String,
-        previous_project: String,
+    Move {
+        wave: Option<String>,
+        project: Option<String>,
+        previous_project: Option<String>,
     },
     Save {
         path: String,
@@ -80,10 +80,13 @@ impl TaskPlanningExplanation {
 
     pub fn render(&self) -> String {
         let action = match &self.action {
-            Some(TaskPlanningAction::Create { title, project, .. }) => format!(
-                "create Task {title:?} in Project {}",
-                project.as_deref().unwrap_or("unavailable")
-            ),
+            Some(TaskPlanningAction::Create { title, project, .. }) => match project {
+                Some(project) => format!("create Task {title:?} in Project {project}"),
+                None if matches!(self.resolution.wave, ContextFact::Unbound) => {
+                    format!("create Task {title:?} without a Wave")
+                }
+                None => format!("create Task {title:?} (Project selection unavailable)"),
+            },
             Some(TaskPlanningAction::Edit { revision, fields }) => {
                 format!("edit {} at planning revision {revision}", fields.join(", "))
             }
@@ -96,8 +99,12 @@ impl TaskPlanningExplanation {
                 if *steer { "direction" } else { "comment" }
             ),
             Some(TaskPlanningAction::Comment { message: None, .. }) => "read Task comments".into(),
-            Some(TaskPlanningAction::Refile { wave, project, .. }) => {
-                format!("refile Task to Wave {wave}, Project {project}")
+            Some(TaskPlanningAction::Move { wave, project, .. }) => {
+                format!(
+                    "move Task to Wave {}, Project {}",
+                    wave.as_deref().unwrap_or("none"),
+                    project.as_deref().unwrap_or("none")
+                )
             }
             Some(TaskPlanningAction::Save {
                 path,
@@ -182,40 +189,37 @@ async fn read_planning(
             });
             report.effects.push("Save changed fields and pending planning mutations locally; attempt configured synchronization. Workflow, checkout and Processes stay unchanged".into());
         }
-        TaskPlanningRequest::Refile { wave } => {
+        TaskPlanningRequest::Move { wave } => {
             let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
-            let destination = crate::work::wave::context::resolve_managed_wave(
-                Some(store),
-                Some(cwd),
-                Some(wave),
-                None,
-            )
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!("{error}; destination registration/acquisition was not performed")
-            })?;
-            let current = crate::ops::project::current_project(store, &destination)?;
-            let project = store
-                .get_project(&current.id)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("destination Project is unavailable"))?;
-            report.action = Some(TaskPlanningAction::Refile {
-                wave: destination.id().to_string(),
-                project: project.id.to_string(),
-                previous_project: task.project_id.to_string(),
+            let destination = match wave {
+                Some(wave) => Some(
+                    crate::work::wave::context::resolve_managed_wave(
+                        Some(store),
+                        Some(cwd),
+                        Some(wave),
+                        None,
+                    )
+                    .await?,
+                ),
+                None => None,
+            };
+            let project = destination
+                .as_ref()
+                .map(|wave| crate::ops::project::current_project(store, wave))
+                .transpose()?;
+            report.action = Some(TaskPlanningAction::Move {
+                wave: destination.as_ref().map(|w| w.id().to_string()),
+                project: project.as_ref().map(|p| p.id.to_string()),
+                previous_project: task.project_id.as_ref().map(ToString::to_string),
             });
-            if let Err(error) =
-                store
-                    .sqlite
-                    .validate_task_refile(&task.id, &task.project_id, &project.id)
-            {
+            if let Err(error) = store.sqlite.validate_task_move(
+                &task.id,
+                task.project_id.as_ref(),
+                project.as_ref().map(|p| &p.id),
+            ) {
                 report.impediments.push(error.to_string());
             }
-            report.effects.push(if task.project_id == project.id {
-                "Membership is unchanged; attempt configured planning synchronization".into()
-            } else {
-                "Save destination Project membership and its pending planning mutation locally; attempt configured synchronization. Recorded work prevents refiling; no execution is transferred".into()
-            });
+            report.effects.push("Save membership and its planning mutation locally; preserve checkout, Workflow, Sessions and Processes".into());
         }
         TaskPlanningRequest::Save {
             path,
@@ -333,41 +337,28 @@ async fn read_creation(
     });
     report.effects.push("Save a new unstarted Task and pending planning mutations locally; attempt configured synchronization without allocating execution".into());
     let main = crate::git::worktrees::main_repo_root(cwd)?;
-    let selected = match super::select_task_creation_wave(store, &main, wave_selector).await {
-        Ok(selected) => selected,
+    report.resolution.repository_path = ContextFact::Bound {
+        value: main.display().to_string(),
+        source: "local_locator".into(),
+    };
+    report.resolution.repository = match store.repository_id(&main.to_string_lossy()).await? {
+        Some(id) => ContextFact::Bound {
+            value: id.to_string(),
+            source: "selected_plan".into(),
+        },
+        None => ContextFact::Unbound,
+    };
+    let wave = match super::select_task_creation_wave(store, &main, wave_selector).await {
+        Ok(Some(wave)) => wave,
+        Ok(None) => {
+            report.resolution.wave = ContextFact::Unbound;
+            return Ok(());
+        }
         Err(error) => {
             report.resolution.wave = ContextFact::Unavailable {
                 reason: error.to_string(),
             };
             anyhow::bail!("{error}; Wave registration/acquisition was not performed");
-        }
-    };
-    let (wave, source) = match selected {
-        Some(wave) => (
-            wave,
-            if wave_selector.is_some() {
-                "explicit"
-            } else {
-                "inherited_declaration"
-            },
-        ),
-        None => {
-            let locator = crate::work::wave::WaveLocator::discover(&main, "inbox")?;
-            match store.get_wave_at(&locator).await? {
-                Some(wave) => (wave, "default_inbox"),
-                None => {
-                    report.resolution.wave = ContextFact::Unbound;
-                    report.effects.push(
-                        "Ensure the repository's inbox Wave and Project before creating the Task"
-                            .into(),
-                    );
-                    report.unavailable.push(
-                        "Inbox Wave/Project identity requires initialization; it was not performed"
-                            .into(),
-                    );
-                    return Ok(());
-                }
-            }
         }
     };
     report.resolution = crate::ops::context::explain_context(
@@ -385,7 +376,7 @@ async fn read_creation(
     report.resolution.execution_machine = ContextFact::Unbound;
     report.resolution.wave = ContextFact::Bound {
         value: wave.id().to_string(),
-        source: source.into(),
+        source: "explicit".into(),
     };
     let project = match crate::ops::project::current_project(store, &wave) {
         Ok(project) => project,
@@ -394,10 +385,6 @@ async fn read_creation(
             return Ok(());
         }
     };
-    let project = store
-        .get_project(&project.id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("selected Project is missing"))?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..
     }) = &mut report.action

@@ -36,19 +36,33 @@ struct WorkDestinationTests {
             == TaskLink(issue: "LOO-427", repo: nil))
     }
 
-    @Test func taskEntryOpensConversationThenRetainsWorkspace() async throws {
-        let data = try fixture()
+    @Test(arguments: [false, true])
+    func taskEntryOpensConversationThenRetainsWorkspace(standalone: Bool) async throws {
+        var data = try fixture()
+        if standalone {
+            var wire = try #require(JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any])
+            var inventory = try #require(wire["tasks"] as? [String: Any])
+            var task = try #require((inventory["items"] as? [[String: Any]])?.first)
+            var summary = try #require(task["task"] as? [String: Any])
+            summary["wave_id"] = NSNull()
+            summary["project_id"] = NSNull()
+            task["task"] = summary
+            inventory["items"] = [task]
+            wire["tasks"] = inventory
+            wire["waves"] = []
+            data = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+        }
+        let planning = data
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
-        let wave = try #require(snapshot.waves.first)
-        let task = try #require(wave.tasks.items.first)
+        let task = try #require(snapshot.tasks.items.first)
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.contains("connect") { return encoded }
-            if args.starts(with: ["wave", "show"]) { return data }
+            if args.starts(with: ["wave", "show"]) { return planning }
             throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
-        let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         await model.openTaskConversation(task.id)
         #expect(installedSession(model, registry)?.id == record.id)
@@ -60,7 +74,7 @@ struct WorkDestinationTests {
         draft.editor.string = "unsaved Task draft"
         let layout = entry.multiplexer.layout
         let focus = entry.multiplexer.focusedPaneId
-        model.select(.wave(id: wave.wave.id))
+        model.select(nil)
         await model.openTaskConversation(task.id)
         #expect(entry.multiplexer.layout == layout)
         #expect(entry.multiplexer.focusedPaneId == focus)
@@ -164,6 +178,12 @@ struct WorkDestinationTests {
             tasks["items"] = items
             waves[0]["tasks"] = tasks
             planning["waves"] = waves
+            var inventory = try #require(planning["tasks"] as? [String: Any])
+            var allTasks = try #require(inventory["items"] as? [[String: Any]])
+            let index = try #require(allTasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == task.id })
+            allTasks[index] = items[0]
+            inventory["items"] = allTasks
+            planning["tasks"] = inventory
             initial = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
         }
         model.applyFixture(roadmap: .available(initial), waves: .available([]), workActivity: .loading, repos: [])
@@ -895,7 +915,7 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
+            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -1044,7 +1064,7 @@ struct WorkDestinationTests {
 
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {
         let data = try fixture()
-        for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#, "transport-error"] {
+        for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#, "transport-error"] {
             let (model, _) = destinationModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
@@ -1070,7 +1090,7 @@ struct WorkDestinationTests {
     }
 
     @Test(arguments: [false, true])
-    func scopedTaskLinkOpensItsMatchWithAnotherWaveUnavailable(scoped: Bool) async throws {
+    func taskLinkUsesRepositoryInventoryWithAnotherWaveUnavailable(scoped: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1089,8 +1109,8 @@ struct WorkDestinationTests {
         var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
         await model.openTaskLink(try #require(link.url))
-        #expect(model.selection == (scoped ? .task(id: task.id) : nil))
-        #expect(model.showsTaskLink == !scoped)
+        #expect(model.selection == .task(id: task.id))
+        #expect(!model.showsTaskLink)
     }
 
     @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {
@@ -1164,7 +1184,7 @@ struct WorkDestinationTests {
         #expect(stale.task?.actions == nil)
         #expect(stale.task?.runControl == nil)
 
-        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [])
+        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [], tasks: .available(items: [], truncated: false))
         model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
         model.select(.task(id: task.id))
         let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
@@ -1902,6 +1922,10 @@ struct WorkDestinationTests {
             waves[index]["tasks"] = evidence
         }
         snapshot["waves"] = waves
+        var inventory = try #require(snapshot["tasks"] as? [String: Any])
+        let tasks = try #require(inventory["items"] as? [[String: Any]])
+        inventory["items"] = tasks.filter { ($0["task"] as? [String: Any])?["id"] as? String == taskId }
+        snapshot["tasks"] = inventory
         return String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
     }
 }

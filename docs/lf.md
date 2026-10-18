@@ -89,7 +89,7 @@ lf --wave exports : "Review the goal" # add context in the current directory
 lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
-lf task move EXP-12 demo     # put the Task at a node, running nothing
+lf task workflow move EXP-12 demo     # put the Task at a node, running nothing
 lf --task EXP-12 flow incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
@@ -164,12 +164,12 @@ capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
 untrusted hooks. Loopflow never writes provider trust decisions.
 
-A Task takes up its Project's workflow and moves through its nodes.
+A Task takes up its Wave's workflow or repository default and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
 one whose Flow you name. At a node the Task waits on you in its conversation;
 no command approves a node. A Flow that does not leave the node is refused
 with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
-you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
+you choose again or `lf task workflow move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
@@ -240,8 +240,10 @@ a different commit. Without an explicit recovery commit, a lost started branch
 is not recreated from its old base.
 
 
-Without a selected Wave, explicit creation uses `inbox`. A Task gets its
-identity before placement; creation starts no agent and requires no Linear login.
+Creation defaults to a standalone repository Task, including inside Wave/Task-bound
+Sessions and checkouts. Only explicit `--wave <wave>` selects membership;
+`--no-wave` is equivalent to omitting both flags. A Task gets its identity before
+placement; creation starts no agent and requires no Linear login.
 Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
 Reads create nothing.
 
@@ -277,13 +279,13 @@ lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
 
-Use `--project ID` instead of a Wave on `workflow show/set/source` or `edit-plan`
-to address an exact retained chapter. An explicit `wave show WAVE` includes history;
+Use `--project ID` on `edit-plan` to address an exact retained chapter.
+Workflow commands select the Wave directly. An explicit `wave show WAVE` includes history;
 `wave show --all` reads current Waves across repositories. Neither starts work.
 
-Project names, summaries, Workflow selections and complete plan replacements save
+Project names, summaries and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
-`lf wave workflow show WAVE --json` includes `sync`: pending changes,
+`lf wave status WAVE --json` includes `sync`: pending changes,
 uncertain attempts, errors and retained losing values. Project reads keep the local
 `id` in both transports, with an optional `linear_id` binding; adding or removing
 that binding does not change identity. Task edits and status use
@@ -294,7 +296,7 @@ or Desktop connection exports saved Projects and delivers their fields. Lost cre
 or Initiative-attachment replies retain uncertainty until exact readback.
 Readback cannot protect against unseen concurrent provider writes.
 
-Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
+Ranks are zero-based within a Project, or within the repository’s standalone Tasks. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions are imported by `lf wave ensure`; builtin definitions remain available.
 Nested Waves use names such as `parser/tokenizer`. Edit `.lf/wave/<name>/GOAL.md`
@@ -414,11 +416,11 @@ never allocate replacement identities. Later local edits survive creation readba
 The local ID works before a Linear alias arrives.
 
 ```bash
-lf task refile <task-id> --wave exports
+lf task move <task-id> --wave exports
 ```
 
-Move unplaced work to the Wave's selected Project. Membership saves locally during
-an outage and retains pending sync; recorded work keeps its owner. An active Task
+Move a Task to the Wave's selected Project, or detach with `--no-wave`. Membership saves locally during
+an outage and retains pending sync; existing Sessions, checkout, PR and Workflow remain intact. An active Task
 Session or Desktop connection delivers the move when both Task and destination
 Project have Linear mappings. The same active connection exports unmapped records.
 
@@ -765,7 +767,7 @@ nothing: previews never fetch, allocate a checkout, take a lease, change a stack
 or contact a provider. Missing branch recovery and finalization remain unperformed;
 previews read admission without claiming it.
 
-`task move TASK NODE --explain` and `task workflow restart TASK --explain`
+`task workflow move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
 (including the exact prior node/edge and reason), `impediments` and
 `unavailable` to `resolution`. Restart means move to `start`, not run a Flow.
@@ -773,9 +775,9 @@ Moving to `end` records arrival before requesting completion. Settlement checks 
 gates and may clean an eligible checkout; preview performs none of these effects.
 Missing or remote execution evidence stays unavailable.
 
-`task create/edit/comment/refile/save --explain` validates mutation input through the same
+`task create/edit/comment/move/save --explain` validates mutation input through the same
 owners as saving. JSON separates `resolution`, intended `action`, `effects`,
-`impediments` and `unavailable`. Creation reads the current Project and derives a
+`impediments` and `unavailable`. Creation resolves optional Wave membership and derives a
 title from piped notes normally; new Task identity and execution stay unallocated.
 Editing reports fields and the observed revision, preserving empty descriptions
 and explicit unassignment. Comment explanation distinguishes appending from reading:

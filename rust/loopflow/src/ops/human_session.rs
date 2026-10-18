@@ -118,7 +118,12 @@ pub(crate) async fn connection_scope(
             .context("selected Work is unavailable")?;
         return Ok(match work.task {
             Some(task) => PrimaryScope::Task(task.id),
-            None => PrimaryScope::Wave(work.wave.id().clone()),
+            None => PrimaryScope::Wave(
+                work.wave
+                    .expect("selection without a Task has a Wave")
+                    .id()
+                    .clone(),
+            ),
         });
     }
     let repo = crate::repository::CanonicalRepo::discover(cwd)?;

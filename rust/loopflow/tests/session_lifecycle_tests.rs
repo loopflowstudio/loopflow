@@ -411,13 +411,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             .unwrap(),
         native
     );
-    let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["project"]["id"].as_str().unwrap();
-    let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
-    assert!(selected.status.success(), "{selected:?}");
     managed_codex_account(&fixture);
     let run = fixture
-        .command(&["-b", "--agent", "codex", "task", "run", task_id])
+        .command(&["-b", "--agent", "codex", "task", "run", task_id, "proof"])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
@@ -438,7 +434,10 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap()
+        .observe_pm_issue_change("fixture-deleted", None, true)
+        .unwrap();
     let refused = fixture
         .command(&["session", "connect", &session])
         .current_dir(worktree)
@@ -1642,8 +1641,8 @@ fn declared_agent_can_start_another_tasks_flow() {
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
-        .select_project_workflow(
-            &target.task.project_id,
+        .select_wave_workflow(
+            target.task.wave_id.as_ref().unwrap(),
             "switch-proof",
             &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
         )

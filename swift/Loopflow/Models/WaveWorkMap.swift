@@ -24,13 +24,12 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let linearId: String?
     public let slug: String
     public let name: String
-    public let workflow: String
     public let status: ProjectStatus
     public let metricTargets: [MetricTarget]
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, workflow, status, krs, current, sync
+        case id, slug, name, status, krs, current, sync
         case linearId = "linear_id"
         case metricTargets = "metric_targets"
     }
@@ -50,6 +49,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
     public let workflowName: String?
+    public let workflowSource: String?
     public let latestFlowProcess: FlowProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
@@ -62,6 +62,7 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, directive, condition, actions, pr, execution
         case workflowName = "workflow_name"
+        case workflowSource = "workflow_source"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
         case nextMove = "next_move"
@@ -93,6 +94,10 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let acquisition: TaskAcquisition
     public let sync: PlanningSyncStatus
     public let id: String
+    public let repositoryId: String
+    public let repo: String
+    public let projectId: String?
+    public let waveId: String?
     public let linearId: String?
     public let identifier: String
     public let name: String
@@ -105,6 +110,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
+        case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
+        case repo
         case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
         case linearId = "linear_id"
         case completedAt = "completed_at"
@@ -194,6 +201,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
     public let workflowName: String?
+    public let workflowSource: String?
     public let latestFlowProcess: FlowProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
@@ -203,6 +211,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr
         case workflowName = "workflow_name"
+        case workflowSource = "workflow_source"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
         case nextMove = "next_move"

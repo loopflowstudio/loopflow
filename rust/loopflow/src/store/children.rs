@@ -16,10 +16,10 @@ impl Store {
     pub(crate) async fn create_task(
         &self,
         input: &crate::work::task::NewTask,
-        acquisition: Arc<super::PlanningLocks>,
+        acquisition: Option<Arc<super::PlanningLocks>>,
     ) -> StoreResult<Task> {
         let input = input.clone();
-        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.create_task(&input)
         })
         .await

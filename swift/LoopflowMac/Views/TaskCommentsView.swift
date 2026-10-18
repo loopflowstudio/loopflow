@@ -9,7 +9,6 @@ import SwiftUI
 struct TaskCommentsView: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     private var reading: WorkReading<TaskComments> { model.comments[task.id] }
@@ -32,17 +31,17 @@ struct TaskCommentsView: View {
                     let navigation = model.navigation
                     if navigation.expandedComments.remove(task.id) == nil {
                         navigation.expandedComments.insert(task.id)
-                        Task { await model.loadComments(task: task, wave: wave) }
+                        Task { await model.loadComments(task: task) }
                     }
                 },
-                retry: { Task { await model.loadComments(task: task, wave: wave) } }
+                retry: { Task { await model.loadComments(task: task) } }
             )
             .padding(.top, Spacing.sm)
             if expanded {
                 if let thread { threadView(thread) } else { statusText }
             }
         }
-        .task(id: task.id) { await model.loadComments(task: task, wave: wave) }
+        .task(id: task.id) { await model.loadComments(task: task) }
     }
 
     private var heading: String {

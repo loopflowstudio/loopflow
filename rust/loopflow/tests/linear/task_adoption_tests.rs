@@ -102,7 +102,6 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             linear_id: Some(LinearProjectId::new("project-1").unwrap()),
             slug: "chapter".into(),
             name: "Chapter".into(),
-            workflow: "adoption".into(),
             status: loopflow::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
             krs: Vec::new(),
@@ -114,7 +113,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         };
         let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
-                "summary":"", "metric_targets":[], "workflow":"adoption", "status":"started",
+                "summary":"", "metric_targets":[], "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",

@@ -128,11 +128,8 @@ async fn read_task_run(
             .unavailable
             .push("Stack placement requires preparation; it has not been performed".into());
     }
-    let wave = super::owning_wave(store, &task).await?;
-    let checkout = task
-        .worktree
-        .as_deref()
-        .unwrap_or_else(|| Path::new(wave.repo()));
+    let repo = super::repository_for_task(store, &task)?;
+    let checkout = task.worktree.as_deref().unwrap_or(&repo);
     if task.worktree.is_some() && !checkout.exists() {
         anyhow::bail!(
             "Recorded checkout definitions are unavailable at {}",

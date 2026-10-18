@@ -173,7 +173,7 @@ struct RoadmapView: View {
     }
 
     private var nowSectionsList: [NowSection] {
-        nowSections(from: visibleWaves)
+        nowSections(from: model.visibleTasks, waves: visibleWaves)
     }
 
     @ViewBuilder
@@ -192,10 +192,10 @@ struct RoadmapView: View {
                             section: section,
                             activeControlId: activeControlId,
                             onSelect: { row in
-                                onOpenTask(row.wave.repo, row.task.id)
+                                onOpenTask(row.task.task.repo, row.task.id)
                             },
                             onTaskAction: { row, action in
-                                perform(action, task: row.task, wave: row.wave)
+                                perform(action, task: row.task)
                             },
                             onOpenWorktree: openWorktree
                         )
@@ -231,7 +231,7 @@ struct RoadmapView: View {
             onOpenWave: { onOpenWave(roadmap.wave) },
             onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
             onTaskAction: { task, action in
-                perform(action, task: task, wave: roadmap.wave)
+                perform(action, task: task)
             },
             onOpenWorktree: openWorktree
         )
@@ -262,7 +262,7 @@ struct RoadmapView: View {
         await model.refresh()
     }
 
-    private func perform(_ action: RoadmapTaskAction, task: RoadmapTask, wave: WaveSnapshot) {
+    private func perform(_ action: RoadmapTaskAction, task: RoadmapTask) {
         switch action {
         case .openPr:
             if let github = task.pr?.publication?.github {
@@ -274,7 +274,7 @@ struct RoadmapView: View {
             controlError = nil
             Task {
                 do {
-                    let repo = wave.repo
+                    let repo = task.task.repo
                     let issue = task.task.identifier
                     try await Task.detached(priority: .userInitiated) {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
@@ -567,7 +567,7 @@ private struct NowRowView: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                 Spacer()
-                Text(row.wave.name)
+                Text(row.wave?.name ?? "No Wave")
                     .font(Typography.caption(9))
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)

@@ -15,7 +15,7 @@ first, then the engineering words it borrows.
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
 | **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
-| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and the workflow its Tasks take up. |
+| **Project** | One Wave's Linear plan: status, Tasks, KRs and targets. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |

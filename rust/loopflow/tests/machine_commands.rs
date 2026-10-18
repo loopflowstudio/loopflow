@@ -1273,8 +1273,11 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         .unwrap();
     let task = remote
         .create_task(&NewTask {
+            repository_id: remote
+                .ensure_repository(remote_path.to_str().unwrap())
+                .unwrap(),
             id: TaskId::new(),
-            project_id: project.id,
+            project_id: Some(project.id),
             title: "Retained elsewhere".into(),
             description: String::new(),
             due_date: None,
@@ -1316,7 +1319,7 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         repository.as_str(),
         "wave",
         "place",
-        task.wave_id.as_str(),
+        task.wave_id.as_ref().unwrap().as_str(),
         caller.as_str(),
     ]));
     remote
@@ -1332,7 +1335,7 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
     assert_eq!(
         db.query_row(
             "SELECT machine_id FROM work_placements WHERE wave_id=?1",
-            [task.wave_id.as_str()],
+            [task.wave_id.as_ref().unwrap().as_str()],
             |row| row.get::<_, String>(0)
         )
         .unwrap(),
@@ -1401,7 +1404,7 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         assert!(run["action"].is_null());
         for command in [
             vec!["task", "checkout"],
-            vec!["task", "move", task.id.as_str(), "start"],
+            vec!["task", "workflow", "move", task.id.as_str(), "start"],
             vec!["desktop", "open"],
         ] {
             let report = explain(&command);
@@ -1682,8 +1685,11 @@ fn task_admission_crosses_machines_and_recovers_a_lost_reply_before_checkout() {
         .unwrap();
     let task = remote
         .create_task(&NewTask {
+            repository_id: remote
+                .ensure_repository(remote_path.to_str().unwrap())
+                .unwrap(),
             id: TaskId::new(),
-            project_id: project.id,
+            project_id: Some(project.id),
             title: "Admit once".into(),
             description: String::new(),
             due_date: None,

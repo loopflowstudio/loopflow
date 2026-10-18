@@ -169,7 +169,7 @@ struct WorkNavigationTests {
         let document = files.document("draft.md")
         document.editor.string = "unfinished idea"
         let layout = workspace.multiplexer.layout
-        let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .loading)
+        let header = TaskWorkflowHeader(model: model, task: task, work: .loading)
         #expect(try !header.inspect().find(ViewType.DisclosureGroup.self).isExpanded())
         model.select(.wave(id: wave.wave.id))
         model.applyFixture(roadmap: .unavailable(lastGood: populated, reason: "Offline"), waves: .available([]), workActivity: .loading, repos: [PortfolioRepo(path: repo, error: nil)])
@@ -182,7 +182,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(files.document("draft.md") === document)
         #expect(document.editor.string == "unfinished idea")
-        let projection = WorkProjection(roadmaps: populated.waves, sessions: inventory)
+        let projection = WorkProjection(roadmaps: populated.waves, inventory: populated.tasks.items, sessions: inventory)
         let rows = projection.outline(collapsed: [], search: "", planningReadable: true)
         #expect(inventory.count == 3)
         #expect(rows.contains { $0.id.work == .task(id: task.id) })
@@ -267,7 +267,7 @@ struct WorkNavigationTests {
         value["state"] = "unknown"
         let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [idle, review])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [idle, review])
         let wave = try #require(projection.waves.first)
         let rows = projection.outline(collapsed: [wave.id], search: "", planningReadable: true)
         let waveRow = try #require(rows.first { $0.id == wave.id })
@@ -283,7 +283,7 @@ struct WorkNavigationTests {
         json["workspace"] = ["machine_id": "local", "worktree": "/src/loopflow.review",
                              "task_id": "ts_review00000000000000000000000000"]
         let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [associated])
+        let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [associated])
         let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
         #expect(task.task.runtime?.workId == associated.workspace?.taskId)
         #expect(associated.work == .task(id: "another-task"))
@@ -301,7 +301,7 @@ struct WorkNavigationTests {
             var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
             json["task_ids"] = ["ts_review00000000000000000000000000"]
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-            let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [record])
+            let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [record])
             #expect(record.work == work)
             #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
             #expect(projection.unmatchedSessions.isEmpty)
@@ -318,7 +318,7 @@ struct WorkNavigationTests {
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
             value["primary_scope"] = scope
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [record])
+            let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [record])
             #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
             #expect(projection.unmatchedSessions.map(\.id) == ["scoped"])
             #expect(projection.subject(for: "scoped") == nil)
@@ -380,7 +380,7 @@ struct WorkNavigationTests {
         let records = try [session("human", work: .task(id: "ts_review00000000000000000000000000")),
                            session("project", work: .project(id: "ps_11111111111111111111111111111111")),
                            session("unknown", work: .task(id: "absent"))]
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: records)
         func rows(collapsed: Set<WorkNodeKey> = [], readable: Bool = true) -> [WorkOutlineRow] {
             projection.outline(collapsed: collapsed, search: "", planningReadable: readable)
         }
@@ -431,7 +431,7 @@ struct WorkNavigationTests {
         wave["unavailable_tasks"] = []
         json["waves"] = [wave]
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
         let rows = projection.outline(collapsed: [], search: "", planningReadable: true)
         #expect(rows.count == 1)
         #expect(rows.first?.id.work.kind == .wave)
@@ -458,7 +458,7 @@ struct WorkNavigationTests {
         }
         json["waves"] = waves
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
         let rows = projection.outline(collapsed: [], search: "", planningReadable: true)
         let kinds = rows.map { $0.id.work.kind }
         #expect(!kinds.contains(.project))
@@ -470,7 +470,7 @@ struct WorkNavigationTests {
         let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
         let orphan = try session("demo", work: nil)
         let stray = try session("stray", work: .task(id: "absent"))
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
+        let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: [attached, orphan, stray])
         let rows = projection.outline(collapsed: [], search: "", planningReadable: true)
         #expect(!rows.contains { $0.inlineSessions.contains { $0.id == "demo" } })
         #expect(!rows.flatMap(\.inlineSessions).contains { $0.id == "stray" })
@@ -528,9 +528,9 @@ struct WorkNavigationTests {
     @Test("Autonomous, upcoming and human work share stable ranked planning rows")
     func workDoesNotRequireSessions() throws {
         let roadmap = try roadmap()
-        let empty = WorkProjection(roadmaps: roadmap.waves, sessions: [])
+        let empty = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [])
         let interactive = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
-        let joined = WorkProjection(roadmaps: roadmap.waves, sessions: [interactive])
+        let joined = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [interactive])
         let before = empty.waves[0].tasks
         let after = joined.waves[0].tasks
 
@@ -580,7 +580,7 @@ struct WorkNavigationTests {
         waves[0]["tasks"] = tasks
         json["waves"] = waves
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: records)
         let retained = try #require(projection.waves[0].tasks.first { $0.id.work.id == "issue-review" })
         #expect(retained.sessions.map(\.id) == ["retained"])
         #expect(!retained.inWorkingSet)
@@ -608,7 +608,7 @@ struct WorkNavigationTests {
                 waves[0]["tasks"] = tasks
                 json["waves"] = waves
                 let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-                let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+                let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: records)
                 let retained = try #require(projection.waves[0].tasks.first { $0.id.work.id == "issue-review" })
                 #expect(retained.sessions.map(\.id) == ["retained"])
                 #expect(!retained.inWorkingSet)
@@ -633,7 +633,7 @@ struct WorkNavigationTests {
         waves[0]["tasks"] = tasks
         json["waves"] = [waves[0]]
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
         #expect(projection.outline(collapsed: [], search: "", planningReadable: true).allSatisfy { $0.task == nil })
         #expect(projection.outline(collapsed: [], search: "", planningReadable: true, selection: .task(id: id))
             .filter { $0.task?.id == id }.count == 1)
@@ -674,13 +674,13 @@ struct WorkNavigationTests {
         }
         json["waves"] = waves
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
         let rows = projection.outline(collapsed: [], search: "", planningReadable: true)
         #expect(rows.filter { $0.id.work.kind == .task }.count == 20)
         #expect(rows.filter { $0.id.work.kind == .wave }.count == 3)
         #expect(projection.waves.allSatisfy { $0.tasks.count == 50 })
         // A poll that re-reads identical evidence yields identical rows.
-        let again = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let again = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
             .outline(collapsed: [], search: "", planningReadable: true)
         #expect(again.map(\.id) == rows.map(\.id))
     }
@@ -696,13 +696,13 @@ struct WorkNavigationTests {
             session("wrong-kind", work: .project(id: "ts_review00000000000000000000000000")),
             session("planning-id-is-not-work", work: .task(id: "issue-review")),
         ]
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
+        let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
         let completed = try #require(projection.waves[0].tasks.first)
         #expect(completed.task.task.completed)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
         #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
-        let missing = WorkProjection(roadmaps: [], sessions: records)
+        let missing = WorkProjection(roadmaps: [], inventory: [], sessions: records)
         #expect(missing.unmatchedSessions == records)
     }
 
@@ -820,10 +820,10 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.name) }
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
-        model.select(.wave(id: task.wave.wave.id))
-        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
+        model.select(.wave(id: task.wave!.wave.id))
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave!.wave.goal) }
         #expect(throws: Never.self) { try view.inspect().find(text: "Current KRs") }
-        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.currentProject!.krs[0].text) }
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave!.currentProject!.krs[0].text) }
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-issue-available") }
     }
 
@@ -1044,16 +1044,17 @@ struct WorkNavigationTests {
         await model.refresh()
         let found = try #require(model.task(id: "issue-review"))
         let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"flow_processes":[],"processes":[],"workflow":null}"#.utf8))
-        let loading = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .loading)
+        let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
-        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow yet") }
-        let missing = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .unavailable(lastGood: nil, reason: "Offline"))
+        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
+        let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
         #expect(try missing.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
-        let absent = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .available(empty))
-        #expect(try absent.inspect().find(text: "No workflow yet").string() == "No workflow yet")
-        let stale = TaskWorkflowHeader(model: model, task: found.task, wave: found.wave.wave, work: .unavailable(lastGood: empty, reason: "Offline"))
+        let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
+        let selection = found.task.workflowName.map { "\($0) · \(found.task.workflowSource ?? "")" } ?? "No workflow selected"
+        #expect(try absent.inspect().find(text: selection).string() == selection)
+        let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
         #expect(try stale.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
-        #expect(throws: (any Error).self) { try stale.inspect().find(text: "No workflow yet") }
+        #expect(throws: (any Error).self) { try stale.inspect().find(text: "No workflow selected") }
         #expect(throws: (any Error).self) { try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start") }
     }
 
@@ -1064,7 +1065,7 @@ struct WorkNavigationTests {
         model.select(.task(id: "issue-review"))
         let records = try [session("first", work: .task(id: "ts_review00000000000000000000000000")),
                            session("second", work: .task(id: "ts_review00000000000000000000000000"))]
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
+        let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         let crumb = try #require(projection.breadcrumb(selection: model.selection, sessionId: "first"))
         #expect(crumb.siblings.count == 2)
         let bar = WorkSessionToolbar(model: model, crumb: crumb, onOpenSession: { _ in })
@@ -1082,7 +1083,7 @@ struct WorkNavigationTests {
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         json["task_primary"] = true
         let primary = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [primary])
+        let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: [primary])
         let crumb = try #require(projection.breadcrumb(selection: model.selection, sessionId: primary.id))
         let bar = WorkSessionToolbar(model: model, crumb: crumb, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session") }
@@ -1099,7 +1100,7 @@ struct WorkNavigationTests {
         json["work_path"] = "wave-1/issue-review"
         json["title"] = "Task ts_review00000000000000000000000000"
         let unbound = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [unbound])
+        let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: [unbound])
         let crumb = try #require(projection.breadcrumb(selection: nil, sessionId: unbound.id))
         #expect(projection.subject(for: unbound.id) == nil)
         #expect(crumb.waveWork == nil)
@@ -1305,6 +1306,60 @@ struct WorkNavigationTests {
         #expect(registry.retained(taskKey) === entry)
         model.goBack()
         #expect(registry.openWork == [root, taskKey])
+    }
+
+    @Test("Standalone Tasks keep their workspace and draft across Wave moves")
+    func wavelessTaskKeepsWorkspaceAcrossMove() async throws {
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var inventory = try #require(wire["tasks"] as? [String: Any])
+        var task = try #require((inventory["items"] as? [[String: Any]])?.first)
+        var summary = try #require(task["task"] as? [String: Any])
+        let taskId = try #require(summary["id"] as? String)
+        let projectId = summary["project_id"]
+        let waveId = summary["wave_id"]
+        summary["project_id"] = NSNull()
+        summary["wave_id"] = NSNull()
+        task["task"] = summary
+        inventory["items"] = [task]
+        wire["tasks"] = inventory
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        var waveTasks = try #require(waves[0]["tasks"] as? [String: Any])
+        waveTasks["items"] = []
+        waves[0]["tasks"] = waveTasks
+        wire["waves"] = waves
+        let initial = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
+        let source = ReadingSource(roadmap: initial, sessions: try sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: "repo")
+        model.select(.task(id: taskId))
+        let key = try #require(registry.selectedWork)
+        let workspace = try #require(registry.retained(key))
+        let draft = workspace.files(taskId: taskId, issue: "W2-131", cwd: "/src/loopflow").document("notes.md")
+        draft.editor.string = "Keep this thought"
+        workspace.multiplexer.newShell(location: workspace.location)
+        let layout = workspace.multiplexer.layout
+        #expect(model.visibleWork.standaloneTasks.map(\.task.id).contains(taskId))
+        for attached in [true, false] {
+            summary["project_id"] = attached ? projectId : NSNull()
+            summary["wave_id"] = attached ? waveId : NSNull()
+            task["task"] = summary
+            inventory["items"] = [task]
+            wire["tasks"] = inventory
+            waveTasks["items"] = attached ? [task] : []
+            waves[0]["tasks"] = waveTasks
+            wire["waves"] = waves
+            await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self))
+            await model.refresh()
+            #expect(model.selection == .task(id: taskId))
+            #expect(registry.selectedWork == key)
+            #expect(registry.retained(key) === workspace)
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(draft.editor.string == "Keep this thought")
+            #expect(model.visibleWork.standaloneTasks.map(\.task.id).contains(taskId) == !attached)
+            #expect(model.task(id: taskId)?.task.task.waveId == (attached ? waveId as? String : nil))
+        }
     }
 
     private func navigatorRoadmapJSON() throws -> String {

@@ -30,11 +30,12 @@ struct WaveProjection: Identifiable {
 /// A presentation of the two shared readings, never another inventory.
 struct WorkProjection {
     let waves: [WaveProjection]
+    let standaloneTasks: [TaskProjection]
     let unmatchedSessions: [SessionRecord]
 
-    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
+    init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
         var matched = Set<String>()
-        let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
+        let visibleTaskIds = Set(inventory.flatMap { [$0.id, $0.runtime?.workId].compactMap { $0 } })
         var taskSessions: [String: [SessionRecord]] = [:]
         var waveSessions: [String: [SessionRecord]] = [:]
         // Index the shared memberships once. A Session may belong to more than
@@ -72,6 +73,11 @@ struct WorkProjection {
                 }
             )
         }
+        standaloneTasks = inventory.filter { $0.task.waveId == nil }.sorted { $0.task.rank < $1.task.rank }.map { task in
+            let records = taskSessions[task.runtime?.workId ?? task.id] ?? []
+            matched.formUnion(records.map(\.id))
+            return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records)
+        }
         // Missing planning and unattributed Sessions remain reachable, including
         // mandatory human boundaries and multiple conversations on one subject.
         unmatchedSessions = sessions.filter { !matched.contains($0.id) }
@@ -81,6 +87,10 @@ struct WorkProjection {
     /// siblings share its parent subject; the final crumb chooses among them.
     func breadcrumb(selection: WorkReference?, sessionId: String?) -> WorkBreadcrumb? {
         if let sessionId {
+            if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }),
+               let session = task.sessions.first(where: { $0.id == sessionId }) {
+                return WorkBreadcrumb(wave: nil, task: task, session: session, siblings: task.sessions)
+            }
             for wave in waves {
                 if let session = wave.sessions.first(where: { $0.id == sessionId }) {
                     return WorkBreadcrumb(wave: wave, task: nil, session: session, siblings: wave.sessions)
@@ -100,6 +110,9 @@ struct WorkProjection {
             }
         }
         guard let selection else { return nil }
+        if let task = standaloneTasks.first(where: { $0.id.work == selection }) {
+            return WorkBreadcrumb(wave: nil, task: task, session: nil, siblings: task.sessions)
+        }
         for wave in waves {
             if wave.id.work == selection {
                 return WorkBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
@@ -114,6 +127,7 @@ struct WorkProjection {
     }
 
     func subject(for sessionId: String) -> WorkReference? {
+        if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) { return task.id.work }
         for wave in waves {
             if wave.sessions.contains(where: { $0.id == sessionId }) { return wave.id.work }
             if let task = wave.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) {
@@ -192,6 +206,11 @@ extension WorkProjection {
                 ancestors: ancestors, task: task
             ))
         }
+        for task in standaloneTasks where !task.task.task.isTerminal || task.id == selectedTask {
+            guard matches(task.task.task.name) || matches(task.task.task.identifier) else { continue }
+            appendWork(WorkOutlineSubject(key: task.id, title: task.task.task.name), depth: 0,
+                       ancestors: [], hasChildren: false, sessions: task.sessions, task: task.task)
+        }
         for wave in waves {
             let waveSubject = WorkOutlineSubject(key: wave.id, title: wave.roadmap.wave.displayName)
             let complete: Bool
@@ -229,8 +248,8 @@ extension WorkProjection {
 /// One Work destination with current, actionable Session evidence.
 struct WorkAttentionItem: Identifiable {
     let work: WorkReference
-    let waveID: String
-    let waveName: String
+    let waveID: String?
+    let waveName: String?
     let title: String
     let reason: String
     let detail: String
@@ -243,31 +262,25 @@ extension WorkProjection {
         guard unavailable == nil else { return [] }
         var items: [WorkAttentionItem] = []
         var includedSessions: Set<String> = []
-        let tasks = waves.flatMap(\.tasks)
-        for wave in waves {
-            let subjects = wave.tasks.filter { !$0.task.task.isTerminal }
-                .map { ($0.id.work, $0.task.task.name, $0.sessions) }
-            for (work, title, sessions) in subjects {
-                // Inspect each Session: another Session's busy report cannot
-                // hide a question, and process liveness is never attention.
-                for session in sessions where session.state != .closed && !includedSessions.contains(session.id) {
-                    if let owner = session.workspace?.taskId,
-                       let task = tasks.first(where: { $0.task.runtime?.workId == owner || $0.id.work.id == owner }),
-                       task.id.work != work { continue }
-                    let status = SessionProgramStatus(sessions: [session], unavailable: nil)
-                    let reason: String
-                    switch status {
-                    case .available: reason = "Available"
-                    case .reported(_, let report) where report.state == .blocked:
-                        reason = report.kind.map { $0.rawValue.capitalized } ?? "Blocked"
-                    default: continue
-                    }
-                    includedSessions.insert(session.id)
-                    items.append(WorkAttentionItem(work: work, waveID: wave.roadmap.wave.id,
-                        waveName: wave.roadmap.wave.displayName, title: title,
-                        reason: reason, detail: status.help, session: session))
-                    break
+        let tasks = waves.flatMap(\.tasks) + standaloneTasks
+        for task in tasks where !task.task.task.isTerminal {
+            for session in task.sessions where session.state != .closed && !includedSessions.contains(session.id) {
+                if let owner = session.workspace?.taskId,
+                   owner != task.task.id && owner != task.task.runtime?.workId { continue }
+                let status = SessionProgramStatus(sessions: [session], unavailable: nil)
+                let reason: String
+                switch status {
+                case .available: reason = "Available"
+                case .reported(_, let report) where report.state == .blocked:
+                    reason = report.kind.map { $0.rawValue.capitalized } ?? "Blocked"
+                default: continue
                 }
+                includedSessions.insert(session.id)
+                let wave = waves.first { $0.roadmap.wave.id == task.task.task.waveId }
+                items.append(WorkAttentionItem(work: task.id.work, waveID: wave?.roadmap.wave.id,
+                    waveName: wave?.roadmap.wave.displayName, title: task.task.task.name,
+                    reason: reason, detail: status.help, session: session))
+                break
             }
         }
         return items
@@ -288,6 +301,7 @@ struct WorkNavigatorProjection {
     }
     let available: [AvailableTask]
     let waves: [Branch]
+    let standalone: [WorkOutlineRow]
 }
 
 extension WorkProjection {
@@ -299,14 +313,15 @@ extension WorkProjection {
         let rows = outline(collapsed: [], search: search, planningReadable: planningReadable,
                            selection: selection).filter { $0.task != nil && !availableWork.contains($0.id.work) }
         let available = attention.compactMap { item -> WorkNavigatorProjection.AvailableTask? in
-            guard let wave = waves.first(where: { $0.roadmap.wave.id == item.waveID }),
-                  let task = wave.tasks.first(where: { $0.id.work == item.work }),
-                  query.isEmpty || [item.title, item.waveName, task.task.task.identifier]
+            guard let task = (waves.flatMap(\.tasks) + standaloneTasks).first(where: { $0.id.work == item.work }),
+                  query.isEmpty || [item.title, item.waveName, task.task.task.identifier].compactMap({ $0 })
                     .contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
-            let parent = WorkOutlineSubject(key: wave.id, title: item.waveName)
+            let parents = waves.first(where: { $0.roadmap.wave.id == item.waveID }).map {
+                [WorkOutlineSubject(key: $0.id, title: $0.roadmap.wave.displayName)]
+            } ?? []
             let row = WorkOutlineRow(subject: WorkOutlineSubject(key: task.id, title: item.title),
                 hasChildren: false, inlineSessions: task.sessions, depth: 0,
-                ancestors: [parent], task: task.task)
+                ancestors: parents, task: task.task)
             return .init(row: row, attention: item)
         }
         let branches = waves.compactMap { wave -> WorkNavigatorProjection.Branch? in
@@ -315,7 +330,7 @@ extension WorkProjection {
             else { return nil }
             return .init(wave: wave, tasks: tasks)
         }
-        return WorkNavigatorProjection(available: available, waves: branches)
+        return WorkNavigatorProjection(available: available, waves: branches, standalone: rows.filter { $0.task?.task.waveId == nil })
     }
 }
 
@@ -411,7 +426,7 @@ final class WorkNavigation {
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [WorkReference?] = []
     var forwardStack: [WorkReference?] = []
-    var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
+    var selectedTaskEvidence: (wave: WaveRoadmap?, task: RoadmapTask)?
     var listScrollOffset: CGFloat = 0
     var showsNavigator = false
 

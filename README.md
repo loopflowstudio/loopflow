@@ -300,7 +300,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
+| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |

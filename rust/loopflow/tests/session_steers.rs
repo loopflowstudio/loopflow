@@ -488,7 +488,7 @@ fn public_commands_save_steers_without_launching_providers() {
     run(&[
         "wave",
         "comment",
-        task.task.wave_id.as_str(),
+        task.task.wave_id.as_ref().unwrap().as_str(),
         "WAVE_DIRECTION",
         "--steer",
     ]);

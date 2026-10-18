@@ -56,6 +56,11 @@ struct WorkNavigator: View {
                         }
                         Divider().padding(.vertical, 10)
                     }
+                    if !presentation.standalone.isEmpty {
+                        sectionTitle("TASKS")
+                        ForEach(presentation.standalone) { taskRow($0, selectedWork: selectedWork) }
+                        Divider().padding(.vertical, 10)
+                    }
                     sectionTitle(searching ? "MATCHING WAVES" : "WAVES")
                     ForEach(presentation.waves) { branch in
                         waveRow(branch.wave, count: branch.tasks.count, selectedWork: selectedWork)
@@ -63,7 +68,7 @@ struct WorkNavigator: View {
                             ForEach(branch.tasks) { taskRow($0, selectedWork: selectedWork).padding(.leading, 12) }
                         }
                     }
-                    if presentation.waves.isEmpty && presentation.available.isEmpty {
+                    if presentation.waves.isEmpty && presentation.available.isEmpty && presentation.standalone.isEmpty {
                         Text(searching ? "No matching Work" : "No Waves yet")
                             .foregroundStyle(palette.textSecondary).padding(12)
                             .accessibilityIdentifier("work-search-empty")
@@ -208,7 +213,7 @@ struct WorkNavigator: View {
                 .foregroundStyle(selected ? palette.workSelectedText : palette.text)
                 .frame(maxWidth: .infinity, alignment: .leading).allowsHitTesting(false)
             if let attention {
-                Text(attention.waveName).font(Typography.body(11))
+                Text(attention.waveName ?? "No Wave").font(Typography.body(11))
                     .foregroundStyle(selected ? palette.workSelectedText : palette.emphasisInk)
                     .allowsHitTesting(false)
             }

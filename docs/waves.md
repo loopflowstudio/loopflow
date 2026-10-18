@@ -120,7 +120,7 @@ not change that selection. Reading never creates a binding or activates a Projec
 legacy Machine-local YAML selection once, preserving its original bytes in SQLite;
 later file edits cannot change selection.
 
-Projects hold Tasks, KRs, metric targets and an optional workflow. Projects
+Projects hold Tasks, KRs and metric targets. Projects
 created together share a chapter name, such as `2026-10`; there is no chapter table.
 Current navigation stays Wave → Task. Completed Projects retain their history.
 
@@ -146,34 +146,23 @@ Project names never choose an endpoint or overwrite a later binding.
 The operation is recoverable within its owning Machine, not atomic across provider
 mutations. Read-only planning and unrelated Wave ensure remain independent of it.
 
-Name the workflow the Project's Tasks take up in its content:
+Select a Wave default for future Tasks:
 
-```markdown
-workflow: feature
-
-## KRs
-
-- [ ] A new contributor ships a change without an undocumented dependency.
+```sh
+lf wave workflow set feature product
+lf wave workflow show product --json
 ```
 
-A Task with no workflow takes that one up on its first `lf task run <task>`;
-naming another takes that up instead, and the Task keeps it.
-`lf wave workflow set NAME WAVE` validates the Workflow and rewrites only
-that selection, preserving KRs and metric targets. `lf task run` refuses a name
-that is not a workflow until a Flow or workflow is named. A Project written with the earlier
-`flow:` line reads the same and is rewritten by the next plan update. Existing
-Projects observed before the status-model upgrade retain their identity and
-custom workflow. The first explicit `lf refresh` or chapter rotation
-converts their old `recommended:` line to `workflow:` and marks the recorded current
-Project In Progress. Until then, planning reads project that same conversion
-without changing Linear. Deliberately Planned successors stay Planned; archived
-predecessors stay historical even if their old status says In Progress.
+A Task keeps its captured Workflow. Before first take-up, an explicit Task
+selection wins, followed by its Wave default and repository `workflow:` in
+`.lf/config.yaml`. No selection means `lf task run` asks for a Workflow. An
+invalid selection reports an error. Wave defaults survive Project rotation;
+Projects do not retain workflow selections.
 
-If no receipt identifies the old current Project, adoption requires a single
-unambiguous candidate. Resolve competing plans in Linear; names and dates never
-break the tie. A missing workflow stays missing. Creation, adoption, plan edits and
-rotation do not require one; a bare `lf task run` still needs the Task or its
-Project to name a workflow.
+Existing Projects retain their identity through status-model adoption. A single
+unambiguous current Project is required; names and dates never break a tie.
+Planned successors stay Planned and archived predecessors stay historical.
+
 Unobserved backlog on another Machine is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 
@@ -377,7 +366,7 @@ lf repo connect --all                  # all nested Waves reuse it
 lf refresh infra              # refresh the local SQLite snapshot
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
-lf task move 1207... end --reason "Dark mode delivered"
+lf task workflow move 1207... end --reason "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
@@ -391,7 +380,7 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task create --wave <wave> --title "add retry to token refresh"
+lf task create --title "add retry to token refresh"
 pbpaste | lf task create --wave incidents
 lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
@@ -400,9 +389,11 @@ lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 incident
 ```
 
-Task Work owns one checkout and zero or one PR. Its
-Project's `workflow:` (`feature`, `code`, `research`, or a file in
-`.lf/workflows/`) is the one it takes up. The Task moves through its
+Creation is standalone by default, even in a Wave-bound Session. Pass `--wave`
+to choose membership explicitly, or use `lf task move <task> --wave <wave>` later.
+
+Task Work owns one checkout and zero or one PR. Workflow selection follows
+Task → Wave → repository. Definitions live in `.lf/workflows/` or builtins. The Task moves through its
 nodes: each `lf task run` takes one edge leaving the current node and runs
 that edge's Flow, and at a node the Task waits on you in its conversation.
 See [workflows](authoring.md#workflows).
@@ -441,7 +432,7 @@ lf task complete INF-124
 ```
 
 Task completion is independent of Workflow position. `task complete` changes
-status; `task move end` records the move and requests completion. If completion
+status; `task workflow move end` records the move and requests completion. If completion
 fails, retry it alone without replaying the Flow. Linear completion and reopening
 leave execution intact; reopening supersedes old requests. A Task with a PR needs
 authoritative merge. A PR-less Task may finish with research files and commits;

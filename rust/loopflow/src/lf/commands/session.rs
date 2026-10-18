@@ -40,10 +40,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 .context("Session not found")?;
             if *prepare {
                 let record = crate::ops::human_session::prepare_attachment(
-                    &store,
-                    &session.id,
-                    *observe,
-                    *if_free,
+                    &store, &session, *observe, *if_free,
                 )
                 .await?;
                 return report_primary(&record, *json);

@@ -631,6 +631,98 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
 }
 
 #[test]
+fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
+    let fixture = Fixture::new();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+if mkdir "$HOME/outer" 2>/dev/null; then
+    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" > "$HOME/caller"
+    "$LF_BIN" --interactive --agent claude : 'nested original input' < /dev/tty &
+    printf '%s\n' "$!" > "$HOME/nested-viewer"
+    wait
+else
+    stty -echo < /dev/tty
+    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/nested-launches"
+    read -r answer < /dev/tty
+    printf '%s:%s\n' "$$" "$answer" > "$HOME/nested-answer"
+fi
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let launched = fixture
+        .command(&["transport", "start", "--terminal", "--"])
+        .args([
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "call the nested CLI",
+        ])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+    assert!(launched.status.success(), "{launched:?}");
+    let caller = fixture.wait_file("caller");
+    let nested = fixture.wait_file("nested-launches");
+    let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();
+    let (caller_pid, caller_capture) = caller.trim().split_once(':').unwrap();
+    let (nested_pid, nested_capture) = nested.trim().split_once(':').unwrap();
+    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let identity = |capture: &str| -> (String, String, String) {
+        sql.query_row(
+            "SELECT s.id,s.agent_process_id,s.transport_lf_process_id
+             FROM agent_sessions s JOIN session_events e ON e.session_id=s.id
+             WHERE e.kind='captured' AND e.receipt_key=?1",
+            [capture],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+    };
+    let parent = identity(caller_capture);
+    let child = identity(nested_capture);
+    assert_ne!(parent.0, child.0);
+    assert_ne!(
+        parent.2, child.2,
+        "nested execution inherited its caller's owner"
+    );
+    let descendants: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM processes WHERE caller_session_id=?1",
+            [&parent.0],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(descendants > 0, "nested CLI lost its caller provenance");
+    // SAFETY: both PIDs are reported by this fixture's live processes. Kill
+    // precisely the calling provider and nested viewer, never either owner.
+    unsafe {
+        assert_eq!(libc::kill(caller_pid.parse().unwrap(), libc::SIGKILL), 0);
+        assert_eq!(libc::kill(viewer, libc::SIGKILL), 0);
+    }
+    let mut attached = fixture.viewer(&child.2, true);
+    assert_eq!(identity(nested_capture), child);
+    let settled: i64 = sql.query_row(
+        "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'",
+        [&child.0], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(settled, 0, "caller death settled the nested request");
+    attached.input("accepted-once\n");
+    attached.finish();
+    assert_eq!(
+        fixture.wait_file("nested-answer").trim(),
+        format!("{nested_pid}:accepted-once")
+    );
+    assert_eq!(fixture.wait_file("nested-launches"), nested);
+}
+
+#[test]
 fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let fixture = Fixture::new();
     let bin = fixture.home.path().join("bin");

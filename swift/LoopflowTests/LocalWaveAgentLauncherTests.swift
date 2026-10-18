@@ -2,6 +2,7 @@
 // development registry environment survives launch, and the not-running copy.
 
 #if os(macOS)
+import Darwin
 import Foundation
 import Testing
 @testable import Loopflow
@@ -134,15 +135,108 @@ struct LocalWaveAgentLauncherTests {
         let helper = try LocalWaveAgentLauncher.controlLfPath()
         #expect(FileManager.default.isExecutableFile(atPath: helper))
         let query = RegistryQuery { args, cwd in
-            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
+            try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
 
         #expect(try await !query.localMachineId().isEmpty)
     }
     #endif
 
-    // MARK: - Not-running copy
+    @Test("finite queries drain both full pipes while sending a large draft")
+    func queryDrainsWhileWriting() async throws {
+        let draft = String(repeating: "draft\n", count: 32768)
+        let result = try await LocalWaveAgentLauncher.run([
+            "/bin/sh", "-c",
+            "/usr/bin/head -c 131072 /dev/zero; /usr/bin/head -c 131072 /dev/zero >&2; /bin/cat"
+        ], input: draft)
+        #expect(result.status == 0)
+        #expect(result.stdout == String(repeating: "\0", count: 131072) + draft)
+        #expect(result.stderr == String(repeating: "\0", count: 131072))
+    }
 
+    @Test("canceling a request reaps only its CLI child")
+    func queryCancellationLeavesDescendant() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let request = Task {
+            try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c",
+                "trap '' TERM; /bin/sleep 60 & echo $! > descendant; echo $$ > child; wait"
+            ], cwd: directory.path, input: String(repeating: "unread draft", count: 65536))
+        }
+        defer { request.cancel() }
+        let child = try await readPID(directory.appendingPathComponent("child"))
+        let descendant = try await readPID(directory.appendingPathComponent("descendant"))
+        defer { _ = Darwin.kill(descendant, SIGKILL) }
+        let started = ContinuousClock.now
+        request.cancel()
+        do {
+            _ = try await request.value
+            Issue.record("Canceled request returned success")
+        } catch is CancellationError {} // cancellation remains distinguishable from failure
+        #expect(started.duration(to: .now) < .seconds(5))
+        #expect(Darwin.kill(child, 0) == -1)
+        #expect(Darwin.kill(descendant, 0) == 0)
+    }
+
+    @Test("oversized CLI responses fail instead of retaining unbounded output",
+          arguments: [false, true])
+    func queryOutputLimit(stderr: Bool) async throws {
+        do {
+            _ = try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c",
+                "exec /usr/bin/head -c 67108865 /dev/zero" + (stderr ? " >&2" : "")
+            ])
+            Issue.record("Oversized response returned success")
+        } catch {
+            #expect(error.localizedDescription.contains("CLI response exceeds 64 MiB"))
+        }
+    }
+
+    @Test("query completion does not await inherited pipes in surviving descendants")
+    func queryCompletesWithInheritedPipes() async throws {
+        let result = try await LocalWaveAgentLauncher.run([
+            "/bin/sh", "-c", "/bin/sleep 60 & echo $!; printf diagnostic >&2; exit 7"
+        ])
+        let descendant = try #require(Int32(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { _ = Darwin.kill(descendant, SIGKILL) }
+        #expect(result.status == 7)
+        #expect(result.stderr == "diagnostic")
+        #expect(Darwin.kill(descendant, 0) == 0)
+    }
+
+    @Test("a stalled CLI request times out and reaps its child")
+    func queryDeadline() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let request = Task {
+            try await LocalWaveAgentLauncher.run([
+                "/bin/sh", "-c", "echo $$ > child; exec /bin/sleep 60"
+            ], cwd: directory.path)
+        }
+        let child = try await readPID(directory.appendingPathComponent("child"))
+        defer { request.cancel() }
+        do {
+            _ = try await request.value
+            Issue.record("Stalled request returned success")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out after 30 seconds"))
+            #expect(error.localizedDescription.contains("result is unknown"))
+        }
+        #expect(Darwin.kill(child, 0) == -1)
+    }
+
+    private func readPID(_ url: URL) async throws -> Int32 {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            if let text = try? String(contentsOf: url, encoding: .utf8),
+               let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { return pid }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw LocalLfError(errorDescription: "Query fixture did not start")
+    }
 }
 
 #endif

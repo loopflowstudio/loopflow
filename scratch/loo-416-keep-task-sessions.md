@@ -2,15 +2,17 @@
 
 Status: **Pursue authorized through demo/review**, 2026-10-16. Jack Heart accepted
 the architecture and expanded creation/readiness scope, then explicitly selected
-`pursue`. Architecture is accepted; detailed restoration mechanisms remain draft.
+`pursue`. Reconciled October 17 against `4fc8754e7d` and the current working
+diff. Architecture is accepted; detailed restoration mechanisms remain draft.
 No merge authorization.
 Task: [LOO-416](https://linear.app/loopflow/issue/LOO-416).
 
 Jack Heart's October 16 acceptance of [per-Session ownership and shared lfdb
 layout](session-ownership-research.md) supersedes app-only files and shell-reopen
 defaults. The shell probe establishes process survival, not terminal restoration.
-[Recurring failures](session-continuity-failures.md) and [caller readiness](session-readiness.md)
-retain the research evidence and expanded scope.
+Failure research remains at `a3e929a7ef:scratch/session-continuity-failures.md`;
+[caller readiness](evidence/session-readiness-before-stack.txt) retains the
+expanded scope.
 
 ## Problem and demo
 
@@ -80,8 +82,11 @@ record contains outer selection/arrangement and a map by `WorkWorkspaceKey`.
 Save each pane tree, stable pane IDs, focus/zoom/hidden panes, presentation selection
 and content's recorded Machine/path/Task location. Container query/arrangement
 values come from LOO-497's single model integrated by LOO-489; no parallel query
-serializer here. LOO-497 owns the migration and shared record/API; LOO-489 owns
-save/restore integration. LOO-416 supplies continuity and draft-recovery requirements.
+serializer here. LOO-497 owns the migration and shared record/API. LOO-489 was assigned
+save/restore integration, but its October 17 selected slice now covers built-in
+repository/Wave query views only. Durable recovery remains required here; its
+committed integration handoff is not supplied by that narrower slice. LOO-416
+supplies continuity and draft-recovery requirements.
 Jack's later October 16 direction authorizes LOO-497's technical foundations,
 including typed selection, retained arrangement and durable intent, before prototype
 review. Production query grammar and UX integration still await that review.
@@ -112,8 +117,10 @@ alone never launch a provider. Ended Sessions show history and explicit resume;
 uncertain/unreachable ones keep their pane and error. Automatic attachment failure
 does not loop. Location mismatch preserves the recorded pane; no local checkout
 or different-account fallback. Neither stale cache nor a layout file authorizes
-takeover. Shared creation/readiness triggers remain to be designed under Jack's
-expanded caller scope; navigation is not their only authorized entry point.
+takeover. Task filing and explicit Wave admission now commit uncaptured primary Sessions;
+Wave admission also admits the repository conversation. Repository/Wave/Task ensure
+share metadata preparation; explicit execution reserves input and starts work.
+Owner/terminal warming policy remains unselected, with costs still unmeasured.
 
 ## Retention and action semantics
 
@@ -133,6 +140,15 @@ not a second authoritative file store. Changed owners/invalid paths preserve tex
 without redirecting writes. Provider drafts are not copied into layout files.
 A Session discovered inside a shell reattaches by its recorded Session identity
 after restart rather than replaying the shell command, preserving its Work owner.
+
+Jack Heart's October 17 tool-tab direction is accepted, not implemented here:
+each Task owns one Shell tool and one Files tool with ordered tabs and selection.
+ShellTab.id supplies stable `TerminalIdentity.shell`; optional Process identity and
+recorded location carry no liveness or launch authority. Restored command stays nil
+until attach-only Process reconnection succeeds. Files tabs share Task/path drafts;
+Files location belongs to the tool. Close/Undo fences removed tabs. Only Tasks create
+shells; historical repo/Wave/Dashboard shells require reconciliation without deletion.
+LOO-497/489 retain shared-record and native-presentation ownership.
 
 **Interrupt** explicitly targets the current turn through existing owned controls;
 it does not reset identity. **Resume** deliberately opens a native client on saved
@@ -154,14 +170,31 @@ must include owner costs. Keep Codex's existing bridge and fences.
 
 Exclude navigation/query redesign, external multiplexers, remote launch/auth
 implementation and Task completion changes. Shell survival
-now has a feasible per-shell ownership candidate; its integration must share the
-relay transport without inventing an agent conversation for a shell. Exact post-crash
-scrollback and cross-installation sync remain review boundaries in [questions](questions.md).
+has LOO-415's `transport start --terminal` / `transport attach` Process owner;
+Desktop tool restoration must consume it without inventing an agent conversation
+for a shell. Its bounded vt100 text snapshot retains 2,000 scrollback rows; it
+does not restore images, hyperlinks, extended keyboard modes or both buffers
+exactly. Exact post-crash scrollback and cross-installation sync remain review boundaries in [questions](questions.md).
 Jack selected first-wins duplicate presentation in LOO-497; integration remains unbuilt.
 The draft does not waive a stronger interpretation of accepted behavior.
 
 ## Delete — do not maintain
 
+- Removed `human_open_argv` and attachment preparation's second Session lookup.
+  Both commands use `human_session_argv`; preparation borrows the resolved Session,
+  and explicit open reads its provider history once. Existing command/lifecycle
+  tests remain on the surviving path.
+- Removed eager workspace placement from primary `ensure`/`replace` and the
+  Task-only workspace update branch. `admit_workspace` resolves placement once
+  at the idle boundary and updates every primary through the same path.
+- Removed Desktop's parallel `Opening` enum and duplicated prepared-action
+  classification. `SessionActionKind` drives the request and `SessionItem` state;
+  reconnect, resume and move retain separate authority. No exclusive fixtures
+  are removed; the existing lifecycle tests exercise all three actions.
+- Removed `MacLocalWaveAgentLauncher.run`'s blocking pipe readers and
+  `OutputCollector`; one bounded async request path now drains all three pipes,
+  suspends between reads, propagates cancellation and cleans up only its exact
+  child. Preserve doctor JSON on nonzero exit and long-lived execution/observation paths.
 - Remove `WorkSnapshot.Repository.selection` and `WorkCache.saveSelection` as
   persistence owners once callers use the durable store; keep cached wire reads
   with unknown liveness. Any one-time seed is discarded after durable creation.
@@ -182,7 +215,7 @@ projection preserves query occurrences while displaying one native surface.
 
 ## Readiness from every caller
 
-Jack requested [prefetch and creation-lifetime analysis](session-readiness.md):
+Jack requested [prefetch and creation-lifetime analysis](evidence/session-readiness-before-stack.txt):
 evaluate and change `task create`, Session `ensure`, and their callers as needed.
 Repository, Wave and Task conversations must share auto-creation and lifecycle
 semantics. Evaluate every ensured Session, including bare Session admission and arbitrarily
@@ -205,10 +238,13 @@ One integrated LOO-416 outcome; serialization alone cannot complete it.
    Focused command: `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkspaceRestorationTests`.
    Expect same owners/IDs/ratios/drafts, fresh native incarnations after app death,
    no provider spawn/input submission and visible corrupt-store failure.
-2. **Attachment cutover — depends on LOO-415.** Add headless
-   `WorkspaceSessionLifecycleTests` and detached-viewer cases in Rust
-   `session_lifecycle_tests`. In a disposable Machine with candidate CLI and
-   provider stand-ins: create a Session, persist layout, end only the viewer
+2. **Attach-only cutover implemented; composed restoration remains.**
+   `WorkspaceSessionLifecycleTests` covers production reconnect, stable failures,
+   canceled preparation and twelve retained attachment models. Rust transport
+   fixtures cover provider/request survival across viewer and nested caller death.
+   Neither crosses app death through saved layout. Extend proof in a disposable
+   Machine with candidate CLI and provider stand-ins: create a Session, persist
+   layout, end only the viewer
    normally and by SIGKILL, observe continuing provider progress, recreate
    Desktop state, attach and submit one unique marker. Assert identical
    Session/AgentProcess/native thread, changed viewer claim, one launch/turn,
@@ -220,6 +256,15 @@ One integrated LOO-416 outcome; serialization alone cannot complete it.
    model tests require zero warm-switch preparation/spawn, no `.opening`
    transition and retained Work state. Native proof checks input echo, scroll
    position, same surface incarnation, unsent text and tile→Task→tile mounting.
+4. **Leaving a Session says the lf thing, on every harness.** (Jack, October 18.)
+   Codex prints its own remote-mode exit text naming the per-client relay
+   (`util.rs` tempdir `client.sock`), which is deleted when the client exits, so
+   "To reconnect" and "Stop the current turn" are dead commands. Replace that
+   text with one short lf line (return with `lf resume`; how to stop) on Claude, Codex,
+   OpenCode and Pi; no socket paths. Proof per harness through the real path:
+   detach, interrupt mid-turn, return, stop, pasted commands work. Needs `lf sync`
+   for OpenCode 2 (#1590) and Pi (#1591). Related, untested: raw `codex resume`
+   while lf's app-server holds the same thread.
 
 **Verification:** build changed code and run focused behavioral suites. Gate owns
 affected Desktop/session/control/file/DTO suites plus the candidate CLI transport
@@ -239,12 +284,8 @@ provider working; relaunch restores Work and attaches exactly once; missing or
 stopped Sessions remain truthful and never silently restart; shared state API
 and click view agree. Full completion also requires resolving post-crash
 renderer-state and cross-installation interpretations instead of silently
-excluding accepted behavior. Transport delivery and native capacity remain
-unproved dependencies.
-
-Review finding: retaining generic connect fallback could make restart tests pass
-while replacing execution. Require attach-only results and preserve explicit
-resume; prove surface reuse separately from provider survival.
+excluding accepted behavior. Integrated transport supplies source-level owner
+survival; composed Desktop restoration, configured-provider continuity and native capacity remain unproved.
 
 ## Implementation boundary — October 17, 2026
 
@@ -262,21 +303,29 @@ now commits its primary Session; Wave admission commits its own and repository
 Sessions without capture, provider effects or Started reservation. No warming
 policy was selected.
 
-Shared reads recovered using released lf 0.14.4 after discovering inherited
-LF_BIN pinned 0.14.3. October 17 status confirms this implement step belongs to
-live Flow `53d045e1-9dc6-44ea-b4f5-a2345446478a`; LOO-497 has a live implementation.
-Latest shared status reconfirms its live implement step and published #1580 head
-`d9141c282f`, containing earlier foundations, not the current
-pane/draft integration. LOO-489/497 retain native persistence and shared record
-ownership; no sibling dirty code was copied. Their supported handoff is still
-needed for restoration, shell Process identity and draft recovery.
+October 17 dependency recheck: shared Task status and remote refs retain LOO-497
+PR #1580 at `959c714fbb`, without its required tab/pane/draft handoff. LOO-489
+has a live Flow and a published branch at `4ad912f336`, but no recorded PR.
+Jack Heart's latest LOO-489 direction selects built-in repository/Wave query views,
+excluding editable Dashboards and Desktop API work; it supersedes older broad
+persistence plans for that slice. Its referenced current design is absent from the
+published commit. Neither published head supplies durable restoration. Their
+ownership stays intact; no sibling edits or speculative handoff are imported.
 
-Remaining: bounded CLI preparation/cancellation beyond
-the transport handshake; nested caller-death boundary proof; durable restoration;
-twelve actual providers and 24/48 capacity measurements; display/native remount;
-exact post-crash terminal state and cross-installation interpretation. Model
-switching tests do not establish native/provider readiness. Infrastructure memory
-remains read-only; its 209-token overage belongs to its owning Flow.
+Finite Desktop requests now have cancellable nonblocking input/output, a monotonic
+30-second deadline, and a 64 MiB bound per output pipe. Caller cancellation reaches
+the worker; cleanup reaps only the exact CLI child. Nonzero diagnostics, doctor
+reports and large drafts retain their behavior. Descendant-held pipes cannot keep
+an exited query pending. Timeouts report unknown mutation results without replay.
+The nested CLI fixture proves separate Session/provider/transport identity and one
+pending native request survive calling-provider and viewer death, with caller
+provenance intact. It supplies a real terminal to the nested interactive CLI;
+headless Flow creator-death coverage remains at the prior checkpoint.
+
+Remaining: committed LOO-497/489 durable-restoration/tool-tab integration; twelve
+actual providers and 24/48 capacity measurements; display/native remount; exact
+post-crash terminal state and cross-installation interpretation. Admission metadata
+and headless model tests do not choose a warming policy or establish native readiness.
 
 ### Admission revision — accepted internal repair, October 17
 
@@ -303,8 +352,14 @@ headless explicit connection use that owner. Concurrent ensure reuses the primar
 Focused checks now cover terminal and headless first start, concurrent ensure,
 uncaptured bind, retained history and the creator-exit transport boundary.
 
-Review findings resolved: generic reconnect fallback; reconnect labels dispatching
-resume; active-provider metadata preventing safe free-viewer attachment. The
-production button tests cover unavailable and ended viewers with distinct recovery.
+Checks (reused; this reconciliation changes prose only): `scripts/test_desktop.sh -Xswiftc -gnone --filter "LocalWaveAgentLauncherTests|WorkspaceSessionLifecycleTests"` — build and 18 tests passed; network-isolated `cargo test -p loopflow --lib ops::human_session < /dev/null` — 34 passed; `cargo test -p loopflow --test session_lifecycle_tests task_creation_commits_its_conversation_without_starting_work < /dev/null` — passed; metadata-only readiness pass remains applicable; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` — prior passes; `git diff --check HEAD` — passed after reconciliation; `lf context` — memory and scratch within both targets. Prior unchanged checks: `a3e929a7ef` and `evidence/lifecycle-handoff-before-query.txt`. Gate owns broader suites; demo owns actual-provider/native/capacity proof.
 
-Checks: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, network-isolated Rust admission/readiness/migration/primary/creator-exit tests, and `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkspaceSessionLifecycleTests|SessionsStoreTests'` passed (20 Swift tests); unchanged Registry/destination/DTO checks also passed. Gate owns remaining affected suites and full acceptance; the display host owns native/provider/capacity demonstration.
+Review repair: sample child exit before draining its pipes, so an exit racing a
+read cannot discard its last response bytes. Remove detached caller wrappers that
+swallow cancellation; keep the single worker responsible for blocking system calls.
+The retained sync/query notes are reconciled without dropping either decision.
+Boundary tests now prove oversized stdout and stderr fail through the production
+request path; neither stream can bypass the bound.
+Admission constructs named Session fields in each scope instead of a positional
+seven-value tuple. The finite-query worker uses cancellable suspension between
+nonblocking drains so stalled requests do not occupy executor threads while idle.

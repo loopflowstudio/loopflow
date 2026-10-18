@@ -566,6 +566,20 @@ struct SessionItem: Identifiable, Equatable {
         guard case .failed(let message) = state else { return nil }
         return message
     }
+
+    mutating func adoptPreparation(_ record: SessionRecord, action: SessionActionKind) {
+        self.record = record
+        // A prepared attachment can join a free viewer even while the provider
+        // is active. Only an explicit move may displace an existing viewer.
+        if action == .reconnect, let attachment = record.action(.reconnect) {
+            state = attachment.unavailableReason.map(State.failed) ?? .prepared
+        } else if action != .moveHere, record.action(.moveHere) != nil {
+            state = .elsewhere
+        } else {
+            state = record.action(action == .moveHere ? .moveHere : .open)?
+                .unavailableReason.map(State.failed) ?? .prepared
+        }
+    }
 }
 
 @MainActor
@@ -645,16 +659,14 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private enum Opening { case attach, resume, move }
-
-    private func prepare(_ id: String, opening: Opening) async {
+    private func prepare(_ id: String, action: SessionActionKind) async {
         guard let index = _index(id) else { return }
-        let replacing = opening == .move
+        let replacing = action == .moveHere
         if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed, .ended:
             sessions[index].state = .opening
-        case .elsewhere where opening != .resume:
+        case .elsewhere where action != .open:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
@@ -668,25 +680,16 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
-            let stage = opening == .attach ? "attach_prepare" : "connect_prepare"
+            let stage = action == .reconnect ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface = try await opening == .attach
+            let surface = try await action == .reconnect
                 ? executionQuery.prepareSessionAttachment(id: id, cwd: repoPath)
                 : executionQuery.prepareSession(id: id, takeover: replacing, cwd: repoPath)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
-                sessions[latest].record = surface
-                if let attachment = surface.action(.reconnect), opening == .attach {
-                    sessions[latest].state = attachment.unavailableReason.map(SessionItem.State.failed) ?? .prepared
-                } else if !replacing, surface.action(.moveHere) != nil {
-                    sessions[latest].state = .elsewhere
-                } else if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
-                    sessions[latest].state = .failed(reason)
-                } else {
-                    sessions[latest].state = .prepared
-                }
+                sessions[latest].adoptPreparation(surface, action: action)
             }
         } catch {
             guard let latest = _index(id) else { return }
@@ -698,16 +701,7 @@ final class SessionsStore {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
         case .pending, .failed, .ended, .elsewhere:
-            sessions[index].record = record
-            if let attachment = record.action(.reconnect) {
-                sessions[index].state = attachment.unavailableReason.map(SessionItem.State.failed) ?? .prepared
-            } else if record.action(.moveHere) != nil {
-                sessions[index].state = .elsewhere
-            } else if let reason = record.action(.open)?.unavailableReason {
-                sessions[index].state = .failed(reason)
-            } else {
-                sessions[index].state = .prepared
-            }
+            sessions[index].adoptPreparation(record, action: record.action(.reconnect) == nil ? .open : .reconnect)
         case .opening, .prepared, .live:
             break
         }
@@ -723,15 +717,15 @@ final class SessionsStore {
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         }
-        await prepare(id, opening: .attach)
+        await prepare(id, action: .reconnect)
     }
 
     func resume(_ id: String) async {
-        await prepare(id, opening: .resume)
+        await prepare(id, action: .open)
     }
 
     func moveHere(_ id: String) async {
-        await prepare(id, opening: .move)
+        await prepare(id, action: .moveHere)
     }
 
     @discardableResult
@@ -1275,9 +1269,7 @@ struct SessionsContentView: View {
             do {
                 let repo = store.repoPath
                 let issue = task.task.task.identifier
-                let path = try await Task.detached(priority: .userInitiated) {
-                    try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-                }.value
+                let path = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
                 navigation.preparedTaskWorktrees[task.task.id] = path
             } catch {
                 launchErrorTitle = "Could not prepare checkout"
@@ -1351,9 +1343,7 @@ struct SessionsContentView: View {
             checkout = identity
         } else {
             let repo = store.repoPath
-            checkout = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-            }.value
+            checkout = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         try launch(.task(repo: checkout.worktree, id: issue), in: entry, identity: checkout)

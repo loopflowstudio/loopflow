@@ -70,6 +70,9 @@ input or taking control from another viewer. A failed connection stays visible.
 **Reconnect** retries attachment; **Resume conversation** explicitly opens saved
 provider history. Repository, Wave and Task conversation entry share metadata-only
 preparation; only a newly admitted conversation offers its first launch.
+Finite CLI requests time out after 30 seconds. Canceling preparation ends only
+that request; running Sessions continue. If a change times out, refresh to learn
+its result before retrying.
 
 Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
 it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open

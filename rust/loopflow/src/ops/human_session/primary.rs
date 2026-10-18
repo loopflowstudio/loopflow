@@ -19,7 +19,7 @@ pub(crate) async fn ensure(
     repo: &Path,
     wave: Option<&str>,
 ) -> Result<SessionRecord> {
-    let (scope, mut session) = match wave {
+    let (scope, session) = match wave {
         Some(wave) => {
             let binding =
                 crate::ops::resolve_work_binding(store, repo, &format!("wave:{wave}")).await?;
@@ -35,7 +35,6 @@ pub(crate) async fn ensure(
         }
     };
     let _lock = lock_scope(&scope).await?;
-    session.cwd = ensure_scope_worktree(&session.cwd, &scope)?.path;
     let session = store.ensure_primary_session(&scope, None, session).await?;
     prepare(store, &session.id).await
 }
@@ -117,7 +116,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
         stop_agent(store, &previous)
             .with_context(|| format!("stop primary Session {id}; it remains primary"))?;
     }
-    let mut successor = match &scope {
+    let successor = match &scope {
         PrimaryScope::Repository(repo) => repository_session(repo),
         PrimaryScope::Wave(wave) => wave_session(
             &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}"))
@@ -130,9 +129,6 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
             task,
         )?,
     };
-    if !matches!(scope, PrimaryScope::Task(_)) {
-        successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
-    }
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
@@ -174,21 +170,21 @@ pub(crate) async fn admit_workspace(
     {
         return Ok(session);
     }
-    let repo = match &scope {
-        PrimaryScope::Repository(repo) => repo.as_path().to_path_buf(),
+    let cwd = match &scope {
+        PrimaryScope::Repository(repo) => ensure_scope_worktree(repo.as_path(), &scope)?.path,
         PrimaryScope::Wave(id) => {
             let wave = store
                 .get_wave(id)
                 .await?
                 .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
-            std::path::PathBuf::from(wave.repo())
+            ensure_scope_worktree(Path::new(wave.repo()), &scope)?.path
         }
         PrimaryScope::Task(task) => {
             let task = store
                 .get_task(task)
                 .await?
                 .ok_or_else(|| anyhow!("primary Task is unavailable"))?;
-            let cwd = if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
+            if let Some(cwd) = task.worktree.filter(|cwd| cwd.is_dir()) {
                 cwd
             } else {
                 let task = task.id.to_string();
@@ -202,20 +198,12 @@ pub(crate) async fn admit_workspace(
                     Ok(task.worktree()?.clone())
                 })
                 .await??
-            };
-            if session.cwd != cwd {
-                store.sqlite.move_primary_workspace(&session, &cwd)?;
-                session.cwd = cwd;
             }
-            return Ok(session);
         }
     };
-    let workspace = ensure_scope_worktree(&repo, &scope)?;
-    if session.cwd != workspace.path {
-        store
-            .sqlite
-            .move_primary_workspace(&session, &workspace.path)?;
-        session.cwd = workspace.path;
+    if session.cwd != cwd {
+        store.sqlite.move_primary_workspace(&session, &cwd)?;
+        session.cwd = cwd;
     }
     Ok(session)
 }
@@ -285,7 +273,7 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
             .flatten()
             .is_some()
     {
-        return super::prepare_attachment(store, &session.id, false, true).await;
+        return super::prepare_attachment(store, &session, false, true).await;
     }
     let session = admit_workspace(store, session).await?;
     let session = if session.captured.is_none() || session.input_published {

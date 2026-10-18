@@ -2,11 +2,12 @@
 
 use crate::id::AgentSessionId;
 use std::fs::File;
+use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::session::{LfSession, PrimaryScope, TitleSource};
+use crate::session::{conversation, LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -441,19 +442,18 @@ pub(super) fn admit_work_conversation_in(
     if let Some(current) = primary_session_in(conn, scope)? {
         return Ok(current);
     }
-    let (repo, cwd, title, agent, skill, wave_id, task_id) = match scope {
-        PrimaryScope::Repository(repo) => (
-            repo.to_string(),
-            repo.as_path().to_path_buf(),
-            repo.as_path()
+    let session = match scope {
+        PrimaryScope::Repository(repo) => {
+            let title = repo
+                .as_path()
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| repo.to_string()),
-            None,
-            "repo-session",
-            None,
-            None,
-        ),
+                .unwrap_or_else(|| repo.to_string());
+            LfSession {
+                repo: Some(repo.to_string()),
+                ..conversation(repo.as_path(), None, "repo-session", title)
+            }
+        }
         PrimaryScope::Wave(wave) => {
             let (repo, name): (String, String) = conn.query_row(
                 "SELECT repo,slug FROM wave_addresses WHERE id=?1",
@@ -462,18 +462,14 @@ pub(super) fn admit_work_conversation_in(
             )?;
             let canonical = crate::repository::CanonicalRepo::from_recorded(repo.clone().into());
             admit_work_conversation_in(conn, &PrimaryScope::Repository(canonical))?;
-            let agent =
-                crate::work::wave::config::read_wave_config(std::path::Path::new(&repo), &name)
-                    .and_then(|config| config.agent);
-            (
-                repo.clone(),
-                repo.into(),
-                name,
-                agent,
-                "wave-session",
-                Some(wave.clone()),
-                None,
-            )
+            let agent = crate::work::wave::config::read_wave_config(Path::new(&repo), &name)
+                .and_then(|config| config.agent);
+            LfSession {
+                repo: Some(repo.clone()),
+                wave_id: Some(wave.clone()),
+                work_source: Some(WorkSource::Declared),
+                ..conversation(Path::new(&repo), agent.as_deref(), "wave-session", name)
+            }
         }
         PrimaryScope::Task(task) => {
             let task = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
@@ -483,24 +479,15 @@ pub(super) fn admit_work_conversation_in(
                 [&task.wave_id],
                 |row| row.get(0),
             )?;
-            (
-                repo.clone(),
-                task.worktree.unwrap_or_else(|| repo.into()),
-                task.title,
-                task.agent,
-                "task-session",
-                Some(task.wave_id),
-                Some(task.id),
-            )
+            let cwd = task.worktree.as_deref().unwrap_or(Path::new(&repo));
+            LfSession {
+                repo: Some(repo.clone()),
+                wave_id: Some(task.wave_id),
+                task_id: Some(task.id),
+                work_source: Some(WorkSource::Declared),
+                ..conversation(cwd, task.agent.as_deref(), "task-session", task.title)
+            }
         }
-    };
-    let session = LfSession {
-        repo: Some(repo),
-        wave_id,
-        task_id,
-        work_source: (!matches!(scope, PrimaryScope::Repository(_)))
-            .then_some(crate::session::WorkSource::Declared),
-        ..crate::session::conversation(&cwd, agent.as_deref(), skill, title)
     };
     ensure_primary_session_in(
         conn,
@@ -1075,7 +1062,7 @@ impl SqliteStore {
     pub(crate) fn move_primary_workspace(
         &self,
         session: &LfSession,
-        cwd: &std::path::Path,
+        cwd: &Path,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
@@ -1119,7 +1106,7 @@ impl SqliteStore {
             ))),
             Some((Some(kind), _, Some(repo))) if kind == "repository" => {
                 Ok(Some(PrimaryScope::Repository(
-                    crate::repository::CanonicalRepo::discover(std::path::Path::new(&repo))
+                    crate::repository::CanonicalRepo::discover(Path::new(&repo))
                         .map_err(invalid)?,
                 )))
             }

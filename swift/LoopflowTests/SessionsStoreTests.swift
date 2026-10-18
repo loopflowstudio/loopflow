@@ -316,7 +316,7 @@ struct WorkspaceSessionLifecycleTests {
     func twelveRetainedAttachments() async throws {
         let calls = AttachmentReads()
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            await calls.append(args)
+            await calls.record()
             guard args == ["session", "attach", args[2], "--if-free", "--prepare", "--json"] else {
                 throw RegistryQueryError("Restoration must not start or resume a provider")
             }
@@ -352,7 +352,7 @@ struct WorkspaceSessionLifecycleTests {
     func attachmentFailureIsStable() async throws {
         let calls = AttachmentReads()
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            await calls.append(args)
+            await calls.record()
             throw RegistryQueryError("Execution owner is unavailable")
         })
         let record = try #require(records([session(id: "retained", state: "closed")]).first)
@@ -432,9 +432,8 @@ struct WorkspaceSessionLifecycleTests {
 }
 
 private actor AttachmentReads {
-    private var commands: [[String]] = []
-    var count: Int { commands.count }
-    func append(_ command: [String]) { commands.append(command) }
+    private(set) var count = 0
+    func record() { count += 1 }
 }
 
 private func attachment(id: String) -> String {

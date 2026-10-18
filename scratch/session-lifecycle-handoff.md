@@ -1,29 +1,34 @@
-# LOO-416 pursue handoff — October 16, 2026
+# LOO-416 handoff — October 17, 2026
 
-Jack Heart explicitly selected `pursue` through demo/review after accepting the
-architecture and broadening scope. Use [the plan](loo-416-keep-task-sessions.md),
-[readiness and caller semantics](session-readiness.md), and
-[historical failures](session-continuity-failures.md). Preserve full continuity
-acceptance; a serialization-only patch is insufficient. Repository, Wave and Task
-conversations share auto-creation/lifecycle behavior; task create, ensure and all
-callers are in scope. Fresh-context restart is downstream intent.
+Jack Heart authorized pursue through demo/review, including shared repository,
+Wave and Task admission, every ensure caller, nested CLI lifetime and readiness.
+No merge or auto-merge authorization. Current scope and remaining work are in
+[the plan](loo-416-keep-task-sessions.md). Full prior handoff, including the
+uncommitted runner recovery evidence, is preserved in
+[evidence/lifecycle-handoff-before-query.txt](evidence/lifecycle-handoff-before-query.txt).
 
-The prior design Flow `fe569cda-0925-4081-b3fb-1243085b50a8` completed. Prelaunch
-reads found no live Flow and Project workflow `code`. Earlier design-only limits
-are superseded by Jack's explicit pursue instruction. Review stays in Session
-`session_df202fd5754c4954aa659e1158a414fd`; no landing authorization. Automatic Task
-operation is disabled; CI watcher is not running. Prior operator evidence is
-preserved in [the archive](evidence/lifecycle-handoff-before-pursue.txt).
+LOO-415 PR #1581 is integrated at `7bfa10fa72`, following retention checkpoint
+`172ce48a39`. Admission and typed attach-only reconnect are checkpointed at
+`a3e929a7ef8d614c667086af1e1107d1799c6fb1`; preserve their passing checks. The old
+0.14.3 runner failed against the 0.14.4 store; recovery uses compatible installed
+0.14.4. Read current execution through `lf task status LOO-416 --json`; earlier
+missing exits are history, not work to replay. No competing implementation or
+provider retry is authorized.
 
-Jack Heart subsequently authorized opening and starting dependency LOO-415 in the current cmux window. Its LF-managed checkout is `/Users/jack/src/loopflow.loo-415-reattach-to-a`; `scratch/loo-415-transport-handoff.md` there carries the accepted architecture and copied research. LOO-416 retains its existing implementation and waits for the shared transport contract; no duplicate 416 Flow is authorized by this launch.
+LOO-497 owns shared records/model; LOO-489 owns native presentation/save-restore.
+Their committed handoff is required before durable integration. October 17 reads
+confirm LOO-497 at `959c714fbb` and LOO-489 published at `4ad912f336` with a live
+Flow. Jack Heart narrowed that LOO-489 slice to built-in query views, superseding
+older broad persistence plans. Neither published head supplies the tab/draft
+restoration contract; the remaining delivery dependency is explicit in the plan.
 
-## Continue on the transport stack — October 17
-
-Jack Heart instructed: “you can stack on 415 and continue now.” LOO-416 now selects
-LOO-415 PR #1581 as parent and integrates its published commit through `7bfa10fa72`.
-Prior changes are checkpointed in `172ce48a39`. Continue pursue through demo/review;
-do not restart LOO-415 or implement a competing owner. Read the current plan and
-transport summaries. Parent tests establish transport fixtures, not Desktop proof.
-LOO-497/489 still own pane/draft records and native persistence respectively;
-coordinate concrete handoffs while implementing independent attachment/readiness.
-No merge authorization. Task automation is disabled; CI watcher is not running.
+Accepted later tool-tab direction: each Task has one Shell tool and one Files
+tool, each with ordered tabs and retained selection. ShellTab.id is the stable
+TerminalIdentity.shell identity, independent of pane/focus; native incarnation is
+runtime-only. Portable WorkShellTab retains optional lf_process_id and recorded
+location, never liveness/launch authority. Restored command stays nil until
+attach-only Process reconnection succeeds; never replay saved argv. Files tabs
+share Task/path drafts; Files location belongs to the tool. Only Tasks create
+shells; reconcile historical repo/Wave/Dashboard shells without silent deletion.
+Close/Undo fences removed tabs. LOO-416 supplies continuity through the agreed
+owner APIs; sibling Tasks retain the tab/persistence cut.

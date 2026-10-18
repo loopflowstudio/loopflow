@@ -179,19 +179,11 @@ prove source behavior; installed concurrent-Flow acceptance remains unproved.
 The slow status/ensure observations and unattributed records-read report have
 no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
 
-Jack Heart's October 11 Kata report (`d4991d61-da39-4b7a-af0f-15880c234d82`)
-records identical timeouts on consecutive prompts with one background shell.
-This rules out a Loopflow-repository-only incident or a requirement for this
-Wave's Flows. Shared-store admission can explain cross-repository recurrence;
-the Kata lock holder and exact cause remain unconfirmed. The background shell
-alone is no causal evidence. Separate-directory, consecutive-callback fixtures
-retain held contention across prompts; installed Kata acceptance remains open.
-
-After main sync, the Task-facts fixture now separates edit-time advancement
-from Task/PR preservation. Affected checks pass; hosted materialized/Linux CI
-and installed concurrent-Flow acceptance remain unproved. Exact gate evidence:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Session titles.
+Jack Heart's October 11 Kata report (`d4991d61`) reproduced consecutive
+prompt timeouts outside Loopflow with one background shell. Shared-store contention
+can explain cross-repository recurrence; the Kata lock holder/cause remain unknown.
+Callback fixtures prove no installed concurrent-Flow/Kata acceptance. Materialized/Linux CI remains open. Report, gate and Task-preservation
+evidence: `4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
 
 ## Program Status direction (LOO-398/415, reconciled 2026-10-16)
 
@@ -208,7 +200,7 @@ do not establish installed/native adoption; viewer absence is not provider death
 Earlier patch evidence and constraints:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, Program Status direction.
 
-## Session continuity (LOO-416, 2026-10-16)
+## Session continuity (LOO-416, reconciled 2026-10-17)
 
 Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
 shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
@@ -221,9 +213,23 @@ LOO-489 integrates it.
 Application retention now keeps repository registries across window closure;
 headless tests cover twelve Work layouts/drafts, not twelve live providers.
 Known scenes render before lookup; fresh resolution still owns new link delivery.
-App death still destroys runtime state: durable identity, native history and
-repaint alone cannot restore live input or exact scrollback. Renderer recovery
-and layout replication across Desktop installations remain unresolved.
+App death destroys Desktop runtime state: durable identity, native history and
+repaint alone cannot restore live input or exact scrollback. Exact renderer recovery
+and layout replication across Desktop installations remain unresolved. The owner
+retains bounded vt100 text state, not a complete native terminal snapshot.
+
+Admission is not execution: Task filing and explicit Wave admission now commit
+uncaptured primary Sessions; ensure prepares placement, while explicit execution
+reserves input and Started. Nested CLI stand-ins preserve a pending request,
+provider/Session identity and caller provenance after calling-provider/viewer death;
+this proves neither native readiness nor a warming policy.
+Finite Desktop requests must propagate cancellation through the actual worker,
+drain input/output together and bound inherited pipes after child exit. Kill only
+the exact query child; a timed-out mutation remains unknown, never retried blindly.
+
+LOO-497 owns durable intent; Jack Heart's October 17 LOO-489 slice narrows to built-in
+query views. That handoff supplies no durable restoration commitment. Full LOO-416
+acceptance still requires saved-state integration and measured native continuity.
 
 Release's operation-entry lesson applies: prove reopening through its public
 router, then native remount and provider survival separately. Neither retained
@@ -439,8 +445,10 @@ Record native identity at spawn and exit at wait; failed spawn proves non-start,
 launcher success proves no provider exit. Commit reservation with attachment;
 fallback shares first-launch authority and preserves fast-published native history.
 
-lf-8fed729 prepares primary input in ensure/replace; connect owns foreground
-launch, removing the tmux launcher. Exact interactive PID/birth observed dead
+LOO-416 supersedes lf-8fed729's eager primary-input preparation: ensure/replace
+prepare placement without a new capture; explicit connect reserves input and
+launches through the detached owner. The tmux launcher stays removed.
+Exact interactive PID/birth observed dead
 permits fenced settlement without inventing success. Live/unknown providers grant
 no duplicate launch or signaling; headless group rules remain. Explicit retry of
 a retired Session without native history retains completion and successor selection.
@@ -1062,48 +1070,26 @@ CI owns the full materialized matrix. LOO-422 owns OSC 7501 simplification after
 adoption. Preserve caller checkpoints/common invocation loading. Codex rejected-turn
 recovery remains unresolved; homepage capture follows installation.
 
-Jack Heart narrowed LOO-420 to ordinary installed-skill invocation, matching
-help/list, native same-harness execution, translated ports, exact arguments,
-assets and declarations; builtin inline skills and `--agent/-a` remain.
-Busy-terminal injection, queues, competing writers and generic recovery are
-outside scope. Jack requested compression, then gate/landing and completion
-after verified merge October 8. Exact comments:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+LOO-420 history:
+`4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+Jack Heart selected native installed-skill invocation with matching discovery,
+exact arguments/assets and translated ports, then delivery after verified merge.
+Busy-terminal injection, competing writers and generic recovery stay excluded.
+One catalog owns source/declarations/arguments; export preserves third-party files.
+Native subagent names never select lf's harness. Preserve Session placement,
+captures after refused continuation and reservations after failed publication.
 
-One skill catalog replaces external/npx/rams and Flow resolvers. Retain source,
-declarations and arguments together; export preserves third-party files. Claude
-subagent names do not select lf's harness. Independent fixes preserve saved Session
-placement, active captures on refused continuation and unpublished reservations on
-publication failure. Launcher success proves no provider exit.
+Codex 0.160.1 requires discovery for typed skill input; explicit Markdown references
+select original paths without another catalog. Custom prompts retain positions and
+assignments, not bundle semantics. Preserve unfamiliar declarations, native/sibling
+history, stale-client rejection and lossless JSON; snapshot/escape native syntax.
+Unbound third-party launches omit operating guidance; attributed Work/Flows retain
+it. PATH discovery replaces availability probes, not actual spawn error handling.
 
-Native/sibling history, stale-client rejection, exact arguments and lossless JSON
-remain required. Snapshot native declarations and escape argument/preprocessing
-syntax. Rejected hook/preprocessing approaches changed first-request context
-ownership. Exact compression/source-audit commits and counterexamples:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Direct invocation and large inputs.
-
-Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
-explicit Markdown skill reference selects the original path on both surfaces.
-No catalog mount or second resolver is required. Single-file custom prompts keep
-one-based positions and named assignments; valid metadata does not make them skill
-bundles. Unfamiliar native declarations are reported, not silently discarded.
-
-Ordinary unbound third-party launches omit operating/conversation guidance;
-attributed Work and captured Flows retain it. Budget checks remain; notices accompany
-managed context or excerpts. Captured input identifies a Flow; ordinary selection
-also retains an in-memory invocation. PATH discovery replaces availability's
-`--version` subprocess/cache without changing actual launch failure handling.
-
-Fixtures prove native model/argument/context fidelity, catalog collisions,
-translated ports, fake-API asset reads and home/reconnect continuity. October 8
-gate repaired Codex's missing `--` before YAML; later resume fixtures read the
-system file. [Benchmarks](../../../scripts/benchmarks/skill-invocation/README.md)
-retain timing: base's post-provider Git failure limits comparison, plain-native
-overhead remains, and no production speedup or live compliance is proved.
-Hosted CI, merge and completion remain unproved. Exact checks and prior-cost
-references: `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Direct invocation and large inputs.
+[Benchmarks](../../../scripts/benchmarks/skill-invocation/README.md) retain fixture
+proofs and baseline Git failure, not live compliance or speedup. Hosted CI, merge,
+installation and completion remain unproved in this evidence; launcher success
+never proves provider exit.
 
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 

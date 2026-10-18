@@ -20,4 +20,4 @@ LOO-415 now retains a bounded vt100 text snapshot; exact terminal state and
 cross-installation layout synchronization remain unresolved. LOO-497 owns shared
 layout/draft records; LOO-489 owns native save/restore. Current implementation,
 remaining proof and accepted constraints live in [the plan](loo-416-keep-task-sessions.md)
-and [caller readiness](session-readiness.md). Fresh-context restart remains later work.
+and [caller readiness](evidence/session-readiness-before-stack.txt). Fresh-context restart remains later work.

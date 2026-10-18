@@ -8,9 +8,9 @@ resume ended execution. Detailed restoration mechanisms remain to be proved.
 
 Consequential choices retained for design review:
 
-- Exact terminal restoration needs a mechanism beyond transparent bytes and repaint.
-  Evaluate a library-backed headless state model within LOO-415's owner, preserving
-  its transport boundary. Do not reduce scrollback acceptance to native history.
+- Exact terminal restoration exceeds LOO-415's implemented vt100 text snapshot
+  and 2,000-row scrollback. Full buffer/mode restoration and renderer-owned state
+  remain unresolved within that owner boundary; native history cannot replace them.
   Client-only selection/IME composition needs its own recovery limits.
 - D9 mentions reopening on another machine. The app-side store supports one
   viewer switching execution Machines. Layout replication between separate
@@ -55,3 +55,9 @@ October 17 sync resolution: retain the six conflicted scratch summaries because
 LOO-416 still uses their accepted direction and open questions. Parent scratch
 cleanup does not retire this branch’s active plan. Combine non-displacing viewer
 attachment with the parent’s EOF and owner-exit fixes; retain both test sets.
+
+October 17 bounded-query assumption: finite Desktop CLI requests have a 30-second
+monotonic deadline and a 64 MiB limit per output pipe. Cancellation/timeout kills
+only the exact query child; accepted execution owners survive. A timed-out mutation
+reports an unknown result requiring refresh, never automatic retry. Long-lived
+work and observation keep their existing distinct launch paths.

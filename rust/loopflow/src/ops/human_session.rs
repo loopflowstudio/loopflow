@@ -497,7 +497,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let state = session_state(session);
     let mut actions = session_actions(state);
-    let open_argv = match human_open_argv(&session.id) {
+    let open_argv = match human_session_argv(&session.id, "connect") {
         Ok(argv) => argv,
         Err(error) => {
             let reason = format!("Session connection unavailable: {error}");
@@ -690,15 +690,11 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
-    if resume
-        && session
-            .artifact_key
-            .as_deref()
-            .map(|key| store.sqlite.input_provider_session(key))
-            .transpose()?
-            .flatten()
-            .is_some()
-    {
+    let provider_session = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?,
+        None => None,
+    };
+    if resume && provider_session.is_some() {
         if let Some(provider) = session.provider.as_deref() {
             if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
                 provider,
@@ -751,7 +747,6 @@ pub(crate) async fn open(
         return surface(store, session).await;
     }
     let native = NativeSession::of(session)?;
-    let provider_session = store.sqlite.input_provider_session(session.input_key()?)?;
     if resume {
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
         transition_headless_to_native(store, session, provider_session.as_ref()).await?;
@@ -931,14 +926,11 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 /// Read an existing execution without preparing input or resuming provider history.
 pub(crate) async fn prepare_attachment(
     store: &SharedStore,
-    id: &str,
+    session: &LfSession,
     observe: bool,
     if_free: bool,
 ) -> Result<SessionRecord> {
-    crate::data_clone::require_writable_session(id)?;
-    let session = session_by_id(store, id)
-        .await?
-        .ok_or_else(|| session_not_found(id))?;
+    crate::data_clone::require_writable_session(&session.id)?;
     let unavailable_reason = match store.sqlite.session_transport(&session.id)? {
         None => Some(
             "Session has no retained execution; resume explicitly to open saved history".into(),
@@ -953,7 +945,7 @@ pub(crate) async fn prepare_attachment(
         }
         Some(_) => None,
     };
-    let mut record = surface(store, &session).await?;
+    let mut record = surface(store, session).await?;
     record.open_argv = human_session_argv(&session.id, "attach")?;
     if observe {
         record.open_argv.push("--observe".into());
@@ -995,7 +987,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         }
         Vec::new()
     } else {
-        human_open_argv(&session.id)?
+        human_session_argv(&session.id, "connect")?
     };
     let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
@@ -1290,10 +1282,6 @@ pub(crate) fn resume_native_session(
         launch_lock.take(),
     )?;
     Ok(true)
-}
-
-fn human_open_argv(id: &str) -> Result<Vec<String>> {
-    human_session_argv(id, "connect")
 }
 
 fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
@@ -1772,7 +1760,7 @@ mod tests {
 
     use std::ffi::OsString;
 
-    use super::{human_open_argv, session_is_resumable};
+    use super::{human_session_argv, session_is_resumable};
     use crate::session::LfSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
@@ -2039,7 +2027,7 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv("session_123").unwrap();
+        let argv = human_session_argv("session_123", "connect").unwrap();
 
         assert_eq!(
             &argv[argv.len() - 3..],

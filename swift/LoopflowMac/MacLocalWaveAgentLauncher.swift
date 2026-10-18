@@ -1,6 +1,7 @@
 // Launch Tasks and local sessions through the CLI.
 
 #if os(macOS)
+import Darwin
 import Foundation
 import Loopflow
 
@@ -17,8 +18,8 @@ enum LocalWaveAgentLauncher {
 
     /// Ensure Task Work and its checkout without running a Flow; returns
     /// the authoritative worktree.
-    static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
-        let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
+    static func checkoutTask(repoPath: String, issue: String) async throws -> WorkspaceIdentity {
+        let stdout = try await runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
         return try taskCheckoutWorkspace(stdout)
     }
 
@@ -66,13 +67,9 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Machine `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
-    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) throws -> String {
+    static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
         let lfPath = try controlLfPath()
-        guard let result = run([lfPath] + subargs, cwd: cwd, input: input) else {
-            throw LocalLfError(
-                errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))"
-            )
-        }
+        let result = try await run([lfPath] + subargs, cwd: cwd, input: input)
         // `lf doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
         // itself behind the query runner's generic non-zero handling.
@@ -132,20 +129,15 @@ enum LocalWaveAgentLauncher {
         return process
     }
 
-    static func queryGitHub(_ args: [String]) throws -> String {
+    static func queryGitHub(_ args: [String]) async throws -> String {
         guard ProcessInfo.processInfo.environment["LF_CLONE_ROOT"] == nil else {
             throw LocalLfError(errorDescription: "GitHub is unavailable in an offline data clone.")
         }
-        return try runCheckedOutput(["gh"] + args, cwd: nil)
+        return try await runCheckedOutput(["gh"] + args, cwd: nil)
     }
 
-    private static func runCheckedOutput(_ args: [String], cwd: String?) throws -> String {
-        let result = run(args, cwd: cwd)
-        guard let result else {
-            throw LocalLfError(
-                errorDescription: "Failed to spawn: \(args.joined(separator: " "))"
-            )
-        }
+    private static func runCheckedOutput(_ args: [String], cwd: String?) async throws -> String {
+        let result = try await run(args, cwd: cwd)
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             let message = detail.isEmpty
@@ -156,77 +148,123 @@ enum LocalWaveAgentLauncher {
         return result.stdout
     }
 
-    private static func run(
+    /// Finite CLI requests only. Cancellation ends this exact child, never its
+    /// descendants or an execution owner. Uncertain mutations must be reconciled.
+    static func run(
         _ args: [String],
         cwd: String? = nil,
         input: String? = nil
-    ) -> (status: Int32, stdout: String, stderr: String)? {
+    ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        let worker = Task.detached(priority: .userInitiated) {
+            try await collect(args, cwd: cwd, input: input)
+        }
+        return try await withTaskCancellationHandler {
+            let result = try await worker.value
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            worker.cancel()
+        }
+    }
+
+    private static func collect(
+        _ args: [String], cwd: String?, input: String?
+    ) async throws -> (status: Int32, stdout: String, stderr: String) {
+        try Task.checkCancellation()
+        let deadline = ProcessInfo.processInfo.systemUptime + 30
         let process = queryProcess(args, cwd: cwd)
         let stdout = Pipe()
         let stderr = Pipe()
+        let stdin = input.map { _ in Pipe() }
         process.standardOutput = stdout
         process.standardError = stderr
-        let stdin = input.map { _ in Pipe() }
-        process.standardInput = stdin
-
-        let outHandle = stdout.fileHandleForReading
-        let errHandle = stderr.fileHandleForReading
-
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-
-        // Drain both pipes while the child is still writing. A pipe holds 64KB;
-        // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf repo tokens --json` says about 120KB. `lf usage --days 0 --task ID --json`/`lf doctor`
-        // are small, which is why this only ever bit the largest reader.
-        let collector = OutputCollector()
-        let group = DispatchGroup()
-        let queue = DispatchQueue.global(qos: .userInitiated)
-        queue.async(group: group) { collector.setStdout(outHandle.readDataToEndOfFile()) }
-        queue.async(group: group) { collector.setStderr(errHandle.readDataToEndOfFile()) }
-
-        if let input, let stdin {
-            // lf can exit before reading; report the failed write instead of taking SIGPIPE.
-            _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-            queue.async(group: group) {
-                defer { try? stdin.fileHandleForWriting.close() }
-                do { try stdin.fileHandleForWriting.write(contentsOf: Data(input.utf8)) }
-                catch { collector.setInputError(error.localizedDescription) }
+        process.standardInput = stdin.map { $0 as Any } ?? FileHandle.nullDevice
+        let out = stdout.fileHandleForReading
+        let err = stderr.fileHandleForReading
+        defer {
+            // Kill only the child we launched. A Session owner is independent;
+            // closing a query must not signal a provider or a process group.
+            if process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+            for handle in [out, err, stdout.fileHandleForWriting, stderr.fileHandleForWriting,
+                           stdin?.fileHandleForReading, stdin?.fileHandleForWriting].compactMap({ $0 }) {
+                try? handle.close()
             }
         }
-        process.waitUntilExit()
-        group.wait()
-        if process.terminationStatus == 0, let error = collector.inputError {
-            return (1, "", "Could not send draft to lf: \(error)")
+        do { try process.run() }
+        catch { throw LocalLfError(errorDescription: "Could not start CLI request: \(error.localizedDescription)") }
+        try stdout.fileHandleForWriting.close()
+        try stderr.fileHandleForWriting.close()
+        try stdin?.fileHandleForReading.close()
+        for handle in [out, err, stdin?.fileHandleForWriting].compactMap({ $0 }) {
+            let fd = handle.fileDescriptor
+            guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) != -1 else {
+                throw LocalLfError(errorDescription: "Could not configure CLI request pipes")
+            }
+            _ = fcntl(fd, F_SETNOSIGPIPE, 1)
         }
+        var output = Data()
+        var diagnostics = Data()
+        let draft = Data((input ?? "").utf8)
+        var sent = 0
+        var writer = stdin?.fileHandleForWriting
+        var inputError: String?
+        while true {
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw LocalLfError(errorDescription: "CLI request timed out after 30 seconds. Its result is unknown; refresh before retrying a change.")
+            }
+            let running = process.isRunning
+            // Bound each drain so noisy output cannot starve input/cancellation.
+            let outputDrained = try drain(out, into: &output)
+            let diagnosticsDrained = try drain(err, into: &diagnostics)
+            if let handle = writer {
+                if sent < draft.count {
+                    let count = draft.withUnsafeBytes {
+                        Darwin.write(handle.fileDescriptor,
+                                     $0.baseAddress!.advanced(by: sent), min(draft.count - sent, 65536))
+                    }
+                    if count > 0 { sent += count }
+                    else if count < 0 && errno != EAGAIN && errno != EINTR {
+                        inputError = String(cString: strerror(errno))
+                    }
+                }
+                if sent == draft.count || inputError != nil {
+                    try handle.close()
+                    writer = nil
+                }
+            }
+            // An inherited pipe in a descendant cannot hold a completed query
+            // open. The child's buffered output has been drained at this point.
+            if !running, outputDrained, diagnosticsDrained { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        if process.terminationStatus == 0, sent != draft.count {
+            throw LocalLfError(errorDescription: "Could not send draft to lf: \(inputError ?? "request exited before reading the draft")")
+        }
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self),
+                String(decoding: diagnostics, as: UTF8.self))
+    }
 
-        return (
-            process.terminationStatus,
-            String(data: collector.stdout, encoding: .utf8) ?? "",
-            String(data: collector.stderr, encoding: .utf8) ?? ""
-        )
+    /// True once all currently buffered bytes have been read, including EOF.
+    private static func drain(_ handle: FileHandle, into data: inout Data) throws -> Bool {
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        for _ in 0..<16 {
+            let count = Darwin.read(handle.fileDescriptor, &buffer, buffer.count)
+            if count == 0 { return true }
+            if count < 0 {
+                if errno == EAGAIN { return true }
+                if errno == EINTR { continue }
+                throw LocalLfError(errorDescription: "Could not read CLI response")
+            }
+            guard data.count + count <= 64 * 1024 * 1024 else {
+                throw LocalLfError(errorDescription: "CLI response exceeds 64 MiB")
+            }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return false
     }
 }
-
-/// Two reader threads, one box. The pipes must be drained concurrently with the
-/// child's execution, so their results cross a thread boundary.
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var out = Data()
-    private var err = Data()
-    private var inputFailure: String?
-
-    var inputError: String? { lock.withLock { inputFailure } }
-    func setInputError(_ message: String) { lock.withLock { inputFailure = message } }
-
-    var stdout: Data { lock.withLock { out } }
-    var stderr: Data { lock.withLock { err } }
-
-    func setStdout(_ data: Data) { lock.withLock { out = data } }
-    func setStderr(_ data: Data) { lock.withLock { err = data } }
-}
-
 #endif

@@ -1,8 +1,8 @@
 # Historical remote-work design — LOO-394
 
 The recovered Task description, accepted decisions, alternatives, rename evidence
-and deferred remote-work acceptance remain verbatim in
-[the source archive](evidence/work-on-another-machine-name.txt).
+and deferred remote-work acceptance remain verbatim at
+`172ce48a39:scratch/evidence/work-on-another-machine-name.txt`.
 SHA-256: `c2aca9cafece70c682e9b86537623e6f0793115ace7abd229f68d5945c975fb1`.
 The October 16 Arrange direction supersedes conflicting scope.
 

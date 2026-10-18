@@ -384,7 +384,6 @@ fn put_project(
         ":slug": &project.slug,
         ":name": &project.name,
         ":summary": &project.summary,
-        ":workflow": &project.workflow,
         ":status": &status,
         ":krs": &krs,
         ":metric_targets": &metric_targets,
@@ -403,13 +402,13 @@ fn put_project(
         .query_row(
             "SELECT revision,observed_at,archived,
             ((slug IS NOT NULL AND slug IS NOT :slug) OR (name IS NOT NULL AND name IS NOT :name)),
-            (summary IS NOT NULL AND summary IS NOT :summary) OR (workflow IS NOT NULL AND workflow IS NOT :workflow) OR (status IS NOT NULL AND status IS NOT :status)
+            (summary IS NOT NULL AND summary IS NOT :summary) OR (status IS NOT NULL AND status IS NOT :status)
             OR (description_revision IS revision AND description IS NOT NULL
                 AND :description IS NOT NULL AND description IS NOT :description),krs,metric_targets
          FROM pm_projects WHERE repo=:repo AND provider=:provider AND id=:id",
             named_params! { ":repo": repo, ":provider": "linear", ":id": &project.id,
             ":slug": &project.slug, ":name": &project.name, ":summary": &project.summary,
-            ":workflow": &project.workflow, ":status": &status, ":description": &project.description },
+            ":status": &status, ":description": &project.description },
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
@@ -468,13 +467,13 @@ fn put_project(
         }
     }
     conn.execute(
-        "INSERT INTO pm_projects(repo,provider,id,observed_at,slug,name,summary,workflow,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
-         VALUES(:repo,:provider,:id,:observed_at,:slug,:name,:summary,:workflow,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
+        "INSERT INTO pm_projects(repo,provider,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
+         VALUES(:repo,:provider,:id,:observed_at,:slug,:name,:summary,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
          ON CONFLICT(repo,provider,id) DO UPDATE SET
          observed_at=excluded.observed_at,revision=excluded.revision,
-         slug=excluded.slug,name=excluded.name,summary=excluded.summary,workflow=excluded.workflow,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
+         slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
          description=COALESCE(excluded.description,pm_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
          description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,
@@ -573,14 +572,14 @@ pub(crate) fn put_item(
             conn.execute(
                 "INSERT INTO task_events(task_id,kind_json,created_at)
                  SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
-                 FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                 FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
                  WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_completed=0",
                 params![item.id,repo,observed_at])?;
         }
         conn.execute(
             "UPDATE tasks SET completion_request=NULL,completion_error=NULL
-             WHERE external_issue_id=?1 AND project_id IN
-             (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)",
+             WHERE external_issue_id=?1 AND repository_id IN
+             (SELECT id FROM repository_plans WHERE repo=?2)",
             params![item.id, repo],
         )?;
     }
@@ -600,7 +599,7 @@ pub(crate) fn observe_task_state(
     let repo: Option<String> = tx
         .query_row(
             "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-         JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         JOIN repository_plans w ON w.id=t.repository_id
          WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
          AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
             params![delivery.id, delivery.task_id.as_str(), observed.id],
@@ -694,7 +693,7 @@ fn project_accepted_planning(
          SELECT id,observed_at,wave_id,revision,
              slug,name,
              summary,json_quote(status),
-             workflow,krs,
+             krs,
              metric_targets,initiative_ids,
              team_ids,
              CASE WHEN description_revision IS revision THEN description END
@@ -719,13 +718,12 @@ fn project_accepted_planning(
                     Edit::ProjectName(Some(row.get(5)?)),
                     Edit::ProjectSummary(row.get(6)?),
                     Edit::ProjectStatus(serde_json::from_str(&row.get::<_, String>(7)?)?),
-                    Edit::Workflow(row.get(8)?),
-                    Edit::Krs(serde_json::from_str(&row.get::<_, String>(9)?)?),
-                    Edit::MetricTargets(serde_json::from_str(&row.get::<_, String>(10)?)?),
-                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(11)?)?),
-                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(12)?)?),
+                    Edit::Krs(serde_json::from_str(&row.get::<_, String>(8)?)?),
+                    Edit::MetricTargets(serde_json::from_str(&row.get::<_, String>(9)?)?),
+                    Edit::ProjectInitiatives(serde_json::from_str(&row.get::<_, String>(10)?)?),
+                    Edit::ProjectTeams(serde_json::from_str(&row.get::<_, String>(11)?)?),
                 ];
-                if let Some(description) = row.get::<_, Option<String>>(13)? {
+                if let Some(description) = row.get::<_, Option<String>>(12)? {
                     edits.push(Edit::ProjectDescription(Some(description)));
                 }
                 Ok((
@@ -782,7 +780,7 @@ fn project_accepted_planning(
         tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
     }
     let mut query = tx.prepare(
-        "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed
+        "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
          FROM pm_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
          WHERE i.repo=?1 AND i.provider='linear' AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?2))",
@@ -797,7 +795,9 @@ fn project_accepted_planning(
                 edits.push(Edit::TaskAssignee(row.get(4)?));
             }
             if let Some(project) = row.get::<_, Option<String>>(5)? {
-                edits.push(Edit::TaskProject(project));
+                edits.push(Edit::TaskProject(Some(project)));
+            } else if row.get::<_, bool>(7)? && row.get::<_, Option<String>>(8)?.is_none() {
+                edits.push(Edit::TaskProject(None));
             }
             Ok((
                 row.get::<_, String>(0)?,
@@ -822,18 +822,17 @@ fn project_accepted_planning(
              i.assignee,i.due_date,
              i.state,i.completed,
              i.completed_at FROM pm_items i
-         JOIN projects p ON p.external_project_id=i.project_id
-         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
+         LEFT JOIN projects p ON p.external_project_id=i.project_id
+         LEFT JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
          LEFT JOIN projects current ON current.id=target.project_id
          WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
-         AND (target.id IS NULL OR current.wave_id=p.wave_id OR EXISTS(
-             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='task_project'
-             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$.value')=current.id
-             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='task_project')))
+         AND ((observed.id IS NOT NULL AND observed.wave_id=p.wave_id)
+              OR (i.project_id_observed=1 AND i.claimed_project_id IS NULL))
+         AND (target.id IS NULL OR target.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d
-             WHERE d.wave_id=COALESCE(current.wave_id,p.wave_id) AND d.issue_id=i.id)
+             WHERE d.issue_id=i.id AND EXISTS(SELECT 1 FROM waves dw WHERE dw.id=d.wave_id AND dw.repo=?1))
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
              AND c.removed=1)"
     ))?;
@@ -965,6 +964,79 @@ mod tests {
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::store::PlanningState;
+
+    #[test]
+    fn explicit_null_detaches_but_unknown_linear_membership_retains_task() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let mut issue = snapshot.items[0].clone();
+        store
+            .seed_inventory(&crate::test_linear_input::InventoryFixture {
+                wave_id: wave.id().clone(),
+                provider: "linear".into(),
+                initiative: snapshot.projects[0].initiative_ids[0].clone(),
+                synced_at: 42,
+                snapshot,
+            })
+            .unwrap();
+        let original = store.task_by_issue(&issue.id).unwrap().unwrap();
+        // Unmapped Project evidence cannot manufacture a standalone Task.
+        issue.project_id = Some("unknown-project".into());
+        issue.revision = Some("2026-10-17T01:00:00Z".into());
+        super::accept_linear_issue_in(&store, "/repo", &issue, None, 43, None).unwrap();
+        assert_eq!(
+            store.task(&original.id).unwrap().unwrap().project_id,
+            original.project_id
+        );
+        assert_eq!(
+            store.task_acquisition(&original.id).unwrap().state,
+            PlanningState::Invalid
+        );
+        // An omitted field in retained historical evidence remains unknown.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE pm_items SET project_id=NULL,claimed_project_id=NULL,project_id_observed=0",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .linear_issue_evidence("/repo", &issue.id)
+                .unwrap()
+                .state,
+            PlanningState::Invalid
+        );
+        assert_eq!(
+            store.task(&original.id).unwrap().unwrap().project_id,
+            original.project_id
+        );
+        // A complete, newer observation explicitly clearing Project detaches it.
+        issue.project_id = None;
+        issue.revision = Some("2026-10-17T02:00:00Z".into());
+        super::accept_linear_issue_in(&store, "/repo", &issue, None, 44, None).unwrap();
+        let detached = store.task(&original.id).unwrap().unwrap();
+        assert!(detached.project_id.is_none());
+        assert!(detached.wave_id.is_none());
+        assert_eq!(detached.repository_id, original.repository_id);
+        assert_eq!(
+            store.task_acquisition(&original.id).unwrap().state,
+            PlanningState::Available
+        );
+    }
 
     #[test]
     fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {

@@ -54,10 +54,10 @@ or liveness evidence; never a reason to start a second Flow process). â€œReadyâ€
    moving the Task. Without a workflow, choose as follows.
    Leave a Flow with a live process running. A stopped
    Flow is history: read what it finished and which effects it recorded before
-   choosing what to launch. Read the owning Wave's status and current Project's
-   `workflow:`, then inspect the actual
+   choosing what to launch. Read the Wave default when assigned, otherwise the
+   repository `workflow:`, then inspect the actual
    installed catalog with `lf list` and `lf help <flow>`. Honor an explicit Flow
-   choice; otherwise use the Project's workflow unless the design and execution
+   choice; otherwise use the Wave's workflow or repository default unless the design and execution
    evidence call for another entry point. For example, an accepted design with
    implementation remaining can use `pursue`; unresolved design starts with
    `task-design` and its review in the Task conversation. Flows run autonomous

@@ -1,5 +1,5 @@
-//! A reorder is one Project intention. Its individual provider effects retain
-//! before/after lists so acquisition can recognize our own partial progress.
+//! Rank edits reorder siblings within a Project or the repository's standalone Tasks.
+//! Project provider effects retain before/after lists to recognize partial progress.
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
@@ -7,8 +7,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::durable::{ProjectId, TaskId};
+use crate::durable::ProjectId;
 use crate::store::StoreResult;
+use crate::work::task::Task;
 
 use super::SqliteStore;
 
@@ -98,27 +99,34 @@ impl SqliteStore {
     }
 }
 
-pub(super) fn reorder_in(
-    conn: &Connection,
-    project: &ProjectId,
-    task: &TaskId,
-    rank: u32,
-) -> StoreResult<()> {
-    let previous = project_members(conn, project)?;
+pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
+    let project = task.project_id.as_ref();
+    let mut query = conn.prepare(
+        "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
+         AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id",
+    )?;
+    let previous = query
+        .query_map(
+            params![task.repository_id.as_str(), project.map(ProjectId::as_str)],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
     let mut desired = previous.clone();
-    desired.retain(|id| id != task.as_str());
-    desired.insert((rank as usize).min(desired.len()), task.to_string());
+    desired.retain(|id| id != task.id.as_str());
+    desired.insert((rank as usize).min(desired.len()), task.id.to_string());
     if previous != desired {
-        let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
-        conn.execute(
-            "INSERT INTO project_changes(id,project_id,value_json,base_json) VALUES(?1,?2,?3,?4)",
-            params![
-                uuid::Uuid::new_v4().to_string(),
-                project.as_str(),
-                serde_json::to_string(&desired)?,
-                base.map(|value| value.to_string())
-            ],
-        )?;
+        if let Some(project) = project {
+            let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+            conn.execute(
+                "INSERT INTO project_changes(id,project_id,value_json,base_json) VALUES(?1,?2,?3,?4)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    project.as_str(),
+                    serde_json::to_string(&desired)?,
+                    base.map(|value| value.to_string())
+                ],
+            )?;
+        }
         apply_order(conn, project, &desired)?;
     }
     Ok(())
@@ -285,7 +293,7 @@ pub(crate) fn observe_in(
     } else {
         observed
     };
-    apply_order(conn, project, &order)?;
+    apply_order(conn, Some(project), &order)?;
     Ok(true)
 }
 
@@ -311,9 +319,16 @@ fn current_members(
         .collect())
 }
 
-fn apply_order(conn: &Connection, project: &ProjectId, order: &[String]) -> StoreResult<()> {
+fn apply_order(
+    conn: &Connection,
+    project: Option<&ProjectId>,
+    order: &[String],
+) -> StoreResult<()> {
     for (rank, id) in order.iter().enumerate() {
-        let member:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)",params![id,project.as_str()],|r|r.get(0))?;
+        let member: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id IS ?2 AND planning_deleted_at IS NULL)",
+            params![id, project.map(ProjectId::as_str)], |row| row.get(0),
+        )?;
         if member {
             planning_write::local(
                 conn,

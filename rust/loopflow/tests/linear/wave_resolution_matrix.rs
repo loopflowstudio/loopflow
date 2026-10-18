@@ -352,10 +352,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     git(&["add", "."]);
     std::fs::write(
         repo.join("plan.json"),
-        serde_json::to_vec(
-            &serde_json::json!({"metric_targets":[], "workflow":"feature", "krs":[]}),
-        )
-        .unwrap(),
+        serde_json::to_vec(&serde_json::json!({"metric_targets":[], "krs":[]})).unwrap(),
     )
     .unwrap();
     git(&["add", "plan.json"]);

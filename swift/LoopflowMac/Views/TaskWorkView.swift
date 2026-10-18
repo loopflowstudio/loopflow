@@ -6,7 +6,6 @@ import SwiftUI
 struct TaskWorkflowHeader: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
     let work: WorkReading<TaskOverview>
     var workspaceActions: AnyView? = nil
@@ -37,7 +36,7 @@ struct TaskWorkflowHeader: View {
                     ForEach(workflow.outgoing, id: \.self) { index in
                         if workflow.edges.indices.contains(index) {
                             let edge = workflow.edges[index]
-                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task, wave: wave) } }
+                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
                                 .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                                 .disabled(unavailable != nil)
                                 .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
@@ -48,19 +47,25 @@ struct TaskWorkflowHeader: View {
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
                         ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
-                            Button(node) { Task { await model.moveTask(to: node, task: task, wave: wave) } }
+                            Button(node) { Task { await model.moveTask(to: node, task: task) } }
                                 .accessibilityIdentifier("task-workflow-move-\(node)")
                         }
                     }
                     .fixedSize()
                     .disabled(acting || readingUnavailable != nil)
-                    .help("lf task move \(task.task.identifier) <node>")
+                    .help("lf task workflow move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
 
                 } else if work.value != nil, work.errorMessage == nil {
-                    // A Task takes up its Project's workflow on its first run.
-                    Text("No workflow yet").foregroundStyle(palette.textSecondary)
-                    Button("Start") { Task { await model.startTask(nil, task: task, wave: wave) } }
+                    // The shared resolver reports the first-run default and its owner.
+                    Text(task.workflowName.map { "\($0) · \(task.workflowSource ?? "")" } ?? "No workflow selected")
+                        .foregroundStyle(palette.textSecondary)
+                    Menu("Choose workflow") {
+                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
+                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
+                        }
+                    }.task { await model.loadWorkflowCatalog() }
+                    Button("Start") { Task { await model.startTask(nil, task: task) } }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
@@ -73,15 +78,15 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 }
                 if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
+                    Button("Reopen") { Task { await model.reopenTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
+                    Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
                     }
                     .disabled(acting || readingUnavailable != nil)
                     .accessibilityIdentifier("task-pause-resume")
@@ -121,7 +126,7 @@ struct TaskWorkflowHeader: View {
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task, wave: wave) } })
+                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -139,7 +144,7 @@ struct TaskWorkflowHeader: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
-                        Task { await model.completeTask(task, wave: wave) }
+                        Task { await model.completeTask(task) }
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
@@ -159,7 +164,7 @@ struct TaskWorkflowHeader: View {
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task, wave: wave) }
+                Task { await model.abandonTask(task) }
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
@@ -219,7 +224,6 @@ struct TaskWorkflowHeader: View {
 struct TaskLifecycleActions: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     let work: WorkReading<TaskOverview>
     @State private var hovering = false
     @State private var expanded = false
@@ -244,13 +248,13 @@ struct TaskLifecycleActions: View {
             }
             if expanded || hovering {
                 if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
+                    Button("Reopen") { Task { await model.reopenTask(task) } }
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button(task.runtime?.completionPending == nil ? "Complete" : "Retry completion") { Task { await model.completeTask(task, wave: wave) } }
+                    Button(task.runtime?.completionPending == nil ? "Complete" : "Retry completion") { Task { await model.completeTask(task) } }
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
                     }
                     .accessibilityIdentifier("task-pause-resume")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
@@ -265,7 +269,7 @@ struct TaskLifecycleActions: View {
         .onHover { hovering = $0 }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task, wave: wave) }
+                Task { await model.abandonTask(task) }
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")

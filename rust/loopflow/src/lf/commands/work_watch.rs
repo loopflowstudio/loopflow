@@ -501,19 +501,23 @@ impl Reader {
             let Ok(checkouts) = store.sqlite.task_checkouts() else {
                 return;
             };
+            let mut paths: Vec<_> = checkouts.into_iter().map(|row| row.worktree).collect();
+            if let Ok(repositories) = store.sqlite.repository_paths() {
+                paths.extend(repositories);
+            }
+            if let Some(repo) = &self.scope.repo {
+                paths.push(std::path::PathBuf::from(repo));
+            }
             let wake = shared.clone();
-            self.checkouts.watch(
-                checkouts.into_iter().map(|row| row.worktree).collect(),
-                move || {
-                    lock(&wake).look = true;
-                    wake.1.notify_all();
-                },
-            );
+            self.checkouts.watch(paths, move || {
+                lock(&wake).look = true;
+                wake.1.notify_all();
+            });
             self.watched_at = Some(revisions.planning);
         }
         let changed = self.checkouts.take(Instant::now());
         // Every one is asked again, not only up to the first that differs.
-        let mut differs = false;
+        let mut differs = !changed.is_empty();
         for worktree in &changed {
             differs |= crate::git::reread_retained(worktree);
         }
@@ -782,6 +786,10 @@ impl Reader {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
                     waves: Vec::new(),
+                    tasks: super::waves::Evidence::Ok {
+                        items: Vec::new(),
+                        truncated: false,
+                    },
                 },
                 waves: Vec::new(),
             }))),

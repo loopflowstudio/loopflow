@@ -261,10 +261,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     // Validate pushed code before any planning I/O can hide missing source work.
     let source = TaskSource::resolve(&store, selector).await?;
     let repo = match store.get_task_by_issue(selector).await? {
-        Some(task) => store
-            .get_wave(&task.wave_id)
-            .await?
-            .map(|wave| std::path::PathBuf::from(wave.repo())),
+        Some(task) => Some(crate::ops::task::repository_for_task(&store, &task)?),
         None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
             .ok()
             .flatten(),

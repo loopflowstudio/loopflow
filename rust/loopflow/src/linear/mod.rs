@@ -1441,10 +1441,7 @@ impl LinearClient {
             WorkValue::ProjectStatus(value) => {
                 Ok(json!({"statusId": self.project_status_id(*value).await?}))
             }
-            WorkValue::ProjectDescription(_)
-            | WorkValue::Workflow(_)
-            | WorkValue::Krs(_)
-            | WorkValue::MetricTargets(_) => {
+            WorkValue::ProjectDescription(_) | WorkValue::Krs(_) | WorkValue::MetricTargets(_) => {
                 Ok(json!({"content": patch_project_field(content, value)?}))
             }
             _ => Err(LinearError::Message(format!(
@@ -1573,9 +1570,8 @@ impl LinearClient {
         planning_response(&response[operation], project, id)
     }
 
-    // Only migration-marked Projects reach this path. Ordinary parsing reads
-    // workflow: and the earlier flow: line; no provider mutation occurs during
-    // read projection.
+    // Adoption resolves Project status and membership. Historical workflow prose
+    // grants no selection authority and is left intact.
     pub(crate) async fn adopt_project(
         &self,
         project_id: &str,
@@ -1585,8 +1581,6 @@ impl LinearClient {
         apply: bool,
     ) -> LinearResult<LinearProject> {
         let mut node = self.project_node(project_id).await?;
-        let original = node.content.clone().unwrap_or_default();
-        let converted = convert_legacy_project_content(&original)?;
         let promote = promote
             && node.archived_at.is_none()
             && matches!(
@@ -1594,20 +1588,15 @@ impl LinearClient {
                 crate::work::project::ProjectStatus::Backlog
                     | crate::work::project::ProjectStatus::Planned
             );
-        node.content = Some(converted.clone());
         if promote {
             node.status.type_ = crate::work::project::ProjectStatus::Started;
         }
         let mut project = node.into_observation()?;
         crate::linear::validate_project_ownership("adoption", initiative, Some(team), &project)?;
-        if apply && (converted != original || promote) {
-            let mut input = json!({"content":converted});
-            if promote {
-                input["statusId"] = json!(
-                    self.project_status_id(crate::work::project::ProjectStatus::Started)
-                        .await?
-                );
-            }
+        if apply && promote {
+            let input = json!({
+                "statusId": self.project_status_id(crate::work::project::ProjectStatus::Started).await?
+            });
             let response: Value = self
                 .graphql(
                     &format!("mutation AdoptProject($id: String!, $input: ProjectUpdateInput!) {{ projectUpdate(id: $id, input: $input) {{ success project {{ {PROJECT_RESPONSE_FIELDS} }} }} }}"),
@@ -2379,13 +2368,12 @@ fn patch_project_field(
     value: &crate::work::edit::WorkValue,
 ) -> LinearResult<String> {
     use crate::work::edit::WorkValue;
-    use project_document::ProjectField::{Krs, Targets, Workflow};
+    use project_document::ProjectField::{Krs, Targets};
     let document = parse_project_document(content)?;
     let (owner, replacement) = match value {
         WorkValue::ProjectDescription(Some(description)) => {
             return document.replace_description(description)
         }
-        WorkValue::Workflow(workflow) => (Workflow, format!("workflow: {workflow}")),
         WorkValue::Krs(krs) => (Krs, project_document::render_krs(krs)),
         WorkValue::MetricTargets(targets) => {
             crate::work::project::validate_metric_targets(targets).map_err(LinearError::Message)?;
@@ -2401,37 +2389,6 @@ fn patch_project_field(
     Ok(document.rewrite(owner, &format!("{replacement}\n\n")))
 }
 
-fn convert_legacy_project_content(content: &str) -> LinearResult<String> {
-    let current = parse_project_document(content)?.workflow;
-    let mut section = false;
-    let mut legacy: Option<String> = None;
-    let mut converted = String::new();
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if trimmed.starts_with("## ") {
-            section = trimmed.eq_ignore_ascii_case("## Flows");
-        }
-        if let Some(value) = section
-            .then(|| trimmed.strip_prefix("recommended:"))
-            .flatten()
-        {
-            let value = value.trim();
-            if (!current.is_empty() && current != value)
-                || legacy.as_deref().is_some_and(|previous| previous != value)
-            {
-                return Err(LinearError::Message("Project has conflicting legacy and current workflows; resolve its content in Linear".into()));
-            }
-            if current.is_empty() && legacy.is_none() {
-                converted.push_str(&line.replacen("recommended:", "workflow:", 1));
-            }
-            legacy = Some(value.to_owned());
-        } else {
-            converted.push_str(line);
-        }
-    }
-    Ok(converted)
-}
-
 impl ProjectNode {
     fn into_observation(self) -> LinearResult<LinearProject> {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
@@ -2444,7 +2401,6 @@ impl ProjectNode {
             summary: self.description.unwrap_or_default(),
 
             metric_targets: content.metric_targets,
-            workflow: content.workflow,
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
@@ -2632,7 +2588,7 @@ mod tests {
             let after = input["content"].as_str().unwrap();
             let parsed = super::parse_project_document(after).unwrap();
             assert_eq!(parsed.description().trim(), description.trim());
-            assert_eq!(parsed.workflow, before.workflow);
+            assert!(after.contains("workflow: code\n"));
             assert_eq!(parsed.krs, before.krs);
             assert_eq!(parsed.metric_targets, before.metric_targets);
             assert!(!after.contains("Old introduction"));
@@ -2669,12 +2625,10 @@ mod tests {
         ] {
             let source = format!("## Example\n{example}\nworkflow: actual\n## Metric targets\nTarget rationale.\n```json\n[]\n```\nTarget note.\n## KRs\nKR preamble.\n- [ ] Original criterion\n\nParagraph after the criterion.\n{example}## Notes\nKeep these bytes.\n");
             let before = super::parse_project_document(&source).unwrap();
-            assert_eq!(before.workflow, "actual");
             assert_eq!(before.krs.len(), 1);
             assert_eq!(before.krs[0].text, "Original criterion");
             assert!(before.metric_targets.is_empty());
             for (field, value) in [
-                ("workflow", serde_json::json!("review")),
                 ("krs", serde_json::json!([{"text":"New criterion","holds":true}])),
                 ("metric_targets", serde_json::json!([{"metric_id":"proof","target":{"kind":"at_least","value":1.0}}])),
             ] {
@@ -2684,7 +2638,7 @@ mod tests {
                     assert!(after.contains(prose), "{field}: {after}");
                 }
                 let parsed = super::parse_project_document(&after).unwrap();
-                assert_eq!(parsed.workflow, if field == "workflow" { "review" } else { &before.workflow });
+                assert!(after.contains("workflow: actual\n"));
                 assert_eq!(parsed.krs, if field == "krs" { serde_json::from_value(value.clone()).unwrap() } else { before.krs.clone() });
                 assert_eq!(parsed.metric_targets, if field == "metric_targets" { serde_json::from_value(value).unwrap() } else { before.metric_targets.clone() });
             }
@@ -2725,25 +2679,6 @@ mod tests {
     use crate::linear::test_server::{self, json_response};
     use axum::http::StatusCode;
     use serde_json::json;
-
-    #[test]
-    fn adoption_converts_only_the_legacy_flow_key_and_preserves_authored_content() {
-        let before =
-            "Retain prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Original proof\n";
-        let after = convert_legacy_project_content(before).unwrap();
-        assert_eq!(after, before.replace("recommended:", "workflow:"));
-        assert_eq!(parse_project_document(&after).unwrap().workflow, "custom");
-        assert_eq!(convert_legacy_project_content(&after).unwrap(), after);
-        assert!(parse_project_document(before).unwrap().workflow.is_empty());
-        assert!(convert_legacy_project_content(
-            "workflow: different\n\n## Flows\nrecommended: custom"
-        )
-        .is_err());
-        assert_eq!(
-            convert_legacy_project_content("## Notes\nrecommended: prose").unwrap(),
-            "## Notes\nrecommended: prose"
-        );
-    }
 
     #[tokio::test]
     async fn zero_retry_after_still_pauses_other_callers_without_more_requests() {
@@ -2808,7 +2743,6 @@ mod tests {
             .unwrap();
         assert_eq!(adopted.id, "project-1");
         assert_eq!(adopted.name, "Summer work — customer requests");
-        assert!(adopted.workflow.is_empty());
         assert_eq!(adopted.krs[0].text, "Preserve this proof");
         assert_eq!(adopted.status, crate::work::project::ProjectStatus::Started);
         assert_eq!(requests.lock().await.len(), 1);
@@ -2836,7 +2770,6 @@ mod tests {
             .adopt_project("project-1", "initiative-1", "team-1", false, true)
             .await
             .unwrap();
-        assert_eq!(adopted.workflow, "feature");
         assert_eq!(adopted.revision.as_deref(), Some("2026-10-11T12:00:00Z"));
         assert_eq!(requests.lock().await.len(), 2);
     }
@@ -3645,7 +3578,6 @@ pub(crate) struct LinearProject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub metric_targets: Vec<MetricTarget>,
-    pub workflow: String,
     pub status: ProjectStatus,
     pub krs: Vec<ProjectKR>,
     pub initiative_ids: Vec<String>,

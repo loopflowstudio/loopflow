@@ -761,31 +761,25 @@ impl WavePlanTarget {
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
     /// Read the authored definition without creating a repository file
-    Source {
-        name: String,
-        #[command(flatten)]
-        target: WavePlanTarget,
-    },
+    Source { name: String, wave: Option<String> },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Project's stored Wave Workflow definitions
+        /// Include this Wave's stored Workflow definitions
         #[arg(long)]
         wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show the selected chapter's Workflow
+    /// Show the Wave's default Workflow
     Show {
-        #[command(flatten)]
-        target: WavePlanTarget,
+        wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
     Set {
         name: String,
-        #[command(flatten)]
-        target: WavePlanTarget,
+        wave: Option<String>,
         /// Store this definition in the Wave
         #[arg(long)]
         file: Option<std::path::PathBuf>,
@@ -794,6 +788,16 @@ pub enum WaveWorkflowCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskWorkflowCommand {
+    /// Move Workflow position without running anything; `end` requests completion
+    Move {
+        issue: String,
+        /// `start`, `end` or one of the workflow's nodes
+        node: String,
+        /// Why, kept in the Task's workflow history
+        #[arg(long)]
+        reason: Option<String>,
+    },
+
     /// Show the Task's captured graph, position and history
     Show {
         issue: String,
@@ -1045,7 +1049,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Select and inspect the chapter Workflow
+    /// Select and inspect the Wave default Workflow
     Workflow {
         #[command(subcommand)]
         cmd: WaveWorkflowCommand,
@@ -1143,7 +1147,7 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs, targets and workflow
+    /// Replace the current chapter's KRs and targets
     UpdatePlan {
         #[arg(short = 'w', long)]
         wave: Option<String>,
@@ -1176,6 +1180,14 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// List every Task in the selected repository
+    List {
+        #[arg(long)]
+        wave: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Pause future Task execution without stopping live processes
     Pause { issue: String },
     /// Clear a Task pause without starting execution
@@ -1237,7 +1249,7 @@ pub enum TaskCommand {
     Run {
         issue: Option<String>,
         /// The edge's Flow, or a workflow to take up; the Task's only edge or its
-        /// Project's workflow when omitted
+        /// Wave or repository default when omitted
         flow: Option<String>,
         #[arg(long)]
         name: Option<String>,
@@ -1263,17 +1275,10 @@ pub enum TaskCommand {
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Move Workflow position without running anything; `end` requests completion
-    Move {
-        issue: String,
-        /// `start`, `end` or one of the workflow's nodes
-        node: String,
-        /// Why, kept in the Task's workflow history
-        #[arg(long)]
-        reason: Option<String>,
-    },
     /// Create a planning Task without allocating a checkout or starting work
     Create {
+        #[arg(long, conflicts_with = "wave")]
+        no_wave: bool,
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
         wave: Option<String>,
@@ -1412,12 +1417,18 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
-    /// Move a Task that has no recorded work to another Wave's current Project
-    Refile {
+    /// Change Task membership while preserving its recorded work
+    Move {
         issue: String,
-        /// The Wave to file it under
-        #[arg(short = 'w', long)]
-        wave: String,
+        #[arg(
+            short = 'w',
+            long,
+            required_unless_present = "no_wave",
+            conflicts_with = "no_wave"
+        )]
+        wave: Option<String>,
+        #[arg(long)]
+        no_wave: bool,
     },
     /// Read the thread or publish a comment; agent comments default to progress
     Comment {
@@ -1452,14 +1463,17 @@ pub enum TaskCommand {
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::Create { .. }
+            Self::List { .. }
+            | Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
             | Self::Repair { .. }
             | Self::Automation { .. } => None,
             Self::Workflow {
                 cmd:
-                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+                    TaskWorkflowCommand::Show { issue, .. }
+                    | TaskWorkflowCommand::Restart { issue }
+                    | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
@@ -1482,7 +1496,6 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
-            | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -1491,14 +1504,17 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::Create { .. }
+            Self::List { .. }
+            | Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
             | Self::Repair { .. }
             | Self::Automation { .. } => None,
             Self::Workflow {
                 cmd:
-                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+                    TaskWorkflowCommand::Show { issue, .. }
+                    | TaskWorkflowCommand::Restart { issue }
+                    | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
@@ -1521,7 +1537,6 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
-            | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -2889,6 +2904,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
+            "workflow",
             "move",
             "LOO-42",
             "end",
@@ -2897,7 +2913,7 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason } })
+            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, node, reason } } })
                 if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
         let cli =
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])

@@ -192,7 +192,12 @@ pub(crate) async fn select_connection(
         } else {
             store
                 .sqlite
-                .primary_session(&crate::session::PrimaryScope::Wave(work.wave.id().clone()))?
+                .primary_session(&crate::session::PrimaryScope::Wave(
+                    work.wave
+                        .expect("selection without a Task has a Wave")
+                        .id()
+                        .clone(),
+                ))?
         };
         return session
             .map(|session| session.id)

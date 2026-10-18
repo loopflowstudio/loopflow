@@ -1062,6 +1062,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
+        if session.task_id == previous.task_id && session.task_id.is_some() {
+            session.wave_id = previous.wave_id.clone();
+        }
         if previous.captured != expected_input
             || previous.completed_at != session.completed_at
             || previous.task_id != session.task_id
@@ -1093,6 +1096,9 @@ impl SqliteStore {
         let session = next.id.clone();
         self.with_session_resume(&session, expected, close, |tx| {
             let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
+            if next.task_id == previous.task_id && next.task_id.is_some() {
+                next.wave_id = previous.wave_id.clone();
+            }
             if previous.captured != next.captured
                 || previous.completed_at.is_some()
                 || previous.cwd != next.cwd
@@ -1161,7 +1167,7 @@ impl SqliteStore {
             if session
                 .wave_id
                 .as_ref()
-                .is_some_and(|existing| *existing != wave)
+                .is_some_and(|existing| Some(existing) != wave.as_ref())
             {
                 return Err(StoreError::InvalidAuthority(format!(
                     "Session {id} belongs to another Wave"
@@ -1169,7 +1175,7 @@ impl SqliteStore {
             }
             tx.execute(
                 "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
-                params![id, task.as_str(), wave.as_str(), crate::store::rows::now_unix()],
+                params![id, task.as_str(), wave.as_ref().map(crate::id::WaveId::as_str), crate::store::rows::now_unix()],
             )?;
         }
         repair_session_title_in(&tx, id, None)?;
@@ -1359,10 +1365,14 @@ pub(super) fn reserve_session_in(
 fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResult<()> {
     if let Some(task) = &session.task_id {
         let wave = super::durable::task_wave_in(conn, task)?;
-        if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
+        if session
+            .wave_id
+            .as_ref()
+            .is_some_and(|given| Some(given) != wave.as_ref())
+        {
             return Err(invalid("Session Task and Wave disagree"));
         }
-        session.wave_id = Some(wave);
+        session.wave_id = wave;
     }
     if session.repo.is_none() && session.cwd.is_dir() {
         session.repo = crate::repo::discover_repo_root(&session.cwd)
@@ -1456,13 +1466,17 @@ fn capture_in(
         }
         return Ok(seq);
     }
+    let wave = match &session.task_id {
+        Some(task) => super::durable::task_wave_in(conn, task)?,
+        None => session.wave_id.clone(),
+    };
     let payload = serde_json::json!({"artifact_key":session.artifact_key,
         "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
         "provider":session.provider,"model":session.model,"work_source":session.work_source});
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,process,session.task_id.as_ref().map(TaskId::as_str),
-            session.wave_id.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
+            wave.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -1632,7 +1646,8 @@ mod metadata_tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
         }
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         let exclusion = store.lock_checkout(&session.cwd).unwrap();

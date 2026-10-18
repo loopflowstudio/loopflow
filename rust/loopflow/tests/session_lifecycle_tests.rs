@@ -404,13 +404,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             .unwrap(),
         native
     );
-    let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["project"]["id"].as_str().unwrap();
-    let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
-    assert!(selected.status.success(), "{selected:?}");
     managed_codex_account(&fixture);
     let run = fixture
-        .command(&["-b", "--agent", "codex", "task", "run", task_id])
+        .command(&["-b", "--agent", "codex", "task", "run", task_id, "proof"])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
@@ -1487,8 +1483,8 @@ fn declared_agent_can_start_another_tasks_flow() {
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
-        .select_project_workflow(
-            &target.task.project_id,
+        .select_wave_workflow(
+            target.task.wave_id.as_ref().unwrap(),
             "switch-proof",
             &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
         )

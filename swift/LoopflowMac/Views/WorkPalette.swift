@@ -23,15 +23,16 @@ extension WorkModel {
         }
         for wave in visibleRoadmaps {
             rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave", key: wave.wave.name))
-            for task in wave.tasks.items {
-                rows.append(.init(id: .task(task.id), title: task.task.name,
-                                  detail: "Task · \(wave.wave.name) · \(task.task.identifier)", key: task.task.identifier))
-            }
+        }
+        for task in visibleTasks {
+            let home = visibleRoadmaps.first { $0.wave.id == task.task.waveId }?.wave.name ?? "No Wave"
+            rows.append(.init(id: .task(task.id), title: task.task.name,
+                              detail: "Task · \(home) · \(task.task.identifier)", key: task.task.identifier))
         }
         if let linked = navigation.selectedTaskEvidence,
            !rows.contains(where: { $0.id == .task(linked.task.id) }) {
             rows.append(.init(id: .task(linked.task.id), title: linked.task.task.name,
-                              detail: "Task · \(linked.wave.wave.name) · \(linked.task.task.identifier)",
+                              detail: "Task · \(linked.wave?.wave.name ?? "No Wave") · \(linked.task.task.identifier)",
                               key: linked.task.task.identifier))
         }
         // Current-plan absence says nothing about retained historical Tasks.
@@ -92,15 +93,13 @@ struct TaskLinkView: View {
             Text("Open Task").font(Typography.sectionTitle(26))
             if let error = model.taskLinkReading.errorMessage { Text(error) }
             if let result = model.taskLinkReading.value {
-                let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
-                if matches.isEmpty { Text("No exact Task found in available planning.") }
-                ForEach(result.waves, id: \.wave.id) { wave in
-                    if let reason = wave.tasks.unavailableReason { Text("\(wave.wave.repo): \(reason)") }
-                    ForEach(wave.tasks.items) { task in
-                        Button("\(task.task.identifier) · \(task.task.name)\n\(wave.wave.repo) / \(wave.wave.name)") {
-                            Task { await model.chooseLinkedTask(wave: wave, task: task) }
-                        }.buttonStyle(.plain)
-                    }
+                if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
+                if let reason = result.tasks.unavailableReason { Text(reason) }
+                ForEach(result.tasks.items) { task in
+                    let wave = result.waves.first { $0.wave.id == task.task.waveId }
+                    Button("\(task.task.identifier) · \(task.task.name)\n\(task.task.repo)") {
+                        Task { await model.chooseLinkedTask(wave: wave, task: task) }
+                    }.buttonStyle(.plain)
                 }
             }
             HStack {

@@ -331,7 +331,6 @@ struct RegistryQueryTests {
 
 
 
-        #expect(result.workMap.currentProject?.workflow == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")

@@ -358,7 +358,7 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     let database = Connection::open(source.join("loopflow.db")).unwrap();
     database.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,provider,task_id,wave_id)
         VALUES('copied-primary','Task conversation','generated',1,1,?1,'claude',?2,?3)",
-        rusqlite::params![repo.path().to_str().unwrap(),registered.task.id.as_str(),registered.task.wave_id.as_str()]).unwrap();
+        rusqlite::params![repo.path().to_str().unwrap(),registered.task.id.as_str(),registered.task.wave_id.as_ref().unwrap().as_str()]).unwrap();
     database
         .execute_batch(
             "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)

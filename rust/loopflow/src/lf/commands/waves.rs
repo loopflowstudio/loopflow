@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -111,6 +110,10 @@ impl<T> Evidence<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSummary {
+    pub repository_id: String,
+    pub repo: String,
+    pub project_id: Option<String>,
+    pub wave_id: Option<String>,
     pub acquisition: crate::store::TaskAcquisition,
     pub sync: crate::store::planning_sync::PlanningSyncStatus,
     pub id: String,
@@ -249,6 +252,7 @@ pub struct TaskDetailSnapshot {
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
+    pub workflow_source: Option<String>,
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -376,6 +380,7 @@ pub enum RoadmapSection {
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
+    pub tasks: Evidence<RoadmapTask>,
     /// RFC3339 time this read was taken.
     pub generated_at: String,
     pub waves: Vec<WaveRoadmap>,
@@ -383,6 +388,7 @@ pub struct RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
+    pub workflow: Option<String>,
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
@@ -399,7 +405,6 @@ pub struct ProjectSummary {
     pub linear_id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub workflow: String,
     pub status: crate::work::project::ProjectStatus,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
     pub krs: Vec<crate::work::project::ProjectKR>,
@@ -428,7 +433,6 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                     id: project.id.to_string(),
                     slug: project.slug,
                     name: project.name,
-                    workflow: project.workflow,
                     status: project.status,
                     metric_targets: project.metric_targets,
                     krs: project.krs,
@@ -447,7 +451,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
         Evidence::Ok { items, .. } => {
             for project in items {
                 println!(
-                    "  chapter   {} ({}) · {} · {} · workflow {}",
+                    "  chapter   {} ({}) · {} · {}",
                     project.name,
                     project.id,
                     if project.current {
@@ -455,8 +459,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                     } else {
                         "historical"
                     },
-                    project.status.as_str(),
-                    project.workflow
+                    project.status.as_str()
                 );
                 for line in project.sync.lines() {
                     println!("    {line}");
@@ -492,6 +495,7 @@ pub struct RoadmapTask {
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
+    pub workflow_source: Option<String>,
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -657,6 +661,7 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
                 generated_at: format_time(evaluation_time)
                     .expect("current timestamp formats as RFC 3339"),
                 waves: Vec::new(),
+                tasks: Evidence::complete(Vec::new()),
             };
             if json {
                 println!("{}", serde_json::to_string(&roadmap)?);
@@ -708,12 +713,55 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
                 crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
             }
         }
-        let roadmap =
-            roadmap_snapshot(&store, waves, include_history, task, evaluation_time).await?;
+        let roadmap = roadmap_snapshot(
+            &store,
+            waves,
+            include_history,
+            task,
+            if all { None } else { repo.as_deref() },
+            evaluation_time,
+        )
+        .await?;
         if json {
             println!("{}", serde_json::to_string(&roadmap)?);
         } else {
             print_roadmap(&roadmap);
+        }
+        Ok(())
+    })
+}
+
+pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async {
+        let Some(store) = crate::store::read_existing_registry()?.map(std::sync::Arc::new) else {
+            if json {
+                println!("[]");
+            }
+            return Ok(());
+        };
+        let waves = store.list_waves(None).await?;
+        let roadmap = roadmap_snapshot(&store, waves, true, None, Some(repo), now()).await?;
+        let mut tasks = match roadmap.tasks {
+            Evidence::Ok { items, .. } => items,
+            Evidence::Unavailable { reason } => return Err(anyhow!(reason)),
+        };
+        if let Some(name) = wave {
+            let wave = crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(repo),
+                Some(name),
+                None,
+            )
+            .await?;
+            tasks.retain(|task| task.task.wave_id.as_deref() == Some(wave.id().as_str()));
+        }
+        if json {
+            println!("{}", serde_json::to_string(&tasks)?);
+        } else {
+            for task in tasks {
+                println!("{} · {}", task.task.identifier, task.task.name);
+            }
         }
         Ok(())
     })
@@ -725,7 +773,7 @@ pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> 
         .list_waves(None)
         .await
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-    roadmap_snapshot(store, waves, false, None, now()).await
+    roadmap_snapshot(store, waves, false, None, None, now()).await
 }
 
 async fn roadmap_snapshot(
@@ -733,6 +781,7 @@ async fn roadmap_snapshot(
     waves: Vec<Wave>,
     include_history: bool,
     task: Option<&str>,
+    repo_scope: Option<&Path>,
     evaluation_time: time::OffsetDateTime,
 ) -> Result<RoadmapSnapshot> {
     // A Wave filter narrows presentation, not repository ownership checks.
@@ -747,6 +796,30 @@ async fn roadmap_snapshot(
     let mut repositories = HashMap::new();
     validate_linear_ownership(store, &ownership_waves, &mut repositories).await?;
     let shared = SharedTaskReads::read(store).await?;
+    let mut tasks = store.list_tasks(None).await?;
+    if let Some(repo) = repo_scope {
+        let repo = crate::repository::CanonicalRepo::discover(repo)?;
+        let repository = store.sqlite.repository_id(&repo.to_string())?;
+        tasks.retain(|task| Some(&task.repository_id) == repository.as_ref());
+    }
+    if let Some(selector) = task {
+        let selected = store
+            .sqlite
+            .resolve_task_id(selector, repo_scope.and_then(Path::to_str))?;
+        tasks.retain(|task| Some(&task.id) == selected.as_ref());
+    }
+    let inventory = snapshot_tasks(
+        store,
+        store.list_projects(None).await?,
+        tasks,
+        false,
+        true,
+        &shared,
+    )
+    .await;
+    let tasks: Evidence<RoadmapTask> = Evidence::from_result(
+        inventory.map(|(tasks, _)| (tasks.into_iter().map(roadmap_task).collect(), false)),
+    );
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
         // Repository scoping can repair an alias in the registry. Use that
@@ -760,31 +833,31 @@ async fn roadmap_snapshot(
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
-        let task_snapshots = wave_tasks(store, wave, false, task, &shared)
-            .await
-            .unwrap_or_else(|error| WaveTasks {
-                tasks: Evidence::Unavailable {
-                    reason: error.to_string(),
-                },
-                unavailable_tasks: Vec::new(),
-            });
-        if task.is_some()
-            && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
-        {
+        let wave_tasks = match &tasks {
+            Evidence::Ok { items, truncated } => Evidence::Ok {
+                items: items
+                    .iter()
+                    .filter(|task: &&RoadmapTask| {
+                        task.task.wave_id.as_deref() == Some(wave.id().as_str())
+                    })
+                    .cloned()
+                    .collect(),
+                truncated: *truncated,
+            },
+            Evidence::Unavailable { reason } => Evidence::Unavailable {
+                reason: reason.clone(),
+            },
+        };
+        if task.is_some() && matches!(&wave_tasks, Evidence::Ok { items, .. } if items.is_empty()) {
             continue;
         }
         roadmaps.push(WaveRoadmap {
+            workflow: store.sqlite.selected_wave_workflow(wave.id())?,
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
-            tasks: match task_snapshots.tasks {
-                Evidence::Ok { items, truncated } => Evidence::Ok {
-                    items: items.into_iter().map(roadmap_task).collect(),
-                    truncated,
-                },
-                Evidence::Unavailable { reason } => Evidence::Unavailable { reason },
-            },
-            unavailable_tasks: task_snapshots.unavailable_tasks,
+            tasks: wave_tasks,
+            unavailable_tasks: Vec::new(),
             metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
                 store,
                 wave,
@@ -797,6 +870,7 @@ async fn roadmap_snapshot(
     Ok(RoadmapSnapshot {
         generated_at: format_time(evaluation_time).expect("current timestamp formats as RFC 3339"),
         waves: roadmaps,
+        tasks,
     })
 }
 
@@ -905,6 +979,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         condition: detail.condition,
         actions: detail.actions,
         workflow_name: detail.workflow_name,
+        workflow_source: detail.workflow_source,
         latest_flow_process: detail.latest_flow_process,
         execution: detail.execution,
         run_control: detail.run_control,
@@ -1094,20 +1169,18 @@ async fn snapshot_tasks(
     let mut requests = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for task in &tasks {
-        let parent = projects
-            .iter()
-            .find(|project| project.id == task.project_id);
-        let Some(parent) = parent else {
+        if task
+            .project_id
+            .as_ref()
+            .is_some_and(|id| !projects.iter().any(|p| &p.id == id))
+        {
             let status = store.task_state(&task.id).await?;
             if include_retained || !status.is_terminal() {
                 unavailable_tasks.push(unavailable_task(task, status));
             }
             continue;
-        };
-        requests.push(TaskDetailRequest {
-            task,
-            recommended: parent.workflow.clone(),
-        });
+        }
+        requests.push(task);
     }
     let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
     details.sort_by(|left, right| {
@@ -1125,17 +1198,12 @@ async fn snapshot_tasks(
     Ok((details, unavailable_tasks))
 }
 
-struct TaskDetailRequest<'a> {
-    task: &'a Task,
-    recommended: String,
-}
-
 /// Each detail waits on fresh Git observations of its own checkout. Gather
 /// them side by side: one after another, those children are most of a
 /// roadmap read. Details and the first error keep their request order.
 fn snapshot_task_details(
     store: &SharedStore,
-    requests: Vec<TaskDetailRequest<'_>>,
+    requests: Vec<&Task>,
     probe_pr_empty: bool,
     shared: &SharedTaskReads,
 ) -> Result<Vec<TaskDetailSnapshot>> {
@@ -1147,10 +1215,6 @@ fn snapshot_task_details(
         .map_or(1, std::num::NonZero::get)
         .min(MAX_WORKERS)
         .min(requests.len());
-    let requests: Vec<_> = requests
-        .into_iter()
-        .map(|request| Mutex::new(Some(request)))
-        .collect();
     let next = AtomicUsize::new(0);
     let mut details: Vec<_> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
@@ -1159,18 +1223,12 @@ fn snapshot_task_details(
                     let mut details = Vec::new();
                     loop {
                         let index = next.fetch_add(1, Ordering::Relaxed);
-                        let Some(request) = requests.get(index) else {
+                        let Some(task) = requests.get(index) else {
                             return details;
                         };
-                        let request = request
-                            .lock()
-                            .expect("Task detail request mutex poisoned")
-                            .take()
-                            .expect("each Task detail request is claimed once");
                         let detail = runtime.block_on(snapshot_task_detail(
                             store,
-                            request.task,
-                            request.recommended,
+                            task,
                             probe_pr_empty,
                             shared,
                         ));
@@ -1204,7 +1262,6 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
 async fn snapshot_task_detail(
     store: &SharedStore,
     task: &Task,
-    recommended: String,
     probe_pr_empty: bool,
     shared: &SharedTaskReads,
 ) -> Result<TaskDetailSnapshot> {
@@ -1343,16 +1400,21 @@ async fn snapshot_task_detail(
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let workflow_name = store
-        .sqlite
-        .workflow(&task.id)?
-        .map(|workflow| workflow.definition.name)
-        .or_else(|| (!recommended.is_empty()).then_some(recommended));
+    let selection = match store.sqlite.workflow(&task.id)? {
+        Some(workflow) => Some((workflow.definition.name, "task")),
+        None => crate::ops::task::task_workflow_default(store, task)?,
+    };
+    let (workflow_name, workflow_source) = selection
+        .map(|(name, source)| (name, source.to_owned()))
+        .unzip();
     Ok(TaskDetailSnapshot {
         task: task_summary(
             task,
             store.sqlite.task_planning_sync(&task.id)?,
             acquisition,
+            crate::ops::task::repository_for_task(store, task)?
+                .display()
+                .to_string(),
         ),
         reference,
         runtime: Some(runtime),
@@ -1361,6 +1423,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         workflow_name,
+        workflow_source,
         latest_flow_process: flow_record,
         execution: Some(execution),
         run_control,
@@ -1648,8 +1711,13 @@ fn task_summary(
     task: &Task,
     sync: crate::store::planning_sync::PlanningSyncStatus,
     acquisition: crate::store::TaskAcquisition,
+    repo: String,
 ) -> TaskSummary {
     TaskSummary {
+        repository_id: task.repository_id.to_string(),
+        repo,
+        project_id: task.project_id.as_ref().map(ToString::to_string),
+        wave_id: task.wave_id.as_ref().map(ToString::to_string),
         acquisition,
         due_date: task.due_date.clone(),
         sync,
@@ -2405,7 +2473,7 @@ mod tests {
             rusqlite::params![wave.id().as_str(), assigned.as_str()]).unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, String::new(), false, &shared)
+        let detail = super::snapshot_task_detail(&store, &task, false, &shared)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
@@ -2417,7 +2485,7 @@ mod tests {
             .await
             .unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
-        let detail = super::snapshot_task_detail(&store, &task, String::new(), false, &shared)
+        let detail = super::snapshot_task_detail(&store, &task, false, &shared)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
@@ -2826,7 +2894,6 @@ mod tests {
             slug: name.into(),
             summary: String::new(),
             revision: None,
-            workflow: String::new(),
             status: crate::work::project::ProjectStatus::Started,
             metric_targets: Vec::new(),
             krs: Vec::new(),
@@ -2887,7 +2954,7 @@ mod tests {
         for _ in 0..2 {
             let current = crate::ops::project::current_project(&store, &wave).unwrap();
             assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
-            assert!(current.workflow.is_empty());
+
             let super::Evidence::Ok {
                 items: projects, ..
             } = super::project_planning(&store, &wave).await

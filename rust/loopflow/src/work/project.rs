@@ -1,7 +1,6 @@
 //! Durable tracking for one Project's KRs.
 //!
-//! A Wave selects its current Project; saved planning facts include status and
-//! workflow. A Project owns no worktree, shipping branch, PR, permanent
+//! A Wave selects its current Project. A Project owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -52,7 +51,6 @@ pub struct Project {
     pub description: String,
     pub krs: Vec<ProjectKR>,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
-    pub workflow: String,
     pub status: ProjectStatus,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearProjectId>,

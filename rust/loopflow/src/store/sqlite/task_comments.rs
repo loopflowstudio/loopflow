@@ -143,8 +143,8 @@ impl SqliteStore {
         let tx = conn.savepoint()?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
         let repo: String = tx.query_row(
-            "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-            [task.project_id.as_str()],
+            "SELECT repo FROM repository_plans WHERE id=?1",
+            [task.repository_id.as_str()],
             |row| row.get(0),
         )?;
         let connected = crate::ops::linear_observe::connected(&repo);
@@ -289,8 +289,9 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
                 VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
-                VALUES(?1,?2,'linear-task','FIX-1','Keep identity','',1,1,'keep-identity')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'linear-task','FIX-1','Keep identity','',1,1,'keep-identity')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
         }
         let original = TaskComment {
             id: uuid::Uuid::new_v4().to_string(),

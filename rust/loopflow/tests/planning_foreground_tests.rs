@@ -222,7 +222,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)",
-        params![source_key,fixture.task.id.as_str(),fixture.task.wave_id.as_str()]).unwrap();
+        params![source_key,fixture.task.id.as_str(),fixture.task.wave_id.as_ref().unwrap().as_str()]).unwrap();
     let graph = json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
     conn.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
@@ -255,7 +255,11 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);
     assert_ne!(second, third);
-    run(&source, left.path(), &["task", "move", &first, "end"]);
+    run(
+        &source,
+        left.path(),
+        &["task", "workflow", "move", &first, "end"],
+    );
     assert!(runtime
         .block_on(worker.get_task(&first.parse().unwrap()))
         .unwrap()
@@ -340,7 +344,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     run(
         &target,
         right.path(),
-        &["task", "move", fixture.task.id.as_str(), "end"],
+        &["task", "workflow", "move", fixture.task.id.as_str(), "end"],
     );
     wait_for(|| {
         status(&runtime, &worker, target_key, &binding)
@@ -728,12 +732,12 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     assert!(worker.peer_planning_status(target_key, None).unwrap()[0]
         .conflicts
         .is_empty());
-    let wave_id = fixture.task.wave_id.as_str();
+    let wave_id = fixture.task.wave_id.as_ref().unwrap().as_str();
     let conn = Connection::open(right.path().join("loopflow.db")).unwrap();
     conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     let retained_task = worker.task(&retained.parse().unwrap()).unwrap().unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
-        VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_str()]).unwrap();
+        VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_ref().unwrap().as_str()]).unwrap();
     let graph = json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
     conn.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
@@ -744,7 +748,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let imported_before = execution(&conn, fixture.task.id.as_str());
     let placements = || rows(&conn, "SELECT * FROM work_placements ORDER BY rowid", []);
     let placements_before = placements();
-    let imported_work = loopflow::durable::WorkRef::Wave(fixture.task.wave_id.clone());
+    let imported_work = loopflow::durable::WorkRef::Wave(fixture.task.wave_id.clone().unwrap());
     assert!(worker.find_placement(&imported_work).unwrap().is_none());
     for _ in 0..2 {
         let detail: serde_json::Value = serde_json::from_str(&run(

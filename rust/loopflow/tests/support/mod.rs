@@ -386,7 +386,6 @@ fn register_task_fixture(
         id: ProjectId::new(),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
@@ -404,6 +403,10 @@ fn register_task_fixture(
         updated_at: now,
     };
     let task = Task {
+        repository_id: loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db"))
+            .unwrap()
+            .ensure_repository(wave.repo())
+            .unwrap(),
         id: TaskId::new(),
 
         revision: 0,
@@ -414,8 +417,8 @@ fn register_task_fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         pm_writeback: LinearWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: project.id.clone(),
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(project.id.clone()),
         worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
         branch: branch.to_string(),

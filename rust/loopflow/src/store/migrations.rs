@@ -812,6 +812,7 @@ pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> Stor
     }
     if sql.contains("CREATE TABLE planning_peer_changes (")
         || sql.contains("CREATE TABLE delegated_placements (")
+        || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
     {
         super::sqlite::planning_write::seed(conn)?;
     }
@@ -843,6 +844,24 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
 }
 
 fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+    if migration.sql.contains("CREATE TABLE tasks_migration (")
+        && migration.sql.contains("repository_id TEXT NOT NULL")
+    {
+        let mut query = conn.prepare("SELECT t.id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+            LEFT JOIN waves w ON w.id=p.wave_id LEFT JOIN repository_plans r ON r.repo=w.repo AND r.selected=1
+            WHERE r.id IS NULL UNION SELECT t.task_id FROM task_creation_intents t
+            LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
+            LEFT JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE r.id IS NULL")?;
+        let missing = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !missing.is_empty() {
+            return Err(StoreError::InvalidData(format!(
+                "Tasks have no retained repository: {}",
+                missing.join(", ")
+            )));
+        }
+    }
     if migration.name != "durable_input_spine" {
         return Ok(());
     }
@@ -2935,6 +2954,84 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn optional_task_ancestry_preserves_released_work_and_current_defaults() {
+        let conn = open();
+        apply_before_current_draft(&conn, "optional_task_ancestry");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/optional_task_ancestry.sql"
+        ))
+        .unwrap();
+        super::_migration_transaction(&conn, |conn| {
+            conn.execute_batch(&current_draft_sql("optional_task_ancestry"))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        let task: (String, String, String, String) = conn.query_row(
+            "SELECT repository_id,project_id,worktree,branch FROM tasks WHERE id='task_retained'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        assert_eq!(
+            task,
+            (
+                "repo_retained".into(),
+                "proj_current".into(),
+                "/retained/task".into(),
+                "branch".into()
+            )
+        );
+        let defaults: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT id,workflow FROM waves ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            defaults,
+            vec![
+                ("wave-retained".into(), Some("code".into())),
+                ("wave-unselected".into(), None)
+            ]
+        );
+        let receipt: (String, bool, String) = conn
+            .query_row(
+                "SELECT repository_id,export_attempted,export_json FROM task_creation_intents",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            receipt,
+            (
+                "repo_retained".into(),
+                true,
+                r#"{"id":"reserved-issue"}"#.into()
+            )
+        );
+        conn.execute(
+            "UPDATE tasks SET project_id=NULL WHERE id='task_retained'",
+            [],
+        )
+        .unwrap();
+        let current: Option<String> = conn
+            .query_row("SELECT wave_id FROM agent_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(current, None);
+        let capture: String = conn
+            .query_row("SELECT wave_id FROM session_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(capture, "wave-retained");
+        let position: String = conn
+            .query_row("SELECT node FROM task_workflows", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(position, "review");
+        assert!(!conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
     }
 
     #[test]
@@ -5234,7 +5331,6 @@ mod tests {
             .unwrap();
         let content = crate::linear::project_document::parse_project_document(&text).unwrap();
         assert_eq!(content.krs, project.krs);
-        assert_eq!(content.workflow, project.workflow);
         assert_eq!(content.metric_targets, project.metric_targets);
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();
         assert_eq!(

@@ -256,7 +256,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_ne!(merged["status"]["execution"]["status"], "done");
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
-        let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
+        let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()), false,
             Some("Verify installed release".into()), Some("Run the released command; retain failures.".into())).unwrap();
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
@@ -385,7 +385,6 @@ fn fixture(
         summary: String::new(),
         slug: "chapter".into(),
         name: "Chapter".into(),
-        workflow: "feature".into(),
         status: crate::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
@@ -398,6 +397,7 @@ fn fixture(
         updated_at: now,
     };
     let task = Task {
+        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
         id: TaskId::new(),
 
         linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
@@ -408,8 +408,8 @@ fn fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         pm_writeback: LinearWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: project.id.clone(),
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(project.id.clone()),
         worktree: Some(repo.path().canonicalize().unwrap()),
         workspace_slug: "delivery".into(),
         branch: "main".into(),

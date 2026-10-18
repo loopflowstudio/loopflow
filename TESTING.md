@@ -1234,6 +1234,11 @@ turns, provider cleanup, and preserved user settings. Provider output alone is
 not hook evidence: untrusted hooks do not run.
 It uses no account or login. This proves protocol
 launch composition; actual cmux tab tracking remains a separate acceptance check.
+On reconnect, the fixture types a Unicode draft, fails a stand-in cmux title
+refresh, resizes the PTY, edits and submits the draft. It checks the native model
+request and retained diagnostic file, and rejects raw Loopflow warnings in the
+terminal. `session_launch_contract` covers the same output boundary with
+deterministic Claude, Codex and OpenCode stand-ins.
 
 ### Released capture-history preservation
 

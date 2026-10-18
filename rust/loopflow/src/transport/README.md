@@ -40,3 +40,11 @@ It records an ordinary Process. Session rows name that Process; viewer tokens an
 terminal bytes remain in memory. Native clients retain their original provider
 channels, including pending request identities. Flow steps share their Flow's
 terminal owner through explicit child handoff, retaining their own Process results.
+
+While a native terminal is open, Loopflow sends its own diagnostics and background
+helper output to private `logs/terminal-PROCESS.log` files under the selected
+Machine home (`~/.lf` by default). Each launcher prints its location before handing
+over the terminal and reports newly recorded diagnostics after returning. Native
+provider output retains its original terminal; OpenCode keeps its separate
+provider stderr log. Ordinary CLI output resumes when the client exits or the
+viewer detaches. Read these logs from another terminal while editing a draft.

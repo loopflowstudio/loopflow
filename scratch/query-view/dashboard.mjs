@@ -4,14 +4,24 @@ import {resolveQuery,tileTree,projection,treeMembers,swapMembers} from './model.
 // selection/arrangement owner while drafts and tools stay in its Task state.
 const data=tasks.map(t=>({...t,id:t.key,kind:'task',status:t.started===false?'backlog':t.paused?'paused':t.state,finished:false}));
 data.push(...waves.map(id=>({id,kind:'wave',title:labelWave(id),parent:null})));
-const catalog={product:'wave:product state:open',available:'state:available'};
+const catalog={};
 const dashboardKey=`lf-dashboards:${repository.id}`;
 let dashboards;
 try{dashboards=JSON.parse(localStorage.getItem(dashboardKey))}catch{}
 dashboards ||= [
  {id:'review',name:'Review desk',query:'state:available',hidden:[],tree:null},
- {id:'product-watch',name:'Product watch',query:'query:product or query:available',hidden:[],tree:null}
+ {id:'product-watch',name:'Product watch',query:'(wave:product state:open) or state:available',hidden:[],tree:null}
 ];
+// Upgrade the earlier sample expression without discarding its arrangement.
+for(const d of dashboards){
+ if(d.query==='query:product or query:available'){
+  d.query='(wave:product state:open) or state:available';
+  const member=id=>id.replace('Qproduct','').replace('Qavailable','');
+  const remap=node=>{if(!node)return;if(node.member)node.member=member(node.member);else{remap(node.first);remap(node.second)}};
+  remap(d.tree);d.hidden=d.hidden.map(member);
+ }
+}
+localStorage.setItem(dashboardKey,JSON.stringify(dashboards));
 let editing=null;
 const save=()=>localStorage.setItem(dashboardKey,JSON.stringify(dashboards));
 const dashboard=()=>dashboards.find(d=>d.id===state.route.id);
@@ -63,7 +73,7 @@ function dashboardCenter(){
 }
 
 const dialog=document.createElement('dialog');dialog.id='dashboard-editor';dialog.setAttribute('aria-label','Edit Dashboard');
-dialog.innerHTML=`<header><span id="dashboard-editor-title">Edit Dashboard</span><button data-close="dashboard-editor" aria-label="Close Dashboard editor">Esc</button></header><form id="dashboard-form"><label for="dashboard-name">Name</label><input id="dashboard-name" required autocomplete="off"><label for="dashboard-query">Query</label><textarea id="dashboard-query" rows="3" spellcheck="false" required></textarea><div class="dashboard-presets"><button type="button" data-dashboard-preset="state:available">Available</button><button type="button" data-dashboard-preset="wave:product state:open">Product</button><button type="button" data-dashboard-preset="query:product or query:available">Overlapping queries</button><button type="button" data-dashboard-preset="task:LOO-330 or task:LOO-489">Include an unstarted Task</button></div><p id="dashboard-feedback" role="status"></p><details><summary>Query vocabulary</summary><p><code>state:open</code> started, unfinished Tasks<br><code>wave:product</code> Work in a Wave<br><code>task:LOO-330</code> an explicit Task, including unstarted<br><code>query:product</code> a saved expression<br>Spaces mean AND; use <code>or</code> to combine. Repository is this window.</p></details><footer><button type="button" data-close="dashboard-editor">Cancel</button><button type="submit" id="save-dashboard">Save Dashboard</button></footer></form>`;
+dialog.innerHTML=`<header><span id="dashboard-editor-title">Edit Dashboard</span><button data-close="dashboard-editor" aria-label="Close Dashboard editor">Esc</button></header><form id="dashboard-form"><label for="dashboard-name">Name</label><input id="dashboard-name" required autocomplete="off"><label for="dashboard-query">Query</label><textarea id="dashboard-query" rows="3" spellcheck="false" required></textarea><div class="dashboard-presets"><button type="button" data-dashboard-preset="state:available">Available</button><button type="button" data-dashboard-preset="wave:product state:open">Product</button><button type="button" data-dashboard-preset="(wave:product state:open) or state:available">Overlapping queries</button><button type="button" data-dashboard-preset="task:LOO-330 or task:LOO-489">Include an unstarted Task</button></div><p id="dashboard-feedback" role="status"></p><details><summary>Query vocabulary</summary><p><code>state:open</code> started, unfinished Tasks<br><code>wave:product</code> Work in a Wave<br><code>task:LOO-330</code> an explicit Task, including unstarted<br>Spaces mean AND; use <code>or</code> to combine. Repository is this window.</p></details><footer><button type="button" data-close="dashboard-editor">Cancel</button><button type="submit" id="save-dashboard">Save Dashboard</button></footer></form>`;
 document.body.append(dialog);
 function feedback(){try{const result=resolveQuery($('#dashboard-query').value,data,catalog);$('#dashboard-feedback').textContent=`${new Set(result.map(m=>m.work.id)).size} unique Work · ${result.length} matches. Repeated Work appears only once.`;$('#dashboard-feedback').classList.remove('error');$('#save-dashboard').disabled=false;}catch(e){$('#dashboard-feedback').textContent=e.message;$('#dashboard-feedback').classList.add('error');$('#save-dashboard').disabled=true}}
 function editDashboard(d){editing=d?.id||null;$('#dashboard-editor-title').textContent=d?'Edit Dashboard':'New Dashboard';$('#dashboard-name').value=d?.name||'';$('#dashboard-query').value=d?.query||'state:available';feedback();dialog.showModal();$('#dashboard-name').focus()}

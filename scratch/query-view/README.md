@@ -10,7 +10,7 @@ Wave conversation + complete Task plan, and Task-only Shell/Files tabs.
 
 - **Review desk** selects Available Tasks. Write in a tile, open its Task, add
   a Shell tab or edit a Files tab, then return. Drafts/tools belong to the Task.
-- **Product watch** combines overlapping queries. Hide LOO-489: its later
+- **Product watch** selects `(wave:product state:open) or state:available`. Hide LOO-489: its later
   occurrence becomes visible. Restore it from the Hidden strip. First visible wins.
 - Drag tile headers to swap positions. Drag a divider, or focus it and use arrow
   keys, to resize. Hiding/restoring preserves edits to surviving splits.
@@ -27,7 +27,7 @@ The study retains state in this browser’s local storage. Reset study clears on
 its fixtures. Terminal output, Tasks and PRs are sample data; inputs send nothing,
 shell commands do not execute, and document edits never write repository files.
 HTML retention is not evidence of native terminal attachment or restoration.
-The two named nested query fixtures (`product`, `available`) are provisional.
+There are no invisible named-query fixtures in the Dashboard editor.
 
 `source-manifest.json` records the captured LOO-489 source before adaptation.
 `dashboard.mjs` adds Dashboard interactions to that Console; `model.mjs` retains

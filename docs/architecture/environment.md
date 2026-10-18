@@ -15,11 +15,11 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
-| `LF_BIN` | Desktop and lf launch paths, test fixtures | CLI dispatch and child launch | Explicit executable selection, independent of `LF_HOME`. Desktop sets its bundled helper; child Sessions and agents retain it. Without it, ordinary commands use the installed CLI. It grants no migration or process-control authority. |
+| `LF_BIN` | Desktop and lf launch paths, test fixtures | CLI dispatch and child launch | Explicit executable selection for private `LF_HOME` launches. Ordinary Sessions and agents receive the stable installed entry; main-Machine dispatch ignores inherited selections. It grants no migration or process-control authority. |
 
-Without explicit `LF_BIN` or private `LF_HOME`, source commands forward to the
-installed CLI. Store schema compatibility and migration authority apply to every
-build; see [Machine selection](machines.md#one-main-machine).
+Without a private `LF_HOME`, source commands forward to the installed CLI,
+even with an inherited `LF_BIN`. Store schema compatibility and migration
+authority apply to every build; see [Machine selection](machines.md#one-main-machine).
 
 ## Process context
 

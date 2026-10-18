@@ -107,10 +107,11 @@ an incompatible store. Observation failures remain explicit; they never justify
 an agent launch without its required records. Optional stream failures preserve
 missingness without inventing a terminal result.
 
-Saved Session handoffs retain the executable, Machine and database together. A later
-installation selection must not redirect an already-prepared command. Failed
-launch diagnostics survive retry. Store copies preserve data, not live process
-authority, and do not synchronize private writes back to the installation.
+Saved Session handoffs retain the Machine and stable installed entry. Prepared
+commands select the current installation when executed; private-Home handoffs
+retain their explicit executable. Failed launch diagnostics survive retry.
+Store copies preserve data, not live process authority, and do not synchronize
+private writes back to the installation.
 
 ## Attribution and Started
 

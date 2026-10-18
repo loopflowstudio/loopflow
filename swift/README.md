@@ -7,9 +7,9 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app and its children use this checkout's bundled CLI against
-main-Machine data by default. Explicit `LF_HOME` selects separate data, not a
-different binary. For populated data, use [offline data clones](../docs/data-clones.md):
+The development app's main-Machine commands forward to the installed CLI.
+Select a private `LF_HOME` to use this checkout's bundled CLI with separate data.
+For populated data, use [offline data clones](../docs/data-clones.md):
 `lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
 terminals, preserves source checkouts read-only, and reports copied Sessions'
 continuation limits. A bare SQLite copy provides no filesystem, provider or client
@@ -591,10 +591,10 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app selects its bundled helper with `LF_BIN`. New Sessions and agent
-children retain that selection; embedded shells restore its directory first on
-PATH after startup. Existing providers keep their environment when reattached.
-Nothing changes the global installed CLI or shell configuration.
+The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
+Main-Machine commands forward to installed lf; new Sessions and agent children
+use its stable entry. Private-Home launches retain the bundled helper selection.
+Existing providers keep their environment when reattached.
 
 `run` and `run-debug` check `repo identity --json` through that helper before
 launching. This checks repository registration, not all Desktop actions. Schema

@@ -73,6 +73,17 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
+`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_flow`
+starts a fixture provider, observes a controlled command failure, switches the
+installed CLI, and retries the same command in the same provider and checkout.
+Saved hooks and later Flow children also use the replacement. The proof preserves
+Session history, pending steers and caller attribution, and checks stale inherited
+`LF_BIN` selections through the real installation gate.
+The initial CLI is a failing script and the replacement is the source build;
+this does not prove released-version migration or configured native-provider
+behavior. The Flow starts after the switch, so it does not prove survival of an
+already-running Flow.
+
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
@@ -802,6 +813,9 @@ Run these through the same external-network denial wrapper as other CLI fixtures
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
+Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
+`LF_BIN`, even when they never execute the declared hook. When changing executable
+selection, run these fixtures with installed `lf` directories removed from PATH.
 
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;

@@ -553,7 +553,7 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
 
 /// Launch the prepared input of a conversation or of a saved Flow's review.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
-    let lf = crate::os_process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session);
     command
@@ -1202,8 +1202,7 @@ fn human_open_argv(id: &str) -> Result<Vec<String>> {
     crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
-    // Carry the executable and its data together, including when a different
-    // installation becomes current between listing and opening.
+    // Carry its Machine and stable entry so opening picks up the current install.
     Ok(vec![
         "/usr/bin/env".to_string(),
         format!("LF_BIN={}", context.lf_bin.display()),

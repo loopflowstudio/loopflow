@@ -496,8 +496,17 @@ running its remaining work fresh, and names what waits on you, including a Task
 at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
-An open conversation keeps the instructions it launched with; use `lf connect --fresh`
-in its scope after an upgrade to start with current instructions.
+New commands, hooks and Flow children select the current CLI through the stable
+installed entry. Retry a failed command in the same Session and checkout.
+Installation does not restart existing processes; they may fail naturally.
+Clients launched before this behavior can retain old executable paths. After
+their provider exits, use `lf connect SESSION` through the installed
+`~/.local/bin/lf` to reopen the same native history with fresh hooks. Reattaching
+to a live provider retains its environment. Inspect failed Flow history and
+effects before selecting remaining work; do not repeat uncertain steers.
+
+An open conversation keeps the instructions it launched with. To start a new
+conversation with current instructions, use `lf connect --fresh` in its scope.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 A process has a durable `id` and an optional Unix `pid`. Inspect by `id`; PIDs

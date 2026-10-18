@@ -1,6 +1,6 @@
 # Store structured IDs canonically and accept any casing
 
-Status: representation revision required, reconciled 2026-10-17. Jack Heart's product direction remains accepted; the identity conversion remains unfinished. The inventory exposed a content-addressed metric counterexample: changing its embedded Wave ID invalidates the retained observation identity. The recorded 13-test pass includes that proof and the filesystem slice's Trace collision, ownership and rollback coverage. Constructor/storage conversion needs an evidence representation that preserves the accepted guarantees. This remains one internal slice, not a shippable normalization change.
+Status: metric evidence representation implemented, 2026-10-17. Jack Heart's product direction remains accepted. The released-fixture proof separates original hashed evidence from canonical Work association without changing wire shapes or reminting observations. The filesystem slice and metric/Wave relational slice remain internal; constructors, complete SQL/JSON conversion, CLI/remote and Swift consumers are unfinished. This branch is not ready for publication.
 
 During LOO-499 review on October 17, Jack Heart requested case-invariant IDs everywhere, including Linear IDs and normalized storage. Later that day Jack Heart authorized autonomous planning, implementation, verification, publication and landing, superseding the earlier design/demo/merge review boundary. The selected Flow is kickoff → pursue → ship.
 
@@ -9,9 +9,10 @@ LOO-499 / PR #1585 remains independent: preserve its simplified conversation ope
 October 17 reconciliation: fetched `origin/main` advanced to `070e5bb6a4` (#1586,
 LOO-503). Its `remove_landing_timeouts` draft removes four pending-CI columns and
 reopens only landings blocked by the retired timeout policy. It also changes the
-shared migration runner. Integration remains outstanding: preserve that draft and
-policy alongside this Task's single conversion draft, and seed upgrade fixtures
-before the complete materialized release batch. No identity requirement changed.
+shared migration runner. Integrated through `lf sync --manual origin/main` in `4ab8b24bbb`, after
+checkpoint `5a6407814e` preserved the prior slice and notes. Both drafts and
+runner changes remain; upgrade fixtures start before the complete materialized
+release batch. No identity requirement changed.
 Infrastructure and its immediate Release child's complete goal/memory were read;
 Release is the only immediate child with Markdown in this checkout. Release's
 operation-entry and isolated installation evidence limits remain applicable.
@@ -57,7 +58,7 @@ Normalize ASCII case in domain-owned constructors, parsing, serde and SQL conver
 | Loopflow Session identity | Introduce `LfSessionId` and propagate through owners/serde; lowercase recognized released structured forms. Preserve accepted historical nonstructured values rather than inventing identities. |
 | Linear-owned UUID fields | Lowercase at Linear response, authored binding, model and persistence boundaries, including Initiative/Team/comment/attachment/assignee IDs. Existing non-UUID strings are not presumed structured. |
 | Task labels | Domain-owned Task identifier/parser: lowercase `lf-<hex>`, uppercase Linear `<team>-<number>`. Normalize abbreviated hex and prefixes without changing ambiguity/minimum-length rules. |
-| Other owned UUIDs | Mutation/edit/comment/delivery/observation IDs and predecessor/map keys use the same domain normalization. Inventory by ownership, never `_id` suffix. |
+| Other owned UUIDs | Mutation/edit/comment/delivery UUIDs and predecessor/map keys use the same domain normalization. Inventory by ownership, never `_id` suffix. |
 | Opaque values | Native conversation/turn IDs, provider-account IDs, request/cursor tokens, credentials, hashes, URLs, paths, slugs, names, arbitrary content and capture locators retain bytes. |
 
 For multi-domain selectors, try normalized Loopflow identity against its owner; native fallback receives the original selector. An opaque native token resembling an uppercase UUID stays opaque. Names and paths are never lowercased while attempting ID lookup.
@@ -145,7 +146,7 @@ rewrite is intended.
 | `task_events`, `project_events` | `task_id` / `project_id` respectively |
 | `task_prs` | `id`, `task_id`, `parent_pr_id`, `linear_attachment_id`, `linear_comment_id` |
 | `pr_landings` | `id`, `task_id`, `supervisor_machine_id`; **not** OS PID `supervisor_process_id` |
-| `ci_incidents` | `landing_id`, `task_id`, `pr_id`, `repair_lf_process_id`, `repair_session_id`; identity/hash fields need ownership audit, not folding |
+| `ci_incidents` | `landing_id`, `task_id`, `pr_id`, `repair_lf_process_id`, `repair_session_id`; `identity` is `github:ci:<repo>:<PR>:<head>:<failure hash>`; preserve it |
 | `task_pr_repair_incidents` | `task_pr_id` |
 | `task_linear_observations`, `task_linear_ingested_comments` | `task_id` in each; `task_linear_ingested_comments.comment_id` |
 | `task_deletions`, `task_issue_identities` | `wave_id`, `issue_id`, `identifier` (label) in each |
@@ -168,7 +169,7 @@ rewrite is intended.
 | `steer_batches` | `id`, `session_id`, `agent_process_id`, `attachment_token` |
 | `task_admissions`, `work_placements` | `task_id`, `machine_id` in each; `work_placements.{wave_id,project_id}` |
 | `tool_responses` | `id`, `work_id` by `work_kind`; `request_id` is opaque |
-| `metric_instruments`, `metric_observations` | `wave_id` in each; **not** content-hash `observation_id`; evidence representation unresolved below |
+| `metric_instruments`, `metric_observations` | `wave_id` in each; **not** content-hash `observation_id`; original payload/digest retained as described below |
 | `linear_team_checks`, `relocated_task_processes` | `team_id` / `task_id`, `process_id` respectively |
 
 `provider_routes.scope_id` is a repository slug (`RouteScope::Repo(RepoId)`) or
@@ -190,14 +191,14 @@ limits and route/import delivery evidence are not structured-ID owners.
 | `task_changes.value_json` | WorkValue `$.value` only for `task_project` and `task_assignee`; deletion receipts contain no IDs |
 | `{task_changes,project_changes}.{base_json,conflict_json}` | Optional WorkValue under `$.value`; distinguish order Task-ID array `$.value[*]` |
 | `project_changes.value_json` | Task-ID array for `field='task_order'`; other current Project variants contain no IDs |
-| `project_changes.order_effects_json` | `$[*].before[*]`, `$[*].after[*]` Task IDs; `$[*].issue` Linear ID; provider input paths need exact writer audit |
+| `project_changes.order_effects_json` | `$[*].before[*]`, `$[*].after[*]` Task IDs; `$[*].issue` Linear ID; `input` contains only `prioritySortOrder`/`sortOrder` numbers (`ops/planning_order.rs::move_input`) |
 | `planning_peer_changes.mutation` | `$.edit.target` by `record_table`; `$.parents[*]` mutation IDs; `$.edit.change` WorkValues; generated columns follow JSON |
-| `task_events.kind_json` | Variant-owned `$.pr_id`, `$.steer_id`, `$.lf_process_ids[*]` (historical `$.exec_ids[*]`), `$.invocation_id`, `$.{relation_id,source_issue_id,target_issue_id}`; historical `intent`, `link`, `remaining` still need released-shape audit |
+| `task_events.kind_json` | Variant-owned `$.pr_id`, `$.steer_id`, `$.lf_process_ids[*]` (historical `$.exec_ids[*]`), `$.invocation_id`, `$.{relation_id,source_issue_id,target_issue_id}`; historical `intent`/`link` paths below; `remaining` contains only outcome, evidence and integer check time |
 | `project_events.kind_json` | `$.task_id`, `$.steer_id`; nested `$.event` follows Task event variants |
 | `pr_landings.retired_supervisor_json` | `$.home_id` is Machine identity; `$.process_id` is OS PID |
-| `pm_project_name_cutover.body` | Retained Linear Project DTO; released identity paths still need audit |
-| `session_events.payload` | Artifact/caller keys, imported manifests, native evidence and arbitrary result content stay opaque; historical typed Flow observations still need path audit |
-| `metric_observations.payload` | Hashed evidence; **no conversion until evidence/output representation is resolved** |
+| `pm_project_name_cutover.body` | `$.id`, `$.initiative_ids[*]`, `$.team_ids[*]`; all prose/revision/status/metric names retained |
+| `session_events.payload` | Artifact/caller keys, imported manifests, native evidence and arbitrary result content stay opaque; only `$.flow_id` for `type IN ('legacy_flow','legacy_flow_review')` is a typed UUID reference; keep receipt keys, cursor graph names, failure text and captured integer sequence |
+| `metric_observations.payload` | Original hashed evidence; never rewrite, including its embedded Wave spelling |
 
 WorkValue identity variants: `wave_parent`, `wave_project`, `project_wave`,
 `project_linear_id`, `task_project`, `task_linear_id`, `task_assignee`, `task_team`,
@@ -208,53 +209,77 @@ values. External PlanningSnapshot `changes` map keys and predecessor sets need
 collision checks before collection, even for equal contents. Equal-clock winner
 changes must abort. No blanket recursive conversion.
 
-Collision scopes include affected primary/unique keys (including composites), the
-`session_event_receipt` expression index, primary Wave Session uniqueness, active
-Wave `(repo,parent_wave_id,name)`, active Task PR ownership, Project transition
-ownership, active `(agent_process_id,boundary)` batches, and Linear correspondence
-claims. Opaque members of composite keys retain bytes. Trace directory collisions
-are now rejected by the draft; the remaining scopes are not implemented.
+Historical audit sources: `906576f39d` and `07a3586ac3^` retain the two
+follow-through writers. `intent.issue_id` and `link.issue_id` can be local Task
+IDs or earlier Linear UUIDs; `intent.project_id` can be local Project or Linear.
+`intent.{relation_id,team_id,state_id}` are Linear UUIDs; `link.identifier` uses
+the ticket domain. `key` is an authored `--key` (default `follow-up`), and `wave`
+is a slug: preserve both. Nested Project `task_observed.event` uses the same
+variant-owned paths. `9c7b6828a9^:engine/{invocation,execution,transitions}.rs` and
+`durable.rs` establish the retired Flow UUID and cursor/blocker shapes retained by
+`0.13.9.001_release.sql`; cursor `repeats` keys are graph occurrence names.
+Steer `payload_hash` hashes already emitted text, not the relational identity:
+retain it without rebuilding old payloads. CI hashes contain no Loopflow IDs.
 
-### Content-addressed evidence revision — unresolved
+Collision inventory (current schema after #1586, including implicit indexes):
 
-**New counterexample, October 17:** `MetricObservation::digest` in
-`work/wave/metrics.rs` hashes the typed payload including `identity.wave_id`.
-`observation_id` is SHA-256 content identity, not a UUID. `validate` requires that
-digest. `accept_metric_observation` uses it for exactly-once insertion and rejects
-different payloads under the same ID. The new test
-`canonical_ids_metric_payload_case_changes_its_content_identity` proves that
-changing only the embedded Wave spelling changes the digest.
+* Every affected primary/unique identity: all owner IDs, `projects.external_project_id`,
+  `tasks.external_issue_id`, `task_issue_identities.issue_id`, delivery/change UUIDs,
+  and `flow_process_steps.lf_process_id`. Trace directory aliases also conflict.
+* Composite keys: ingested `(task_id,comment_id)`, repairs `(task_pr_id,kind)`,
+  instruments `(wave_id,metric_id)`, tool responses `(work_kind,work_id,request_id)`,
+  deletions `(wave_id,issue_id)`, planning observations `(repo,provider,id)`,
+  transitions `(wave_id,successor_id)` and items `(wave_id,successor_id,issue_id)`,
+  PR `(task_id,sequence)`, peer routes `(repo,destination,mutation_id)`, peer
+  conflicts `(kind,object_id,reason)`, Session steers `(session_id,steer_id)` and
+  deliveries with `attempt`, relocated `(task_id,process_id)`, and each nullable
+  Wave/Project/Task placement key. Opaque key members retain their bytes.
+* Partial/expression uniqueness: `session_event_receipt` retains native thread,
+  turn, kind and receipt key; primary Wave Sessions apply only while open;
+  active Wave `(repo,ifnull(parent_wave_id,''),name)` applies only before retirement;
+  pending transitions use `settled_at IS NULL`; current Task PRs use `historical=0`;
+  active steer `(agent_process_id,boundary)` excludes cancelled batches. Existing
+  path-, name-, provider- and repo/PR-only indexes do not change domains.
+* Planning documents: reject normalized mutation-map keys and distinct predecessor
+  spellings before BTreeMap/BTreeSet insertion. Compare existing causal winners
+  before and after canonicalization, including equal-clock UUID ordering and
+  coalescing target spellings. Reject newly conflicting unique Linear claims;
+  preserve already recorded conflicts and all losing mutations. Identity arrays
+  (Task order, Initiative/Team membership) must not acquire duplicate identities.
 
-The earlier Metrics inventory incorrectly called observation identity structured.
-Classifying the digest as opaque does not solve the embedded identity:
-`MetricIdentity` currently serves both hashed evidence and canonical Work keys.
-Normalizing its decoder would change the bytes used to verify retained digests;
-rehashing would remint observations and could change equal-time selection.
-The accepted design requires canonical typed outputs, unchanged hashes/history,
-no reminting, and unchanged wire shapes.
+Trace locator and Wave owner collisions are implemented. The other scopes and
+JSON conversion remain part of the single unfinished conversion cut.
 
-Source inspection narrows the conflict: `derive_metric_reading_from_evidence`
-already emits identity from the contract, not the retained observation.
-`metric_observation_evidence` selects by relational Wave/metric columns and orders
-equal-time rows by the original observation ID. Public producer input binds to a
-resolved contract before hashing. These existing boundaries support separating
-original evidence from canonical association without changing the reading DTO.
-They do not yet prove retained observation validation, direct library reimport,
-in-memory history selection or graduation qualification after normalization.
+### Content-addressed evidence revision — implemented
 
-Required revision: name the surviving authority for original hashed evidence and
-its canonical Work association; specify public output and reimport semantics;
-preserve counts, original digests, source times, qualification and equal-time
-selection. Proposed direction: retain original evidence bytes on the existing
-observation owner and derive Work association from its canonical relational column.
-The existing MetricObservation wire/hash contract still needs explicit treatment:
-the evidence identity must preserve its hash input, while its canonical Work key
-uses the shared Wave domain for validation, association and qualification. The
-proposal remains draft until a released-fixture proof covers unchanged payloads,
-digests/counts, equal-time selection, repeated original-payload import and canonical
-reading output. No payload rewrite, alias table, rehash or decoder normalization
-was introduced. This is remaining representation work under Jack Heart's autonomous
-authorization; no product requirement has been waived or new approval requested.
+**October 17 decision and proof:** `MetricObservationIdentity` owns the original
+hash input, including Wave spelling. `MetricIdentity` owns canonical Work
+association, with a private Wave string constructed/decoded through the shared
+UUID case function. Non-UUID historical strings and metric names keep their bytes.
+No new table, alias registry, wire field, payload rewrite or rehash exists.
+
+`MetricObservation::metric_identity` projects its association for validation,
+history selection and graduation. Hashing still serializes the original evidence
+identity. Current producers bind canonical contracts before creating evidence;
+direct library reimports accept the original spelling under that same contract.
+The store writes contract identity into relational Wave/metric columns and retains
+original payload text. Readings use contract identity; evidence remains original.
+
+`canonical_ids_metrics.sql` is populated released data with two equal-time
+observations, one qualifying and one incomplete. The actual materialized draft
+updates Wave associations while retaining payloads, digests, source/receipt times,
+qualification and row counts. Reimporting original payloads repeatedly is a
+Duplicate; a newly received original-spelling payload joins the canonical owner.
+SQL and reversed in-memory history choose the same original digest, qualify the
+same graduated contract, and emit the same canonical reading. Captured Session
+payloads survive and their immutability guard is restored. A Wave collision rolls
+back metrics, locators and the migration ledger. UUID simple/hyphenated/braced/URN
+forms retain punctuation; metric names remain case sensitive.
+
+The draft currently contains the filesystem cut and Wave **relational** conversion
+supporting this proof. It does not yet convert declared Wave JSON references or
+prevent all noncanonical writers; those belong to the complete constructor/SQL cut
+below. The metric representation obstacle is resolved, not the full migration.
 
 Migration sequence:
 
@@ -278,6 +303,7 @@ Affected consumers include store readers/writers, CLI selectors/history, Task re
 Delete — do not maintain:
 
 * Duplicate normalization in `durable_id!`/`prefixed_uuid_id!`; preserve public domain types/error contracts around one implementation.
+* Removed from metric evidence: shared raw `MetricIdentity` hash/Work representation and direct Wave field construction. Preserve the original `MetricObservationIdentity` hash input and canonical contract association.
 * Unnormalized `from_raw` and derived serde escape paths. Remove redundant constructors or route required adapters through the domain owner.
 * Exactly cased `lf-`/`task_` selector branches and comparison-only patches once shared domain resolution owns them. Preserve ambiguity and original native fallback input.
 * Tests requiring structured case preservation; replace with canonical round trips. Preserve native-token, capture, ancestry, admission, PR-history and A→B→A fencing proofs.
@@ -287,10 +313,10 @@ Excluded: changing names/slugs/paths, UUID punctuation, legacy prefixes, provide
 
 ## Internal sequence and remaining work
 
-One indivisible delivery. The filesystem slice exists; canonical identity behavior and its acceptance remain unfinished. No separate publication of this internal slice. The metric representation needs revision before dependent normalization. The scalar inventory is explicit; historical JSON paths and non-Trace collision scopes remain open and can be completed independently. Integration of main #1586's migration/runner changes remains outstanding.
+One indivisible delivery. Filesystem authority and metric evidence have focused proofs; full canonical identity behavior remains unfinished. No separate publication of these slices. Main #1586 is integrated. Scalar, historical JSON and collision inventories above specify the remaining cut; their implementation and full conversion acceptance are outstanding.
 
 1. Preserve the implemented filesystem cut and its passing Trace collision, real-claim dispatch, receipt mismatch and guard-failure proofs. Extend the fixture with the actual final SQL conversion. In-flight provider transport across upgrade and isolated installation remain required; do not reintroduce identity-derived file lookups.
-2. **After the metric representation revision, close construction and storage together:** consolidate normalization; cut over constructors/serde/SQL and Session/Linear/planning string boundaries; author the single draft and populated released fixture. Include trigger restoration, collision rollback, peer reimport, opaque tokens and active-claim counterexamples. Focused new test prefix: `canonical_ids`.
+2. **Close construction and storage together:** consolidate normalization; cut over constructors/serde/SQL and Session/Linear/planning string boundaries; author the single draft and populated released fixture. Include trigger restoration, collision rollback, peer reimport, opaque tokens and active-claim counterexamples. Focused new test prefix: `canonical_ids`.
 3. Cut over shared selectors, local/remote ingress, history and authored/import boundaries; remove comparison patches. Add real-command/remote scenarios against the migrated fixture. Preserve CLI shapes and LOO-499 connect behavior.
 4. Cut over Swift identity/cache boundaries and shared fixtures. Verify selection/panes and opaque bytes through real CLI transport. Update user/API documentation.
 5. Run acceptance and review every inventory entry. Unresolved noncanonical consumers remain unfinished, not exemptions.
@@ -320,6 +346,11 @@ Expected: all selected tests pass with canonical references, unchanged opaque by
 
 Existing evidence (October 17): the disposable SQLite/`flock`/SHA-256 probe reproduced distinct simultaneous fences for one case-folded Session during an exclusive SQLite transaction and distinct retained/canonical Process receipt basenames. This remains a synthetic counterexample, not production upgrade acceptance. Gate retains full upgrade and isolated installation acceptance.
 
-Review finding (October 17): the metric content-identity contract prevents treating every owned JSON identity as a rewriteable reference. Existing contract-derived readings and relational evidence selection narrow the required repair; retained-payload validation and reimport still need proof. The independent SQL change rejects Trace aliases before locator/schema writes and leaves source rows and the migration ledger intact on failure.
+Review findings (October 17): evidence/Work identity separation preserves hash input
+while making association canonical. The Wave SQL conversion keeps all four UUID
+spellings accepted by the Rust parser and restores only the four guards it needs
+to suspend. The fixture now checks captured-payload immutability after upgrade.
+Historical follow-through fields carry both local and earlier Linear identities;
+assuming every `issue_id` is Linear would miss retained Task references.
 
-Check result (2026-10-17): `uv run python scripts/materialize_rust_tests.py -- cargo test -p loopflow --lib canonical_ids < /dev/null` — recorded PASS (13 tests, no warnings), reused for unchanged code; `git diff --check`, `lf context` — PASS after reconciliation; gate owns broader regression and isolated installation after full conversion.
+Check result (2026-10-17): `uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(canonical_ids) | test(metrics)' --no-tests fail < /dev/null` — PASS (49 tests); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. `lf context`: scratch within both limits; inherited Wave memory 55 tokens over (read-only here). Gate owns broader regression and isolated installation after full conversion.

@@ -646,6 +646,13 @@ the final Process, Project-status and Session schema. Current Work, links, accou
 routes and resumable conversations survive the cutover. Migration rehearsal uses
 a disposable copy and leaves the installed Machine unchanged.
 
+Metric observations retain their original payload and content hash, including the
+Wave spelling used by the producer. `MetricObservationIdentity` is that hash input;
+`MetricIdentity` is the canonical Work association used by contracts, validation,
+qualification and readings. The relational Wave key can change case without
+rewriting evidence or changing equal-time selection. Reimporting the original
+payload remains idempotent. Metric names and UUID punctuation retain their bytes.
+
 ### Filesystem state
 
 | Location | Contents | Write pattern |

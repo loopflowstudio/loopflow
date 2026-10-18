@@ -14,16 +14,19 @@ to the released `session_<32 hex>` and bare 32-hex forms; other historical Sessi
 strings retain bytes. These decisions and remaining conversion work live in the
 [design](loo-506-store-structured-ids.md#filesystem-authority-and-evidence).
 
-No constructor or full storage normalization exists yet. Focused tests deliberately
-change fixture IDs only after retaining their locators; they prove the filesystem
-boundary, not completion of LOO-506. The draft now rejects distinct raw Trace spellings that would collapse to one
-identity with different directory locators.
+General constructor and full storage normalization remain unfinished. The earlier
+filesystem tests manually change fixture IDs after retaining locators; the new
+metric tests exercise actual Wave relational conversion through the draft. Neither
+proves the whole conversion. Trace directory aliases and Wave owner collisions
+now roll back without choosing or reminting an identity.
 
-The October 17 inventory found that MetricObservation content hashes include the
-original Wave ID. Canonicalizing that payload changes observation identity.
-Readings already derive identity from the contract; retained evidence needs a
-separate canonical association without rewriting its hash input. The design's
-content-addressed evidence revision records the draft approach and missing proofs.
-This is representation work under existing authorization, not a new approval
-requirement. Historical JSON/collision inventory remains independently actionable;
-dependent constructor/full storage conversion is unfinished.
+The metric evidence representation is now implemented and proved against released
+SQL through the actual draft. Original observation identity and hashes remain
+opaque evidence; canonical Work association owns reading/validation/qualification.
+Historical JSON and collision inventories are recorded in the design. Their full
+conversion, constructors and consumers remain unfinished together.
+
+Main #1586 is integrated at `4ab8b24bbb`. Its inherited Wave memory is now 55 tokens
+over its target; this implement step has no authority to curate `.lf/wave/`.
+The memory owner can trim superseded landing-timeout/history prose. Scratch stays
+within both limits. No limits were raised.

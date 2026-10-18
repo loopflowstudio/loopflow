@@ -7,6 +7,15 @@ use uuid::Uuid;
 #[error("invalid id: {0}")]
 pub struct IdError(String);
 
+/// Fold only a structured UUID's ASCII case, retaining its accepted punctuation.
+pub(crate) fn canonical_uuid(value: &str) -> String {
+    if Uuid::parse_str(value).is_ok() {
+        value.to_ascii_lowercase()
+    } else {
+        value.to_owned()
+    }
+}
+
 macro_rules! uuid_id {
     ($name:ident) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]

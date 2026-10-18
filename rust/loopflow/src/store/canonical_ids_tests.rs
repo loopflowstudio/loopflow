@@ -512,3 +512,252 @@ fn canonical_ids_metric_payload_case_changes_its_content_identity() {
     let retained: MetricObservation = serde_json::from_slice(&original_bytes).unwrap();
     assert_eq!(retained.expected_observation_id().unwrap(), original_id);
 }
+
+#[test]
+fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
+    use crate::work::wave::metrics::{
+        compose_metric_portfolio, derive_metric_portfolio, LoadedMetricContract, MetricContract,
+        MetricContractDefinition, MetricContractDiscovery, MetricDuration, MetricIdentity,
+        MetricStage, ObservationAcceptance,
+    };
+
+    let (home, conn) = released();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_metrics.sql"
+    ))
+    .unwrap();
+    let retained = || {
+        conn.prepare("SELECT observation_id,payload,source_time_seconds,source_time_nanoseconds,received_at,graduation_qualifying FROM metric_observations ORDER BY observation_id")
+            .unwrap().query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,bool>(5)?)))
+            .unwrap().collect::<Result<Vec<_>,_>>().unwrap()
+    };
+    let before = retained();
+    super::validate_foreign_keys(&conn).unwrap();
+    let capture: String = conn
+        .query_row(
+            "SELECT payload FROM session_events WHERE receipt_key='run_Opaque-Capture'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    apply_sqlite(&conn).unwrap();
+    assert_eq!(retained(), before);
+    assert_eq!(
+        conn.query_row(
+            "SELECT payload FROM session_events WHERE receipt_key='run_Opaque-Capture'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        capture
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT wave_id FROM session_events WHERE receipt_key='run_Opaque-Capture'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        TRACE.to_ascii_lowercase()
+    );
+    assert!(conn
+        .execute(
+            "UPDATE session_events SET payload='{}' WHERE receipt_key='run_Opaque-Capture'",
+            []
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("Captured Session evidence is immutable"));
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let identity = MetricIdentity::new(TRACE, "Case-Sensitive-Metric");
+    assert_eq!(identity.wave_id(), TRACE.to_ascii_lowercase());
+    let mut contract = MetricContract::new(MetricContractDefinition {
+        identity: identity.clone(),
+        name: "Retained evidence".into(),
+        stage: MetricStage::Graduated,
+        instrument: "retained-producer".into(),
+        unit: "ratio".into(),
+        window: MetricDuration::parse("7d").unwrap(),
+        freshness_policy: MetricDuration::parse("6h").unwrap(),
+        body: "Retain original evidence.".into(),
+    })
+    .unwrap();
+    contract.contract_revision = "retained-revision".into();
+    let now = time::OffsetDateTime::from_unix_timestamp(before[0].2).unwrap();
+    let mut observations: Vec<MetricObservation> = before
+        .iter()
+        .map(|(id, payload, ..)| {
+            let observation: MetricObservation = serde_json::from_str(payload).unwrap();
+            assert_eq!(observation.expected_observation_id().unwrap(), *id);
+            assert_eq!(serde_json::to_string(&observation).unwrap(), *payload);
+            for _ in 0..2 {
+                assert_eq!(
+                    store
+                        .accept_metric_observation(&contract, &observation, now)
+                        .unwrap(),
+                    ObservationAcceptance::Duplicate
+                );
+            }
+            observation
+        })
+        .collect();
+    assert_eq!(retained(), before);
+    let evidence = store
+        .metric_observation_evidence(std::slice::from_ref(&contract))
+        .unwrap();
+    let current = &evidence[&identity];
+    assert_eq!(
+        current.current.as_ref().unwrap().observation_id(),
+        before.last().unwrap().0
+    );
+    assert!(current.instrumented);
+    assert!(current.graduation_qualified);
+    let in_memory = derive_metric_portfolio(&[(&contract, &observations)], &[], now).unwrap();
+    observations.reverse();
+    assert_eq!(
+        derive_metric_portfolio(&[(&contract, &observations)], &[], now).unwrap(),
+        in_memory
+    );
+    let instruments = store
+        .metric_instruments(std::slice::from_ref(&identity))
+        .unwrap();
+    let persisted = compose_metric_portfolio(
+        MetricContractDiscovery {
+            contracts: vec![LoadedMetricContract {
+                path: "retained.md".into(),
+                contract: contract.clone(),
+            }],
+            contract_issues: vec![],
+        },
+        &instruments,
+        &evidence,
+        Some(&[]),
+        now,
+    )
+    .unwrap();
+    assert_eq!(persisted, in_memory);
+    assert!(persisted.contract_issues.is_empty());
+    assert_eq!(persisted.metrics.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&persisted.metrics[0]).unwrap()["identity"]["wave_id"],
+        TRACE.to_ascii_lowercase()
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM metric_observations WHERE wave_id=?1",
+            [TRACE.to_ascii_lowercase()],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        2
+    );
+
+    // A newly received original-spelling payload also joins the canonical owner.
+    let mut fresh = MetricObservation::Unavailable {
+        identity: crate::work::wave::metrics::MetricObservationIdentity {
+            wave_id: TRACE.into(),
+            metric_id: identity.metric_id.clone(),
+        },
+        contract_revision: contract.contract_revision.clone(),
+        instrument: contract.instrument.clone(),
+        observation_id: String::new(),
+        source_as_of: now,
+        reason: "Producer unavailable after upgrade".into(),
+    };
+    let digest = fresh.expected_observation_id().unwrap();
+    let MetricObservation::Unavailable { observation_id, .. } = &mut fresh else {
+        unreachable!()
+    };
+    *observation_id = digest.clone();
+    assert_eq!(
+        store
+            .accept_metric_observation(&contract, &fresh, now)
+            .unwrap(),
+        ObservationAcceptance::Accepted
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT wave_id FROM metric_observations WHERE observation_id=?1",
+            [digest],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap(),
+        TRACE.to_ascii_lowercase()
+    );
+    assert_eq!(
+        store
+            .accept_metric_observation(&contract, &fresh, now)
+            .unwrap(),
+        ObservationAcceptance::Duplicate
+    );
+}
+
+#[test]
+fn canonical_ids_wave_collision_preserves_original_metric_evidence() {
+    let (_home, conn) = released();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_metrics.sql"
+    ))
+    .unwrap();
+    conn.execute(
+        "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'Other Wave','/repo',1)",
+        [TRACE.to_ascii_lowercase()],
+    )
+    .unwrap();
+    let before: String = conn.query_row("SELECT json_group_array(json_array(observation_id,wave_id,payload)) FROM metric_observations", [], |r|r.get(0)).unwrap();
+    let ledger: i64 = conn
+        .query_row("SELECT count(*) FROM schema_migrations", [], |r| r.get(0))
+        .unwrap();
+    let error = apply_sqlite(&conn).unwrap_err().to_string();
+    assert!(
+        error.contains("canonical identity collision: Wave"),
+        "{error}"
+    );
+    assert!(error.contains(TRACE), "{error}");
+    assert_eq!(conn.query_row("SELECT json_group_array(json_array(observation_id,wave_id,payload)) FROM metric_observations", [], |r|r.get::<_,String>(0)).unwrap(), before);
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM schema_migrations", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        ledger
+    );
+    assert!(conn
+        .prepare("SELECT fence_locator FROM agent_sessions")
+        .is_err());
+}
+
+#[test]
+fn canonical_ids_wave_associations_keep_uuid_punctuation() {
+    let (_home, conn) = released();
+    let spellings = [
+        TRACE.to_string(),
+        TRACE.replace('-', ""),
+        format!("{{{TRACE}}}"),
+        format!("URN:UUID:{TRACE}"),
+        "Historical-Wave".to_string(),
+    ];
+    for (index, spelling) in spellings.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,?2,'/repo',1)",
+            params![spelling, format!("Wave {index}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metric_instruments VALUES(?1,'metric','producer',1)",
+            [spelling],
+        )
+        .unwrap();
+    }
+    super::validate_foreign_keys(&conn).unwrap();
+    apply_sqlite(&conn).unwrap();
+    for (index, spelling) in spellings.iter().enumerate() {
+        let expected = crate::id::canonical_uuid(spelling);
+        let association: String = conn.query_row("SELECT m.wave_id FROM metric_instruments m JOIN waves w ON m.wave_id=w.id WHERE w.name=?1", [format!("Wave {index}")], |r|r.get(0)).unwrap();
+        assert_eq!(association, expected);
+    }
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM waves", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        spellings.len() as i64
+    );
+}

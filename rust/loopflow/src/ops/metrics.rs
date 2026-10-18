@@ -223,7 +223,7 @@ impl MetricProducerObservation {
                 complete,
                 ..
             } => MetricObservation::Observed {
-                identity: contract.identity.clone(),
+                identity: contract.identity.clone().into(),
                 contract_revision: contract.contract_revision.clone(),
                 instrument: contract.instrument.clone(),
                 observation_id: String::new(),
@@ -237,7 +237,7 @@ impl MetricProducerObservation {
                 reason,
                 ..
             } => MetricObservation::Unavailable {
-                identity: contract.identity.clone(),
+                identity: contract.identity.clone().into(),
                 contract_revision: contract.contract_revision.clone(),
                 instrument: contract.instrument.clone(),
                 observation_id: String::new(),
@@ -420,7 +420,7 @@ mod tests {
         end: OffsetDateTime,
     ) -> MetricObservation {
         let mut observation = MetricObservation::Observed {
-            identity: contract.identity.clone(),
+            identity: contract.identity.clone().into(),
             contract_revision: contract.contract_revision.clone(),
             instrument: contract.instrument.clone(),
             observation_id: String::new(),

@@ -67,3 +67,89 @@ WHEN NEW.id != lower(NEW.id) AND (
 BEGIN
     SELECT RAISE(ABORT, 'Session identity must be canonical');
 END;
+
+-- Canonical Wave associations do not rewrite content-addressed metric payloads.
+CREATE TEMP TABLE canonical_waves (original TEXT PRIMARY KEY, canonical TEXT NOT NULL);
+CREATE TEMP TRIGGER canonical_wave_collision BEFORE INSERT ON canonical_waves
+WHEN EXISTS(SELECT 1 FROM waves WHERE id=NEW.canonical AND id!=NEW.original)
+    OR EXISTS(SELECT 1 FROM canonical_waves WHERE canonical=NEW.canonical)
+BEGIN SELECT RAISE(ABORT, 'canonical identity collision: Wave: ' || NEW.original || ' / ' || NEW.canonical); END;
+INSERT INTO canonical_waves
+WITH identities AS (
+    SELECT id, CASE
+        WHEN length(id)=38 AND substr(id,1,1)='{' AND substr(id,-1)='}'
+            THEN substr(id,2,36)
+        WHEN length(id)=45 AND lower(substr(id,1,9))='urn:uuid:'
+            THEN substr(id,10)
+        ELSE id END AS uuid
+    FROM waves WHERE id!=lower(id)
+)
+SELECT id,lower(id) FROM identities WHERE
+    (length(id)=32 AND id NOT GLOB '*[^0-9a-fA-F]*') OR
+    (length(uuid)=36 AND substr(uuid,9,1)='-' AND substr(uuid,14,1)='-'
+     AND substr(uuid,19,1)='-' AND substr(uuid,24,1)='-'
+     AND length(replace(uuid,'-',''))=32 AND replace(uuid,'-','') NOT GLOB '*[^0-9a-fA-F]*');
+DROP TRIGGER preserve_capture_update;
+DROP TRIGGER validate_conversation_ancestry_update;
+DROP TRIGGER validate_project_conversation_parents;
+DROP TRIGGER selected_project_owner_update;
+UPDATE waves SET id=(SELECT canonical FROM canonical_waves WHERE original=waves.id)
+WHERE id IN (SELECT original FROM canonical_waves);
+UPDATE waves SET parent_wave_id=(SELECT canonical FROM canonical_waves WHERE original=waves.parent_wave_id)
+WHERE parent_wave_id IN (SELECT original FROM canonical_waves);
+UPDATE waves SET superseded_by_wave_id=(SELECT canonical FROM canonical_waves WHERE original=waves.superseded_by_wave_id)
+WHERE superseded_by_wave_id IN (SELECT original FROM canonical_waves);
+UPDATE projects SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=projects.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE agent_sessions SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=agent_sessions.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE session_events SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=session_events.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE task_deletions SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=task_deletions.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE task_issue_identities SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=task_issue_identities.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE pm_wave_sync SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=pm_wave_sync.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE pm_wave_projects SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=pm_wave_projects.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE project_binding_imports SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=project_binding_imports.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE wave_workflows SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=wave_workflows.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE project_transitions SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=project_transitions.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE project_transition_items SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=project_transition_items.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE steers SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=steers.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE work_placements SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=work_placements.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE metric_instruments SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=metric_instruments.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE metric_observations SET wave_id=(SELECT canonical FROM canonical_waves WHERE original=metric_observations.wave_id)
+WHERE wave_id IN (SELECT original FROM canonical_waves);
+UPDATE tool_responses SET work_id=(SELECT canonical FROM canonical_waves WHERE original=tool_responses.work_id)
+WHERE work_kind='wave' AND work_id IN (SELECT original FROM canonical_waves);
+CREATE TRIGGER preserve_capture_update BEFORE UPDATE ON session_events WHEN OLD.kind='captured'
+BEGIN SELECT RAISE(ABORT,'Captured Session evidence is immutable'); END;
+CREATE TRIGGER validate_conversation_ancestry_update
+BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
+    SELECT CASE WHEN NEW.task_id IS NOT NULL AND NOT EXISTS(
+        SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
+        WHERE t.id=NEW.task_id AND p.wave_id=NEW.wave_id
+    ) THEN RAISE(ABORT,'AgentSession Task and Wave disagree') END;
+    SELECT CASE WHEN OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id
+        THEN RAISE(ABORT,'AgentSession binding is permanent') END;
+    SELECT CASE WHEN OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
+        THEN RAISE(ABORT,'AgentSession Wave is permanent') END;
+END;
+CREATE TRIGGER validate_project_conversation_parents BEFORE UPDATE OF wave_id ON projects
+WHEN EXISTS(SELECT 1 FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
+    WHERE t.project_id=NEW.id AND s.wave_id IS NOT NEW.wave_id)
+BEGIN SELECT RAISE(ABORT,'Project would change AgentSession ancestry'); END;
+CREATE TRIGGER selected_project_owner_update BEFORE UPDATE OF wave_id ON projects
+WHEN EXISTS(SELECT 1 FROM waves WHERE current_project_id=NEW.id AND id!=NEW.wave_id)
+BEGIN SELECT RAISE(ABORT, 'selected Project cannot change Wave ownership'); END;
+DROP TRIGGER canonical_wave_collision;
+DROP TABLE canonical_waves;

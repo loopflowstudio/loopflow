@@ -145,9 +145,11 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
         let mut command = std::process::Command::new(&lf);
         command.args(&args).current_dir(checkout);
         crate::transport::configure_child(&mut command);
+        let output = crate::terminal_output::TerminalOutput::for_child(&mut command)?;
         let mut child = command.spawn().context("could not start the Task's Flow")?;
         ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
         let status = child.wait();
+        drop(output);
         ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
         let status = status.context("could not wait for the Task's Flow")?;
         if status.success() {
@@ -489,6 +491,7 @@ impl RunningFlow<'_> {
             .sqlite
             .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
         crate::transport::configure_child(command.as_std_mut());
+        let output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
         let mut child = command.spawn().context("could not execute Flow step")?;
         drop(admission);
         let mut step = None;
@@ -501,6 +504,7 @@ impl RunningFlow<'_> {
                 }
             }
         };
+        drop(output);
         // The step ran whatever comes next, so its row is attempted first.
         if step.is_none() {
             step = self.record_step(mark).unwrap_or(None);

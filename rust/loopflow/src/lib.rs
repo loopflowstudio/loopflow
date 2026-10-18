@@ -28,6 +28,7 @@ pub mod prompt;
 pub mod skills;
 pub(crate) mod startup;
 pub mod task_work;
+pub(crate) mod terminal_output;
 pub(crate) mod terminal_title;
 pub mod workflow;
 // Build-time parsing lives here so its golden tests compile against the exact parser.

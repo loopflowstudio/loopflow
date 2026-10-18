@@ -1100,7 +1100,7 @@ Focus an exact pane in its retained workspace (does not select Work)
 
 ## lf desktop shell
 
-Add a shell on the recorded Machine beside a pane without changing selection
+Add a shell tab on the Task’s recorded Machine
 
 | Argument | What it does |
 |---|---|
@@ -1125,17 +1125,6 @@ Show the recorded Task's Flow processes beside an exact pane
 | Argument | What it does |
 |---|---|
 | `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop split
-
-Add a shell split beside an exact pane, retaining selection and clients
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--axis` | axis |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

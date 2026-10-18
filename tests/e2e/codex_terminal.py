@@ -104,9 +104,24 @@ def _terminal(
     submit_at = None
     exit_at = None
     pending_follow_up = follow_up
+    waiting_for_diagnostic = False
     expected = b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE"
     try:
         while time.monotonic() < deadline:
+            if waiting_for_diagnostic:
+                assert b"cmux title update failed" not in output, (
+                    "Loopflow warning entered the native draft display"
+                )
+                logs = Path(env["LF_HOME"]) / "logs"
+                if any(
+                    b"cmux title update failed" in path.read_bytes()
+                    for path in logs.glob("terminal-*.log")
+                ):
+                    assert b"cmux title update failed" not in output
+                    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
+                    os.write(master, b"\x7f ready")
+                    submit_at = time.monotonic() + 0.3
+                    waiting_for_diagnostic = False
             if exit_at is not None and time.monotonic() >= exit_at:
                 os.write(master, b"/exit")
                 submit_at = time.monotonic() + 0.3
@@ -123,8 +138,19 @@ def _terminal(
                 if b"\x1b[6n" in chunk:
                     os.write(master, b"\x1b[1;1R")
                 if pending_follow_up and b"FIXTURE_DONE" in output:
-                    os.write(master, b"typed reconnect follow-up")
-                    submit_at = time.monotonic() + 0.3
+                    os.write(master, "typed reconnect follow-up café 雪 🦀x".encode())
+                    (cwd / "fail-title").touch()
+                    with sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db") as database:
+                        session = database.execute(
+                            "SELECT id FROM agent_sessions LIMIT 1"
+                        ).fetchone()[0]
+                        # Completed Sessions reject CLI rename. Change only this
+                        # fixture's title to exercise the active reconnect reader.
+                        database.execute(
+                            "UPDATE agent_sessions SET title='Warning during draft' WHERE id=?",
+                            (session,),
+                        )
+                    waiting_for_diagnostic = True
                     pending_follow_up = False
                 if not exiting and expected in output:
                     exit_at = time.monotonic() + 1
@@ -133,12 +159,28 @@ def _terminal(
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
         assert expected in output, "terminal never displayed the completed turn"
+        if follow_up:
+            assert not waiting_for_diagnostic, "background failure never reached diagnostics"
+            assert b"cmux title update failed" not in output
+            assert b"Loopflow recorded diagnostics:" in output
         return child.returncode
     finally:
         transcript.write_bytes(output)
         if child.poll() is None:
-            os.killpg(child.pid, signal.SIGKILL)
-        child.wait()
+            # Cleanly exit even with a draft, reaping the private app-server too.
+            os.write(master, b"\x15/exit")
+            time.sleep(0.3)
+            os.write(master, b"\r")
+            cleanup_deadline = time.monotonic() + 5
+            while child.poll() is None and time.monotonic() < cleanup_deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        os.read(master, 65536)
+                    except OSError:
+                        break
+            if child.poll() is None:
+                os.killpg(child.pid, signal.SIGKILL)
+        child.wait(timeout=5)
         os.close(master)
 
 
@@ -221,6 +263,8 @@ trust_level="trusted"
     )
     (bin_dir / "codex").write_text(wrapper)
     (bin_dir / "codex").chmod(0o755)
+    (bin_dir / "cmux").write_text('#!/bin/sh\n[ ! -f "$PWD/fail-title" ]\n')
+    (bin_dir / "cmux").chmod(0o755)
     env = {
         "HOME": str(home),
         "CODEX_HOME": str(native),
@@ -228,6 +272,9 @@ trust_level="trusted"
         "LF_BIN": str(lf),
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "TERM": "xterm-256color",
+        "RUST_LOG": "warn",
+        "CMUX_WORKSPACE_ID": "fixture",
+        "CMUX_SURFACE_ID": "fixture",
     }
     args = [str(lf), "--diff", "none", "-a", "codex", ":", "hello"]
     status = _terminal(args, env, root, root / "launch.txt")
@@ -266,6 +313,11 @@ trust_level="trusted"
     assert status == 0, (status, root / "resume.txt")
     assert binding.exists(), "resume did not restore its context binding"
     assert any(b"NATIVE_CONTEXT_AFTER_RESUME" in request for request in Model.requests)
+    assert any(
+        "typed reconnect follow-up café 雪 🦀 ready"
+        in json.dumps(json.loads(request), ensure_ascii=False)
+        for request in Model.requests
+    ), "Unicode draft did not survive warning, resize and editing"
     (root / "model-requests.json").write_text(
         json.dumps([json.loads(request) for request in Model.requests])
     )

@@ -285,6 +285,7 @@ mod tests {
                     "conversation",
                     &attachment,
                     &crate::session::SessionActivity {
+                        preview: None,
                         observed_at,
                         open_tools,
                         pending_input,

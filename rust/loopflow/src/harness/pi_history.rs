@@ -175,6 +175,7 @@ fn observe_native(
                 crate::store::StoreError::InvalidData("Pi callback has no input count".into())
             })? as usize,
             yielded,
+            preview: None,
         };
         store.record_session_activity(&adapter.session, &attachment, &activity)?;
         crate::transport::report(

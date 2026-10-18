@@ -14,18 +14,29 @@ public enum PaneContent: Codable, Sendable, Equatable {
     case empty
     case session(id: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// Unknown locations remain unavailable, never a local-shell fallback.
-    case shell(location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil)
+    case shell(tabs: [ShellTab], selected: String)
     /// Every Flow process of a Task.
     case flowLog(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
     /// A Task's worktree files.
     case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
+
+    public static func shell(location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) -> Self {
+        let tab = ShellTab(location: location, execution: execution)
+        return .shell(tabs: [tab], selected: tab.id)
+    }
+
+    public var selectedShell: ShellTab? {
+        guard case .shell(let tabs, let selected) = self else { return nil }
+        return tabs.first { $0.id == selected }
+    }
 
     /// Terminals retain their captured location; Files and logs follow their
     /// recorded owner. Unavailable owner evidence never falls back to a path.
     public var location: WorkspaceIdentity? {
         switch self {
         case .empty: return nil
-        case .session(_, let location, _), .shell(let location, _): return location
+        case .session(_, let location, _): return location
+        case .shell: return selectedShell?.location
         case .files(_, let location, let execution), .flowLog(_, let location, let execution):
             guard let execution else { return location }
             guard case .recorded(_, let checkout?) = execution.location else { return nil }
@@ -36,10 +47,25 @@ public enum PaneContent: Codable, Sendable, Equatable {
     /// The exact observed owner travels with the content, never the enclosing workspace.
     public var executionLocation: TaskLocationObservation? {
         switch self {
-        case .session(_, _, let execution), .shell(_, let execution),
-             .files(_, _, let execution), .flowLog(_, _, let execution): execution
-        case .empty: nil
+        case .shell: return selectedShell?.execution
+        case .session(_, _, let execution),
+             .files(_, _, let execution), .flowLog(_, _, let execution): return execution
+        case .empty: return nil
         }
+    }
+}
+
+/// Runtime shell state. Its identity and incarnation survive tab selection and pane moves.
+public struct ShellTab: Codable, Sendable, Identifiable, Equatable {
+    public let id: String
+    public let incarnation: String
+    public let location: WorkspaceIdentity?
+    public let execution: TaskLocationObservation?
+    public let command: [String]?
+    public let lfProcessID: String?
+    public init(id: String = UUID().uuidString, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil, command: [String]? = [], lfProcessID: String? = nil) {
+        self.id = id; incarnation = UUID().uuidString; self.location = location
+        self.execution = execution; self.command = command; self.lfProcessID = lfProcessID
     }
 }
 
@@ -54,6 +80,10 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
     }
 
     public var executionLocation: TaskLocationObservation? { content.executionLocation }
+
+    fileprivate init(id: String, content: PaneContent, incarnation: String) {
+        self.id = id; self.content = content; self.incarnation = incarnation
+    }
 
     public init(
         id: String = UUID().uuidString,
@@ -136,6 +166,12 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                 second: .leaf(newPane),
                 ratio: ratio.clampedSplitRatio
             )
+        }
+    }
+
+    public func updatingShellTabs(of paneId: String, tabs: [ShellTab], selected: String) -> LayoutNode {
+        _replacingLeaf(paneId) { pane in
+            .leaf(PaneState(id: pane.id, content: .shell(tabs: tabs, selected: selected), incarnation: pane.incarnation))
         }
     }
 

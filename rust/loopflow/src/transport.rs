@@ -688,17 +688,25 @@ fn size() -> (u16, u16) {
     dimensions(size.ws_row, size.ws_col)
 }
 
-struct RawTerminal(Option<libc::termios>);
+struct RawTerminal {
+    original: Option<libc::termios>,
+    // Drop restores terminal modes before output announces any diagnostics.
+    output: crate::terminal_output::TerminalOutput,
+}
 impl RawTerminal {
-    fn enter() -> io::Result<Self> {
+    fn enter() -> Result<Self> {
+        let output = crate::terminal_output::TerminalOutput::enter()?;
         if !io::stdin().is_terminal() {
-            return Ok(Self(None));
+            return Ok(Self {
+                original: None,
+                output,
+            });
         }
         // SAFETY: termios is initialized by tcgetattr before it is read.
         let original = unsafe {
             let mut value = std::mem::zeroed();
             if libc::tcgetattr(0, &mut value) < 0 {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
             value
         };
@@ -715,17 +723,20 @@ impl RawTerminal {
             libc::cfmakeraw(&mut raw);
             libc::tcsetattr(0, libc::TCSANOW, &raw);
         }
-        Ok(Self(Some(original)))
+        Ok(Self {
+            original: Some(original),
+            output,
+        })
     }
 }
 impl Drop for RawTerminal {
     fn drop(&mut self) {
-        if let Some(original) = self.0 {
+        if let Some(original) = self.original {
             // SAFETY: restores attributes previously read from stdin.
             unsafe {
                 libc::tcsetattr(0, libc::TCSANOW, &original);
             }
-            let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m");
+            let _ = self.output.stdout.write_all(b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?1049l\x1b[?25h\x1b[0m");
         }
     }
 }
@@ -802,11 +813,21 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
                         if is_terminal {
                             terminal = Some(RawTerminal::enter()?);
                         }
-                        io::stdout().write_all(&bytes)?;
-                        io::stdout().flush()?;
+                        if let Some(terminal) = &mut terminal {
+                            terminal.output.stdout.write_all(&bytes)?;
+                        } else {
+                            io::stdout().write_all(&bytes)?;
+                            io::stdout().flush()?;
+                        }
                     }
                     Response::Output { stream, bytes } => {
-                        if stream == 2 {
+                        if let Some(terminal) = &mut terminal {
+                            if stream == 2 {
+                                terminal.output.stderr.write_all(&bytes)?;
+                            } else {
+                                terminal.output.stdout.write_all(&bytes)?;
+                            }
+                        } else if stream == 2 {
                             io::stderr().write_all(&bytes)?;
                             io::stderr().flush()?;
                         } else {

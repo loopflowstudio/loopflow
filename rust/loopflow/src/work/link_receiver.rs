@@ -16,7 +16,6 @@ const SCHEME_TYPE: &str = "x-scheme-handler/loopflow";
 const DESKTOP_ENTRY: &str = "loopflow-links.desktop";
 const APPLET: &str = "Loopflow Links.app";
 const APPLET_BUNDLE: &str = "com.loopflow.links";
-const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 
 /// Who receives `loopflow:` links after installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,7 +217,8 @@ fn install_macos(home: &Path, lf: &Path, placed_desktop: bool) -> Result<Receive
     let applet = home
         .join("Library/Application Support/Loopflow")
         .join(APPLET);
-    if placed_desktop || application_for_bundle(DESKTOP_BUNDLE).is_some() {
+    if placed_desktop || application_for_bundle(crate::lf::commands::open::DESKTOP_BUNDLE).is_some()
+    {
         // Desktop owns the scheme and resolves through `lf open --link` itself.
         if applet.exists() {
             fs::remove_dir_all(&applet).with_context(|| format!("remove {}", applet.display()))?;

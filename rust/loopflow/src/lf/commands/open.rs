@@ -22,7 +22,7 @@ use crate::session::PrimaryScope;
 use crate::store::Store;
 use crate::work::link::{WorkTarget, WorkUrl};
 
-const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
+pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a just-created destination stands for its Work while its
 /// conversation starts and attaches. Later, attachment placement answers.
@@ -191,6 +191,7 @@ impl Resolved {
     fn receipt(
         &self,
         host: Option<OpenHost>,
+        destination: Option<String>,
         status: OpenStatus,
         reason: Option<String>,
     ) -> OpenReceipt {
@@ -198,7 +199,7 @@ impl Resolved {
             label: self.label.clone(),
             url: self.url.to_string(),
             host,
-            destination: None,
+            destination,
             status,
             reason,
             fallback_argv: self.fallback_argv(),
@@ -411,22 +412,18 @@ fn describe(
         }
         _ => None,
     };
+    let registered = registered(store)?;
+    let canonical = repository_path
+        .canonicalize()
+        .unwrap_or_else(|_| repository_path.clone());
+    let own = registered.iter().find(|repo| repo.canonical == canonical);
     let repository_id = match &context.repository {
         ContextFact::Bound { value, .. } => Some(value.clone()),
-        _ => {
-            let canonical = repository_path
-                .canonicalize()
-                .unwrap_or_else(|_| repository_path.clone());
-            registered(store)?
-                .into_iter()
-                .find(|repo| repo.canonical == canonical)
-                .and_then(|repo| repo.id)
-                .map(|id| id.to_string())
-        }
+        _ => own
+            .and_then(|repo| repo.id.as_ref())
+            .map(|id| id.to_string()),
     };
-    let short_name = repository_path
-        .file_name()
-        .and_then(|name| name.to_str())
+    let short_name = folder_name(&repository_path)
         .context("Repository folder has no readable name")?
         .to_owned();
     let target = match (&task, &wave) {
@@ -435,7 +432,7 @@ fn describe(
         (None, None) => WorkTarget::Repository,
     };
     let mut url = WorkUrl::new(short_name.clone(), target);
-    url.qualifier = qualifier_for(store, &repository_path, &short_name)?;
+    url.qualifier = own.and_then(|own| qualifier_for(&registered, own, &short_name));
     // An exact Session travels with a Task link; elsewhere the connect argv carries it.
     if task.is_some() {
         url.session = session.clone();
@@ -575,21 +572,16 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl) -> Result<PathBuf> {
 
 /// Qualify a short name only when another registered repository shares it.
 fn qualifier_for(
-    store: Option<&Store>,
-    path: &Path,
+    registered: &[Registered],
+    own: &Registered,
     short_name: &str,
-) -> Result<Option<crate::durable::RepositoryId>> {
-    let registered = registered(store)?;
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let Some(own) = registered.iter().find(|repo| repo.canonical == canonical) else {
-        return Ok(None);
-    };
+) -> Option<crate::durable::RepositoryId> {
     let shared = registered.iter().any(|repo| {
         repo.canonical != own.canonical
             && folder_name(&repo.path) == Some(short_name)
             && (repo.id.is_none() || repo.id != own.id)
     });
-    Ok(own.id.clone().filter(|_| shared))
+    own.id.clone().filter(|_| shared)
 }
 
 /// Every conversation the shared reader judges available, as Work targets
@@ -773,25 +765,34 @@ fn in_herdr() -> bool {
 /// terminal placement (`herdr:<workspace>` or `cmux:<workspace>`) so a later
 /// opening can focus that conversation instead of starting another client.
 pub(crate) fn host_placement() -> Option<String> {
-    let workspace = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
-    if in_herdr() {
-        return workspace(HERDR_WORKSPACE).map(|id| format!("herdr:{id}"));
+    let (host, name) = if in_herdr() {
+        (OpenHost::Herdr, HERDR_WORKSPACE)
+    } else if in_cmux() {
+        (OpenHost::Cmux, CMUX_WORKSPACE)
+    } else {
+        return None;
+    };
+    let workspace = std::env::var(name).ok().filter(|value| !value.is_empty())?;
+    placement(host, &workspace)
+}
+
+/// `cmux:<workspace>` / `herdr:<workspace>`; other hosts record no placement.
+fn placement(host: OpenHost, destination: &str) -> Option<String> {
+    match host {
+        OpenHost::Cmux => Some(format!("cmux:{destination}")),
+        OpenHost::Herdr => Some(format!("herdr:{destination}")),
+        _ => None,
     }
-    in_cmux()
-        .then(|| workspace(CMUX_WORKSPACE))
-        .flatten()
-        .map(|id| format!("cmux:{id}"))
 }
 
 fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
-    placement
-        .strip_prefix("cmux:")
-        .map(|id| (OpenHost::Cmux, id))
-        .or_else(|| {
-            placement
-                .strip_prefix("herdr:")
-                .map(|id| (OpenHost::Herdr, id))
-        })
+    let (prefix, id) = placement.split_once(':')?;
+    let host = match prefix {
+        "cmux" => OpenHost::Cmux,
+        "herdr" => OpenHost::Herdr,
+        _ => return None,
+    };
+    Some((host, id))
 }
 
 /// Why one destination did not open. A definite failure created nothing, so
@@ -801,9 +802,25 @@ enum RouteError {
     Unknown(String),
 }
 
+impl RouteError {
+    fn reason(&self) -> &str {
+        let (Self::Definite(reason) | Self::Unknown(reason)) = self;
+        reason
+    }
+}
+
 struct Opened {
     status: OpenStatus,
     destination: Option<String>,
+}
+
+impl Opened {
+    fn opening(destination: Option<String>) -> Self {
+        Self {
+            status: OpenStatus::Opening,
+            destination,
+        }
+    }
 }
 
 fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<OpenReceipt> {
@@ -844,7 +861,7 @@ fn open_one(
     let mut opening = match Opening::lock(target) {
         Ok(opening) => opening,
         Err(error) => {
-            return target.receipt(None, OpenStatus::Failed, Some(format!("{error:#}")));
+            return target.receipt(None, None, OpenStatus::Failed, Some(format!("{error:#}")));
         }
     };
     let elsewhere = elsewhere(target);
@@ -860,19 +877,25 @@ fn open_one(
                 .filter(|(placed, _)| focus && route.hosts.contains(placed))
             {
                 if focus_destination(workspace.0, workspace.1).is_ok() {
-                    let mut receipt = target.receipt(Some(workspace.0), OpenStatus::Usable, None);
-                    receipt.destination = Some(workspace.1.to_owned());
-                    return receipt;
+                    return target.receipt(
+                        Some(workspace.0),
+                        Some(workspace.1.to_owned()),
+                        OpenStatus::Usable,
+                        None,
+                    );
                 }
             }
-            return target.receipt(Some(host), OpenStatus::Elsewhere, Some(live.reason.clone()));
+            return target.receipt(
+                Some(host),
+                None,
+                OpenStatus::Elsewhere,
+                Some(live.reason.clone()),
+            );
         }
         // A destination created moments ago is still starting this conversation.
         if let Some(destination) = opening.starting(host) {
             if !focus || focus_destination(host, &destination).is_ok() {
-                let mut receipt = target.receipt(Some(host), OpenStatus::Opening, None);
-                receipt.destination = Some(destination);
-                return receipt;
+                return target.receipt(Some(host), Some(destination), OpenStatus::Opening, None);
             }
         }
         let attempt = match host {
@@ -890,9 +913,7 @@ fn open_one(
                 if let Some(destination) = &opened.destination {
                     opening.record(host, destination);
                 }
-                let mut receipt = target.receipt(Some(host), opened.status, None);
-                receipt.destination = opened.destination;
-                return receipt;
+                return target.receipt(Some(host), opened.destination, opened.status, None);
             }
             Err(RouteError::Definite(reason)) => {
                 skipped.push(format!("{}: {reason}", host.label()));
@@ -900,6 +921,7 @@ fn open_one(
             Err(RouteError::Unknown(reason)) => {
                 return target.receipt(
                     Some(host),
+                    None,
                     OpenStatus::Failed,
                     Some(format!(
                         "{}: {reason}. It may have opened; check there before retrying.",
@@ -909,7 +931,7 @@ fn open_one(
             }
         }
     }
-    target.receipt(None, OpenStatus::Failed, Some(skipped.join("; ")))
+    target.receipt(None, None, OpenStatus::Failed, Some(skipped.join("; ")))
 }
 
 /// The per-Work opening lock. Its file remembers the host destination the
@@ -965,15 +987,13 @@ impl Opening {
 
     fn record(&mut self, host: OpenHost, destination: &str) {
         use std::io::{Seek, Write};
-        let prefix = match host {
-            OpenHost::Cmux => "cmux",
-            OpenHost::Herdr => "herdr",
-            _ => return,
+        let Some(placement) = placement(host, destination) else {
+            return;
         };
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let written = self.0.set_len(0).and_then(|()| {
             self.0.rewind()?;
-            write!(self.0, "{now} {prefix}:{destination}")
+            write!(self.0, "{now} {placement}")
         });
         if let Err(error) = written {
             tracing::warn!(%error, "cannot record the opened destination");
@@ -1022,10 +1042,7 @@ fn open_desktop(target: &Resolved, focus: bool) -> Result<Opened, RouteError> {
         command.arg("-g");
     }
     command.arg(target.url.to_string());
-    run_host(command, "Launch Services").map(|_| Opened {
-        status: OpenStatus::Opening,
-        destination: None,
-    })
+    run_host(command, "Launch Services").map(|_| Opened::opening(None))
 }
 
 fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
@@ -1047,10 +1064,7 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
         .split_whitespace()
         .find(|word| word.starts_with("workspace:"))
         .map(str::to_owned);
-    Ok(Opened {
-        status: OpenStatus::Opening,
-        destination,
-    })
+    Ok(Opened::opening(destination))
 }
 
 fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
@@ -1077,16 +1091,14 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
         .map_err(|error| RouteError::Unknown(error.to_string()))?;
     let mut run = Command::new("herdr");
     run.args(["pane", "run", pane, &shell]);
-    run_host(run, "Herdr").map_err(|error| match error {
-        RouteError::Definite(reason) | RouteError::Unknown(reason) => RouteError::Unknown(format!(
-            "created workspace {} but could not start its conversation: {reason}",
-            workspace.as_deref().unwrap_or(pane)
-        )),
+    run_host(run, "Herdr").map_err(|error| {
+        RouteError::Unknown(format!(
+            "created workspace {} but could not start its conversation: {}",
+            workspace.as_deref().unwrap_or(pane),
+            error.reason()
+        ))
     })?;
-    Ok(Opened {
-        status: OpenStatus::Opening,
-        destination: workspace,
-    })
+    Ok(Opened::opening(workspace))
 }
 
 fn open_terminal(
@@ -1141,10 +1153,7 @@ fn open_terminal(
             .inspect_err(|_| {
                 let _ = std::fs::remove_file(&path);
             })
-            .map(|_| Opened {
-                status: OpenStatus::Opening,
-                destination: None,
-            });
+            .map(|_| Opened::opening(None));
     }
     if !set("DISPLAY") && !set("WAYLAND_DISPLAY") {
         return Err(RouteError::Definite(
@@ -1162,12 +1171,7 @@ fn open_terminal(
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         match command.spawn() {
-            Ok(_) => {
-                return Ok(Opened {
-                    status: OpenStatus::Opening,
-                    destination: None,
-                })
-            }
+            Ok(_) => return Ok(Opened::opening(None)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(RouteError::Definite(error.to_string())),
         }
@@ -1197,8 +1201,7 @@ fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError
     run_host(command, host.label())
         .map(drop)
         .inspect_err(|error| {
-            let (RouteError::Definite(reason) | RouteError::Unknown(reason)) = error;
-            tracing::warn!(%reason, "cannot focus the destination");
+            tracing::warn!(reason = error.reason(), "cannot focus the destination");
         })
 }
 
@@ -1305,7 +1308,7 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
 }
 
 /// Read-only links for `--link` and `--explain`.
-pub fn links(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<WorkLink>, Vec<String>)> {
+fn links(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<WorkLink>, Vec<String>)> {
     let (targets, unknown) = targets(cli, args)?;
     let route = route(args.host);
     Ok((

@@ -690,10 +690,11 @@ impl Reader {
                         }
                         None => None,
                     };
+                    let roadmap = super::waves::roadmap_all(store).await?;
                     WorkContent::Planning(Some(Box::new(PlanningPart {
                         selections,
-                        roadmap: super::waves::roadmap_all(store).await?,
-                        waves: super::waves::wave_snapshots(store, true, true).await?,
+                        waves: super::waves::current_waves(&roadmap),
+                        roadmap,
                     })))
                 }
                 Part::PeerPlanning => {

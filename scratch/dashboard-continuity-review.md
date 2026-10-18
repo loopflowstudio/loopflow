@@ -167,6 +167,11 @@ Open design tension (4), not resolved: an unstarted Task opened as a workspace h
 Session view. Options Jack named and disliked: Sessions for unstarted Tasks; auto-start.
 Jack's leaning: queries exclude unstarted Tasks — but completed Tasks share the
 no-Session property and recently completed ones should stay visible.
+Agent proposal: unstarted Tasks appear only as their brief and cannot be zoomed. Jack:
+“i could accept just a start UI not unlike the "move to here" UI we already have”.
+Direction (agreed in principle, not built): opening an unstarted Task shows its brief
+with an explicit Start action styled like the existing “Open here”/move-here pane, never
+an empty Files/Changes workspace. Starting stays explicit; no automatic start.
 
 ## Review disposition and next action
 

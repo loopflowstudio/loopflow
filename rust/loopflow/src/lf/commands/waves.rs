@@ -548,9 +548,9 @@ pub(crate) async fn wave_snapshots(
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
     let mut snapshots = Vec::with_capacity(waves.len());
-    let mut repositories = HashMap::new();
+    let mut checkouts = Checkouts::default();
     for wave in waves {
-        let checkout = wave_repository(&wave, &mut repositories)?;
+        let checkout = wave_repository(&wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, &wave, &checkout).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
@@ -615,9 +615,9 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .list_waves(Some(wave.repo()))
         .await
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-    let mut repositories = HashMap::new();
-    validate_linear_ownership(store, &repository_waves, &mut repositories).await?;
-    let checkout = wave_repository(wave, &mut repositories)?;
+    let mut checkouts = Checkouts::default();
+    validate_linear_ownership(store, &repository_waves, &mut checkouts).await?;
+    let checkout = wave_repository(wave, &mut checkouts)?;
     let snapshot = snapshot_wave(store, wave, &checkout).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
@@ -772,6 +772,13 @@ pub fn list_tasks(repo: &Path, wave: Option<&str>, json: bool) -> Result<()> {
 }
 
 /// `lf wave show --all`: every current Wave in every repository.
+/// The current Waves a roadmap already read, ordered as `wave_snapshots` orders them.
+pub(crate) fn current_waves(roadmap: &RoadmapSnapshot) -> Vec<WaveSnapshot> {
+    let mut waves: Vec<_> = roadmap.waves.iter().map(|wave| wave.wave.clone()).collect();
+    waves.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+    waves
+}
+
 pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
     let waves = store
         .list_waves(None)
@@ -797,8 +804,8 @@ async fn roadmap_snapshot(
     } else {
         waves.clone()
     };
-    let mut repositories = HashMap::new();
-    validate_linear_ownership(store, &ownership_waves, &mut repositories).await?;
+    let mut checkouts = Checkouts::default();
+    validate_linear_ownership(store, &ownership_waves, &mut checkouts).await?;
     let shared = SharedTaskReads::read(store).await?;
     let mut tasks = store.list_tasks(None).await?;
     if let Some(repo) = repo_scope {
@@ -843,7 +850,7 @@ async fn roadmap_snapshot(
             .iter()
             .find(|current| current.id() == wave.id())
             .unwrap_or(wave);
-        let checkout = wave_repository(wave, &mut repositories)?;
+        let checkout = wave_repository(wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
@@ -1057,26 +1064,46 @@ fn now() -> time::OffsetDateTime {
 
 // Resolve each recorded repository once per read. Sharing across validation and
 // display avoids one Git process per Wave without retaining facts across reads.
-fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> Result<PathBuf> {
-    if let Some(checkout) = repositories.get(wave.repo()) {
+/// Checkouts resolved during one reading: each repository address once, and
+/// the current directory's checkout once, however many Waves share them.
+#[derive(Debug, Default)]
+struct Checkouts {
+    current: Option<Option<(PathBuf, crate::repository::CanonicalRepo)>>,
+    repositories: HashMap<String, PathBuf>,
+}
+
+fn wave_repository(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
+    if let Some(checkout) = checkouts.repositories.get(wave.repo()) {
         return Ok(checkout.clone());
     }
-    let checkout = wave_checkout(wave)?;
-    repositories.insert(wave.repo().to_string(), checkout.clone());
+    let checkout = wave_checkout(wave, checkouts)?;
+    checkouts
+        .repositories
+        .insert(wave.repo().to_string(), checkout.clone());
     Ok(checkout)
 }
 
 // A registry address identifies the repository, not the checkout's document bytes.
-fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
-    if let Some(checkout) = crate::repo::discover_repo_root(&std::env::current_dir()?)? {
-        if crate::repository::CanonicalRepo::discover(&checkout)?.contains(Path::new(wave.repo())) {
-            return Ok(checkout);
+fn wave_checkout(wave: &Wave, checkouts: &mut Checkouts) -> Result<PathBuf> {
+    let Ok(main) = crate::git::worktrees::main_repo_root(Path::new(wave.repo())) else {
+        return Ok(PathBuf::from(wave.repo()));
+    };
+    if checkouts.current.is_none() {
+        let current = match crate::repo::discover_repo_root(&std::env::current_dir()?)? {
+            Some(checkout) => {
+                let repo = crate::repository::CanonicalRepo::discover(&checkout)?;
+                Some((checkout, repo))
+            }
+            None => None,
+        };
+        checkouts.current = Some(current);
+    }
+    if let Some(Some((checkout, repo))) = &checkouts.current {
+        if main.canonicalize().is_ok_and(|main| main == repo.as_path()) {
+            return Ok(checkout.clone());
         }
     }
-    Ok(
-        crate::git::worktrees::main_repo_root(Path::new(wave.repo()))
-            .unwrap_or_else(|_| PathBuf::from(wave.repo())),
-    )
+    Ok(main)
 }
 
 /// Read planning and optional placement without allocating execution.
@@ -1152,11 +1179,11 @@ fn snapshot_task_runtime(
 async fn validate_linear_ownership(
     store: &SharedStore,
     waves: &[Wave],
-    repositories: &mut HashMap<String, PathBuf>,
+    checkouts: &mut Checkouts,
 ) -> Result<()> {
     let mut ownership = HashMap::<PathBuf, Vec<_>>::new();
     for wave in waves {
-        let repo = wave_repository(wave, repositories)?;
+        let repo = wave_repository(wave, checkouts)?;
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         ownership
             .entry(repo)

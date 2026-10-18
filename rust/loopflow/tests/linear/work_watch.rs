@@ -1357,3 +1357,78 @@ fn peer_planning_receipts_reach_open_desktop_without_refresh() {
         Some("unconfirmed")
     );
 }
+
+/// The `git` commands one planning reading runs, recorded by a shim ahead of
+/// the real `git` on PATH.
+fn planning_git_commands(home: &Path) -> Vec<String> {
+    let shim = tempfile::tempdir().unwrap();
+    let log = shim.path().join("calls");
+    let path = std::env::var_os("PATH").unwrap();
+    let git = std::env::split_paths(&path)
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .unwrap();
+    let script = shim.path().join("git");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec '{}' \"$@\"\n",
+            log.display(),
+            git.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut search = vec![shim.path().to_path_buf()];
+    search.extend(std::env::split_paths(&path));
+    let output = lf(home, &["monitor", "work", "--json"])
+        .env("PATH", std::env::join_paths(search).unwrap())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let planning = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<WorkFrame>(line).unwrap())
+        .any(|frame| matches!(frame.content, WorkContent::Planning(Some(_))));
+    assert!(planning, "no planning frame");
+    std::fs::read_to_string(&log)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every Desktop window waits on this reading. On October 18, 2026 Jack Heart's
+/// Machine took over a minute to produce it, mostly spawning `git` for Waves
+/// whose repositories were deleted test directories, so the window stayed on
+/// “Updating…” with no working Tasks.
+#[test]
+fn planning_runs_git_per_repository_not_per_wave() {
+    let home = Machine::new();
+    home.plan(3);
+    let baseline = planning_git_commands(home.path());
+
+    for index in 0..8 {
+        let gone = home.path().join(format!("deleted-{index}"));
+        let wave = Wave::new(
+            WaveId::new(),
+            format!("gone-{index}"),
+            gone.display().to_string(),
+        );
+        home.store.create_wave(&wave).unwrap();
+        let sibling = Wave::new(
+            WaveId::new(),
+            format!("sibling-{index}"),
+            home.wave.repo().into(),
+        );
+        home.store.create_wave(&sibling).unwrap();
+    }
+    let grown = planning_git_commands(home.path());
+
+    assert!(
+        grown.len() <= baseline.len(),
+        "baseline: {baseline:#?}\ngrown: {grown:#?}"
+    );
+}

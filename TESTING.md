@@ -813,6 +813,9 @@ Run these through the same external-network denial wrapper as other CLI fixtures
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
+Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
+`LF_BIN`, even when they never execute the declared hook. When changing executable
+selection, run these fixtures with installed `lf` directories removed from PATH.
 
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;

@@ -96,8 +96,11 @@ mod tests {
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions_without_granting_trust() {
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let repos = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
         let contexts: Vec<_> = repos
             .iter()
@@ -143,7 +146,11 @@ mod tests {
 
     #[test]
     fn opencode_context_preserves_settings_and_existing_plugins() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", repo.path().join("machine"));
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
             repository: None,
             repo: repo.path().to_owned(),

@@ -480,8 +480,8 @@ or bind one member of a taskless Flow inconsistently with its owner.
 Jack Heart's 2026-09-30 decision retains prospective usage
 attribution: bind records assignment time; earlier usage retains its owner.
 The history reader owns this single choice. `lf usage --binds` compares it with
-post-hoc attribution from the same history; the
-[evaluation](../performance/bind-attribution.md) holds the reading and recommendation. Preserve active-turn start/assignment evidence; unknown allocation remains unknown rather than inventing a token split.
+post-hoc attribution from the same history. Preserve active-turn start/assignment
+evidence; unknown allocation remains unknown rather than inventing a token split.
 Project/Task moves preserve immutable historical attribution while
 validating current ancestry.
 
@@ -1198,8 +1198,8 @@ their deletion is finished.
 
 Canonical migrations, migration fixtures, and release notes retain historical
 names because changing shipped evidence would rewrite history. Operational docs
-and current runtime source do not. Chapter archives under `.lf/chapters/` are
-dated evidence, excluded from live vocabulary and compatibility-seam discovery.
+and current runtime source do not. Dated operational archives belong outside
+the tracked source tree.
 
 ## Authority and failure invariants
 

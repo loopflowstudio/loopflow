@@ -1,3 +1,4 @@
+-- draft: session_preview
 ALTER TABLE session_activity ADD COLUMN preview TEXT CHECK (preview IS NULL OR json_valid(preview));
 DROP TRIGGER store_revision_session_activity_update;
 CREATE TRIGGER store_revision_session_activity_update AFTER UPDATE ON session_activity

@@ -95,8 +95,8 @@ struct DashboardView: View {
                             Button {
                                 save(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
                             } label: {
-                                if let task = model.task(id: member.work.id)?.task { TaskHeading(task: task) }
-                                else { Text(plan.contents.first { $0.work == member.work }?.title ?? member.work.id) }
+                                Text(model.task(id: member.work.id)?.task.task.name
+                                    ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
                             }.disabled(model.dashboardSaving).help("Show this occurrence again")
                         }
                     }.font(.caption).padding(8)

@@ -289,7 +289,12 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let base = repo.head_sha();
     let branch = "jack/initializing-task";
     repo.create_branch(branch);
-    let mut task = register_task_with_pr(home.path(), repo.path(), branch, &base);
+    let mut task = register_task_with_pr(
+        home.path(),
+        &repo.path().canonicalize().unwrap(),
+        branch,
+        &base,
+    );
     let missing_worktree = home.path().join("not-yet-created-worktree");
     task.task.worktree = Some(missing_worktree.clone());
     let runtime = tokio::runtime::Runtime::new().expect("initialization fixture runtime");

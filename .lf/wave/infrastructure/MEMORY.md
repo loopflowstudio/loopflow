@@ -48,13 +48,28 @@ evidence covers retries, resize/edit/submit, normal success and native identity;
 it proves neither paid-account access, screenshot version 1.18.33 nor delivery.
 Release's entry-point lesson applies: source tests miss competing terminal writers.
 
+## OpenCode protocol evidence (LOO-504, 2026-10-17)
+
+Jack Heart selected OpenCode 2 repair/delivery;
+automatic crash continuation is deferred. Candidate deterministic-native
+tool/context/Flow and configured-account launch/tool/resume passed.
+[PR #1590](https://github.com/loopflowstudio/loopflow/pull/1590) records verification
+and remaining native acceptance.
+
+No parent IDs or replayable events; steer/queue share idle.
+Readmission can emit empty success; managed recovery injects synthetic guidance
+with unaccepted at-least-once semantics. Native stability proves neither
+attribution nor deduplication. Preserve frozen capture/Process/Work,
+independent steers, separate queued results and LOO-415's owner. Release's lesson:
+candidate proof cannot bypass supported installation. Gate, broader native
+acceptance and delivery remain open.
+
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
 #1545 merged; installation and measured savings remain unproved. Assertion
 boundaries, counts and acquisition evidence:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading;
-[assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13).
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
 
@@ -389,24 +404,15 @@ retain no authority; emission is not confirmation.
 
 Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
 bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
-`0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
-and OpenCode retry protocol proofs, not configured model acceptance. Old injection
-paths are deleted; the withdrawn-cut feedback no longer describes current source.
-`27ce387bdc` removes unread subscription state. `cd2c38184f` reconciles membership
-on Session reads/callbacks, removing publication-time scans; cancelled mixed batches
-retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
-not installed. Release's operation-entry lesson applies: store proofs cannot
-replace public launch proofs; protocol stand-ins cannot prove model acceptance.
-The shared-dispatch counterexample and protocol limits remain in
-`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
-Configured-provider acceptance remains unproved; current semantics and limitations
-live in `docs/architecture-reference.md` under Durable communication.
-Gate found missing planning revision triggers for saved steers; the same draft now
-adds them. Explicit delivery diagnostics do not drive workspace refreshes.
-The launch fixtures select hooks by moment and supply the native Session identity;
-the account fixture isolates native Claude state. Focused repairs, receipt/migration
-proofs, CLI/integration checks and 28 headless Swift DTO tests pass. The broader
-library run had 1,718 passes and 9 ignores; both failures passed focused repairs.
+Old injection paths are deleted. Membership reconciles on reads/callbacks;
+cancelled mixed batches retain unaffected direction. Reserved capabilities are not
+installed ones; explicit diagnostics do not drive workspace refreshes. Saved
+steers now trigger planning revisions. Historical fixture counts, branch cuts and
+the shared-dispatch counterexample remain at
+`28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
+this heading. These prove neither configured model acceptance nor OpenCode 2
+compatibility. Current semantics: `docs/architecture-reference.md`, Durable
+communication.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 
@@ -441,7 +447,7 @@ Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized investigation, cleanup and delivery. Evidence: [storage footprint review](../../../docs/reviews/storage-footprint.md).
+Jack Heart authorized investigation, cleanup and delivery.
 `session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
 also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
 measured): new captures keep 28% of rows and 72% of bytes, preflight validates
@@ -525,8 +531,7 @@ Release owns re-entry leases, transfer deadlines and pending-version lessons.
 `cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
 its ancestry veto in source. Jack Heart subsequently authorized landing #1533
 after resolving main conflicts (`7689d642`); this gate does not establish delivery.
-The [durable review](../../../docs/reviews/stale-pr-bases.md) preserves the 5 Whys
-and refusal inventory. Current Git ancestry owns PR comparison; saved placement cannot
+Current Git ancestry owns PR comparison; saved placement cannot
 classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
 refreshing them during publication can restore files main deleted. Disposable
 CLI proofs pass; installed Etude and hosted acceptance remain unproved.
@@ -1116,14 +1121,13 @@ Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/networ
 proof remains; Release's lesson separates local proof from delivery.
 Preserve copy/sign, development/validation-only authority and disposable
 OS accounts for installation. No paid runners, test removal, cache relaxation or
-retries. [Trials and limits](../../../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-exact-cache-miss-overlap).
+retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
 Jack Heart requested landing #1505 on October 8, superseding review-only Flow feedback.
 Keep the Task open for outstanding cold-cache verification.
-[The report](../../../scripts/benchmarks/agent-startup/README.md) owns numbers,
-release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
+Git retains the dated measurements and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and
 ancestor-probe deferral did not and were removed. The last rejection meets
 the stopping condition, not exhaustion.

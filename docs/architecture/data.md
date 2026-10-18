@@ -71,8 +71,7 @@ A capture's `events.jsonl` holds every provider event verbatim. SQLite history
 keeps what streaming increments add up to: a run of deltas is one event at the
 first delta's position, a Turn keeps its last cumulative diff, and the raw
 notification behind each increment stays in the file. Complete items, usage,
-input and outcomes are kept in both. Sizes and the reasoning are in the
-[storage footprint review](../reviews/storage-footprint.md).
+input and outcomes are kept in both.
 
 A Flow is one lf process and the step processes it starts, and its ID is the
 Flow process's. The Flow process keeps the cursor in memory and appends FlowProcess: the

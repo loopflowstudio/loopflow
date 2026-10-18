@@ -976,6 +976,11 @@ fn _run_with_transient_retries(
             None
         };
         result.failure = failure;
+        // OpenCode's native execution cannot be resumed without adding a new
+        // model-visible input. Preserve failure; only explicit input starts more work.
+        if parse_agent(launch.agent()).0 == "opencode" {
+            return Ok(result);
+        }
         let Some(failure) = failure else {
             return Ok(result);
         };
@@ -1419,8 +1424,8 @@ fn _run_agent_once(
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
-    if harness == "codex" {
-        let result = crate::lf::commands::util::run_native_codex_agent(launch)
+    if matches!(harness.as_str(), "codex" | "opencode") {
+        let result = crate::lf::commands::util::run_native_agent(launch)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         return Ok(AgentAttempt::Finished {
             result,

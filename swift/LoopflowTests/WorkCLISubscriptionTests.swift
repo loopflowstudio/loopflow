@@ -50,7 +50,11 @@ struct WorkCLISubscriptionTests {
         try await eventually { model.task(id: id) != nil }
         #expect(selectedPlanMembers(model).allSatisfy { $0.work.kind != .task }) // Unstarted backlog stays hidden.
         _ = try await fixture.run(["-b", "task", "run", id])
-        try await eventually { selectedPlanMembers(model).filter { $0.work.id == id }.count == 1 }
+        // Membership and checkout details arrive in separate observation frames.
+        try await eventually {
+            selectedPlanMembers(model).filter { $0.work.id == id }.count == 1
+                && model.task(id: id)?.task.reference.workspace?.identity != nil
+        }
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(registry.retained(original.key) === original)
         #expect(original.multiplexer.layout == originalLayout)

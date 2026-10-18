@@ -566,6 +566,8 @@ For async model readers, keep generic values crossing actor boundaries
 `Sendable`. A newer local Swift compiler can accept code rejected by CI's
 toolchain; record `swift --version` with compile evidence when investigating
 concurrency diagnostics.
+Work stream fixtures must await the fields they consume: selection membership
+can arrive before planning supplies a Task's checkout.
 
 Keep native code compatible with CI's Xcode toolchain in both SwiftPM and Xcode
 builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4

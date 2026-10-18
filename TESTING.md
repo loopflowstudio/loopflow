@@ -566,6 +566,9 @@ builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4
 cannot enable it even with an experimental feature flag. Put teardown that can
 run off-actor in a resource owner and exercise release from outside the main
 actor. A newer local compiler's pass does not establish older-toolchain support.
+Runtime `#available` checks do not make new SDK symbols compile on older Xcode.
+Gate macOS 26 toolbar APIs behind the matching compiler condition as well;
+CI's SwiftPM and Xcode builds verify the older-SDK path.
 
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside

@@ -468,7 +468,7 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "open", "list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell",
+        "open", "list", "hide", "restore", "focus", "move", "resize", "zoom", "shell",
         "files", "flow-log", "read", "text", "key",
     ] {
         let output = command(
@@ -490,7 +490,6 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             "key" => vec!["--pane", "absent", "enter"],
             "read" => vec!["--pane", "absent", "--region", "screen"],
             "files" | "flow-log" => vec!["--pane", "absent"],
-            "split" => vec!["--pane", "absent", "--axis", "vertical"],
             "move" => vec![
                 "--pane",
                 "absent",

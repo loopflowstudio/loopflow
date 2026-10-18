@@ -358,18 +358,18 @@ Set the default harness, with an optional model.
 |---|---|
 | **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
+| **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode`, `pi` installed on this machine) |
 
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
 ```
 
-Harnesses: `claude`, `codex`, `opencode`. Use `harness:model` for specific models.
+Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
 
 Four built-in skills intentionally default to Claude: `kickoff`,
 `review-design`, `realign`, and `prompt`. Every other unconfigured
-built-in skill uses Codex when it is installed, then Claude, then OpenCode. A
+built-in skill uses Codex when it is installed, then Claude, then OpenCode, then Pi. A
 CLI `-m` or authored `agent:` config remains an explicit override.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
@@ -386,6 +386,39 @@ agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
+### Pi
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.3.0
+pi                                      # configure a model and /login
+lf -a pi implement                     # native interactive Session
+lf -b -a pi:anthropic/claude-sonnet-4-6 implement
+lf resume <session-id>                  # reopen its exact Pi conversation
+```
+
+Pi 1.3.0 is the protocol baseline. Bare `pi` uses Pi's own model selection;
+`pi:provider/model` passes the model to Pi. Pi owns credentials and its native
+session files. API keys supplied to the process (for example through Doppler)
+remain available to Pi; Loopflow does not copy Claude/Codex subscription logins
+into it. Configure Pi on each Machine where it runs.
+
+Headless work uses Pi RPC; native Sessions retain Pi's terminal interface.
+Loopflow supplies context through a launch-local extension, including after
+compaction, and translates selected skills with their arguments. Resume requires
+the recorded session file; deleting it produces an error instead of a new chat.
+Keep that file when moving or archiving work. A native `/new` or session switch
+changes the conversation outside Loopflow's recorded identity; start another
+Loopflow Session to select a new conversation.
+
+Text, tool events and reported token/cost usage enter capture/history. Pi's final
+`agent_settled` event ends a turn, including retries. Missing usage stays unknown.
+Managed account switching, subscription limits, native response schemas,
+turn limits and transferring Pi history to another harness are unavailable.
+Headless extension dialogs fail with an instruction
+to open the Session interactively. Pi's tools use the OS user's permissions;
+project trust and the working directory do not sandbox them. Provider-only
+worktree confinement is unsupported; managed Tasks use the caller's OS boundary.
+
 ### Supported Harnesses
 
 Optional list of harnesses exposed in Loopflow's model picker and settings.
@@ -395,6 +428,7 @@ supported_harnesses:
   - claude
   - codex
   - opencode
+  - pi
 ```
 
 This list is additive across global and repo config.
@@ -454,9 +488,10 @@ and `approvalPolicy: "never"` through its app-server protocol, and OpenCode uses
 
 Managed Task turns require an execution boundary independently of vendor
 permission settings. Claude and Codex bypass their own permission prompts within
-managed execution; `yolo` does not remove the required boundary. OpenCode cannot
-currently satisfy that managed execution requirement. For provider-only worktree
-scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
+managed execution; `yolo` does not remove the required boundary. Pi uses the same
+caller-owned OS environment and its own credentials; no vendor sandbox is implied.
+OpenCode cannot currently satisfy that managed execution requirement. For
+provider-only worktree scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
 sandbox, and OpenCode denies external-directory tools, including with `yolo`.
 
 Stopped-session resume reloads Loopflow settings at the saved checkout. The

@@ -2425,6 +2425,7 @@ fn execute_command(
         Some(Commands::Config {
             cmd: loopflow::lf::ConfigCommand::User { json },
         }) => loopflow::lf::commands::config::print_user(*json),
+        Some(Commands::PiEvent) => loopflow::harness::pi_history::native_event(),
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }

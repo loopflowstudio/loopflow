@@ -143,9 +143,9 @@ pub(crate) fn checkout_execution_boundary(
     agent: &str,
 ) -> anyhow::Result<AgentExecutionBoundary> {
     let (harness, _) = parse_agent(agent);
-    if !matches!(harness.as_str(), "codex" | "claude") {
+    if !matches!(harness.as_str(), "codex" | "claude" | "pi") {
         return Err(anyhow::anyhow!(format!(
-            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex or claude"
+            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
         )));
     }
     let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
@@ -1336,7 +1336,9 @@ fn _run_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                if matches!(code.as_str(), "codex_disconnected" | "codex_dispatch_rejected" | "opencode_disconnected" | "provider_rate_limited") {
+                                if crate::harness::is_terminal_harness_error(&code)
+                                    || matches!(code.as_str(), "codex_dispatch_rejected" | "provider_rate_limited")
+                                {
                                     exit_code = Some(1);
                                 }
                             }
@@ -1455,7 +1457,7 @@ fn _run_agent_once(
     if let Some(context) = launch
         .conversation_context
         .as_ref()
-        .filter(|_| matches!(harness.as_str(), "claude" | "codex"))
+        .filter(|_| matches!(harness.as_str(), "claude" | "codex" | "pi"))
     {
         context
             .configure_hooks(&mut cmd)
@@ -1629,6 +1631,7 @@ pub fn missing_agent_message(cli: &str) -> String {
         "codex" => {
             "Install it with `npm install -g @openai/codex`, then sign in with `lf account connect codex`."
         }
+        "pi" => "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
         "opencode" => "Install it with `npm install -g opencode-ai`.",
         _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",
     };

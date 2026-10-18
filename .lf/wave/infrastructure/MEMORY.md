@@ -1,5 +1,22 @@
 # infrastructure wave memory
 
+## Pi harness boundaries (LOO-507, 2026-10-17)
+
+Jack Heart requested Pi through existing Session, Task and Flow paths with exact
+continuity. Adapter choices await demo review. Pi owns models/credentials;
+an underlying model proves no managed account identity. An execution descriptor
+names writable roots, not an OS sandbox.
+
+Pi 1.3.0 accepts a missing session path as a new conversation. Retain the absolute
+session file and fail missing-file continuation explicitly. `agent_end` may precede
+retry; `agent_settled` ends the Loopflow turn. Cumulative usage must retain unknown
+fields and rejoin its capture counter on recovery. Shared attachment fences and
+stable CLI dispatch own control and callbacks.
+
+Real Pi RPC/native non-TTY probes with a local model fixture retained context,
+identity and usage, not authenticated or rendered acceptance. Release's entry-point
+lesson applies: composed Task/Flow, nested invocation and compaction remain unproved.
+
 ## Opening work conversations (LOO-499, 2026-10-17)
 
 Jack Heart selected `resume` as an exact `connect` alias, matching scope/session
@@ -80,32 +97,19 @@ mappings are links, not planning authorities. During an outage, local edits succ
 and show pending sync. Preserve uncertain effects and concurrent edits; no resident
 or automatic turn/Flow retry.
 
-Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
-independent inbound completion, membership and comments during pending writes and
-after reconnect. Comment `93690dc2-5526-4ecf-a203-5e248339b0c9` adds immediate local
-comment/completion saves and active CLI/Desktop propagation without another turn,
-manual refresh or unrelated outbound drain. Acceptance requires stable mutation
-identities, retained conflicts and reconnect deduplication. Jack Heart selected
-Linear as winner for every planning conflict.
-LOO-412's accepted Git ordering supersedes host preference: causality precedes
-clock and mutation-ID ties; losing edits remain recoverable.
-`185de5fbf` implements observed Linear conflict adoption and retires losing
-intentions. Receipts preserve both values; unchanged baselines preserve saves.
-Sessions, Processes, Flow/captured Workflow
-position, reservations and checkouts never synchronize. Planning completion grants
-no Workflow movement, Process control or cleanup authority.
-Jack Heart selected user-keyed Git planning by default, with explicit opt-in to
-one shared plan. Sharing a code remote never merges plans implicitly. Selection
-uses the same records/APIs, not personal/shared types. LOO-412 owns local-only Git routing/order; its October 9 decision below
-replaces Git with Linear for connected plans. Ref separation is not privacy;
-joining must not silently publish existing local plans. Shared UX needs clear
-plan selection, authorship, assignees and sync status; execution stays local.
-Jack Heart selected the October 8 Git prototype and cross-Task boundary:
-LOO-406 owns common writers/Linear, LOO-412 transport excluding execution.
-Isolated fixtures consume committed writer cuts, never dirty/duplicated code.
-Jack invoked ship-decomposed; no competing Flow or public-repo plan publication
-was authorized. Exact comments and boundary history:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Plan ownership.
+Jack Heart requires inbound completion/membership/comments during pending writes,
+immediate local saves and active CLI/Desktop propagation without another turn.
+Retain mutation identities, both conflicting values and reconnect deduplication;
+Linear wins observed planning conflicts, while unseen remote edits remain a race.
+LOO-412's accepted ordering uses causality before clock/mutation-ID ties and keeps
+losing edits recoverable. Its later transport design below supersedes the October 8
+prototype. User-keyed Git is the default; shared planning is opt-in, and joining
+cannot silently publish existing plans. Ref separation supplies no privacy.
+Sessions, Processes, captured Workflow positions, reservations and checkouts stay
+local. Shared completion grants no execution or cleanup authority.
+The superseded prototype/delivery narrative and exact October 8 comments remain at
+`616d73b4dcd21dd78c62f3f3420c5e4f9b0d8f21:.lf/wave/infrastructure/MEMORY.md`,
+Plan ownership; LOO-406 owns common writers/Linear and LOO-412 transport.
 
 Foreground acquisition and delivery are independent; effect locks block neither
 saves nor acquisition. Captured receipts retain losing values and concurrent saves;

@@ -24,7 +24,7 @@ run_lf() {
 }
 
 case "${1:-claude}" in
-  claude|codex|opencode)
+  claude|codex|opencode|pi)
     agent="${1:-claude}"
     run_lf -i -a "$agent" : "test"
     echo
@@ -44,7 +44,7 @@ case "${1:-claude}" in
     run_lf session connect "${@:2}"
     ;;
   *)
-    echo "usage: scripts/launch-resumable-ux-demo.sh [claude|codex|opencode|list|open <SESSION> [--replace|--try]]" >&2
+    echo "usage: scripts/launch-resumable-ux-demo.sh [claude|codex|opencode|pi|list|open <SESSION> [--replace|--try]]" >&2
     exit 2
     ;;
 esac

@@ -1,5 +1,7 @@
 //! Stable provider hook declarations and separately saved launch context. No user files
 //! or trust decisions are replaced. Saved sources survive driver replacement.
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -12,17 +14,7 @@ pub(crate) fn claude_args(context: &ContextDelivery) -> Result<Vec<String>> {
     hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     let settings = json!({"hooks": hooks});
     let bytes = serde_json::to_vec(&settings)?;
-    let directory = context.home.join("hook-settings");
-    std::fs::create_dir_all(&directory)?;
-    let path = directory.join(format!(
-        "claude-{}.json",
-        hex::encode(Sha256::digest(&bytes))
-    ));
-    if !path.exists() {
-        let file = tempfile::NamedTempFile::new_in(&directory)?;
-        serde_json::to_writer(file.as_file(), &settings)?;
-        file.persist(&path)?;
-    }
+    let path = save_hook(&context.home, "claude", "json", &bytes)?;
     Ok(vec!["--settings".into(), path.display().to_string()])
 }
 
@@ -85,8 +77,37 @@ pub(crate) fn add_opencode_context(
 pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> Result<Vec<String>> {
     match (harness, context) {
         ("claude", Some(context)) => claude_args(context),
+        ("pi", context) => pi_args(context, true),
         _ => Ok(Vec::new()),
     }
+}
+
+pub(crate) fn pi_args(context: Option<&ContextDelivery>, native: bool) -> Result<Vec<String>> {
+    let source = format!(
+        "const spec = {};\n{}",
+        json!({"native":native}),
+        include_str!("context_pi.mjs")
+    );
+    let home = context
+        .map(|c| c.home.clone())
+        .unwrap_or_else(crate::store::lf_home_dir);
+    let extension = save_hook(&home, "pi", "mjs", source.as_bytes())?;
+    Ok(vec!["--extension".into(), extension.display().to_string()])
+}
+
+fn save_hook(home: &Path, provider: &str, extension: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let directory = home.join("hook-settings");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join(format!(
+        "{provider}-{}.{extension}",
+        hex::encode(Sha256::digest(bytes))
+    ));
+    if !path.exists() {
+        let file = tempfile::NamedTempFile::new_in(&directory)?;
+        std::fs::write(file.path(), bytes)?;
+        file.persist(&path)?;
+    }
+    Ok(path)
 }
 
 #[cfg(test)]

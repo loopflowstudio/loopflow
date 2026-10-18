@@ -1262,3 +1262,144 @@ exit 3
         );
     }
 }
+
+fn pi_fixture() -> Fixture {
+    let fixture = Fixture::new("pi:fixture/model");
+    let script = fixture.home.path().join("bin/pi");
+    fs::write(
+        &script,
+        format!(
+            "#!/usr/bin/python3 -I\n{}",
+            include_str!("../src/harness/testdata/pi_rpc.py")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
+    fixture
+}
+
+#[test]
+fn pi_public_headless_skill_delivers_context_and_resumes_exact_history() {
+    let fixture = pi_fixture();
+    fixture.create_wave();
+    fixture.repo.create_file(
+        ".lf/skills/pi-proof.md",
+        "Preserve this Pi skill and its exact arguments.",
+    );
+    fixture
+        .repo
+        .create_file("scratch/pi-context.md", "Pi context sentinel.");
+    let output = fixture
+        .command()
+        .env(
+            "PI_FIXTURE_RECORD",
+            fixture.home.path().join("received.json"),
+        )
+        .args([
+            "-b",
+            "--wave",
+            "fixture",
+            "skill",
+            "pi-proof",
+            "Unicode 雪 stays intact",
+        ])
+        .output()
+        .unwrap();
+    success(&output);
+    let received = fixture.received();
+    assert!(received["input"]
+        .as_str()
+        .unwrap()
+        .contains("Preserve this Pi skill"));
+    assert!(received["input"]
+        .as_str()
+        .unwrap()
+        .contains("Unicode 雪 stays intact"));
+    assert!(received["context"]
+        .as_str()
+        .unwrap()
+        .contains("Pi context sentinel"));
+    assert_eq!(received["caller"]["session_id"], fixture.session());
+    assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
+    let token = fixture
+        .repo
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("pi-conversation.jsonl");
+    let output = fixture
+        .command()
+        .env(
+            "PI_FIXTURE_RECORD",
+            fixture.home.path().join("received.json"),
+        )
+        .args([
+            "-b",
+            "resume",
+            &fixture.session(),
+            "--message",
+            "Second Pi turn",
+        ])
+        .output()
+        .unwrap();
+    success(&output);
+    let received = fixture.received();
+    assert!(args(&received)
+        .windows(2)
+        .any(|a| a == ["--session", token.to_str().unwrap()]));
+    assert_eq!(fs::read_to_string(token).unwrap().lines().count(), 3);
+}
+
+#[test]
+fn pi_native_callbacks_retain_identity_final_output_and_usage() {
+    let fixture = pi_fixture();
+    let output = fixture
+        .command()
+        .env(
+            "PI_FIXTURE_RECORD",
+            fixture.home.path().join("received.json"),
+        )
+        .args(["-i", ":", "Native Pi input"])
+        .output()
+        .unwrap();
+    success(&output);
+    let session = fixture.session();
+    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let (provider, thread): (String, String) = db
+        .query_row(
+            "SELECT provider,provider_thread FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(provider, "pi");
+    assert_eq!(
+        thread,
+        fixture
+            .repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("pi-conversation.jsonl")
+            .display()
+            .to_string()
+    );
+    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM session_events WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
+    assert_eq!(output, "native answer");
+    let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'", [&session], |row| row.get(0)).unwrap();
+    assert_eq!(tokens, 26);
+    let receipts: i64 = db
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='usage'",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(receipts, 1);
+    let received = fixture.received();
+    assert!(args(&received).contains(&"--extension"));
+    assert!(received["input"]
+        .as_str()
+        .unwrap()
+        .contains("Native Pi input"));
+}

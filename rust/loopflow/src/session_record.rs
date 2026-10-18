@@ -741,10 +741,10 @@ fn recover_native_usage(
         let Some(first) = receipts.first() else {
             continue;
         };
-        let provider = if first.payload["provider"] == "opencode" {
-            "opencode"
-        } else {
-            "codex"
+        let provider = match first.payload["provider"].as_str() {
+            Some("opencode") => "opencode",
+            Some("pi") => "pi",
+            _ => "codex",
         };
         let matching: Vec<_> = events[..recorder_len]
             .iter()
@@ -779,6 +779,45 @@ fn recover_native_usage(
             continue;
         }
         if matching.iter().any(|receipt| receipt.2) {
+            continue;
+        }
+        if provider == "pi" {
+            for receipt in receipts {
+                let Ok(usage) =
+                    serde_json::from_value::<TurnUsage>(receipt.payload["usage"].clone())
+                else {
+                    gaps += 1;
+                    continue;
+                };
+                let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(receipt.observed_at)
+                else {
+                    gaps += 1;
+                    continue;
+                };
+                // Both transports report cumulative usage for the complete adapter turn.
+                let stream = matching
+                    .first()
+                    .map(|r| r.0.clone())
+                    .unwrap_or_else(|| format!("native:{thread}:{turn}"));
+                let seq = matching.iter().map(|r| r.1).max().unwrap_or(0) + receipt.seq as u64;
+                events.push(EventEnvelope {
+                    schema_version: SCHEMA_VERSION,
+                    seq: events.iter().map(|e| e.seq).max().map_or(0, |s| s + 1),
+                    observed_at,
+                    event: CaptureEvent::Usage {
+                        usage_stream_id: stream,
+                        provider: provider.into(),
+                        model: usage.model.clone(),
+                        attempt_key: String::new(),
+                        turn_key: turn.into(),
+                        observation_seq: seq,
+                        counter_kind: "cumulative".into(),
+                        start_known: native.iter().any(|e| e.kind == SessionEventKind::Started),
+                        final_receipt: receipt.payload["final"] == true,
+                        usage: Box::new(usage),
+                    },
+                });
+            }
             continue;
         }
         if provider == "opencode" {
@@ -3045,6 +3084,74 @@ mod tests {
     };
     use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, TurnUsage};
+
+    #[test]
+    fn pi_usage_recovery_finishes_the_existing_counter_without_double_counting() {
+        let thread = crate::id::AgentSessionId::from("/pi/conversation.jsonl");
+        let usage = TurnUsage {
+            input_tokens: Some(20),
+            output_tokens: Some(6),
+            ..Default::default()
+        };
+        let history = vec![crate::session::SessionEvent {
+            seq: 3,
+            session_id: "session".into(),
+            agent_session: Some(thread.clone()),
+            provider_turn: Some("turn".into()),
+            kind: crate::session::SessionEventKind::Usage,
+            agent_process_id: None,
+            lf_process_id: None,
+            task_id: None,
+            wave_id: None,
+            observed_at: 1,
+            payload: serde_json::json!({"provider":"pi", "usage":usage, "final":true}),
+        }];
+        let envelope = |seq, event| super::EventEnvelope {
+            schema_version: super::SCHEMA_VERSION,
+            seq,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+            event,
+        };
+        let mut events = vec![
+            envelope(
+                0,
+                super::CaptureEvent::ProviderSessionObserved {
+                    attempt_key: "attempt".into(),
+                    agent_session: thread,
+                },
+            ),
+            envelope(
+                1,
+                super::CaptureEvent::Usage {
+                    usage_stream_id: "stream".into(),
+                    provider: "pi".into(),
+                    model: None,
+                    attempt_key: "attempt".into(),
+                    turn_key: "turn".into(),
+                    observation_seq: 1,
+                    counter_kind: "cumulative".into(),
+                    start_known: true,
+                    final_receipt: false,
+                    usage: Box::new(TurnUsage {
+                        input_tokens: Some(10),
+                        ..Default::default()
+                    }),
+                },
+            ),
+        ];
+        assert_eq!(super::recover_native_usage(&mut events, &history), 0);
+        assert_eq!(events.len(), 3);
+        assert!(matches!(&events[2].event, super::CaptureEvent::Usage {
+            usage_stream_id, usage, final_receipt: true, ..
+        } if usage_stream_id == "stream" && usage.input_tokens == Some(20)));
+
+        if let super::CaptureEvent::Usage { final_receipt, .. } = &mut events[1].event {
+            *final_receipt = true;
+        }
+        events.truncate(2);
+        assert_eq!(super::recover_native_usage(&mut events, &history), 0);
+        assert_eq!(events.len(), 2);
+    }
 
     #[test]
     fn terminal_attachment_probe() {

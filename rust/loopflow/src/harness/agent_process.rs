@@ -553,6 +553,15 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     match provider {
         Some("codex") => program("codex") && has("app-server") && has("--listen"),
         Some("opencode") => program("opencode") && has("serve"),
+        Some("pi") => {
+            (program("pi")
+                || process
+                    .command
+                    .split_whitespace()
+                    .any(|part| part.contains("/pi-coding-agent/") && part.ends_with("/cli.js")))
+                && has("--mode")
+                && has("rpc")
+        }
         // Headless Claude has no subcommand to match; identity and group carry it.
         Some("claude") => program("claude"),
         _ => false,

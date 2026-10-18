@@ -1,5 +1,6 @@
 use crate::support;
 
+use loopflow::ops::task::task_stack;
 use loopflow::ops::{
     continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
     OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
@@ -740,6 +741,68 @@ fn stacked_child_merges_main_after_parent_squash() {
         "one\ntwo\n",
         "the squashed parent content must not be reintroduced or conflicted"
     );
+}
+
+#[test]
+fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
+    // A landed parent's removed checkout is ordinary state: the child plans
+    // its sync onto the default branch without the parent's git dir.
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent_path = repo.create_named_worktree("parent");
+    let parent =
+        support::register_task_with_pr(home.path(), &parent_path, "parent", &repo.head_sha());
+    let child_path = repo.create_named_worktree("child");
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    let mut parent_pr = parent.pr.clone();
+    parent_pr.publication = Some(PrPublication {
+        requested_at: parent_pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 41,
+            url: "https://github.com/fixture/repo/pull/41".into(),
+            head_sha: Some(parent_pr.base_commit.clone()),
+        }),
+        merge: None,
+    });
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    runtime
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
+        .unwrap();
+    parent_pr.merge_commit = Some(repo.head_sha());
+    runtime
+        .block_on(parent.store.update_task_pr(&parent_pr))
+        .unwrap();
+    git(
+        repo.path(),
+        &[
+            "worktree",
+            "remove",
+            "--force",
+            parent_path.to_str().unwrap(),
+        ],
+    );
+
+    let stacked = task_stack(&child_path)
+        .expect("stack resolves without the parent checkout")
+        .expect("child is stacked");
+    assert_eq!(stacked.parent_branch, None);
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "--plan"])
+        .current_dir(&child_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("base: main\n"), "{stdout}");
 }
 
 #[test]

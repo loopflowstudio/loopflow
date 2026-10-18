@@ -2837,12 +2837,10 @@ async fn reconcile_task_pr_observation(
 ) -> OpsResult<Option<TaskPr>> {
     // Reconciliation updates the same projection as publication/finalization.
     // Refuse overlap so a remote read begun before a push cannot overwrite the
-    // request or head recorded by the command that completed after it.
-    let _mutation = task
-        .worktree
-        .as_deref()
-        .map(lock_task_pr_mutation)
-        .transpose()?;
+    // request or head recorded by the command that completed after it. A
+    // removed checkout (a landed stack parent) hosts no mutation to overlap.
+    let checkout = task.worktree.clone().filter(|path| path.exists());
+    let _mutation = checkout.as_deref().map(lock_task_pr_mutation).transpose()?;
     let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
         return Ok(None);
     };
@@ -2866,11 +2864,23 @@ async fn reconcile_task_pr_observation(
         }
     }
     let previous = pr.clone();
+    let repo = match checkout {
+        Some(path) => path,
+        None => store
+            .sqlite
+            .repository_path(&task.repository_id)
+            .map_err(task_error)?
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                task_error(format!(
+                    "Task {} has no checkout or registered repository to observe its PR from",
+                    task.identifier
+                ))
+            })?,
+    };
     let observation = match number {
-        Some(number) => {
-            crate::ops::pr::observe_pr_by_number(task.worktree()?, number, &pr.branch, freshness)
-        }
-        None => crate::ops::pr::observe_pr_by_branch(task.worktree()?, &pr.branch),
+        Some(number) => crate::ops::pr::observe_pr_by_number(&repo, number, &pr.branch, freshness),
+        None => crate::ops::pr::observe_pr_by_branch(&repo, &pr.branch),
     };
     let github_pr = match observation {
         crate::ops::pr::PrObservation::Fresh(info) => {
@@ -2928,7 +2938,7 @@ async fn reconcile_task_pr_observation(
         github: None,
         merge: None,
     });
-    invalidate_stale_merge_request(task.worktree()?, publication, &github_pr, &|_| {})?;
+    invalidate_stale_merge_request(&repo, publication, &github_pr, &|_| {})?;
     publication.github = Some(GithubPr {
         number,
         url: url.clone(),
@@ -2993,12 +3003,9 @@ async fn reconcile_task_pr_observation(
             // GitHub has it open, so any `abandoned_at` here is a stale claim that
             // it was closed. Clearing it returns the same row to `Open`.
             pr.abandoned_at = None;
-            if let Some(ci_observation) = observe_required_checks(
-                task.worktree()?,
-                github_pr.number,
-                github_pr.head_sha.as_deref(),
-                now,
-            ) {
+            if let Some(ci_observation) =
+                observe_required_checks(&repo, github_pr.number, github_pr.head_sha.as_deref(), now)
+            {
                 pr.ci_observation = Some(ci_observation);
             }
             Some(TaskEventKind::PrOpened {

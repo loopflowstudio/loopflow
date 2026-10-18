@@ -869,4 +869,3 @@ private struct PaneFocusTarget: NSViewRepresentable {
         }
     }
 }
-

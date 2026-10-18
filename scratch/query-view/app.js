@@ -305,7 +305,7 @@ function consoleSearchResults(){
  else{group('Working tasks · recent first',ranked.filter(t=>t.repo===repository.id&&NavStudy.workingIds(state).includes(t.id)).map(item));group('Other tasks',ranked.filter(t=>t.repo!==repository.id||!NavStudy.workingIds(state).includes(t.id)).map(item));}
  }
  if(paletteMode!=='repositories')group('Waves',waves.filter(w=>!q||w.includes(q)).map(w=>({label:labelWave(w),detail:repository.name,route:{kind:'wave',id:w}})));
- 
+
  group('Repositories',repositories.filter(r=>!q||r.name.includes(q)).map(r=>({label:r.name,detail:r.id===repository.id?'This repository':'Open repository window',route:{kind:'home',id:'all',repo:r.id}})));
  }
  $('#results').innerHTML=html||'<p class="empty">No results.</p>';highlight=Math.min(highlight,Math.max(0,paletteRows.length-1));$('#results').querySelector(`[data-result="${highlight}"]`)?.classList.add('highlighted');$('#save-query').innerHTML='<span>↑↓ choose · ↵ open · Esc return</span>';

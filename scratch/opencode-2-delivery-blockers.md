@@ -1,9 +1,0 @@
-# Delivery blockers — October 17, 2026
-
-Jack Heart requested OpenCode 2 running and authorized autonomous infra repairs and landing. The repository operator is continuing through supported release/install after merge; merely recording deterministic required-test failures does not satisfy delivery. Keep the current Task/Flow and preserve other contributions.
-
-The broader gate reproduced four Task repository/planning failures. Resolve bounded fixture or production defects needed for a green deliverable, preserving repository/admission invariants. Do not weaken assertions or waive CI. Three fail with `Task Project must belong to its repository` (two task_admission tests and global_commands scoped prefix); the exact_task_roadmap scoped-identifier test returns zero Waves instead of one. Inspect canonical repository paths and project ownership rather than bypassing the new constraint. A session steer with this direction is saved as c289d00d-7f90-44bb-ac15-12e56f9096be, but live delivery remains pending; no receipt has confirmed consumption.
-
-Root owns release/install and is checking compatibility of pre-fix live clients separately. Do not advance the shared schema with the source branch or restart unrelated providers.
-
-Gate resolution: consumed this direction from the local note. Five Task fixture failures (including initializing-worktree roadmap) used inconsistent canonical repository paths on macOS; fixtures now agree without weakening assertions or production invariants. The materialized focused selection passed all six tests, with one nextest leaked-handle warning on the delegation test. All ten failures from the affected Rust run have passing focused follow-ups; final combined-tree CI and the leak observation remain visible in `docs/reviews/opencode-2/README.md`. Shared schema, installed tools and unrelated providers were not changed.

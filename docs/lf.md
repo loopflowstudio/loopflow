@@ -848,7 +848,8 @@ primary conversation, admission and attachment fences decide what opens. A
 conversation already live in a cmux or Herdr workspace is focused there, draft
 intact, when this caller is in that host. Live in any other client, it is
 reported as `elsewhere` with its `--takeover` command; ordinary opening never
-moves it. `--available` opens
+moves it. Openings of one Work are serialized: a repeat while its new workspace
+is still starting focuses that workspace instead of creating another. `--available` opens
 conversations the shared reader judges available, across registered
 repositories unless `--repo`, `--task` or `--wave` narrows it. A Task's primary
 opens as its Work; another available conversation opens as its exact Session.

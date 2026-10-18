@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use sha2::Digest as _;
 
 use super::desktop::WorkWorkspaceKind;
 use crate::ops::context::{ContextExplanation, ContextFact};
@@ -23,6 +24,9 @@ use crate::work::link::{WorkTarget, WorkUrl};
 
 const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long a just-created destination stands for its Work while its
+/// conversation starts and attaches. Later, attachment placement answers.
+const STARTING: Duration = Duration::from_secs(30);
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize, schemars::JsonSchema,
@@ -836,6 +840,13 @@ fn open_one(
     in_place: bool,
     lf: &str,
 ) -> OpenReceipt {
+    // Lookup and creation for one Work are serialized across processes.
+    let mut opening = match Opening::lock(target) {
+        Ok(opening) => opening,
+        Err(error) => {
+            return target.receipt(None, OpenStatus::Failed, Some(format!("{error:#}")));
+        }
+    };
     let elsewhere = elsewhere(target);
     let mut skipped = Vec::new();
     for &host in &route.hosts {
@@ -856,6 +867,14 @@ fn open_one(
             }
             return target.receipt(Some(host), OpenStatus::Elsewhere, Some(live.reason.clone()));
         }
+        // A destination created moments ago is still starting this conversation.
+        if let Some(destination) = opening.starting(host) {
+            if !focus || focus_destination(host, &destination).is_ok() {
+                let mut receipt = target.receipt(Some(host), OpenStatus::Opening, None);
+                receipt.destination = Some(destination);
+                return receipt;
+            }
+        }
         let attempt = match host {
             OpenHost::Desktop => open_desktop(target, focus),
             OpenHost::Cmux => open_cmux(target, focus, lf),
@@ -868,6 +887,9 @@ fn open_one(
         };
         match attempt {
             Ok(opened) => {
+                if let Some(destination) = &opened.destination {
+                    opening.record(host, destination);
+                }
                 let mut receipt = target.receipt(Some(host), opened.status, None);
                 receipt.destination = opened.destination;
                 return receipt;
@@ -888,6 +910,75 @@ fn open_one(
         }
     }
     target.receipt(None, OpenStatus::Failed, Some(skipped.join("; ")))
+}
+
+/// The per-Work opening lock. Its file remembers the host destination the
+/// last opening created and when, so a repeated or concurrent request inside
+/// the startup window focuses it rather than starting another client.
+struct Opening(std::fs::File);
+
+impl Opening {
+    fn lock(target: &Resolved) -> Result<Self> {
+        use fs2::FileExt;
+        let directory = crate::store::lf_home_dir().join("open");
+        std::fs::create_dir_all(&directory).context("create the opening directory")?;
+        let key = format!(
+            "{}\n{}",
+            target.url,
+            target.session.as_deref().unwrap_or("")
+        );
+        let name = hex::encode(&sha2::Sha256::digest(key.as_bytes())[..16]);
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join(format!("{name}.lock")))
+            .context("open the Work opening lock")?;
+        let deadline = std::time::Instant::now() + HOST_TIMEOUT * 3;
+        loop {
+            match file.try_lock_exclusive() {
+                Ok(()) => return Ok(Self(file)),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    anyhow::ensure!(
+                        std::time::Instant::now() < deadline,
+                        "another opening of this Work is still in progress; retry when it settles"
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(error) => return Err(error).context("lock the Work opening"),
+            }
+        }
+    }
+
+    fn starting(&mut self, host: OpenHost) -> Option<String> {
+        use std::io::{Read, Seek};
+        let mut text = String::new();
+        self.0.rewind().ok()?;
+        self.0.read_to_string(&mut text).ok()?;
+        let (at, placement) = text.trim().split_once(' ')?;
+        let age = time::OffsetDateTime::now_utc().unix_timestamp() - at.parse::<i64>().ok()?;
+        let (placed, destination) = placement_host(placement)?;
+        (placed == host && (0..STARTING.as_secs() as i64).contains(&age))
+            .then(|| destination.to_owned())
+    }
+
+    fn record(&mut self, host: OpenHost, destination: &str) {
+        use std::io::{Seek, Write};
+        let prefix = match host {
+            OpenHost::Cmux => "cmux",
+            OpenHost::Herdr => "herdr",
+            _ => return,
+        };
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let written = self.0.set_len(0).and_then(|()| {
+            self.0.rewind()?;
+            write!(self.0, "{now} {prefix}:{destination}")
+        });
+        if let Err(error) = written {
+            tracing::warn!(%error, "cannot record the opened destination");
+        }
+    }
 }
 
 struct Live {

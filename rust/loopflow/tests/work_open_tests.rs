@@ -562,3 +562,49 @@ fn reopening_a_live_conversation_focuses_its_cmux_workspace() {
         .unwrap()
         .contains("workspace create"));
 }
+
+#[test]
+fn concurrent_and_repeated_openings_create_one_destination() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let log = host(bin.path(), "cmux", "OK workspace:7", 0);
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+    let receipts: Vec<Value> = std::thread::scope(|scope| {
+        let openings: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    json(&lf(
+                        home.path(),
+                        repo.path(),
+                        Some(bin.path()),
+                        &["open", &url, "--host", "cmux", "--json"],
+                    ))
+                })
+            })
+            .collect();
+        openings
+            .into_iter()
+            .map(|opening| opening.join().unwrap())
+            .collect()
+    });
+    let again = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", &url, "--host", "cmux", "--json"],
+    ));
+    for report in receipts.iter().chain([&again]) {
+        assert_eq!(report["receipts"][0]["status"], "opening");
+        assert_eq!(report["receipts"][0]["destination"], "workspace:7");
+    }
+    let calls = std::fs::read_to_string(log).unwrap();
+    assert_eq!(
+        calls.matches("workspace create").count(),
+        1,
+        "one conversation destination: {calls}"
+    );
+    assert_eq!(calls.matches("workspace select workspace:7").count(), 2);
+}

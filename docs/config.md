@@ -629,13 +629,15 @@ apply to identical literal names. Existing unique bare shortcuts remain; hyphen
 suffixes do not create new shortcuts. Untyped lookup checks exact names before
 fallbacks, with Flow-first precedence for the same literal name.
 
-Codex exports retain slash and dash names, plus dashed fallbacks where unoccupied.
-Claude exports are flat: a literal dashed name wins over a flattened hierarchical
-name, with unrepresentable exports reported as skipped. Flow exports have no
-prefix and yield to skills at each provider's projected name. Each recipe retains
-its original exact Flow name. Invalid provider names are reported, never silently
-rewritten. Third-party files and bundles are preserved. Sync prunes only generated
-exports after replacements are writable; desired nested Codex exports survive.
+Exports use one portable name per skill in both directories: lowercase letters,
+digits and separating hyphens, at most 64 characters. `repo/operate` exports as
+`repo-operate`. Long names use their final component plus a stable suffix, such as
+`pdf-a1b2c3d4`. Exact literal names keep priority; collisions receive distinct
+suffixes so neither skill is lost. Original `lf` names remain unchanged; native
+slash aliases are replaced by these portable names. Flow exports yield to skills
+at the same projected name and retain their original exact Flow identity.
+Third-party files and bundles are preserved. Sync prunes only generated exports
+after replacements are writable.
 Original native declarations and resource paths remain attached to each source;
 cross-harness exports do not claim to enforce or translate native controls.
 

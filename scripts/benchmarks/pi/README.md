@@ -42,3 +42,17 @@ real threshold/manual compaction, active viewer handoff, provider death during
 real tools, repeated partial-usage recovery and child-process cleanup, and real
 429/5xx/invalid-model cases. Demo owns rendered judgment and the selected personal
 account route.
+
+## Shared skill discovery
+
+Run `lf sync-skills --yes`, then `/reload` in an open Pi session. Generated native
+names use lowercase letters, digits and hyphens within 64 characters. Long names
+and collisions retain distinct exports; original `lf` commands and resource paths
+remain available. Third-party bundles are preserved.
+
+On October 18, Pi 1.3.0's loader checked the configured shared catalog before and
+after candidate sync: 85 skills / 59 diagnostics became 101 skills / zero diagnostics.
+Both synced PDF variants survived, all 27 third-party SKILL.md files stayed
+byte-identical, and repeat sync made no writes or prunes. Candidate help resolved
+both slash and dashed Loopflow commands. This checks actual discovery and CLI
+resolution; it does not record a rendered reload review.

@@ -1,8 +1,9 @@
 # LOO-507 — Pi harness
 
 2026-10-17 design, updated after the compatibility repair pass. Jack Heart's Task
-directive accepts the outcome below; implementation choices remain draft pending
-demo review. Earlier design/evidence is retained at `3a0b71d455`, and the first
+directive accepts the outcome below. On October 18, Jack Heart accepted portable
+skill-name simplification and authorized shipping after its repair; the earlier
+demo evidence and coverage limits remain recorded. Earlier design/evidence is retained at `3a0b71d455`, and the first
 published implementation at `806338d501e4d2ac088033764cc0edc1dd48074d`.
 
 ## Outcome and boundary
@@ -97,6 +98,19 @@ retain the original counterexamples by git reference and current acceptance gaps
 
 ## Remaining work
 
+The October 18 interactive demo supersedes the implementation-complete conclusion
+for skill discovery: Jack Heart observed extensive Pi warnings for namespaced and
+long synced skill names in the real shared catalog. See [demo feedback](pi-demo.md).
+Native export naming is corrected while retaining canonical identity/source/assets.
+The actual Pi loader now reports zero warnings on the shared catalog, with both
+long synced PDF variants retained; see the demo note for preservation evidence.
+Jack Heart accepted shortening native names and removing redundant aliases while
+preserving skill behavior, then authorized `lf ship` through verified main landing
+after this repair. Use one portable export per source; preserve original `lf`
+identities and suffix collisions instead of dropping skills. Delete vendor-specific
+slash alias projection and its exclusive assertions. Retain third-party preservation,
+resource paths, native declarations and safe replacement pruning.
+
 Implementation repairs are complete. Reproducible provider-isolated scenarios and
 coverage boundaries live in `scripts/benchmarks/pi/README.md` and `probe.py`. The passing
 managed Task/Flow proof includes JSON routing, only the selected branch and nested
@@ -112,8 +126,9 @@ remains unreviewed.
 Gate owns affected suites and the remaining comparison matrix: real manual and
 threshold compaction, active viewer handoff, real tool crashes/child cleanup,
 repeated partial recovery and real 429/5xx/invalid-model cases. Demo owns rendered
-judgment and the selected personal account route. The selected Flow owns
-publication for demo review; merge and Task completion remain unapproved.
+judgment and the selected personal account route. Jack Heart
+authorized ship and Task completion after the naming correction and verified merge;
+remaining automated acceptance belongs to its gate.
 
 Recovery after interruption: implement and compress succeeded in Flow
 `fce325b0-3db9-4fa6-8196-ae13ed06dc7a`; sync left no exit record, but its conflict
@@ -130,3 +145,5 @@ Clippy, context-hook regression and Python lint passed; no Pi implementation byt
 changed from the verified stash. The configured Loopflow account probe also passed.
 
 Checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --lib pi_` (21), `cargo test -p loopflow --test session_launch_contract pi_` (4), `node scripts/benchmarks/skill-invocation/test_pi_context.mjs`, all six `probe.py --pi /tmp/loo507-pi/node_modules/.bin/pi` scenarios, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `uv run ruff check` / `ruff format --check scripts/benchmarks/pi/probe.py`, and `git diff --check` passed; Rust tests/probes used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Existing managed Task/Flow routing proof remains applicable. `lf context` is within both budgets; remaining affected suites and acceptance belong to gate/demo.
+
+Naming repair checks: `cargo test -p loopflow --lib skills::` under `scripts/test_network.py` passed (26 tests); `cargo fmt --check` and `git diff --check` passed. Binary build and real-catalog Pi discovery passed (59 diagnostics → zero, 27 third-party files unchanged); `cargo clippy --all-targets -- -D warnings` passed.

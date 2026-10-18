@@ -124,9 +124,17 @@ struct DashboardView: View {
         let entry = workspaces.retained(member.work)
         return VStack(spacing: 0) {
             HStack {
-                Button(content?.title ?? member.work.id) { model.select(member.work.reference) }
-                    .buttonStyle(.plain).lineLimit(1)
+                Button { zoom(member, plan: plan) } label: {
+                    if let task = model.task(id: member.work.id)?.task { TaskHeading(task: task) }
+                    else { Text(content?.title ?? member.work.id).lineLimit(1) }
+                }.buttonStyle(.plain)
                 Spacer()
+                if let task = model.task(id: member.work.id) {
+                    TaskLifecycleActions(model: model, task: task.task, wave: task.wave?.wave)
+                        .menuStyle(.button).buttonStyle(.plain).fixedSize()
+                }
+                Button { zoom(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                    .help("Open this Work in full")
                 Button { save(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
                     .help("Hide this occurrence").disabled(model.dashboardSaving)
             }.padding(8).background(palette.surface)
@@ -147,11 +155,18 @@ struct DashboardView: View {
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
                 } else {
-                    ContentUnavailableView("No primary Session", systemImage: "bubble.left")
+                    Label("No primary Session", systemImage: "bubble.left")
+                        .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else { Text("Work unavailable").frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }.clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius).strokeBorder(palette.border))
+    }
+
+    private func zoom(_ member: WorkMemberRef, plan: WorkViewPlan) {
+        guard let id = plan.dashboardID, let work = member.work.reference else { return model.select(member.work.reference) }
+        model.zoom(into: work, from: id)
     }
 
     private func save(_ plan: WorkViewPlan, tree: WorkArrangementTree? = nil, hidden: [WorkMemberRef]? = nil) {

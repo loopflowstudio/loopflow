@@ -218,22 +218,21 @@ struct WorkBreadcrumbs: View {
                 }
                     .help("Navigate (⌘K)").accessibilityLabel("Navigate Tasks, Waves and repositories")
             }.fixedSize()
-            if showWave, let wave = model.breadcrumb?.wave {
+            if showWave, model.navigation.trailDashboardID == nil, let wave = model.breadcrumb?.wave {
                 Text("/")
                 Button(wave.roadmap.wave.displayName) {
                     model.select(.wave(id: wave.roadmap.wave.id))
                     model.navigation.content = .terminals
                 }.lineLimit(1).fixedSize()
             }
-            if let id = model.navigation.dashboardID {
+            if let id = model.navigation.trailDashboardID {
                 Text("/")
-                Text(model.dashboard(id)?.name ?? id).lineLimit(1)
+                Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
+                    .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
             }
             if let task = model.breadcrumb?.task {
                 Text("/")
-                Text(task.task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
-                Text(task.task.task.name).lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: 60).help(task.task.task.name)
+                TaskHeading(task: task.task)
             }
         }
     }

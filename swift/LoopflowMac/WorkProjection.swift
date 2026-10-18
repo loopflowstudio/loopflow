@@ -272,17 +272,35 @@ final class WorkNavigation {
         case work(WorkReference?)
         case dashboard(String)
         case view(WorkViewPlan)
+        /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
+        case zoomed(dashboard: String, work: WorkReference)
     }
     var destination: Destination = .work(nil)
     var selection: WorkReference? {
-        get { if case .work(let work) = destination { return work }; return nil }
+        get {
+            switch destination {
+            case .work(let work): work
+            case .zoomed(_, let work): work
+            case .dashboard, .view: nil
+            }
+        }
         set { destination = .work(newValue) }
     }
     var showsSelection: Bool {
-        if case .work = destination { return false }; return true
+        switch destination {
+        case .work, .zoomed: false
+        case .dashboard, .view: true
+        }
     }
     var dashboardID: String? {
         if case .dashboard(let id) = destination { return id }; return nil
+    }
+    /// The Dashboard the breadcrumb passes through, shown or zoomed from.
+    var trailDashboardID: String? {
+        switch destination {
+        case .dashboard(let id), .zoomed(let id, _): id
+        case .work, .view: nil
+        }
     }
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [Destination] = []

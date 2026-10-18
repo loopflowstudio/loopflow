@@ -2332,6 +2332,9 @@ extension WorkModel {
     private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
         case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
+        case .zoomed(let dashboard, let work):
+            select(work, preservingOpening: false, recordingHistory: recordingHistory)
+            navigation.destination = .zoomed(dashboard: dashboard, work: work)
         case .dashboard, .view:
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
@@ -2348,6 +2351,10 @@ extension WorkModel {
 
     func selectDashboard(_ id: String) {
         selectDestination(.dashboard(id), recordingHistory: true)
+    }
+
+    func zoom(into work: WorkReference, from dashboard: String) {
+        selectDestination(.zoomed(dashboard: dashboard, work: work), recordingHistory: true)
     }
 
     private func presentView(_ plan: WorkViewPlan) {
@@ -2410,7 +2417,7 @@ extension WorkModel {
 extension WorkModel {
     var selectedViewPlan: WorkViewPlan? {
         switch navigation.destination {
-        case .work: nil
+        case .work, .zoomed: nil
         case .dashboard(let id): dashboard(id)
         case .view(let plan): plan
         }

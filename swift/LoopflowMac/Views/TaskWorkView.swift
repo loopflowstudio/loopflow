@@ -221,6 +221,29 @@ struct TaskWorkflowHeader: View {
 }
 
 /// One compact control; hover or click reveals the Task's lifecycle actions.
+/// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
+struct TaskHeading: View {
+    let task: RoadmapTask
+    @Environment(\.palette) private var palette
+
+    private var state: String {
+        if let label = task.task.terminalLabel { return label }
+        if task.runtime?.status == .paused { return "Paused" }
+        if task.runtime?.started != true { return "Unstarted" }
+        return task.task.state?.capitalized ?? "Started"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
+            Text(task.task.name).lineLimit(1).truncationMode(.tail)
+                .frame(minWidth: 60, alignment: .leading).help(task.task.name)
+            Text(state).foregroundStyle(palette.textSecondary).fixedSize()
+                .accessibilityIdentifier("task-heading-state")
+        }
+    }
+}
+
 struct TaskLifecycleActions: View {
     let model: WorkModel
     let task: RoadmapTask

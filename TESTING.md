@@ -176,6 +176,12 @@ with missing context evidence.
 OpenCode context-hook changes also run
 `node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` for refreshed
 system context after compaction, preserved user messages and child-session isolation.
+Pi context-hook changes also run
+`node scripts/benchmarks/skill-invocation/test_pi_context.mjs`. The isolated real-Pi
+probe in `scripts/benchmarks/pi/probe.py` takes `--pi /path/to/pi` and covers failed/empty
+results, automatic overflow compaction, native continuation, Unicode PTY input and
+public live steering. It uses a local model and disposable homes; configured-account
+and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when

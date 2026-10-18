@@ -114,6 +114,7 @@ struct PaneProgramHeading: Equatable {
         switch provider?.lowercased() {
         case "codex": name = "Codex"; symbol = "terminal"
         case "claude": name = "Claude"; symbol = "sparkle"
+        case "pi": name = "Pi"; symbol = "terminal"
         case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
         case .some(let value) where !value.isEmpty:
             name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"

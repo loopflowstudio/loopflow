@@ -145,6 +145,17 @@ pub(crate) fn build_session_command(
             }
             native = Some(launch);
         }
+        "pi" => {
+            args.extend(crate::harness::pi::options(config, context_file)?);
+            if let ProviderInvocation::Resume { session_id } = invocation {
+                crate::harness::pi::validate_resume(session_id)?;
+                args.extend(["--session".into(), session_id.to_string()]);
+            }
+            if let Some(prompt) = prompt.filter(|p| !p.is_empty()) {
+                super::validate_terminal_turn(&prompt)?;
+                args.extend(["--".into(), prompt]);
+            }
+        }
         _ => bail!("unsupported agent provider: {harness}"),
     }
     Ok(SessionCommand {

@@ -211,7 +211,7 @@ mod installation_tests;
 mod lifeline;
 pub(crate) use lifeline::{
     agent_process_lifeline_path, hold_agent_process_lifeline, release_agent_lifeline,
-    spawn_agent_process, spawn_native_agent_process,
+    spawn_agent_process, spawn_native_agent_process, watch_tool_lifeline,
 };
 
 pub(crate) fn current_process_group_id() -> Option<u32> {

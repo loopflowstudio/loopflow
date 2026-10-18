@@ -31,8 +31,9 @@ processes keep running and may fail if they cannot use the upgraded database.
 
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-[Codex](https://github.com/openai/codex), or
-[OpenCode](https://github.com/anomalyco/opencode). Default install location is
+[Codex](https://github.com/openai/codex),
+[OpenCode](https://github.com/anomalyco/opencode), or
+[Pi](https://github.com/earendil-works/pi) (1.3+). Default install location is
 `~/.local/bin` (`LF_INSTALL_DIR` overrides). Or install with cargo:
 
 ```bash

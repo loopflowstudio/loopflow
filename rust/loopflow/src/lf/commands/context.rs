@@ -359,7 +359,10 @@ fn emit_context(
         store.with_provider_context(
             adapter,
             thread,
-            event == "SessionStart" || event == "OpenCodeMessagesTransform",
+            matches!(
+                event,
+                "SessionStart" | "OpenCodeMessagesTransform" | "PiContext"
+            ),
             || {
                 let invocation = input["tool_use_id"]
                     .as_str()

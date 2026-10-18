@@ -53,7 +53,7 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Override agents named in Tasks, Flows and skills, including child commands (harness[:model])
+    /// Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model])
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
@@ -456,6 +456,16 @@ pub enum Commands {
     PlanningCheck {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
+    },
+    /// Owned Pi native lifecycle callback.
+    #[command(name = "__pi-event", hide = true)]
+    PiEvent,
+    /// Arm the existing watchdog for an owned detached tool group.
+    #[command(name = "__tool-lifeline", hide = true)]
+    ToolLifeline {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        provider_pid: u32,
     },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]

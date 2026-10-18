@@ -373,7 +373,7 @@ struct SessionPaneView: View {
     private var paneContentChoices: some View {
         if let session = primarySession {
             Section("Session agent") {
-                ForEach(["claude", "codex", "opencode"], id: \.self) { agent in
+                ForEach(["claude", "codex", "opencode", "pi"], id: \.self) { agent in
                     Button {
                         changeSession(session, agent: agent)
                     } label: {

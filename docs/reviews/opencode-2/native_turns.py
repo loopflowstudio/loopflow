@@ -23,6 +23,8 @@ class Model(ThreadingHTTPServer):
         self.release = threading.Event()
         self.hold = hold
         self.fail = fail
+        self.fail_all = False
+        self.answer: str | None = None
         self.tool_commands = {1: "printf native-tool-proof"}
 
     def __enter__(self) -> "Model":
@@ -45,10 +47,12 @@ class ModelRequest(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         model.requests.append(request)
         index = len(model.requests)
-        if getattr(model, "tool_on_primary", False) and any(tool.get("function", {}).get("name") == "shell" for tool in request.get("tools", [])):
+        if getattr(model, "tool_on_primary", False) and any(
+            tool.get("function", {}).get("name") == "shell" for tool in request.get("tools", [])
+        ):
             model.tool_commands[index] = "printf native-tool-proof"
             model.tool_on_primary = False
-        if index == model.fail:
+        if model.fail_all or index == model.fail:
             self.send_response(400)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -57,7 +61,7 @@ class ModelRequest(BaseHTTPRequestHandler):
                 b'"type":"invalid_request_error"}}'
             )
             return
-        delta = {"content": f"answer-{index}"}
+        delta = {"content": model.answer or f"answer-{index}"}
         finish = "stop"
         if index in model.tool_commands:
             delta = {

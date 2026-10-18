@@ -1330,7 +1330,7 @@ fn session_names_survive_capture_replacement() {
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let evidence = home.path().join("launched");
+    let evidence = home.path().join("resume-proof");
     let mut opened = command(home.path(), &["session", "connect", id])
         .env(
             "PATH",

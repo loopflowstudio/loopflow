@@ -2,13 +2,16 @@
 
 ```sh
 uv run python scripts/test_network.py uv run --no-sync python docs/reviews/opencode-2/loopflow_turns.py target/debug/lf
+uv run python scripts/test_network.py uv run --no-sync python docs/reviews/opencode-2/loopflow_turns.py target/debug/lf --routing-and-failure
+uv run python scripts/test_network.py uv run --no-sync python docs/reviews/opencode-2/loopflow_turns.py target/debug/lf --resize
 ```
 
 The candidate now uses OpenCode 2.0.32's authenticated private server, current
 Session/context APIs and full-screen native terminal. Jack Heart's revised
 priority is ordinary launch, tools, context, batch execution and completed-session
 resume. Automatic continuation after a crash is explicitly unsupported: no
-synthetic retry input or admission replay is sent. Gate, publication, landing
+synthetic retry input or admission replay is sent. The checkpoint is published as
+[PR #1590](https://github.com/loopflowstudio/loopflow/pull/1590); landing
 and supported installation remain subsequent Flow steps. No shared schema or
 installed provider was changed by this implementation.
 
@@ -21,16 +24,76 @@ native integration evidence, separate from configured-account acceptance.
 
 | Behavior | Current evidence | Remaining gate/demo scope |
 |---|---|---|
-| Native full-screen launch, tools and resume | Local PTY: bare launch, explicit resumed input, same native identity; configured-account operator: shell result and remembered answer after reconnect | Resize and interruption during rendering |
+| Native full-screen launch, tools and resume | Local PTY: bare launch, explicit resumed input, same native identity; resized Unicode draft remains editable and reaches model; configured-account operator: shell result and remembered answer after reconnect | Interruption during rendering; subjective rendering judgment |
 | Quit before submission | Empty resumed composer exits without another model request | Initial `--prompt` retains native automatic submission semantics |
-| Headless results and Flow | Real headless tool turn, completed resume, one-step Flow pass; migrated lifecycle tests reject failures and disconnect after tools | Full Task workflow and JSON routing acceptance |
-| Context, scratch and skills | Real model requests contain initial and refreshed Unicode scratch; generated plugin directory loads; 300 KB Unicode skill reaches model through final marker | Native compaction and child-session isolation |
+| Headless results and Flow | Real headless tool turn, completed resume, one-step Flow and JSON router pass; selected branch reaches model and unselected branch does not | Full native Task workflow acceptance |
+| Context, scratch and skills | Real model requests contain initial and refreshed Unicode scratch; generated plugin directory loads; 300 KB Unicode skill reaches model through final marker; current hook fixture covers compaction refresh and child isolation | Native compaction and child-session isolation |
 | Model and account selection | Current Session model API; launch fixture checks model; account-routing unit test passes; configured-account native turn succeeds | Agent settings, additional configured accounts, invalid-model/429/5xx cases |
 | Native identity and startup errors | API identity precedes terminal launch; focused fresh/resume and failed-start tests pass; native export reader updated | Cross-provider continuation |
 | Ownership, steers and receipts | Focused test freezes initiating capture through attachment handoff and independent steer; repeated snapshot does not double usage; operator retains old/new Process attribution across resume | Actual live-provider viewer handoff, native steer and host-queue acceptance |
-| Failed/empty completion | Failed idle, empty success and interrupted old input cannot complete a new capture; synthetic retry disabled; disconnect remains unknown | Explicit new input after actual native provider death |
+| Failed/empty completion | Failed idle and empty success rejected; actual model 400 and SIGKILL fail the command; explicit new input completes in the same native conversation while failed/interrupted captures retain their outcomes | Automatic crash continuation remains unsupported |
 | Permissions and cleanup | Current permission reply and interrupt APIs; ownership fencing retained; disposable native server cleanup succeeds | Actual Worktree deny enforcement and stale viewer cancellation |
 | Output, attention and stream parsing | Current content/tool/form mapping, conformance fixtures and split UTF-8/CRLF parser tests pass | Wider native attention/retry scenarios |
+
+Gate's native probes used **OpenCode 2.0.32** and candidate
+**lf 0.14.5+285aadc9d.dirty**, with disposable homes and external network denied.
+The ordinary-operation probe passed eight assertions with 11 model requests.
+The routing/failure probe proved selected JSON routing, rejected model failure,
+and explicit continuation after both model failure and provider SIGKILL. Native
+completion receipts join through their frozen initiating-input origin; the killed
+capture never acquires the new input's successful receipt. The resize probe used
+a real PTY and headless terminal screen parser: the Unicode draft survived a
+120×35 → 130×40 resize, remained editable and reached the model intact.
+
+Review found one unmigrated context-hook benchmark still calling OpenCode 1's
+removed callbacks. It now exercises current hooks and proves refreshed system
+context, intact user messages and child isolation. Two changed Python fixtures
+also required formatting. Broader Rust tests exposed a native-handoff stand-in
+that never started a private server; it now uses the shared OpenCode 2 fixture.
+The startup-recovery fixture also still suppressed a removed log line; it now
+exits before publishing the private endpoint. Both retain their original ownership
+and recovery assertions. The corrected startup fixture exposed a production
+recovery defect: a confirmed-dead private server with stale Process bookkeeping
+and no native ID was treated as live headless work. Reopening now settles that
+dead attachment through the existing ownership fence before launching the
+prepared input; live work still requires native identity before interruption.
+Settlement uses the observed attachment and rechecks death, so a replacement
+owner cannot be stopped. The transport-resume stand-in now serves the private
+endpoint; the session-name fixture keeps its resume proof separate from shared
+launch history. Their original behavior assertions remain intact.
+These native proofs use a deterministic model, not configured accounts;
+the independent configured-account evidence below remains a separate result.
+
+### Gate verification and bounded fixture repairs
+
+`uv run python scripts/test.py --base 616d73b4dc --reuse-passing` ran the affected
+plan once: Rust had 2,666 passes, ten failures and 22 skips; website had 75 passes.
+All ten Rust failures were repaired and passed focused follow-ups. The original
+aggregate result remains failed; no second full-suite or baseline-only run is
+claimed. CI owns the final combined-tree result.
+
+Five failures came from Task fixtures registering `/var/...` and
+`/private/var/...` as different repositories on macOS. Admission, scoped Task
+navigation and initializing-worktree fixtures now consistently register canonical
+paths. Assertions and production ownership constraints are unchanged. The focused
+materialized nextest selection passed all six tests; it reported one `LEAK` warning
+for `delegation_selects_first_owner_but_unknown_started_location_never_moves`.
+That leaked-handle observation remains unresolved; no retry or suppression was added.
+
+The architecture scan also mistook generated `.lf/prompts/` history for current
+instructions. It now excludes that history alongside existing historical roots,
+with regression coverage; authored `.lf/skills` remain checked. The standard
+scanner passes on the actual checkout, and all 21 architecture tests pass.
+
+Focused Rust follow-ups passed: all 13 human-session unit tests, all 21 Session
+CLI tests, transport's explicit-resume regression and all four data-clone tests.
+The lifecycle suite initially passed 25 cases with one stale error assertion and
+one ignored case; the repaired assertion and dead-start recovery each passed
+focused reruns. Final `cargo fmt --all -- --check`,
+`cargo clippy --all-targets --jobs 4 -- -D warnings`, changed-Python Ruff checks
+and the JavaScript context-hook check passed. The native commands above passed
+their ordinary, routing/failure and resize probes. Paid live tests, remaining
+native acceptance in the matrix, and supported installation are not claimed passed.
 
 The independent repository operator used the existing configured account without
 reading credentials: native initial answer, shell tool, normal exit, unchanged
@@ -43,11 +106,11 @@ This acceptance used a disposable store; the operator's shared-store attempt hit
 the preexisting session-transport schema boundary before provider startup.
 Supported installation must follow the normal release/materialization path.
 
-Focused checks passed: OpenCode library tests (23 passed, two paid live tests
+Earlier implementation checks passed: OpenCode library tests (23 passed, two paid live tests
 ignored), OpenCode launch/lifecycle tests (five passed), shared terminal launch
 contract, context steer receipt tests, account routing and failed-start reopen.
 `cargo build -p loopflow --bin lf`, `cargo fmt`, and
-`cargo clippy --all-targets -- -D warnings` passed. Gate owns broader suites.
+`cargo clippy --all-targets -- -D warnings` passed. Gate results are recorded above.
 
 Concrete review repairs: remove log-scraped identity and old endpoints; load a
 plugin directory with the native package export; keep one launch configuration;

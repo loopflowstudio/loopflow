@@ -705,9 +705,10 @@ fn headless_flow(resume: bool) {
     assert!(outcome.is_none(), "viewer death settled the execution");
     if resume {
         // Replace only the next native executable, leaving the running server intact.
+        std::fs::copy(&provider, bin.join("opencode-server.py")).unwrap();
         std::fs::write(
             &provider,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
+            "#!/bin/sh\nif [ \"$1\" = serve ]; then exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"; fi\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
         )
         .unwrap();
         let output = fixture

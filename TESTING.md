@@ -173,6 +173,13 @@ Context-hook changes also run `session_cli_tests`: resume callbacks supply the
 native Session identity and event payload, just like startup. Provider fixture
 scripts must fail when a callback fails, rather than report a successful turn
 with missing context evidence.
+OpenCode context-hook changes also run
+`node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` for refreshed
+system context after compaction, preserved user messages and child-session isolation.
+The native OpenCode 2 probe in `docs/reviews/opencode-2/loopflow_turns.py` accepts
+`--routing-and-failure` for JSON Flow routing and explicit input after model failure
+or provider death, and `--resize` for editable Unicode draft preservation;
+run it through `scripts/test_network.py` with the built candidate as its first argument.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when

@@ -56,6 +56,16 @@ a public launch regression covers cleanup. SSE framing preserves split UTF-8 and
 mixed CRLF/LF boundaries. No additional code mismatch was established during this
 reconciliation.
 
+Gate found and repaired another startup-recovery boundary: a private server can
+die before native identity exists while its Process bookkeeping remains stale.
+Reopening now settles confirmed-dead attachments before requiring native identity
+for interruption of live headless work. The existing startup-recovery fixture now
+fails before endpoint publication, and the handoff fixture uses the shared OpenCode
+2 private server. The standalone JavaScript context test also uses current hooks.
+Native gate probes now cover JSON routing, explicit input after model failure and
+SIGKILL without completing the interrupted capture, and editable Unicode drafts
+across resize. Results and remaining native gaps are retained in the audit.
+
 ## Related changes and retained limits
 
 The checkout includes #1585 (`40a9a697f0`): resume uses an explicit Session ID and
@@ -78,11 +88,11 @@ LOO-454 owns context-consumption accounting; LOO-502 owns upgrade continuity.
 
 ## Remaining work
 
-1. Complete affected gate/CI and native acceptance against the final candidate.
+1. Complete CI and remaining native acceptance against the final candidate.
    Outstanding cases are actual live-provider viewer handoff, independent steer
-   and host-queued results, explicit new input after provider death, full Task
-   workflow/JSON routing, Worktree permission denial and stale-viewer cancellation,
-   compaction/child-session isolation, resize, native agent settings,
+   and host-queued results, full native Task
+   workflow, Worktree permission denial and stale-viewer cancellation,
+   compaction/child-session isolation, native agent settings,
    cross-provider continuation, wider attention and auth/model/network failures.
    The audit matrix distinguishes fixture, deterministic-native and configured-account
    evidence; Claude/Codex baseline inspection is not a fresh provider run.
@@ -93,8 +103,10 @@ LOO-454 owns context-consumption accounting; LOO-502 owns upgrade continuity.
 3. Publish and land through the caller's delivery procedure, then coordinate
    supported release/installation with its existing owner and replay the original
    `lf -a opencode` experience. Preserve unrelated Sessions, Flows, accounts and
-   checkouts. No PR, merge or supported installed repair is established yet.
+   checkouts. PR #1590 is published; merge and supported installed repair remain open.
 
 Check: prior unchanged-code results retained—`uv run python scripts/test_network.py cargo test -p loopflow --lib opencode` (25 passed, 2 live ignored), `--lib agent::session::tests` (4 passed), and `--test session_launch_contract` with each filter `opencode_headless_start_and_resume_preserve_history_and_reload_policy` and `terminal_launch_and_resume_use_current_policy_and_preserve_native_identity` (1 each), with `< /dev/null`; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Prose reconciliation: `git diff --check` passed; `lf context` within both targets. Broader acceptance remains with gate/CI and delivery.
 
 Publication check: `uv run python scripts/test_network.py cargo test -p loopflow --test session_launch_contract < /dev/null` passed all 19 tests; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` passed. Review against Task base `616d73b4dc` found no further publication blocker; native/account evidence and its limits remain as recorded above. This is a review checkpoint; affected gate suites, full CI and supported installed acceptance remain with delivery.
+
+Gate check: `uv run python scripts/test.py --base 616d73b4dc --reuse-passing` initially reported Rust 2,666 passed/10 failed/22 skipped and website 75 passed; all ten failures now pass focused follow-ups (human-session 13, Session CLI 21, lifecycle repairs, transport resume, canonical-repository selection 6), plus data-clones 4; one nextest leaked-handle warning remains; final fmt, Clippy, Ruff, architecture scanner/21 tests, context-hook JavaScript and all three native probe modes passed; combined-tree CI, paid live tests and installed acceptance remain with delivery.

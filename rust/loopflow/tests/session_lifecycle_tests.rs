@@ -487,7 +487,7 @@ fn task_conversation_reopens_after_terminal_startup_failure() {
     std::fs::write(&provider, "#!/bin/sh\nexit 0\n").unwrap();
     let failed = fixture.run(&LAUNCH);
     assert!(!failed.status.success());
-    assert!(String::from_utf8_lossy(&failed.stderr).contains("did not report a resumable session"));
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("private server failed to start"));
     let sessions = fixture.sessions();
     assert_eq!(sessions.len(), 1);
     let id = sessions[0]["id"].as_str().unwrap();
@@ -1186,10 +1186,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         let id = session["id"].as_str().unwrap();
         let provider = fixture.home.path().join("bin/opencode");
         let script = std::fs::read_to_string(&provider).unwrap();
-        std::fs::write(&provider, script.replace(
-            "    print(\"message=created id=ses_\" + os.environ[\"LF_CAPTURE_KEY\"], file=sys.stderr)",
-            "    pass  # exit without publishing native history",
-        )).unwrap();
+        std::fs::write(
+            &provider,
+            script.replace(
+                "print(json.dumps({\"url\": f\"http://127.0.0.1:{server.server_port}\"}), flush=True)",
+                "_record_launch()\nraise SystemExit(0)",
+            ),
+        )
+        .unwrap();
         let failed = fixture.run(&["session", "connect", id]);
         assert!(!failed.status.success());
         assert!(String::from_utf8_lossy(&failed.stderr).contains("before becoming resumable"));

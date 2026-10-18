@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Disposable native OpenCode messages and permission ordering for CLI proofs."""
+
 import json
 import os
 import queue
@@ -35,9 +36,19 @@ def _record_launch():
         Path(evidence + ".args").write_text("\n".join(sys.argv[1:]))
     config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
     if "serve" not in sys.argv:
-        (HOME / "received.json").write_text(json.dumps({"args":sys.argv[1:], "cwd":os.getcwd(),
-        "participant":os.environ.get("LF_USER_NAME"), "opencode":json.dumps(config),
-        "model":json.loads((HOME / "native-model.json").read_text()) if (HOME / "native-model.json").exists() else None}))
+        (HOME / "received.json").write_text(
+            json.dumps(
+                {
+                    "args": sys.argv[1:],
+                    "cwd": os.getcwd(),
+                    "participant": os.environ.get("LF_USER_NAME"),
+                    "opencode": json.dumps(config),
+                    "model": json.loads((HOME / "native-model.json").read_text())
+                    if (HOME / "native-model.json").exists()
+                    else None,
+                }
+            )
+        )
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
     with (HOME / "declarations").open("a") as output:
@@ -64,7 +75,7 @@ def _contract(parts):
     start = text.rfind(CONTRACT)
     if start < 0:
         return None
-    return json.JSONDecoder().raw_decode(text[start + len(CONTRACT):])[0]
+    return json.JSONDecoder().raw_decode(text[start + len(CONTRACT) :])[0]
 
 
 def _launch(session, prompt):
@@ -75,9 +86,13 @@ def _launch(session, prompt):
             raise TimeoutError("fixture turn was not released")
         time.sleep(0.01)
     assistant = "msg_" + uuid.uuid4().hex
-    message = {"id": assistant, "type": "assistant",
-            "time": {"created": int(time.time() * 1000)},
-            "modelID": "fixture", "providerID": "opencode"}
+    message = {
+        "id": assistant,
+        "type": "assistant",
+        "time": {"created": int(time.time() * 1000)},
+        "modelID": "fixture",
+        "providerID": "opencode",
+    }
     message["content"] = []
     with LOCK:
         sessions[session].append(message)
@@ -101,11 +116,16 @@ def _launch(session, prompt):
         permission = "per_" + uuid.uuid4().hex
         reply = threading.Event()
         REPLIES[permission] = reply
-        _event("permission.asked", sessionID=session, id=permission,
-               source={"messageID": assistant, "id": "call_fixture", "type": "tool"})
+        _event(
+            "permission.asked",
+            sessionID=session,
+            id=permission,
+            source={"messageID": assistant, "id": "call_fixture", "type": "tool"},
+        )
         if not reply.wait(15):
             message["error"] = {
-                "name": "APIError", "data": {"message": "fixture permission unanswered"}
+                "name": "APIError",
+                "data": {"message": "fixture permission unanswered"},
             }
         else:
             schema = json.loads(saved.read_text()) if saved.exists() else None
@@ -119,8 +139,11 @@ def _launch(session, prompt):
                     blocked = HOME / "blocked-once"
                     if blocked.exists():
                         blocked.unlink()
-                        value = {"decision": "blocked", "summary": None,
-                                 "reason": "Release target is missing"}
+                        value = {
+                            "decision": "blocked",
+                            "summary": None,
+                            "reason": "Release target is missing",
+                        }
                     invalid = HOME / "invalid-output-once"
                     if invalid.exists() or (HOME / "invalid-output-always").exists():
                         invalid.unlink(missing_ok=True)
@@ -137,17 +160,36 @@ def _launch(session, prompt):
                 (HOME / "tool-effect").write_text("completed")
                 EVENTS.put(None)
                 return
-    message.update(finish="stop", tokens={"input": 20, "output": 5, "reasoning": 0,
-                                      "cache": {"read": 0, "write": 0}}, cost=0)
+    message.update(
+        finish="stop",
+        tokens={"input": 20, "output": 5, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+        cost=0,
+    )
     message["time"]["completed"] = int(time.time() * 1000)
-    message["content"] = [{"id": "part_" + assistant, "sessionID": session,
-                         "messageID": assistant, "type": "text", "text": answer}]
+    message["content"] = [
+        {
+            "id": "part_" + assistant,
+            "sessionID": session,
+            "messageID": assistant,
+            "type": "text",
+            "text": answer,
+        }
+    ]
     with LOCK:
-        sessions[session].append({"id": "msg_" + uuid.uuid4().hex, "type": "idle",
-            "outcome": "failed" if "error" in message else "succeeded", "error": message.get("error"),
-            "time": {"created": int(time.time() * 1000)}})
+        sessions[session].append(
+            {
+                "id": "msg_" + uuid.uuid4().hex,
+                "type": "idle",
+                "outcome": "failed" if "error" in message else "succeeded",
+                "error": message.get("error"),
+                "time": {"created": int(time.time() * 1000)},
+            }
+        )
         _save(sessions)
-    _event("session.execution.failed" if "error" in message else "session.execution.succeeded", sessionID=session)
+    _event(
+        "session.execution.failed" if "error" in message else "session.execution.succeeded",
+        sessionID=session,
+    )
 
 
 class Server(BaseHTTPRequestHandler):
@@ -175,7 +217,9 @@ class Server(BaseHTTPRequestHandler):
                     return
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-        elif self.path.startswith("/api/session/") or self.path.startswith("/api/experimental/session/"):
+        elif self.path.startswith("/api/session/") or self.path.startswith(
+            "/api/experimental/session/"
+        ):
             session = self.path.split("/")[4 if "/experimental/" in self.path else 3]
             with LOCK:
                 if session not in sessions:
@@ -183,7 +227,13 @@ class Server(BaseHTTPRequestHandler):
                 elif self.path.endswith("/export"):
                     self._json({"data": {"messages": sessions[session]}})
                 else:
-                    self._json({"data": sessions[session] if self.path.endswith("/context") else {"id": session}})
+                    self._json(
+                        {
+                            "data": sessions[session]
+                            if self.path.endswith("/context")
+                            else {"id": session}
+                        }
+                    )
         else:
             self._json({})
 
@@ -206,11 +256,21 @@ class Server(BaseHTTPRequestHandler):
             self._json({"data": {"id": session}})
         elif self.path.endswith("/prompt"):
             if evidence := os.environ.get("LF_TEST_REPLAY_EVIDENCE"):
-                Path(evidence).write_text(json.dumps({
-                    "input": os.environ["LF_CAPTURE_KEY"],
-                    "request": body, "config": json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")),
-                    "instructions": [Path(p).read_text() for p in json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")).get("instructions", [])],
-                }))
+                Path(evidence).write_text(
+                    json.dumps(
+                        {
+                            "input": os.environ["LF_CAPTURE_KEY"],
+                            "request": body,
+                            "config": json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")),
+                            "instructions": [
+                                Path(p).read_text()
+                                for p in json.loads(
+                                    os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")
+                                ).get("instructions", [])
+                            ],
+                        }
+                    )
+                )
             session = self.path.split("/")[3]
             request = body["id"]
             with LOCK:
@@ -224,8 +284,11 @@ class Server(BaseHTTPRequestHandler):
                 source = (Path(plugin.removeprefix("file://")) / "index.js").read_text()
                 spec = json.JSONDecoder().raw_decode(source.split("const spec = ", 1)[1])[0]
                 instructions += spec.get("instructions", "")
-            threading.Thread(target=_launch, args=(session,
-                [{"text": instructions}, {"text": body["text"]}]), daemon=True).start()
+            threading.Thread(
+                target=_launch,
+                args=(session, [{"text": instructions}, {"text": body["text"]}]),
+                daemon=True,
+            ).start()
         elif "/permission/" in self.path:
             assert body == {"reply": "once"}
             REPLIES[self.path.split("/")[5]].set()

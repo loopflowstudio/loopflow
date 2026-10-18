@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -151,6 +151,88 @@ pub(crate) enum NativeSubmission {
     InputAccepted,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{direction}: {operation}")]
+struct RelayOperation {
+    operation: &'static str,
+    direction: &'static str,
+}
+
+impl RelayOperation {
+    fn new(operation: &'static str, direction: &'static str) -> Self {
+        Self {
+            operation,
+            direction,
+        }
+    }
+}
+
+struct RelayDiagnostics<'a> {
+    connection: &'a CodexConnection,
+    input: String,
+    attachment: Option<SessionAttachment>,
+}
+
+impl RelayDiagnostics<'_> {
+    fn retain(&self, error: &anyhow::Error) {
+        let operation = error.downcast_ref::<RelayOperation>();
+        let mut message = format!("{error:#}");
+        if message.len() > 2048 {
+            let mut end = 2045;
+            while !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+            message.push_str("...");
+        }
+        // A failed diagnostic write must never end the listener or reach the TUI.
+        let _ = super::dispatch::off_reactor(|| {
+            self.connection.store.retain_codex_relay_failure(
+                &self.input,
+                self.attachment.as_ref(),
+                &json!({
+                    "source": "codex_relay", "input_id": self.input,
+                    "operation": operation.map_or("process", |op| op.operation),
+                    "direction": operation.map_or("relay", |op| op.direction),
+                    "error": message,
+                }),
+            )
+        });
+    }
+
+    fn client_result<T>(
+        &self,
+        result: std::result::Result<T, Error>,
+        operation: RelayOperation,
+    ) -> Result<Option<T>> {
+        let error = match result {
+            Ok(value) => return Ok(Some(value)),
+            Err(error) => error,
+        };
+        // Renderer resets end this channel, while outstanding provider replies
+        // still drain. Explicit close frames never reach this error path.
+        let disconnected = match &error {
+            Error::ConnectionClosed
+            | Error::AlreadyClosed
+            | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake) => true,
+            Error::Io(error) => matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::NotConnected
+            ),
+            _ => false,
+        };
+        let error = anyhow::Error::new(error).context(operation);
+        if disconnected {
+            self.retain(&error);
+            Ok(None)
+        } else {
+            Err(error)
+        }
+    }
+}
+
 impl CodexConnection {
     pub(crate) fn ensure_thread_resolved(&self) -> Result<()> {
         if self.submission()? == Some(NativeSubmission::ThreadDispatched)
@@ -282,14 +364,44 @@ impl CodexConnection {
         endpoint: &Path,
         initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
     ) -> Result<()> {
-        let mut client = accept_async(client).await?;
-        let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
-        let input_key = self
+        let session = self
             .store
             .session(&self.session_id)?
-            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?
-            .artifact_key;
+            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
+        let diagnostics = RelayDiagnostics {
+            connection: self,
+            input: session.artifact_key,
+            attachment: self
+                .attachment
+                .clone()
+                .or(self.store.session_attachment(&self.session_id)?),
+        };
+        let result = self
+            .serve_relay(client, endpoint, initial, &diagnostics)
+            .await;
+        if let Err(error) = &result {
+            diagnostics.retain(error);
+        }
+        result
+    }
+
+    async fn serve_relay(
+        &self,
+        client: UnixStream,
+        endpoint: &Path,
+        initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
+        diagnostics: &RelayDiagnostics<'_>,
+    ) -> Result<()> {
+        let mut client = accept_async(client)
+            .await
+            .context(RelayOperation::new("handshake", "client_to_relay"))?;
+        let socket = UnixStream::connect(endpoint)
+            .await
+            .context(RelayOperation::new("connect", "relay_to_provider"))?;
+        let (mut upstream, _) = client_async("ws://localhost", socket)
+            .await
+            .context(RelayOperation::new("handshake", "relay_to_provider"))?;
+        let input_key = &diagnostics.input;
         let mut history = super::codex_history::History::default();
         let mut startup_request = None;
         let mut initial_request = None;
@@ -309,10 +421,10 @@ impl CodexConnection {
             }
             tokio::select! {
                 _ = &mut disconnected_deadline, if !client_open => {
-                    return Err(anyhow!("Codex startup response was lost; submission outcome is unknown; reconnect to inspect the saved conversation"));
+                    return Err(anyhow!("Codex startup response was lost; submission outcome is unknown; reconnect to inspect the saved conversation").context(RelayOperation::new("startup_reply_timeout", "provider_to_relay")));
                 }
                 incoming = client.next(), if client_open => {
-                    let message = incoming.map(client_result).transpose()?.flatten();
+                    let message = incoming.map(|result| diagnostics.client_result(result, RelayOperation::new("read", "client_to_relay"))).transpose()?.flatten();
                     let text = match message {
                         Some(Message::Text(text)) => text,
                         None | Some(Message::Close(_)) => {
@@ -322,7 +434,7 @@ impl CodexConnection {
                         }
                         _ => continue,
                     };
-                    let mut rpc: Value = serde_json::from_str(&text)?;
+                    let mut rpc: Value = serde_json::from_str(&text).context(RelayOperation::new("decode", "client_to_relay"))?;
                     // A reconnecting fresh TUI still asks to start. Its Session
                     // may already have received the original start response.
                     if rpc["method"] == "thread/start" && !subscribed {
@@ -375,7 +487,7 @@ impl CodexConnection {
                     }
                     let message = Message::Text(serde_json::to_string(&rpc)?.into());
                     if passive {
-                        upstream.send(message).await?;
+                        upstream.send(message).await.context(RelayOperation::new("write", "relay_to_provider"))?;
                     } else {
                         let outcome;
                         (upstream, outcome) = self.send(upstream, message,
@@ -385,22 +497,22 @@ impl CodexConnection {
                             Err(StoreError::InvalidAuthority(reason)) => {
                                 reject(&mut client, &rpc, &reason).await?;
                             }
-                            Err(error) => return Err(error.into()),
+                            Err(error) => return Err(anyhow::Error::new(error).context(RelayOperation::new("dispatch", "relay_to_provider"))),
                         }
                     }
                 }
                 outgoing = upstream.next() => {
-                    let outgoing = outgoing.ok_or_else(|| anyhow!("Codex provider connection closed; resume saved history before retrying input"))??;
+                    let outgoing = outgoing.ok_or_else(|| anyhow!("Codex provider connection closed; resume saved history before retrying input")).and_then(|message| message.map_err(Into::into)).context(RelayOperation::new("read", "provider_to_relay"))?;
                     let resumed = match &outgoing {
-                        Message::Close(_) => return Err(anyhow!("Codex provider closed the connection; resume saved history before retrying input")),
+                        Message::Close(_) => return Err(anyhow!("Codex provider closed the connection; resume saved history before retrying input").context(RelayOperation::new("close", "provider_to_relay"))),
                         Message::Text(text) => {
-                            let rpc: Value = serde_json::from_str(text)?;
+                            let rpc: Value = serde_json::from_str(text).context(RelayOperation::new("decode", "provider_to_relay"))?;
                             let bind_thread = startup_request.as_ref().is_some_and(|(_, params)| params.is_some());
                             let startup_reply = startup_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id));
                             if startup_reply {
                                 let (_, params) = startup_request.take().expect("matched startup request");
                                 if rpc.get("error").is_some() && thread.is_none() {
-                                    self.record_submission(&input_key, NativeSubmission::ThreadRejected)?;
+                                    self.record_submission(input_key, NativeSubmission::ThreadRejected)?;
                                     if let Some(initial) = &initial {
                                         initial.lock().await.params = params;
                                     }
@@ -459,13 +571,13 @@ impl CodexConnection {
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, text) = initial_request.take().expect("matched initial request");
                                 if let Some(error) = rpc.get("error") {
-                                    self.record_submission(&input_key, NativeSubmission::InputRejected)?;
+                                    self.record_submission(input_key, NativeSubmission::InputRejected)?;
                                     if let Some(initial) = &initial {
                                         initial.lock().await.text = Some(text);
                                     }
                                     return Err(anyhow!("Codex rejected the initial request: {error}; saved input is available on reconnect"));
                                 }
-                                self.record_submission(&input_key, NativeSubmission::InputAccepted)?;
+                                self.record_submission(input_key, NativeSubmission::InputAccepted)?;
                                 continue;
                             }
                             resumed.then_some(rpc)
@@ -473,7 +585,7 @@ impl CodexConnection {
                         _ => None,
                     };
                     if !client_open { continue; }
-                    if client_result(client.send(outgoing).await)?.is_none() {
+                    if diagnostics.client_result(client.send(outgoing).await, RelayOperation::new("write", "relay_to_client"))?.is_none() {
                         client_open = false;
                         disconnected_deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(15));
                         continue;
@@ -485,7 +597,7 @@ impl CodexConnection {
                         if !turns.is_empty() {
                             initial.text = None;
                             if self.submission()? == Some(NativeSubmission::InputDispatched) {
-                                self.record_submission(&input_key, NativeSubmission::InputAccepted)?;
+                                self.record_submission(input_key, NativeSubmission::InputAccepted)?;
                             }
                         }
                         if let Some(text) = initial.text.take() {
@@ -497,7 +609,7 @@ impl CodexConnection {
                             let outcome;
                             (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
                                 Some((input_key.as_str(), NativeSubmission::InputDispatched))).await?;
-                            outcome?;
+                            outcome.context(RelayOperation::new("dispatch", "relay_to_provider"))?;
                             initial_request = Some((id, text));
                         }
                     }
@@ -565,30 +677,6 @@ fn native_start_params(client: &Value, prepared: Value) -> Value {
     Value::Object(params)
 }
 
-// The retained native client may explicitly exit without a WebSocket close handshake. This applies
-// only to its side of the relay: provider disconnects still propagate as failures.
-fn client_result<T>(result: std::result::Result<T, Error>) -> Result<Option<T>> {
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(
-            Error::ConnectionClosed
-            | Error::AlreadyClosed
-            | Error::Protocol(ProtocolError::ResetWithoutClosingHandshake),
-        ) => Ok(None),
-        Err(Error::Io(error))
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::BrokenPipe
-                    | std::io::ErrorKind::ConnectionReset
-                    | std::io::ErrorKind::NotConnected
-            ) =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
 pub(crate) async fn rpc_request(
     upstream: &mut WebSocketStream<UnixStream>,
     method: &str,
@@ -638,7 +726,8 @@ async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &
                 .to_string()
                 .into(),
             ))
-            .await?;
+            .await
+            .context(RelayOperation::new("reject", "relay_to_client"))?;
     }
     Ok(())
 }
@@ -677,6 +766,87 @@ mod tests {
             attachment: Some(attachment),
             account_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn relay_retains_connect_and_client_handshake_failures() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let endpoint = home.path().join("missing.sock");
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let task_connection = connection.clone();
+        let task = tokio::spawn(async move { task_connection.serve(relay, &endpoint).await });
+        let (_terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        assert!(task.await.unwrap().is_err());
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        drop(terminal);
+        assert!(connection
+            .serve(relay, &home.path().join("unused.sock"))
+            .await
+            .is_err());
+        let history = connection
+            .store
+            .session_history(&connection.session_id, 0, 0)
+            .unwrap();
+        let diagnostics: Vec<_> = history
+            .iter()
+            .filter(|event| event.payload["source"] == "codex_relay")
+            .collect();
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].payload["operation"], "connect");
+        assert_eq!(diagnostics[0].payload["direction"], "relay_to_provider");
+        assert_eq!(diagnostics[1].payload["operation"], "handshake");
+        assert_eq!(diagnostics[1].payload["direction"], "client_to_relay");
+        assert_eq!(
+            diagnostics[0].agent_process_id.as_deref(),
+            Some(
+                connection
+                    .attachment
+                    .as_ref()
+                    .unwrap()
+                    .agent_process_id
+                    .as_str()
+            )
+        );
+    }
+
+    #[test]
+    fn relay_diagnostics_bound_reconnect_storms_and_unicode_errors() {
+        let home = tempfile::tempdir().unwrap();
+        let connection = attached_connection(home.path());
+        let input = connection
+            .store
+            .session(&connection.session_id)
+            .unwrap()
+            .unwrap()
+            .artifact_key;
+        let diagnostics = super::RelayDiagnostics {
+            connection: &connection,
+            input,
+            attachment: connection.attachment.clone(),
+        };
+        for index in 0..32 {
+            diagnostics.retain(
+                &anyhow::anyhow!("{index}: {}", "雪".repeat(2000))
+                    .context(super::RelayOperation::new("read", "provider_to_relay")),
+            );
+        }
+        let history = connection
+            .store
+            .session_history(&connection.session_id, 0, 0)
+            .unwrap();
+        let diagnostics: Vec<_> = history
+            .iter()
+            .filter(|event| event.payload["source"] == "codex_relay")
+            .collect();
+        assert_eq!(diagnostics.len(), 16);
+        assert!(diagnostics[0].payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("0:"));
+        assert!(diagnostics
+            .iter()
+            .all(|event| event.payload["error"].as_str().unwrap().len() <= 2048));
     }
 
     #[tokio::test]
@@ -942,9 +1112,17 @@ mod tests {
                 json!({"id":1,"method":"thread/start","params":{}}),
             )
             .await;
-            let error = relay.await.unwrap().unwrap_err().to_string();
+            let error = format!("{:#}", relay.await.unwrap().unwrap_err());
             assert!(error.contains("provider closed"), "{error}");
             provider.await.unwrap();
+            let diagnostic = connection
+                .store
+                .session_history(&connection.session_id, 0, 0)
+                .unwrap()
+                .into_iter()
+                .find(|event| event.payload["source"] == "codex_relay")
+                .unwrap();
+            assert_eq!(diagnostic.payload["direction"], "provider_to_relay");
             let reopened = CodexConnection {
                 store: SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap(),
                 ..connection
@@ -1050,7 +1228,7 @@ mod tests {
                 fixture_rpc(&mut terminal).await["result"]["thread"]["id"],
                 "saved-thread"
             );
-            let error = relay.await.unwrap().unwrap_err().to_string();
+            let error = format!("{:#}", relay.await.unwrap().unwrap_err());
             assert!(
                 error.contains(if outcome == "rejected" {
                     "rejected"
@@ -1410,6 +1588,7 @@ mod tests {
                 account_id: None,
             };
             let (terminal, relay) = UnixStream::pair().unwrap();
+            let store = connection.store.clone();
             let relay = tokio::spawn(async move { connection.serve(relay, &endpoint).await });
             let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
             terminal
@@ -1429,6 +1608,13 @@ mod tests {
                 .unwrap()
                 .unwrap();
             provider.await.unwrap();
+            let diagnostics: Vec<_> = store
+                .session_history("conversation", 0, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|event| event.payload["source"] == "codex_relay")
+                .collect();
+            assert_eq!(diagnostics.len(), usize::from(!handshake));
         }
     }
 }

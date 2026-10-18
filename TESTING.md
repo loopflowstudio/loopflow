@@ -1251,6 +1251,14 @@ exact Unicode draft once. Native history must retain one conversation, two turns
 and two tools. `session_launch_contract` covers the warning output boundary with
 deterministic Claude, Codex and OpenCode stand-ins.
 
+Add `--startup-failure before-thread`, `after-thread`, or `first-turn` to drop
+only the disposable renderer's connection at native startup protocol boundaries.
+Each case checks the retained Session diagnostic's operation, direction and
+AgentProcess, reads it through `lf history show SESSION --events`, and rejects
+raw diagnostic output in the PTY. These probes use real Codex with a local model;
+they stop after diagnostic readback and clean up the disposable providers. They
+do not prove native startup recovery or establish the original reset's cause.
+
 ### Released capture-history preservation
 
 ```bash

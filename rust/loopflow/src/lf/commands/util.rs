@@ -884,12 +884,6 @@ async fn serve_codex_native(
         ))
         .map_err(|_| anyhow!("Native terminal launch was cancelled"))?;
     let mut clients = tokio::task::JoinSet::new();
-    let diagnostics = launch
-        .env
-        .get(crate::session_record::CAPTURE_KEY_ENV)
-        .map(|key| crate::session_record::capture_dir(key))
-        .transpose()?
-        .map(|directory| directory.join("codex-relay.log"));
     tokio::pin!(closed_rx);
     loop {
         tokio::select! {
@@ -904,14 +898,9 @@ async fn serve_codex_native(
                 });
             }
             result = clients.join_next(), if !clients.is_empty() => {
-                let result = result.expect("client set is nonempty")
-                    .map_err(anyhow::Error::from).and_then(|result| result);
-                if let Err(error) = result {
-                    // Keep the listener available to the native client's reconnect.
-                    if let Some(path) = &diagnostics {
-                        log_codex_relay_failure(path, &error, &connection);
-                    }
-                }
+                // Each connection retains its own diagnostic. Failure never closes
+                // the listener needed by the native client's reconnect.
+                let _ = result.expect("client set is nonempty");
             }
         }
     }
@@ -925,30 +914,6 @@ async fn serve_codex_native(
         );
     }
     Ok(())
-}
-
-fn log_codex_relay_failure(
-    path: &Path,
-    error: &anyhow::Error,
-    connection: &crate::harness::codex_connection::CodexConnection,
-) {
-    use std::io::Write;
-
-    // Diagnostics are best-effort: never write behind the native renderer, and
-    // never let a disk failure close its reconnect listener.
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let Ok(mut log) = options.open(path) else {
-        return;
-    };
-    let thread = connection.store.session_thread(&connection.session_id);
-    let submission = connection.submission();
-    let _ = writeln!(log, "Codex native terminal connection failed: {error:#}; thread={thread:?}; submission={submission:?}");
 }
 
 pub(crate) fn short_id(id: &str) -> String {

@@ -240,8 +240,9 @@ protocol. Claude loads context from a system instructions file and the first
 message from stdin. Large requests stay out of terminal command-line arguments.
 Codex reconnects select the Session's saved thread. Saved initial input survives
 terminal exit and can retry an explicit rejection. Unacknowledged input is not replayed.
-Relay failures are recorded in the run's `codex-relay.log` without writing over
-the native terminal; its reconnect listener stays available.
+Relay failures stay in private Session history: `lf history show SESSION` prints
+their operation and AgentProcess; `--events` includes diagnostic JSON. The native
+terminal stays clear and its reconnect listener stays available.
 Startup, resume and compaction hooks refresh reference context from the Session's
 saved launch sources. Hook declarations stay identical across Tasks and Sessions
 for the same lf executable and Machine. Each native launch gets its own context

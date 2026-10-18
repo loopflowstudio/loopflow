@@ -120,7 +120,7 @@ Gate repaired missing `lf __pi-event` / `process:pi` architecture-map entries an
 formatted the Pi Python fixture. The maintained probe now covers real threshold
 and manual compaction plus HTTP 429/503/model-not-found 404. All eleven non-crash
 scenarios passed at the first gate; crash and normal-tool cases remain in
-`--scenario all`. Real-Pi active viewer handoff still needs coverage assessment.
+`--scenario all`. Real-Pi active viewer handoff also passed in the continuation below.
 
 The October 18 interactive demo supersedes the implementation-complete conclusion
 for skill discovery: Jack Heart observed extensive Pi warnings for namespaced and
@@ -147,8 +147,11 @@ A separate candidate headless Loopflow request through Jack Heart's selected
 OpenCode/Gemini 4 Argon route passed with tools disabled; rendered interaction
 remains unreviewed.
 
-Gate owns affected suites and the remaining comparison matrix: active viewer
-handoff and any remaining shared lifecycle regression coverage.
+Gate owns the remaining affected suites and shared lifecycle regression coverage.
+The October 18 continuation proves active native viewer handoff with real Pi:
+the original viewer dies during a held model call, `lf session attach` replaces it,
+and public steering still reaches the initiating turn. Provider PID/attachment,
+conversation identity and turn/Process attribution remain unchanged.
 Manual/threshold compaction and real Pi HTTP failure handling passed on October 18.
 Demo owns rendered
 judgment and the selected personal account route. Jack Heart
@@ -184,3 +187,27 @@ Desktop app build and static checks passed. Its Rust affected run and Desktop
 headless tests were interrupted with the Flow and have no final pass; remaining
 gate work must finish these. The aggregate changed runner failed at shared cache
 inventory, before product checks; use bounded affected entrypoints if it recurs.
+
+Gate continuation check: `uv run --no-sync python scripts/test_network.py uv run --no-sync python scripts/benchmarks/pi/probe.py --pi /tmp/loo507-pi/node_modules/.bin/pi --scenario handoff < /dev/null` passed (2 requests, same provider/turn/Process); the fixture drains PTY output through shutdown so terminal backpressure cannot block its exit check.
+
+Gate continuation check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone` with inherited `LF_*` cleared and stdin closed passed (603 tests, 73 suites, 80.514 seconds); display-only diagnostics remain explicitly skipped, with no rendered acceptance claimed.
+Gate continuation check: `uv run --no-sync ruff check scripts/benchmarks/pi/probe.py`, `uv run --no-sync ruff format --check scripts/benchmarks/pi/probe.py`, `uv run --no-sync python scripts/check_rust_test_inventory.py`, and `git diff --check` passed.
+
+The broad materialized Rust gate stopped under sustained macOS host-security
+pressure (syspolicyd above 1,300% CPU; load above 130). It recorded 929 passes,
+three assertion failures and four interrupted tests; 1,760 tests did not run.
+The unresolved failures were
+`pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`,
+`native_runner_is_quiet_until_its_turn_ends_claude_foreground`, and
+`planning_export_late_readback_preserves_newer_edits_and_inventory_identity`.
+Their test sources are unchanged from main. This is not a passing broad result;
+hosted CI must resolve it before merge. The repository's required merge queue
+runs the full matrix on the scratch-free candidate. Desktop's 603 headless tests
+and all four macOS clone checks passed locally.
+
+The primary Session stopped ship Flow 8d1ceca2-c428-43a6-90e2-26fc53f67286
+before land after the gate agent also entered network retries. No code or test
+failure was waived. Continue the remaining delivery operation with the unavailable
+broad Rust result explicitly deferred to hosted CI under TESTING.md. Required
+candidate/merge-queue checks must pass before verified landing. Preserve the gate's
+handoff probe and notes; do not rerun the successful Pi/Desktop checks.

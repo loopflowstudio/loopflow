@@ -22,6 +22,7 @@ case with `--scenario NAME` from the table below.
 | `pty` | Native terminal accepts an edited Unicode draft across resize, exits, and resumes the same history. |
 | `manual` | Native `/compact` writes a compaction entry; the next request sees changed scratch and exact resume still works. |
 | `steer` | A public Session steer gets an independent emitted receipt while the model is held, reaches the next request, and retains one initiating turn/Process. |
+| `handoff` | Killing the native viewer during a model call and attaching a replacement preserves the provider, attachment, conversation and initiating turn; a public steer still reaches that turn. |
 | `rate-limit`, `server-error`, `invalid-model` | Real Pi receives HTTP 429, 503 or model-not-found 404; Loopflow fails without synthetic input, then explicit continuation recovers. |
 | `crash`, `crash-native` | Killing real Pi during bash fails the turn, retains paid usage and leaves no running tool children; two explicit resumptions preserve identity and earlier usage. |
 | `tools` | Native bash output, shell prefixes, nonzero exits and timeouts remain intact. |
@@ -53,8 +54,22 @@ tools keep their own ownership; no Pi process registry is introduced. The repair
 13-scenario sweep passed; added native-crash and extended RPC recovery checks also
 passed independently.
 
-Active viewer handoff remains uncovered by these real-Pi probes. Demo owns
-rendered judgment and the selected personal account route.
+The gate continuation's `handoff` probe passed against real Pi: two model requests,
+one initiating turn/Process, unchanged provider PID and attachment, and an emitted
+steer receipt across viewer replacement. The replacement exits through native
+terminal input. Demo owns rendered judgment and the selected personal account route.
+
+The broad materialized Rust gate stopped under sustained macOS host-security
+pressure (syspolicyd above 1,300% CPU; load above 130). It recorded 929 passes,
+three assertion failures and four interrupted tests; 1,760 tests did not run.
+The unresolved failures were
+`pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`,
+`native_runner_is_quiet_until_its_turn_ends_claude_foreground`, and
+`planning_export_late_readback_preserves_newer_edits_and_inventory_identity`.
+Their test sources are unchanged from main. This is not a passing broad result;
+hosted CI must resolve it before merge. The repository's required merge queue
+runs the full matrix on the scratch-free candidate. Desktop's 603 headless tests
+and all four macOS clone checks passed locally.
 
 ## Shared skill discovery
 

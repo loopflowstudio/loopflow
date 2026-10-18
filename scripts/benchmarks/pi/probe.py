@@ -384,6 +384,92 @@ def _tools_scenario(fixture: Fixture) -> dict:
     return {"scenario": "tools", "prefix_output_exit_timeout": True}
 
 
+def _handoff_scenario(fixture: Fixture) -> dict:
+    model = fixture.model
+    model.hold = True
+    fixture.env.update(TERM="xterm-256color", COLORTERM="truecolor")
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 100, 0, 0))
+    viewers = []
+
+    def attach(args: list[str]) -> subprocess.Popen:
+        process = subprocess.Popen(
+            [str(fixture.binary), *args],
+            cwd=fixture.repo,
+            env=fixture.env,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+        )
+        viewers.append(process)
+        return process
+
+    def provider() -> tuple:
+        with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
+            return db.execute(
+                "SELECT p.id,p.pid,p.attachment_token,s.transport_lf_process_id "
+                "FROM processes p JOIN agent_sessions s ON p.id=s.agent_process_id "
+                "WHERE s.id=?",
+                (session,),
+            ).fetchone()
+
+    try:
+        first = attach(["-i", ":", "HANDOFF_INPUT"])
+        assert model.arrived.wait(20), "model request never arrived"
+        session, token = fixture.identity()
+        original = provider()
+        first.kill()
+        first.wait(timeout=5)
+        # Exercise the public viewer path while the original model call is pending.
+        replacement = attach(["session", "attach", session])
+        fixture.run(["session", "steer", session, "HANDOFF_STEER 雪"])
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            receipts = json.loads(fixture.run(["session", "steers", session, "--json"]).stdout)
+            if receipts["items"] and receipts["items"][0]["evidence"].startswith("emitted"):
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(receipts)
+        assert provider() == original, "viewer changed provider ownership"
+        assert len(model.requests) == 1, "viewer replayed the initiating input"
+        model.release.set()
+        output = bytearray()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            assert replacement.poll() is None, bytes(output[-3000:])
+            if select.select([master], [], [], 0.1)[0]:
+                output.extend(os.read(master, 65536))
+            history = json.loads(fixture.run(["session", "history", session, "--json"]).stdout)
+            ends = [e for e in history if e["kind"] == "completed" and e["provider_turn"]]
+            if ends:
+                break
+        else:
+            raise AssertionError(bytes(output[-3000:]))
+        starts = [e for e in history if e["kind"] == "started"]
+        assert len(starts) == len(ends) == 1, (starts, ends)
+        for key in ("provider_turn", "lf_process_id", "task_id"):
+            assert starts[0][key] == ends[0][key], (key, starts, ends)
+        assert ends[0]["payload"]["status"] == "completed", ends
+        assert len(model.requests) == 2 and "HANDOFF_STEER" in json.dumps(model.requests[-1])
+        assert fixture.identity() == (session, token) and provider() == original
+        os.write(master, b"\x04")
+        deadline = time.monotonic() + 10
+        while replacement.poll() is None and time.monotonic() < deadline:
+            if select.select([master], [], [], 0.1)[0]:
+                output.extend(os.read(master, 65536))
+        assert replacement.wait(timeout=1) == 0
+        return {"scenario": "handoff", "model_requests": 2, "same_provider_turn_and_process": True}
+    finally:
+        model.release.set()
+        for viewer in viewers:
+            if viewer.poll() is None:
+                viewer.kill()
+                viewer.wait()
+        os.close(slave)
+        os.close(master)
+
+
 def _crash_scenario(fixture: Fixture, *, native: bool = False) -> dict:
     ready = fixture.root / "tool-pids"
     fixture.model.tool_command = (
@@ -579,6 +665,7 @@ def main() -> None:
             "pty",
             "manual",
             "steer",
+            "handoff",
             "rate-limit",
             "server-error",
             "invalid-model",
@@ -599,6 +686,7 @@ def main() -> None:
             "pty",
             "manual",
             "steer",
+            "handoff",
             "rate-limit",
             "server-error",
             "invalid-model",
@@ -621,6 +709,8 @@ def main() -> None:
                     result = _pty_scenario(fixture, compact=mode == "manual")
                 elif mode == "steer":
                     result = _steer_scenario(fixture)
+                elif mode == "handoff":
+                    result = _handoff_scenario(fixture)
                 elif mode == "tools":
                     result = _tools_scenario(fixture)
                 elif mode in ("crash", "crash-native"):

@@ -19,18 +19,19 @@ implementation was `806338d501e4d2ac088033764cc0edc1dd48074d`.
 - **Compaction:** Source review found automatic compaction could continue without
   `before_agent_start`. Request projection now refreshes context after compaction;
   the real overflow probe sees changed scratch on the first recovered request.
-  Real manual and threshold compaction still need acceptance evidence.
+  Real manual and threshold compaction passed in the October 18 gate.
 - **Steering:** The adapter previously inherited `NotSteerable`. Direct RPC now
   distinguishes queued, rejected and uncertain receipts with frozen turn identity.
   Public Work steering uses the launch extension and existing provider callback
   receipts because the shared lifecycle has no production `send_current` caller.
   A real local-model probe proves same-turn delivery with an independent emitted
-  receipt. Active viewer handoff remains unverified.
+  receipt. The October 18 gate continuation also proves real native viewer handoff
+  during a model call, retaining provider ownership and same-turn public steering.
 - **Partial usage:** Native callbacks previously normalized usage only at
   settlement; raw message observations survived crashes. Assistant-message
   checkpoints now retain cumulative usage before settlement. Focused fixtures
-  cover a crash and duplicate observations; repeated partial recovery remains
-  in the gate matrix.
+  cover a crash and duplicate observations; real RPC/native crash probes now
+  cover two explicit resumptions preserving prior usage and conversation identity.
 
 Protocol baseline: Pi 1.3.0, upstream
 `5ba1cbaf3d96d204d847c84ce235c62dae23e0fd`; installed RPC, extension and session

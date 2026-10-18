@@ -7,6 +7,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import signal
 import sqlite3
 import struct
@@ -24,6 +25,9 @@ class Model(http.server.ThreadingHTTPServer):
         self.requests: list[dict] = []
         self.reply = "Pi protocol proof"
         self.error: str | None = None
+        self.error_status = 400
+        self.input_tokens = 21
+        self.tool_command: str | None = None
         self.context_file: Path | None = None
         self.hold = False
         self.arrived = threading.Event()
@@ -45,7 +49,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             error, model.error = model.error, None
             if model.context_file:
                 model.context_file.write_text("AFTER_COMPACT 雪")
-            self.send_response(400)
+            self.send_response(model.error_status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(
@@ -55,19 +59,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
+        input_tokens, model.input_tokens = model.input_tokens, 21
+        delta = {"role": "assistant", "content": model.reply}
+        finish = "stop"
+        if model.tool_command and len(model.requests) == 1:
+            delta = {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "proof-tool",
+                        "type": "function",
+                        "function": {
+                            "name": "bash",
+                            "arguments": json.dumps(
+                                {
+                                    "command": model.tool_command,
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+            finish = "tool_calls"
         for chunk in [
             {
                 "choices": [
                     {
                         "index": 0,
-                        "delta": {"role": "assistant", "content": model.reply},
+                        "delta": delta,
                         "finish_reason": None,
                     }
                 ]
             },
             {
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 21, "completion_tokens": 4, "total_tokens": 25},
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
+                "usage": {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": 4,
+                    "total_tokens": input_tokens + 4,
+                },
             },
         ]:
             self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
@@ -188,19 +219,26 @@ class Fixture:
 
 def _scenario(fixture: Fixture, mode: str) -> dict:
     model = fixture.model
+    failure = mode in ("empty", "retry", "rate-limit", "server-error", "invalid-model")
     if mode == "empty":
         model.reply = ""
     if mode == "retry":
         model.error = "connection reset"
+    if mode in ("rate-limit", "server-error", "invalid-model"):
+        model.error_status, model.error = {
+            "rate-limit": (429, "rate limit exceeded"),
+            "server-error": (503, "service unavailable"),
+            "invalid-model": (404, "model not found"),
+        }[mode]
     native = mode == "native"
     first = (
         ["-i", ":", "FIRST_INPUT 雪"]
         if native
         else ["-b", "connect", "--fresh", "--message", "FIRST_INPUT 雪"]
     )
-    if mode == "overflow":
+    if mode in ("overflow", "threshold"):
         first[-1] += " prior context 雪" * 2000
-    fixture.run(first, success=mode not in ("empty", "retry"))
+    fixture.run(first, success=not failure)
     session, token = fixture.identity()
     with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
         fixture.repo = Path(
@@ -213,6 +251,9 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
     if mode == "overflow":
         model.error = "maximum context length is 200000 tokens"
         model.context_file = fixture.context
+    if mode == "threshold":
+        model.input_tokens = 199500
+        fixture.context.write_text("AFTER_COMPACT 雪")
     if mode == "retry":
         model.reply = "Explicit recovery"
     second = (
@@ -226,11 +267,14 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
         input_text="EXPLICIT_SECOND_INPUT 雪\n" if native else None,
     )
     assert fixture.identity() == (session, token)
-    if mode == "overflow":
+    if mode in ("overflow", "threshold"):
         entries = [json.loads(line) for line in Path(token).read_text().splitlines()]
         assert any(e["type"] == "compaction" for e in entries), (
-            "overflow must compact real Pi history"
+            f"{mode} must compact real Pi history"
         )
+        if mode == "threshold":
+            fixture.run(["-b", "resume", session, "--message", "AFTER_THRESHOLD"])
+            assert fixture.identity() == (session, token)
         assert "AFTER_COMPACT" in json.dumps(model.requests[-1]), (
             "first post-compaction request must refresh context"
         )
@@ -307,7 +351,68 @@ def _steer_scenario(fixture: Fixture) -> dict:
             process.wait()
 
 
-def _pty_scenario(fixture: Fixture) -> dict:
+def _crash_scenario(fixture: Fixture) -> dict:
+    ready = fixture.root / "tool-pids"
+    fixture.model.tool_command = (
+        f"sleep 60 & child=$!; echo $$ $child > {shlex.quote(str(ready))}.tmp; "
+        f"mv {shlex.quote(str(ready))}.tmp {shlex.quote(str(ready))}; wait"
+    )
+    process = subprocess.Popen(
+        [str(fixture.binary), "-b", "connect", "--fresh", "--message", "RUN_TOOL"],
+        cwd=fixture.repo,
+        env=fixture.env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    children = []
+    try:
+        deadline = time.monotonic() + 25
+        while not ready.exists() and time.monotonic() < deadline and process.poll() is None:
+            time.sleep(0.1)
+        assert ready.exists(), "Pi never started the real bash tool"
+        children = [int(pid) for pid in ready.read_text().split()]
+        session, token = fixture.identity()
+        with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
+            provider_pid = db.execute(
+                "SELECT p.pid FROM processes p JOIN agent_sessions s "
+                "ON p.id=s.agent_process_id WHERE s.id=?",
+                (session,),
+            ).fetchone()[0]
+        os.kill(provider_pid, signal.SIGKILL)
+        _, stderr = process.communicate(timeout=20)
+        assert process.returncode != 0, stderr
+        assert fixture.identity() == (session, token)
+        history = json.loads(fixture.run(["session", "history", session, "--json"]).stdout)
+        usage = [e for e in history if e["kind"] == "usage"]
+        assert usage, "paid tool step must survive the crash"
+        assert not any(
+            e["kind"] == "completed" and e["payload"].get("status") == "completed" for e in history
+        )
+        live = subprocess.run(
+            ["ps", "-o", "pid=,stat=", "-p", ",".join(map(str, children))],
+            capture_output=True,
+            text=True,
+        )
+        survivors = [
+            line.strip() for line in live.stdout.splitlines() if "Z" not in line.split()[-1]
+        ]
+        assert not survivors, f"Pi crash left tool processes alive: {survivors}"
+        return {"scenario": "crash", "failed_turn": True, "children_cleaned": True}
+    finally:
+        for pid in children:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+
+def _pty_scenario(fixture: Fixture, *, compact: bool = False) -> dict:
     model = fixture.model
     binary = fixture.binary
     fixture.env.update(TERM="xterm-256color", COLORTERM="truecolor")
@@ -346,6 +451,24 @@ def _pty_scenario(fixture: Fixture) -> dict:
             drain_until(
                 lambda: b"Pi protocol proof" in output if request_count == 2 else b"Pi" in output
             )
+            if compact and request_count == 2:
+                session, token = fixture.identity()
+                with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
+                    checkout = Path(
+                        db.execute(
+                            "SELECT cwd FROM agent_sessions WHERE id=?", (session,)
+                        ).fetchone()[0]
+                    )
+                (checkout / "scratch/proof.md").write_text("MANUAL_COMPACT 雪")
+                os.write(master, b"/compact\r")
+                drain_until(
+                    lambda: any(
+                        json.loads(line)["type"] == "compaction"
+                        for line in Path(token).read_text().splitlines()
+                    )
+                )
+                output.clear()
+            expected_count = request_count + (1 if compact else 0)
             os.write(master, draft.encode())
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 80, 0, 0))
             os.kill(process.pid, signal.SIGWINCH)
@@ -353,11 +476,13 @@ def _pty_scenario(fixture: Fixture) -> dict:
             os.write(master, b"\x7f edited\r")
             drain_until(
                 lambda: (
-                    len(model.requests) == request_count
+                    len(model.requests) == expected_count
                     and expected in json.dumps(model.requests[-1], ensure_ascii=False)
                 )
             )
             drain_until(lambda: b"Pi protocol proof" in output)
+            if compact:
+                assert "MANUAL_COMPACT" in json.dumps(model.requests[-1])
             identities.append(fixture.identity())
             os.write(master, b"\x04")
             deadline = time.monotonic() + 10
@@ -375,7 +500,7 @@ def _pty_scenario(fixture: Fixture) -> dict:
             os.close(master)
     assert identities[0] == identities[1]
     return {
-        "scenario": "pty",
+        "scenario": "manual" if compact else "pty",
         "model_requests": len(model.requests),
         "unicode_edit_resize": True,
         "exact_resume": True,
@@ -388,12 +513,39 @@ def main() -> None:
     parser.add_argument("--pi", type=Path, required=True)
     parser.add_argument(
         "--scenario",
-        choices=["all", "retry", "empty", "overflow", "native", "pty", "steer"],
+        choices=[
+            "all",
+            "retry",
+            "empty",
+            "overflow",
+            "threshold",
+            "native",
+            "pty",
+            "manual",
+            "steer",
+            "rate-limit",
+            "server-error",
+            "invalid-model",
+            "crash",
+        ],
         default="all",
     )
     args = parser.parse_args()
     modes = (
-        ["retry", "empty", "overflow", "native", "pty", "steer"]
+        [
+            "retry",
+            "empty",
+            "overflow",
+            "threshold",
+            "native",
+            "pty",
+            "manual",
+            "steer",
+            "rate-limit",
+            "server-error",
+            "invalid-model",
+            "crash",
+        ]
         if args.scenario == "all"
         else [args.scenario]
     )
@@ -405,10 +557,12 @@ def main() -> None:
                 fixture = Fixture(
                     Path(directory).resolve(), args.lf.resolve(), args.pi.resolve(), model
                 )
-                if mode == "pty":
-                    result = _pty_scenario(fixture)
+                if mode in ("pty", "manual"):
+                    result = _pty_scenario(fixture, compact=mode == "manual")
                 elif mode == "steer":
                     result = _steer_scenario(fixture)
+                elif mode == "crash":
+                    result = _crash_scenario(fixture)
                 else:
                     result = _scenario(fixture, mode)
                 print(json.dumps(result), flush=True)

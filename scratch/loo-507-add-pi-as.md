@@ -98,6 +98,23 @@ retain the original counterexamples by git reference and current acceptance gaps
 
 ## Remaining work
 
+October 18 gate found a shipping blocker in real provider-death acceptance.
+`probe.py --scenario crash` drives Pi 1.3.0's actual bash tool, observes its shell
+and sleep child, then SIGKILLs the recorded Pi AgentProcess. Loopflow exits with
+failure and retains paid usage, but both detached tool processes remain alive.
+The fixture cleans them up. Pi starts bash with `detached: true`; the shared
+lifeline knows the original group, and after Pi dies the children are reparented.
+Safe cleanup needs child lifetime ownership before provider death, through the
+existing process owner or provider contract. Postmortem PID guessing or a second
+Pi-specific process registry is not an acceptable gate patch. This supersedes the
+earlier implementation-complete conclusion; do not land with this acceptance red.
+
+Gate repaired missing `lf __pi-event` / `process:pi` architecture-map entries and
+formatted the Pi Python fixture. The maintained probe now covers real threshold
+and manual compaction plus HTTP 429/503/model-not-found 404. All eleven non-crash
+scenarios passed; the failing crash case remains part of `--scenario all`.
+Real-Pi active viewer handoff and repeated partial-usage recovery still need proof.
+
 The October 18 interactive demo supersedes the implementation-complete conclusion
 for skill discovery: Jack Heart observed extensive Pi warnings for namespaced and
 long synced skill names in the real shared catalog. See [demo feedback](pi-demo.md).
@@ -123,9 +140,10 @@ A separate candidate headless Loopflow request through Jack Heart's selected
 OpenCode/Gemini 4 Argon route passed with tools disabled; rendered interaction
 remains unreviewed.
 
-Gate owns affected suites and the remaining comparison matrix: real manual and
-threshold compaction, active viewer handoff, real tool crashes/child cleanup,
-repeated partial recovery and real 429/5xx/invalid-model cases. Demo owns rendered
+Gate owns affected suites and the remaining comparison matrix: active viewer
+handoff, repair of real tool-crash child cleanup, and repeated partial recovery.
+Manual/threshold compaction and real Pi HTTP failure handling passed on October 18.
+Demo owns rendered
 judgment and the selected personal account route. Jack Heart
 authorized ship and Task completion after the naming correction and verified merge;
 remaining automated acceptance belongs to its gate.

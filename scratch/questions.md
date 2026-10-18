@@ -15,3 +15,12 @@
 - Public steering uses the launch extension and existing callback receipts because
   the current lifecycle has no production `Harness::send_current` consumer. Pi
   queues custom steering while active; no new dispatcher or store is introduced.
+
+- October 18 gate: the changed-aware runner stopped before product checks because
+  shared uv-cache inventory exceeded 15 seconds, despite 60.3 GiB free against a
+  32 GiB emergency floor. Run bounded affected commands against existing artifacts;
+  do not delete unrelated caches or claim the aggregate runner passed.
+- Real Pi's detached tool children survive abrupt provider death. Keep the failing
+  acceptance probe and block landing; ownership must be captured before reparenting.
+  A new Pi process registry or postmortem PID inference would exceed gate's polish
+  boundary and contradict the accepted single process owner.

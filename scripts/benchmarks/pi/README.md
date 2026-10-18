@@ -10,16 +10,20 @@ Use an installed Pi 1.3.0 executable. Each scenario creates a disposable Git
 repository, Loopflow Machine, Pi settings directory and local HTTP model. It
 inherits no account credentials and never changes personal Pi settings. JSON
 receipts go to stdout; failed assertions include fixture diagnostics. Select one
-case with `--scenario retry|empty|overflow|native|pty|steer`.
+case with `--scenario NAME` from the table below.
 
 | Scenario | What it proves |
 |---|---|
 | `retry` | One model request fails; only explicit later input makes the next request, retaining exact history. |
 | `empty` | Blank answers fail both initial and resumed headless execution. |
 | `overflow` | Real Pi compaction and internal recovery refresh changed scratch before the next model request. |
+| `threshold` | Reported usage crosses Pi's compaction threshold; the next explicit turn retains the conversation and refreshed scratch. |
 | `native` | Native non-TTY launch and explicit continuation retain one conversation file. |
 | `pty` | Native terminal accepts an edited Unicode draft across resize, exits, and resumes the same history. |
+| `manual` | Native `/compact` writes a compaction entry; the next request sees changed scratch and exact resume still works. |
 | `steer` | A public Session steer gets an independent emitted receipt while the model is held, reaches the next request, and retains one initiating turn/Process. |
+| `rate-limit`, `server-error`, `invalid-model` | Real Pi receives HTTP 429, 503 or model-not-found 404; Loopflow fails without synthetic input, then explicit continuation recovers. |
+| `crash` | Killing real Pi during its bash tool must fail the turn, retain paid usage and leave no running tool children. Currently fails child cleanup; the fixture kills its surviving children. |
 
 The overflow fixture keeps one token of recent history so its short conversation
 has something to summarize. It edits scratch in the Session's recorded checkout;
@@ -37,11 +41,16 @@ protocol and terminal input behavior. It does not establish rendered appearance,
 account entitlement or authenticated Loopflow execution. Pi owns login and model
 settings; no subscription credentials were inspected or copied.
 
-Gate still owns the affected suites and the remaining compatibility matrix:
-real threshold/manual compaction, active viewer handoff, provider death during
-real tools, repeated partial-usage recovery and child-process cleanup, and real
-429/5xx/invalid-model cases. Demo owns rendered judgment and the selected personal
-account route.
+October 18 gate: all eleven non-crash scenarios passed, including threshold
+compaction (5 model requests), manual compaction (4), and each HTTP failure (2).
+The `crash` scenario reproduced a release blocker: Pi's detached bash group and
+its `sleep` child survived Pi's SIGKILL and Loopflow exit. The turn failed and paid
+usage survived; the fixture removed both children. `--scenario all` intentionally
+ends with this failing acceptance check until child lifetime ownership is repaired.
+Shared group cleanup cannot reconstruct detached-child ownership after reparenting.
+
+Active viewer handoff and repeated partial-usage recovery remain uncovered by the
+real-Pi probes. Demo owns rendered judgment and the selected personal account route.
 
 ## Shared skill discovery
 

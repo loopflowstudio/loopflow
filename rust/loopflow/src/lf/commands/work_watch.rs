@@ -412,6 +412,17 @@ fn fingerprint(unavailable: &Option<String>, content: &WorkContent) -> Result<[u
                 .and_then(|body| body.as_object_mut())
                 .map(|body| body.remove("since"));
         }
+        // Each Dashboard plan restates when it was read.
+        WorkContent::Planning(_) => {
+            if let Some(plans) = value
+                .pointer_mut("/body/selections")
+                .and_then(|plans| plans.as_array_mut())
+            {
+                for plan in plans.iter_mut().filter_map(|plan| plan.as_object_mut()) {
+                    plan.remove("observed_at");
+                }
+            }
+        }
         _ => {}
     }
     let mut hash = Sha256::new();

@@ -92,9 +92,12 @@ struct DashboardView: View {
                     HStack {
                         Text("Hidden")
                         ForEach(plan.arrangement.hidden, id: \.self) { member in
-                            Button(plan.contents.first { $0.work == member.work }?.title ?? member.work.id) {
+                            Button {
                                 save(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
-                            }.disabled(model.dashboardSaving)
+                            } label: {
+                                if let task = model.task(id: member.work.id)?.task { TaskHeading(task: task) }
+                                else { Text(plan.contents.first { $0.work == member.work }?.title ?? member.work.id) }
+                            }.disabled(model.dashboardSaving).help("Show this occurrence again")
                         }
                     }.font(.caption).padding(8)
                 }

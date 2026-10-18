@@ -11,7 +11,7 @@ lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress
-Project owns Tasks, KRs, targets and an optional workflow. A Chapter is the shared
+Project owns Tasks, KRs and targets. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the explicit shared Project binding. Rotation retains exact destinations and selected
 issue IDs for recovery, while unreviewed backlog stays in its original Project.
@@ -27,7 +27,7 @@ lf checkout <id>
 ```
 
 Wave, Project and Task planning use one local SQLite owner with optional
-repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
+repository-wide Linear synchronization. Creation without a Wave makes a standalone repository Task.
 Wave goals, memory and other Markdown live only in `.lf/wave/<name>/` in the
 checkout. Edit them like any other file; context and summaries read them directly.
 Ancestor context uses the same checkout. Linear Initiative creation uses that
@@ -40,7 +40,7 @@ ref or GOAL.md blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
 Workflow definitions remain separately stored: provisioning and the draft migration
-import `.lf/workflows/`, and Project workflow selection updates the stored definition.
+import `.lf/workflows/`, and Wave workflow selection updates the stored definition.
 Imported Waves remain readable without execution placement: Wave list, status
 and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
 Machine. Desktop consumes the same optional placement.
@@ -57,10 +57,12 @@ retaining the losing receipt. This grants no execution or cleanup authority.
 Task content is read directly from `Task` (identifier, title and description),
 with its local write revision, optional Linear binding and observation age retained.
 `Project` likewise owns its fields directly; neither has a separate Plan wrapper.
-Project prose, workflow, KRs and metric targets are separate stored fields. Local
+Project prose, KRs and metric targets are separate stored fields. Local
 reads and the shared typed writer never parse or regenerate Markdown. Conversion
-reads the released Markdown once inside the migration transaction, preserves saved
-workflow selection and observation age, and seeds Git history only after conversion.
+reads the released Markdown once inside the migration transaction, preserves
+observation age, and seeds Git history only after conversion. Only the selected
+current Project supplies the migrated Wave workflow default; Project history
+retains no workflow authority.
 Prompt assembly and Linear delivery render at their boundaries; malformed legacy
 content refuses the migration rather than discarding criteria. Extraction and Linear
 edits recognize fenced examples as prose and replace only owned field ranges;
@@ -266,7 +268,7 @@ lf wave ensure product --json
 Validate one existing Project and select its accepted local record on the Wave's
 SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
 a different existing binding is left unchanged. Setup preserves provider status,
-content and identity, including a Backlog Project without a workflow. It does not
+content and identity, including a Backlog Project. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
 roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
@@ -284,8 +286,7 @@ its status change for delivery. Without a binding, creation, original name,
 selection and the local transition receipt commit together. Retry reuses that
 identity and preserves later edits. Existing provider creation reservations retain
 their UUID and mappings. No provider request is needed, including during an outage.
-Terminal, archived, paused or foreign Projects retain their history. Names, content
-and an empty workflow remain intact. Binding accepts the durable or mapped ID of
+Terminal, archived, paused or foreign Projects retain their history. Names and content remain intact; the Wave owns its workflow default. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
 Project export uses the original transition receipt on the foreground connection.
@@ -326,7 +327,7 @@ Linear bindings. Classification reads their saved disposition and independent lo
 start evidence; it does not reconstruct provider records or resolve the Task twice.
 
 Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
-`successor_id`, `create`, `project_name`, `workflow`, `metric_targets` and `krs`:
+`successor_id`, `create`, `project_name`, `metric_targets` and `krs`:
 
 ```json
 {
@@ -336,7 +337,6 @@ Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
     "successor_id": "<new-or-existing-project-uuid>",
     "create": true,
     "project_name": "Autumn customer work",
-    "workflow": "",
     "metric_targets": [],
     "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
   }]
@@ -347,7 +347,8 @@ Allocate a new UUID once when authoring a creation plan. Set `create` to false
 for an existing exact destination; absence never turns that instruction into
 creation. Every destination requires authored KRs before any provider write.
 Existing Projects keep their names, summaries and unrelated content; supplied
-KRs, targets and optional workflow replace only those planning fields.
+KRs and targets replace only those planning fields. Rotation preserves the Wave
+workflow default.
 
 The repository operation validates all selected Waves, destinations, legacy
 conversions and Task evidence before reserving every pair and applying the first
@@ -504,8 +505,8 @@ complete Task Work.
 
 A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
 where a person takes part in the Task conversation, and edges that each run
-one Flow. A Task takes up its Project's on its first `lf task run`, or the one
-named; a Task that named its own keeps it. `task_workflows` holds one
+one Flow. On its first `lf task run`, a Task selects the explicitly named Workflow,
+its Wave default, then repository `workflow:`. A captured Workflow stays fixed. `task_workflows` holds one
 row per Task: the graph as it was then, never edited, and the Task's
 position. A later edit to the YAML applies to Tasks that take it up
 afterwards; taking one up again starts over at `start`.
@@ -524,7 +525,7 @@ has one read and four writes, and every write appends to
 
 `lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
 process, which arrives when the Flow succeeds. A Flow that stops leaves the
-Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
+Task on its edge. `lf task workflow move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Process's calling conversation, else
 a person; an arrival is the edge's own.
 
@@ -648,9 +649,10 @@ review feedback remains Session evidence. No Ready/Complete operation closes the
 conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
-Saved handoffs retain executable, Machine and database together. Renaming, binding
-and takeover retain conversation identity and feedback. Desktop reads
-the same record and keys its terminal surface on LfSession identity.
+Saved handoffs retain the Machine and stable installed entry; private-Home
+handoffs retain their explicit executable. Renaming, binding and takeover retain
+conversation identity and feedback. Desktop reads the same record and keys its
+terminal surface on LfSession identity.
 
 ## Work, steering and execution
 

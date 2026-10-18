@@ -501,19 +501,23 @@ impl Reader {
             let Ok(checkouts) = store.sqlite.task_checkouts() else {
                 return;
             };
+            let mut paths: Vec<_> = checkouts.into_iter().map(|row| row.worktree).collect();
+            if let Ok(repositories) = store.sqlite.repository_paths() {
+                paths.extend(repositories);
+            }
+            if let Some(repo) = &self.scope.repo {
+                paths.push(std::path::PathBuf::from(repo));
+            }
             let wake = shared.clone();
-            self.checkouts.watch(
-                checkouts.into_iter().map(|row| row.worktree).collect(),
-                move || {
-                    lock(&wake).look = true;
-                    wake.1.notify_all();
-                },
-            );
+            self.checkouts.watch(paths, move || {
+                lock(&wake).look = true;
+                wake.1.notify_all();
+            });
             self.watched_at = Some(revisions.planning);
         }
         let changed = self.checkouts.take(Instant::now());
         // Every one is asked again, not only up to the first that differs.
-        let mut differs = false;
+        let mut differs = !changed.is_empty();
         for worktree in &changed {
             differs |= crate::git::reread_retained(worktree);
         }
@@ -782,6 +786,10 @@ impl Reader {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
                     waves: Vec::new(),
+                    tasks: super::waves::Evidence::Ok {
+                        items: Vec::new(),
+                        truncated: false,
+                    },
                 },
                 waves: Vec::new(),
             }))),
@@ -1130,7 +1138,7 @@ mod tests {
     use crate::lf::commands::top::ActivitySnapshot;
 
     #[test]
-    fn released_planning_failure_keeps_the_stored_workflow_readable() {
+    fn planning_failure_keeps_the_stored_workflow_readable() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
@@ -1143,9 +1151,12 @@ mod tests {
             .replace("{task}", task.as_str())
             .replace("{repo}", directory.path().to_str().unwrap());
         conn.execute_batch(&fixture).unwrap();
+        crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
+            .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
-        // Use the released shared schema through a read-only connection. The
-        // fixture lives outside the real Machine and has no draft provenance.
+        // Inject a planning-only failure after upgrading retained work, then
+        // prove the independent Workflow read needs no repair or writer.
         let reader = super::Reader {
             store: Some(std::sync::Arc::new(crate::store::Store {
                 sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),

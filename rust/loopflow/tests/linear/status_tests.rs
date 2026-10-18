@@ -49,7 +49,6 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         id: ProjectId::new(),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
@@ -88,7 +87,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "name": project.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
-            "workflow": "feature", "status": "started",
+            "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "sync": {"connected": false, "changes": []},
             "initiative_ids": ["initiative-infrastructure"],
@@ -221,7 +220,6 @@ fn seed_stale_project_work(
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id")),
         slug: "technical-architecture".to_string(),
@@ -239,6 +237,7 @@ fn seed_stale_project_work(
     store.insert_project(&stale).expect("seed stale Project");
     select_project(home, &wave, stale.linear_id.as_ref().unwrap().as_str());
     let stale_task = Task {
+        repository_id: store.ensure_repository(wave.repo()).unwrap(),
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
 
         revision: 0,
@@ -256,8 +255,8 @@ fn seed_stale_project_work(
         pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
 
         pm_writeback: LinearWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: stale.id.clone(),
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(stale.id.clone()),
         worktree: Some(home.join("repo.w2-127")),
         workspace_slug: "w2-127".to_string(),
         branch: "jack-heart/w2-127".to_string(),
@@ -319,7 +318,6 @@ fn seed_stale_project_work(
         id: ProjectId::new(),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(
             LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
@@ -357,7 +355,7 @@ fn seed_stale_project_work(
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "metric_targets": [],
-                "workflow": "feature", "status": "started",
+                "status": "started",
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -498,7 +496,6 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "linear_id": project.linear_id.as_ref().unwrap().as_str(),
             "slug": project.slug,
             "name": project.name,
-            "workflow": "feature",
             "status": "started",
             "current": true,
             "metric_targets": [],
@@ -636,7 +633,7 @@ Count dispatched Task loops that settle without rescue.
             "name": "Loopflow API",
             "summary": "One product contract.",
             "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "workflow": "feature", "status": "started",
+            "status": "started",
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -790,7 +787,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0]["slug"], "auditability");
             assert_eq!(projects[0]["status"], "started");
-            assert_eq!(projects[0]["workflow"], "feature");
+            assert!(projects[0].get("workflow").is_none());
             assert_eq!(view["tasks"]["state"], "ok");
             let tasks = view["tasks"]["items"].as_array().unwrap();
             assert_eq!(tasks.len(), 2);

@@ -222,8 +222,8 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
     assert!(prompt.contains("When Work exists, apply it"));
     let empty = fixture.json(&["wave", "show", "--all", "--json"]);
-    let primary = fixture.json(&["session", "ensure", "--json"]);
-    let again = fixture.json(&["session", "ensure", "--json"]);
+    let primary = fixture.json(&["session", "connect", "--prepare", "--json"]);
+    let again = fixture.json(&["session", "connect", "--prepare", "--json"]);
     assert_eq!(primary["id"], again["id"]);
     assert_eq!(fixture.count("agent_sessions"), 1);
     let configured: (String, String) = fixture
@@ -254,7 +254,14 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "work-first",
         &fixture.repo.head_sha(),
     );
-    let task_primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+    let task_primary = fixture.json(&[
+        "session",
+        "connect",
+        "--prepare",
+        "--task",
+        "INF-123",
+        "--json",
+    ]);
     let population = serde_json::json!({
         "empty": empty,
         "primary": primary,
@@ -404,13 +411,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             .unwrap(),
         native
     );
-    let status = fixture.json(&["task", "status", task_id, "--json"]);
-    let project = status["project"]["id"].as_str().unwrap();
-    let selected = fixture.run(&["wave", "workflow", "set", "--project", project, "proof"]);
-    assert!(selected.status.success(), "{selected:?}");
     managed_codex_account(&fixture);
     let run = fixture
-        .command(&["-b", "--agent", "codex", "task", "run", task_id])
+        .command(&["-b", "--agent", "codex", "task", "run", task_id, "proof"])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
@@ -431,7 +434,10 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap()
+        .observe_pm_issue_change("fixture-deleted", None, true)
+        .unwrap();
     let refused = fixture
         .command(&["session", "connect", &session])
         .current_dir(worktree)
@@ -587,8 +593,13 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     let fixture = Fixture::new(true);
     let (mut child, input) = fixture.attach(&LAUNCH);
     let (id, ..) = fixture.session_row(&input);
-    // SAFETY: child is the live process this test spawned and has not reaped.
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let executor: i32 = fixture.db().query_row(
+        "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured' AND e.receipt_key=?1",
+        [&input], |row| row.get(0),
+    ).unwrap();
+    // SAFETY: the owner starts the captured executor in its own process group.
+    // Terminal Ctrl+C reaches that whole group, including the native provider.
+    assert_eq!(unsafe { libc::kill(-executor, libc::SIGINT) }, 0);
     let deadline = Instant::now() + PATIENCE;
     loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -997,6 +1008,69 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
+fn preparation_rejects_messages_without_admitting_or_launching_a_conversation() {
+    let fixture = Fixture::new(false);
+    let primary = fixture.json(&["connect", "--prepare", "--json"]);
+    let before = fixture.count("agent_sessions");
+    for verb in ["connect", "resume"] {
+        let output = fixture.run(&[
+            "-b",
+            verb,
+            "--fresh",
+            "--prepare",
+            "--message",
+            "Do not submit",
+            "--json",
+        ]);
+        assert!(!output.status.success(), "{output:?}");
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            error.contains("--prepare") && error.contains("--message"),
+            "{error}"
+        );
+        assert_eq!(fixture.count("agent_sessions"), before);
+        assert!(fixture.launches().is_empty());
+        assert_eq!(
+            fixture.json(&["connect", "--prepare", "--json"])["id"],
+            primary["id"]
+        );
+    }
+}
+
+#[test]
+fn fresh_preparation_keeps_the_previous_live_client_and_named_history() {
+    let fixture = Fixture::new(true);
+    let first = fixture.json(&["-a", "opencode", "connect", "--prepare", "--json"]);
+    let id = first["id"].as_str().unwrap();
+    fixture.json(&["session", "rename", id, "Keep this conversation", "--json"]);
+    let (mut client, input) = fixture.attach(&["connect", id]);
+    let previous = fixture.json(&["connect", id, "--prepare", "--json"]);
+    let fresh = fixture.json(&[
+        "-a",
+        "opencode",
+        "-b",
+        "resume",
+        "--fresh",
+        "--prepare",
+        "--takeover",
+        "--json",
+    ]);
+    assert_ne!(fresh["id"], id);
+    assert_eq!(fresh["cwd"], first["cwd"]);
+    assert!(client.try_wait().unwrap().is_none());
+    assert_eq!(fixture.launches(), [input]);
+    let retained = fixture.json(&["connect", id, "--prepare", "--json"]);
+    assert_eq!(retained["title"], "Keep this conversation");
+    assert_eq!(retained["agent_process_id"], previous["agent_process_id"]);
+    assert_eq!(retained["state"], "active");
+    assert_eq!(
+        fixture.json(&["connect", "--prepare", "--json"])["id"],
+        fresh["id"]
+    );
+    fixture.release(client);
+}
+
+#[test]
 fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_exits() {
     let fixture = Fixture::new(false);
     support::register_task_with_pr(
@@ -1006,7 +1080,14 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
         &fixture.repo.head_sha(),
     );
     let first = fixture.json(&[
-        "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+        "-a",
+        "opencode",
+        "session",
+        "connect",
+        "--prepare",
+        "--task",
+        "INF-123",
+        "--json",
     ]);
     assert!(fixture.launches().is_empty());
     assert!(first["agent_process_id"].is_null());
@@ -1014,9 +1095,18 @@ fn ensured_and_replaced_task_conversations_open_and_recover_unrecorded_native_ex
     let mut session = first;
     for replacement in [false, true] {
         if replacement {
-            let previous = session["id"].as_str().unwrap();
             let before = fixture.launches();
-            session = fixture.json(&["-a", "opencode", "session", "new", previous, "--json"]);
+            session = fixture.json(&[
+                "-a",
+                "opencode",
+                "session",
+                "connect",
+                "--task",
+                "INF-123",
+                "--fresh",
+                "--prepare",
+                "--json",
+            ]);
             assert_eq!(fixture.launches(), before);
             assert!(session["agent_process_id"].is_null());
         }
@@ -1084,7 +1174,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
             &fixture.repo.head_sha(),
         );
         let session = fixture.json(&[
-            "-a", "opencode", "session", "ensure", "--task", "INF-123", "--json",
+            "-a",
+            "opencode",
+            "session",
+            "connect",
+            "--prepare",
+            "--task",
+            "INF-123",
+            "--json",
         ]);
         let id = session["id"].as_str().unwrap();
         let provider = fixture.home.path().join("bin/opencode");
@@ -1105,8 +1202,19 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
                 [id],
             )
             .unwrap();
-        let successor =
-            retired.then(|| fixture.json(&["-a", "opencode", "session", "new", id, "--json"]));
+        let successor = retired.then(|| {
+            fixture.json(&[
+                "-a",
+                "opencode",
+                "session",
+                "connect",
+                "--task",
+                "INF-123",
+                "--fresh",
+                "--prepare",
+                "--json",
+            ])
+        });
         std::fs::write(provider, script).unwrap();
 
         let opened = fixture.run(&["session", "connect", id]);
@@ -1116,7 +1224,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         assert_ne!(launches[1], previous);
         assert_eq!(fixture.session_row(&previous).0, id);
         assert_eq!(fixture.session_row(&launches[1]).0, id);
-        let primary = fixture.json(&["session", "ensure", "--task", "INF-123", "--json"]);
+        let primary = fixture.json(&[
+            "session",
+            "connect",
+            "--prepare",
+            "--task",
+            "INF-123",
+            "--json",
+        ]);
         assert_eq!(primary["id"], successor.as_ref().unwrap_or(&session)["id"]);
         assert_eq!(fixture.session_row(&launches[1]).3, retired);
     }
@@ -1147,7 +1262,13 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         fixture.session_row(&fixture.launches()[before]).0
     };
     let primary = |args: &[&str]| -> Value {
-        fixture.json(&[&["session", "ensure", "--json", "--task"], args].concat())
+        fixture.json(
+            &[
+                &["session", "connect", "--prepare", "--json", "--task"],
+                args,
+            ]
+            .concat(),
+        )
     };
     let members = |issue: &str| -> Vec<String> {
         fixture
@@ -1161,12 +1282,18 @@ fn a_task_primary_is_one_of_its_own_conversations() {
 
     // The Task's only unfinished interactive conversation is its primary.
     let sole = converse(&sole_path);
-    let chosen = primary(&["INF-123"]);
+    let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
     // It stays an ordinary member of its Task.
     assert_eq!(chosen["primary_scope"], Value::Null);
     assert_eq!(chosen["task_primary"], true);
-    assert_eq!(members("INF-123"), std::slice::from_ref(&sole));
+    assert_eq!(members("Inf-123"), std::slice::from_ref(&sole));
+    for args in [
+        vec!["connect", "--task", "inf-123", "--prepare", "--json"],
+        vec!["--task", "Inf-123", "connect", "--prepare", "--json"],
+    ] {
+        assert_eq!(fixture.json(&args)["id"], sole.as_str());
+    }
 
     // Among several, the most recently used one; the others stay open.
     let earlier = converse(&several_path);
@@ -1181,13 +1308,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 2);
 
-    // An explicit choice wins, and keeps winning over later use.
+    // Opening an exact conversation leaves the Task's primary unchanged.
     assert_eq!(
-        primary(&["INF-124", "--choose", &earlier])["id"],
+        fixture.json(&["connect", &earlier, "--prepare", "--json"])["id"],
         earlier.as_str()
     );
+    let explained = fixture.json(&["connect", "--task", "inf-124", "--explain", "--json"]);
+    assert_eq!(explained["resolution"]["session"]["value"], later.as_str());
     let newest = converse(&several_path);
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
     let marked: Vec<String> = fixture
@@ -1198,22 +1327,15 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .filter(|session| session["task_primary"] == true)
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(marked, std::slice::from_ref(&earlier));
+    assert_eq!(marked, std::slice::from_ref(&later));
     assert!(members("INF-124").contains(&newest));
-
-    // Another Task's conversation cannot be chosen.
-    let foreign = fixture.run(&[
-        "session", "ensure", "--task", "INF-124", "--choose", &sole, "--json",
-    ]);
-    assert!(!foreign.status.success(), "{foreign:?}");
-    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
 
     // A finished primary gives way to the Task's most recent conversation.
     fixture
         .db()
         .execute(
             "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
-            [&earlier],
+            [&later],
         )
         .unwrap();
     assert_eq!(primary(&["INF-124"])["id"], newest.as_str());
@@ -1275,13 +1397,50 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     );
 
     // Replacing it finishes that conversation and names a fresh one.
-    let successor = fixture.json(&["session", "new", created["id"].as_str().unwrap(), "--json"]);
+    let successor = fixture.json(&[
+        "session",
+        "connect",
+        "--task",
+        "INF-125",
+        "--fresh",
+        "--prepare",
+        "--json",
+    ]);
     assert_ne!(successor["id"], created["id"]);
     assert_eq!(primary(&["INF-125"])["id"], successor["id"]);
     assert_eq!(
         members("INF-125"),
         [successor["id"].as_str().unwrap().to_string()]
     );
+    let nested = empty_path.join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    for verb in ["connect", "resume"] {
+        let opened = fixture
+            .command(&[verb, "--prepare", "--json"])
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        assert!(opened.status.success(), "{opened:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&opened.stdout).unwrap()["id"],
+            successor["id"]
+        );
+        let repository = fixture
+            .command(&[
+                "--repo",
+                fixture.repo.path().to_str().unwrap(),
+                verb,
+                "--prepare",
+                "--json",
+            ])
+            .current_dir(&nested)
+            .output()
+            .unwrap();
+        assert!(repository.status.success(), "{repository:?}");
+        let repository: Value = serde_json::from_slice(&repository.stdout).unwrap();
+        assert_eq!(repository["primary_scope"], "repository");
+        assert_ne!(repository["id"], successor["id"]);
+    }
 }
 
 #[test]
@@ -1304,7 +1463,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let origin: String = fixture
         .db()
         .query_row(
-            "SELECT id FROM processes WHERE kind='lf' ORDER BY rowid LIMIT 1",
+            "SELECT lf_process_id FROM session_events WHERE kind='captured' ORDER BY rowid LIMIT 1",
             [],
             |row| row.get(0),
         )
@@ -1367,8 +1526,22 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let work = fixture.run_parents(&capture);
         assert_eq!(work.0, expected);
         assert_eq!(work.2.as_deref(), source);
-        let parent: String = fixture.db().query_row("SELECT parent_lf_process_id FROM processes WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
-        assert_eq!(parent, origin.as_str());
+        let retained: bool = fixture
+            .db()
+            .query_row(
+                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
+                SELECT p.id,p.parent_lf_process_id FROM processes p
+                JOIN session_events e ON e.lf_process_id=p.id
+                WHERE e.kind='captured' AND e.receipt_key=?1
+                UNION ALL
+                SELECT p.id,p.parent_lf_process_id FROM processes p
+                JOIN ancestors a ON p.id=a.parent_lf_process_id
+             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
+                rusqlite::params![capture, origin],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
     store
@@ -1468,8 +1641,8 @@ fn declared_agent_can_start_another_tasks_flow() {
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
     store
-        .select_project_workflow(
-            &target.task.project_id,
+        .select_wave_workflow(
+            target.task.wave_id.as_ref().unwrap(),
             "switch-proof",
             &std::fs::read_to_string(y.join(".lf/workflows/switch-proof.yaml")).unwrap(),
         )
@@ -1514,14 +1687,22 @@ fn declared_agent_can_start_another_tasks_flow() {
         format!("task:{}", target.task.id)
     );
     // The step ran in Y's checkout under a Flow process X's conversation started.
-    let observed: (String, String) = fixture.db().query_row(
-        "SELECT step.cwd,s.task_id FROM processes step JOIN processes flow_process ON flow_process.id=step.parent_lf_process_id
-         JOIN processes launch ON launch.id=flow_process.parent_lf_process_id
-         JOIN agent_sessions s ON s.id=launch.caller_session_id
-         JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).unwrap();
+    let observed: (String, String) = fixture
+        .db()
+        .query_row(
+            "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
+            SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
+            FROM processes step
+            JOIN flow_process_steps recorded ON recorded.lf_process_id=step.id
+            UNION ALL
+            SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
+            FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
+         ) SELECT DISTINCT a.cwd,s.task_id FROM ancestors a
+         JOIN agent_sessions s ON s.id=a.caller_session_id",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
     assert_eq!(observed, (y.display().to_string(), caller.id.to_string()));
 }
 
@@ -1604,7 +1785,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("AgentProcess requires an admitted invocation"),
+                .contains("Execution requires an admitted invocation"),
             "{output:?}"
         );
         assert!(
@@ -1638,7 +1819,7 @@ fn unavailable_store_starts_no_provider() {
         let output = launch.output().unwrap();
         assert!(!output.status.success(), "{output:?}");
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("unable to open database file"),
+            String::from_utf8_lossy(&output.stderr).contains("Cannot open execution transport log"),
             "{output:?}"
         );
         assert!(

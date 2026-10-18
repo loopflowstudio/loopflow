@@ -1,7 +1,12 @@
 {
   "empty": {
     "generated_at": "2026-10-11T22:28:00.900135Z",
-    "waves": []
+    "waves": [],
+    "tasks": {
+      "state": "ok",
+      "items": [],
+      "truncated": false
+    }
   },
   "primary": {
     "actions": [
@@ -128,8 +133,7 @@
               "sync": {
                 "changes": [],
                 "connected": false
-              },
-              "workflow": "feature"
+              }
             }
           ],
           "state": "ok",
@@ -221,9 +225,14 @@
                 "sync": {
                   "changes": [],
                   "connected": false
-                }
+                },
+                "repository_id": "repo_00000000000040008000000000000001",
+                "repo": "/private/tmp/.tmpRKKNhK",
+                "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+                "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
               },
-              "workflow_name": "feature"
+              "workflow_name": "feature",
+              "workflow_source": "task"
             }
           ],
           "state": "ok",
@@ -243,9 +252,109 @@
           "retirement_reason": null,
           "status": "ready",
           "superseded_by_wave_id": null
-        }
+        },
+        "workflow": "feature"
       }
-    ]
+    ],
+    "tasks": {
+      "state": "ok",
+      "items": [
+        {
+          "actions": {
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+            "recommended": "no_action"
+          },
+          "condition": {
+            "evidence_age_secs": 1,
+            "local_progress": {
+              "authored_commits": false,
+              "dirty": false,
+              "reason": null,
+              "recovery_required": false,
+              "state": "observed",
+              "unsettled": false
+            },
+            "observed_at": "2026-10-11T22:28:09.749519Z",
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+            "state": "blocked",
+            "unresolved_execution": true
+          },
+          "execution": {
+            "captured": null,
+            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "state": "idle",
+            "step": null
+          },
+          "follow_through": {
+            "intents": [],
+            "links": [],
+            "needs_conversion": false,
+            "reason": null,
+            "scope_notes": []
+          },
+          "latest_flow_process": null,
+          "next_move": {
+            "owner": "user",
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+          },
+          "pr": null,
+          "reference": {
+            "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
+            "workspace": {
+              "base_commit": "c2f00286f20ae8ddf775995d21a3f7d37f70b25c",
+              "branch": "work-first",
+              "local_exists": true,
+              "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+              "machine_label": "build-server",
+              "slug": "task-pr-proof",
+              "worktree": "/private/tmp/.tmpRKKNhK"
+            }
+          },
+          "run_control": {
+            "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+          },
+          "runtime": {
+            "completion_pending": null,
+            "provider": "opencode",
+            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "started": true,
+            "status": "not_ready",
+            "updated_at": "2026-10-11T22:28:08Z",
+            "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
+          },
+          "section": "waiting",
+          "task": {
+            "acquisition": {
+              "observed_at": 1791757688,
+              "state": "available"
+            },
+            "assignee": null,
+            "completed": false,
+            "completed_at": null,
+            "description": "Exercise the persisted lifecycle.",
+            "due_date": null,
+            "follow_up_sources": [],
+            "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+            "identifier": "INF-123",
+            "linear_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+            "name": "Prove Task PR transitions",
+            "rank": 0,
+            "state": null,
+            "sync": {
+              "changes": [],
+              "connected": false
+            },
+            "repository_id": "repo_00000000000040008000000000000001",
+            "repo": "/private/tmp/.tmpRKKNhK",
+            "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+            "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
+          },
+          "workflow_name": "feature",
+          "workflow_source": "task"
+        }
+      ],
+      "truncated": false
+    }
   },
   "sessions": [
     {

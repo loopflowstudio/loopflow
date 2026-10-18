@@ -35,18 +35,53 @@ struct SessionsStoreTests {
         #expect(item(store, "main") == previous)
     }
 
-    @Test("Reset prepares the successor and keeps the old conversation accessible")
-    func resetPreparesSuccessor() async throws {
+    @Test("Reset prepares the successor and keeps the old conversation accessible", arguments: [false, true])
+    func resetPreparesSuccessor(bound: Bool) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "fresh", state: "available")
         })
-        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
+        store.reconcile(try records([session(id: "main", state: "active", primary: true), session(id: "other", state: "available")]))
+        if !bound {
+            let unbound = session(id: "main", state: "active", primary: true)
+                .replacingOccurrences(of: #""work": { "kind": "task", "id": "task-main" }"#, with: #""work": null"#)
+            store.reconcile(try records([unbound]))
+        }
+        let previous = try #require(item(store, "main"))
         let successor = try await store.reset("main")
         #expect(successor.id == "fresh")
         #expect(item(store, "fresh")?.state == .prepared)
         #expect(item(store, "fresh")?.launchArguments == ["lf", "session", "connect", "fresh"])
-        #expect(item(store, "main")?.state == .ended("Replaced by a fresh conversation."))
+        #expect(item(store, "main")?.state == previous.state)
         #expect(item(store, "other")?.state == .pending)
+    }
+
+    @Test("Reset leaves the previous Session live and preserves updates while preparing", arguments: [false, true])
+    func resetPreservesConcurrentUpdates(fails: Bool) async throws {
+        let (requests, request) = AsyncStream<Void>.makeStream()
+        let (responses, response) = AsyncStream<Void>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            request.yield(())
+            for await _ in responses { break }
+            if fails { throw RegistryQueryError("Preparation failed") }
+            return session(id: "fresh", state: "available")
+        })
+        store.reconcile(try records([session(id: "main", state: "closed", primary: true)]))
+        let previous = try #require(item(store, "main"))
+        store.adoptPreparation(previous.record)
+        store.recordPaneLive("main")
+
+        let reset = Task { try await store.reset("main") }
+        for await _ in requests { break }
+        #expect(item(store, "main")?.state == .live)
+        store.noteSurfaceClosed(.session("main", machineId: fixtureMachineId), output: "Client exited")
+        response.yield(())
+        if fails {
+            await #expect(throws: RegistryQueryError.self) { try await reset.value }
+        } else {
+            let successor = try await reset.value
+            #expect(successor.id == "fresh")
+        }
+        #expect(item(store, "main")?.state == .ended("Client exited"))
     }
 
     @Test("Filtered refresh retains Sessions without creating local terminals")
@@ -320,7 +355,7 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
     )
 }
 
-private func session(id: String, state: String, replacing: Bool = false) -> String {
+private func session(id: String, state: String, replacing: Bool = false, primary: Bool = false) -> String {
     // A conversation available for a person has no client; `available` is its attention.
     let wire = state == "available" ? "unknown" : state
     return """
@@ -335,7 +370,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
+      "title_source": "generated", "task_primary": \(primary), "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
       "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--takeover\"" : "")]
     }
     """

@@ -653,7 +653,7 @@ async fn worktree_reads_its_checkout_wave_memory() {
     );
     let components = gather_context(&GatherContextOpts {
         repo_root: binding.cwd,
-        wave: Some(binding.wave_name),
+        wave: binding.wave_name,
         message: Some(binding.context),
         operate: true,
         ..Default::default()

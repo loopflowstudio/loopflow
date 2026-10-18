@@ -42,7 +42,9 @@ fn claim_in(conn: &Connection, task: &TaskId, candidate: &MachineId) -> StoreRes
     }
     let saved = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
     super::children::require_task_planning(conn, &saved)?;
-    super::durable::require_selected_project(conn, &saved.project_id)?;
+    if let Some(project) = &saved.project_id {
+        super::durable::require_selected_project(conn, project)?;
+    }
     if super::durable::task_state_in(conn, task)?.is_terminal() {
         return Err(StoreError::InvalidAuthority(
             "terminal Task cannot reserve first execution".into(),
@@ -183,8 +185,9 @@ mod tests {
         let project = store.ensure_wave_project(repo, "work").unwrap();
         store
             .create_task(&NewTask {
+                repository_id: store.ensure_repository(repo).unwrap(),
                 id: TaskId::new(),
-                project_id: project.id,
+                project_id: Some(project.id),
                 title: "One execution".into(),
                 description: String::new(),
                 due_date: None,
@@ -231,7 +234,9 @@ mod tests {
             .add_machine(&other, "other", "other", "/repo")
             .unwrap();
         let wave = store.task(&task).unwrap().unwrap().wave_id;
-        store.place_work(&WorkRef::Wave(wave), &other).unwrap();
+        store
+            .place_work(&WorkRef::Wave(wave.clone().unwrap()), &other)
+            .unwrap();
         let retry = store.claim_task_admission(&task, &other, "retry").unwrap();
         assert_eq!(retry.owner.as_ref(), Some(owner));
         assert_eq!(retry.request, "retry");
@@ -369,7 +374,9 @@ mod tests {
             .add_machine(&remote, "remote", "remote", "/repo")
             .unwrap();
         let wave = store.task(&task).unwrap().unwrap().wave_id;
-        store.place_work(&WorkRef::Wave(wave), &remote).unwrap();
+        store
+            .place_work(&WorkRef::Wave(wave.clone().unwrap()), &remote)
+            .unwrap();
         assert!(store
             .claim_task_admission(&task, &local, "stale")
             .unwrap_err()

@@ -84,8 +84,13 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
-    "workflow_name": null
+    "workflow_name": null,
+    "workflow_source": null
   }
 }

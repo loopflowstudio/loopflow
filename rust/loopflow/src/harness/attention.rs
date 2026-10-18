@@ -115,6 +115,14 @@ impl Attention {
             return;
         }
         if let Some(reading) = self.reading(now) {
+            let state = if reading.pending_input > 0 {
+                crate::program_status::State::Blocked
+            } else if reading.yielded {
+                crate::program_status::State::Idle
+            } else {
+                crate::program_status::State::Working
+            };
+            crate::transport::report(state, false, None);
             if let Err(error) = store.record_session_activity(session, attachment, &reading) {
                 tracing::warn!(%error, session, "failed to save Session activity");
             }

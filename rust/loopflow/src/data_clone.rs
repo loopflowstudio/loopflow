@@ -495,14 +495,20 @@ fn require_platform() -> Result<()> {
 fn policy(manifest: &CloneManifest, runtime: bool) -> Result<String> {
     let quote = |path: &Path| serde_json::to_string(&path.display().to_string());
     let root = quote(&manifest.directory)?;
+    // Unix socket paths cannot fit arbitrary clone paths. Permit only this
+    // clone's private transport directory, never the source Machine's sockets.
+    let transport = quote(&crate::transport::directory(&manifest.directory)?)?;
     let mut policy = format!(
         r#"(version 1)
 (allow default)
 (deny file-write*)
 (allow file-write* (subpath {root}) (literal "/dev/null") (literal "/dev/ptmx") (regex #"^/dev/(ttys|pty)"))
+(allow file-write* (subpath {transport}))
 (deny network*)
 (allow network-bind network-inbound (local unix-socket (subpath {root})))
 (allow network-outbound (remote unix-socket (subpath {root})))
+(allow network-bind network-inbound (local unix-socket (subpath {transport})))
+(allow network-outbound (remote unix-socket (subpath {transport})))
 (deny signal)
 (allow signal (target same-sandbox))
 (deny process-info-setcontrol)

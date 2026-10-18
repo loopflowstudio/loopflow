@@ -202,9 +202,8 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
 }
 
 /// A stream error that means the harness session itself is dead (not just the
-/// turn). Claude has no such code by construction: it runs one subprocess per
-/// turn, so a crash fails the turn (`TurnCompleted { Failed }`) and the next
-/// turn spawns fresh via `--resume`.
+/// turn). Claude keeps a process across turns, but a crash fails the active turn
+/// and the next input respawns it with `--resume` instead of ending the harness.
 pub fn is_terminal_harness_error(code: &str) -> bool {
     matches!(code, "codex_disconnected" | "opencode_disconnected")
 }
@@ -332,7 +331,7 @@ impl HarnessKind {
     ) -> Box<dyn Harness> {
         match self {
             Self::Codex => Box::new(codex::CodexHarness::new(event_tx, approval)),
-            // Claude approvals ride the per-turn CLI flags built from
+            // Claude approvals ride the process-launch CLI flags built from
             // AgentConfig, not a runtime channel; no policy to thread.
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
             Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx, approval)),
@@ -446,7 +445,7 @@ mod tests {
         assert!(is_terminal_harness_error("opencode_disconnected"));
         assert!(is_terminal_harness_error("codex_disconnected"));
         assert!(!is_terminal_harness_error("opencode_error"));
-        // Claude has no session-terminal code: per-turn subprocess.
+        // Claude can respawn after a crash without ending the harness.
         assert!(!is_terminal_harness_error("claude_harness_crashed"));
     }
 

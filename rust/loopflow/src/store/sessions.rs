@@ -4,9 +4,6 @@ use crate::session::{LfSession, TitleSource};
 use super::{run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub(crate) async fn resume_candidates(&self) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
-        run_sqlite(&self.sqlite, |store| store.resume_candidates()).await
-    }
     pub(crate) async fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,

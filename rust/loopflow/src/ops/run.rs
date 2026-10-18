@@ -14,8 +14,8 @@ use super::{OpsError, OpsResult};
 pub struct WorkBinding {
     pub source: crate::session::WorkSource,
     pub work: WorkRef,
-    pub wave_id: WaveId,
-    pub wave_name: String,
+    pub wave_id: Option<WaveId>,
+    pub wave_name: Option<String>,
     pub subjects: Vec<String>,
     pub cwd: PathBuf,
     pub context: String,
@@ -24,36 +24,46 @@ pub struct WorkBinding {
 
 pub(crate) fn render_task_context(
     task: &Task,
-    project: &Project,
+    project: Option<&Project>,
     pr: Option<&TaskPr>,
-    wave_name: &str,
+    wave_name: Option<&str>,
 ) -> String {
-    let placement = task
-        .parent_pr_id
-        .as_ref()
-        .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
-        .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
-    let pull_request = pr
-        .and_then(TaskPr::github)
-        .map(|pr| format!("\nPull request: {}", pr.url))
-        .unwrap_or_default();
-    format!(
-        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
-        identifier = task.identifier,
-        title = task.title,
-        description = task.description,
-        project = project.name,
-        project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
-        project_context = render_project_context(project),
-        task_snapshot_synced_at = task.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
-        project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
-        wave = wave_name,
-        task_id = task.id,
-        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "not placed".into()),
-        branch = task.branch,
-        base_commit = task.base_commit,
-        placement = placement,
-    )
+    let mut context = format!(
+        "Task {}: {}\n\n{}\n\nRepository: {}\nTask Work: {}",
+        task.identifier, task.title, task.description, task.repository_id, task.id
+    );
+    if let Some(project) = project {
+        context.push_str(&format!(
+            "\n\nChapter plan: {} (source {})\n{}",
+            project.name,
+            project.id,
+            render_project_context(project)
+        ));
+    }
+    if let Some(wave) = wave_name {
+        context.push_str(&format!("\nWave: {wave}"));
+    }
+    context.push_str(&format!(
+        "\nTask directive snapshot synced at: {}\nWorktree: {}\nBranch: {}\nBase commit: {}",
+        task.pm_snapshot_synced_at
+            .map(|at| at.to_string())
+            .unwrap_or_else(|| "not observed".into()),
+        task.worktree
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "not placed".into()),
+        task.branch,
+        task.base_commit
+    ));
+    if let Some(parent) = &task.parent_pr_id {
+        context.push_str(&format!(
+            "\nStack parent PR: {parent} (land the parent first)"
+        ));
+    }
+    if let Some(pr) = pr.and_then(TaskPr::github) {
+        context.push_str(&format!("\nPull request: {}", pr.url));
+    }
+    context
 }
 
 fn render_project_context(project: &crate::work::project::Project) -> String {
@@ -63,9 +73,6 @@ fn render_project_context(project: &crate::work::project::Project) -> String {
         "{}\n## Metric targets\n\n```json\n{targets}\n```",
         project.description
     );
-    if !project.workflow.trim().is_empty() {
-        content.push_str(&format!("\n\nworkflow: {}", project.workflow.trim()));
-    }
     content.push_str("\n\n## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
@@ -124,7 +131,7 @@ impl<'a> WorkSelection<'a> {
 #[derive(Debug)]
 pub(crate) struct SelectedWork {
     pub source: crate::session::WorkSource,
-    pub wave: Wave,
+    pub wave: Option<Wave>,
     pub task: Option<Task>,
 }
 
@@ -160,23 +167,26 @@ pub(crate) async fn select_work(
         let task = super::task::task_for_checkout(store, cwd).await?;
         (task, crate::session::WorkSource::Checkout)
     };
-    let wave = match &task {
-        Some(task) => {
-            let wave = store
-                .get_wave(&task.wave_id)
-                .await
-                .map_err(run_error)?
-                .ok_or_else(|| run_error(format!("Task {} has no owning Wave", task.id)))?;
-            if let Some(selected) = &selected_wave {
-                require_wave_match(&wave, selected, &format!("Task {}", task.identifier))?;
+    let wave =
+        match &task {
+            Some(task) => {
+                let wave =
+                    match &task.wave_id {
+                        Some(id) => Some(store.get_wave(id).await.map_err(run_error)?.ok_or_else(
+                            || run_error(format!("Task {} Wave is missing", task.id)),
+                        )?),
+                        None => None,
+                    };
+                if let Some(selected) = &selected_wave {
+                    if wave.as_ref().map(Wave::id) != Some(selected.id()) {
+                        return Err(run_error("selected Wave does not own Task"));
+                    }
+                }
+                wave
             }
-            wave
-        }
-        None => match selected_wave {
-            Some(wave) => wave,
-            None => return Ok(None),
-        },
-    };
+            None if selected_wave.is_none() => return Ok(None),
+            None => selected_wave,
+        };
     Ok(Some(SelectedWork { source, wave, task }))
 }
 
@@ -207,34 +217,47 @@ async fn bind_selected_work(
 ) -> OpsResult<WorkBinding> {
     let wave = selected.wave;
     if let Some(task) = selected.task {
-        let project = store
-            .get_project(&task.project_id)
-            .await
-            .map_err(run_error)?
-            .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
+        let project = match &task.project_id {
+            Some(id) => Some(
+                store
+                    .get_project(id)
+                    .await
+                    .map_err(run_error)?
+                    .ok_or_else(|| run_error("Task Project is missing"))?,
+            ),
+            None => None,
+        };
         let work = WorkRef::Task(task.id.clone());
         let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
-        let mut context = render_task_context(&task, &project, pr.as_ref(), wave.slug());
+        let mut context = render_task_context(
+            &task,
+            project.as_ref(),
+            pr.as_ref(),
+            wave.as_ref().map(Wave::slug),
+        );
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.identifier)));
         }
         let cwd = task.worktree()?.clone();
         return Ok(WorkBinding {
             source: selected.source,
-            subjects: vec![
-                format!("wave:{}", wave.slug()),
-                format!("project:{}", project.slug),
-                format!("task:{}", task.identifier),
-            ],
+            subjects: wave
+                .as_ref()
+                .map(|w| format!("wave:{}", w.slug()))
+                .into_iter()
+                .chain(project.as_ref().map(|p| format!("project:{}", p.slug)))
+                .chain(std::iter::once(format!("task:{}", task.identifier)))
+                .collect(),
             work,
             wave_id: task.wave_id,
-            wave_name: wave.slug().to_string(),
+            wave_name: wave.as_ref().map(|w| w.slug().to_owned()),
             cwd,
             context,
             agent: task.agent,
         });
     }
 
+    let wave = wave.expect("a selection without a Task has a Wave");
     let metric_context = crate::ops::metrics::metric_prompt_section(
         "metric-portfolio",
         crate::ops::metrics::stored_wave_metric_portfolio(
@@ -256,8 +279,8 @@ async fn bind_selected_work(
         source: selected.source,
         subjects: vec![format!("wave:{}", wave.slug())],
         work: WorkRef::Wave(wave.id().clone()),
-        wave_id: wave.id().clone(),
-        wave_name: wave.slug().to_string(),
+        wave_id: Some(wave.id().clone()),
+        wave_name: Some(wave.slug().to_string()),
         cwd,
         context,
         agent: None,
@@ -312,17 +335,6 @@ async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResul
     wave.ok_or_else(|| run_error(format!("Wave {value:?} is not registered")))
 }
 
-fn require_wave_match(actual: &Wave, requested: &Wave, subject: &str) -> OpsResult<()> {
-    if actual.id() == requested.id() {
-        return Ok(());
-    }
-    Err(run_error(format!(
-        "{subject} belongs to Wave {}, not {}",
-        actual.slug(),
-        requested.slug()
-    )))
-}
-
 fn run_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
@@ -364,7 +376,6 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            workflow: "feature".into(),
             status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
@@ -384,6 +395,7 @@ mod tests {
     async fn task(store: &SharedStore, wave: &Wave, project: &Project, worktree: PathBuf) -> Task {
         let now = OffsetDateTime::now_utc();
         let task = Task {
+            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
             id: TaskId::new(),
 
             revision: 0,
@@ -394,8 +406,8 @@ mod tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
+            wave_id: Some(wave.id().clone()),
+            project_id: Some(project.id.clone()),
             worktree: Some(worktree),
             workspace_slug: "runtime-research".to_string(),
             branch: "jack/runtime-research".to_string(),
@@ -467,15 +479,16 @@ mod tests {
         let task = store
             .create_task(
                 &crate::work::task::NewTask {
+                    repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
                     due_date: None,
                     id: TaskId::new(),
-                    project_id: project.id,
+                    project_id: Some(project.id),
                     title: "Inspect before starting".into(),
                     description: String::new(),
                 },
-                std::sync::Arc::new(crate::store::PlanningLocks::new(
+                Some(std::sync::Arc::new(crate::store::PlanningLocks::new(
                     tempfile::tempfile().unwrap(),
-                )),
+                ))),
             )
             .await
             .unwrap();
@@ -840,14 +853,14 @@ mod tests {
             let binding = resolve_work_binding(&store, repo.path(), "task:LOO-267")
                 .await
                 .unwrap();
-            assert_eq!(binding.wave_name, address);
+            assert_eq!(binding.wave_name.as_deref(), Some(address));
             assert_eq!(
                 store.get_task(&task.id).await.unwrap().unwrap().wave_id,
-                *release.id()
+                Some(release.id().clone())
             );
             let components = crate::prompt::gather_context(&crate::prompt::GatherContextOpts {
                 repo_root: binding.cwd,
-                wave: Some(binding.wave_name),
+                wave: Some(binding.wave_name.clone().unwrap()),
                 include_diff: false,
                 include_diff_files: false,
                 ..Default::default()
@@ -1264,7 +1277,9 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(wave_error.to_string().contains("belongs to Wave"));
+        assert!(wave_error
+            .to_string()
+            .contains("selected Wave does not own Task"));
     }
 
     #[tokio::test]
@@ -1294,7 +1309,6 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                workflow: "feature".into(),
                 status: crate::work::project::ProjectStatus::Started,
                 krs: vec![ProjectKR {
                     text: "One model everywhere".to_string(),

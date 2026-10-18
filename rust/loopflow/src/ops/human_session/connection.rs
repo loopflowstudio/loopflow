@@ -8,7 +8,7 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::WorkSelection;
 use crate::store::SharedStore;
 
-use super::{NativeSession, OpenMode, SessionAction, SessionState};
+use super::{OpenMode, SessionAction, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +54,7 @@ impl SessionConnectExplanation {
                 SessionConnectIntent::Start => "Start this conversation",
                 SessionConnectIntent::Resume => "Resume saved provider history",
                 SessionConnectIntent::ConnectOrResume => {
-                    "Connect to the recorded live conversation, or resume saved history"
+                    "Attach to a retained terminal, or explicitly transition a structured Run to native history"
                 }
             };
             let mode = match action.mode {
@@ -102,20 +102,43 @@ pub(crate) async fn explain_connect(
     target: super::SessionTarget<'_>,
     mode: OpenMode,
     prepare_only: bool,
+    fresh: bool,
 ) -> SessionConnectExplanation {
-    let selector = match super::select_connection(store, cwd, target, false).await {
-        Ok(selector) => selector,
+    use crate::session::PrimaryScope;
+    let selected = async {
+        if let super::SessionTarget::Session(id) = target {
+            return Ok((None, Some(id.to_string())));
+        }
+        let scope = super::connection_scope(store, cwd, target).await?;
+        let session = if fresh {
+            None
+        } else {
+            match &scope {
+                PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
+                _ => store.sqlite.primary_session(&scope)?,
+            }
+        };
+        Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id)))
+    }
+    .await;
+    let (scope, selector) = match selected {
+        Ok(selected) => selected,
         Err(error) => return SessionConnectExplanation::unavailable(error),
+    };
+    let task = match &scope {
+        Some(PrimaryScope::Task(task)) => Some(task.as_str()),
+        _ => None,
+    };
+    let wave = match &scope {
+        Some(PrimaryScope::Wave(wave)) => Some(wave.as_str()),
+        _ => None,
     };
     let mut report = SessionConnectExplanation {
         resolution: crate::ops::context::explain_context(
             store,
             cwd,
-            WorkSelection {
-                task: None,
-                wave: None,
-            },
-            Some(&selector),
+            WorkSelection { task, wave },
+            selector.as_deref(),
             None,
         )
         .await,
@@ -125,13 +148,43 @@ pub(crate) async fn explain_connect(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
+    if let Some(PrimaryScope::Repository(_)) = &scope {
+        report.resolution.task = ContextFact::Unbound;
+        report.resolution.wave = ContextFact::Unbound;
+    }
+    if selector.is_none() {
+        if let Some(scope @ (PrimaryScope::Repository(_) | PrimaryScope::Wave(_))) = &scope {
+            let path = match &report.resolution.repository_path {
+                ContextFact::Bound { value, .. } => Path::new(value),
+                _ => cwd,
+            };
+            match super::primary::scope_worktree(path, scope) {
+                Ok(plan) => {
+                    report.resolution.checkout = ContextFact::Bound {
+                        value: plan.worktree_path.to_string_lossy().into_owned(),
+                        source: "persistent_checkout".into(),
+                    }
+                }
+                Err(error) => report.unavailable.push(error.to_string()),
+            }
+        }
+    }
     if let ContextFact::Bound { source, .. } = &mut report.resolution.session {
         if !matches!(target, super::SessionTarget::Session(_)) {
             *source = "contextual_session".into();
         }
     }
-    if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await {
-        report.unavailable.push(error.to_string());
+    if let Some(selector) = selector {
+        if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await
+        {
+            report.unavailable.push(error.to_string());
+        }
+    } else {
+        report.action = Some(SessionConnectAction {
+            intent: SessionConnectIntent::Start,
+            mode,
+            prepare_only,
+        });
     }
     report
 }
@@ -147,18 +200,13 @@ async fn read_connection(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    let native = NativeSession::of(&session)?;
     let provider = store.sqlite.input_provider_session(&session.artifact_key)?;
-    // Do not probe a socket: even a connect-and-close enters the live driver's protocol.
-    let connection = if native.provider == "codex" && provider.is_some() {
-        store.sqlite.session_connection(&session.id)?
-    } else {
-        None
-    };
-    let intent = if provider.is_none() {
-        SessionConnectIntent::Start
-    } else if !prepare_only && connection.is_some() {
+    // A metadata read does not acquire viewer control or probe the endpoint.
+    let connection = store.sqlite.session_transport(&session.id)?;
+    let intent = if !prepare_only && connection.is_some() {
         SessionConnectIntent::ConnectOrResume
+    } else if provider.is_none() {
+        SessionConnectIntent::Start
     } else {
         SessionConnectIntent::Resume
     };
@@ -167,15 +215,8 @@ async fn read_connection(
         mode,
         prepare_only,
     });
-    if let Some((_, thread)) = connection {
-        let matching = provider
-            .as_ref()
-            .is_some_and(|provider| provider.agent_session == thread);
-        report.unavailable.push(if matching {
-            "Recorded live endpoint is not probed; reachability and driver takeover are checked only when opening"
-        } else {
-            "Recorded live thread differs from saved history; a reachable endpoint would refuse connection, an absent endpoint may resume history"
-        }.into());
+    if connection.is_some() {
+        report.unavailable.push("Retained execution endpoint is not probed; an unavailable owner leaves continuity unknown".into());
     }
     if !prepare_only {
         if !session.cwd.is_dir() {
@@ -208,9 +249,9 @@ async fn read_connection(
     let state = super::session_state(&metadata);
     report.state = Some(state);
     report.actions = super::session_actions(state);
-    // The live Codex connection precedes the native-client refusal in ordinary open.
+    // Retained terminal attachment precedes the native-client refusal in ordinary open.
     // With no socket observation, report the native fallback's refusal conditionally.
-    if provider.is_some() {
+    if !prepare_only && provider.is_some() {
         if let Err(error) = mode.require_action(state) {
             if intent == SessionConnectIntent::ConnectOrResume {
                 report

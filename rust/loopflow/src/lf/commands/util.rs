@@ -73,14 +73,7 @@ pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
 ) -> Result<()> {
-    resume_session_with_env(
-        artifact_key,
-        Some(provider_session),
-        &BTreeMap::new(),
-        None,
-        None,
-        None,
-    )
+    resume_session_with_env(artifact_key, Some(provider_session), &BTreeMap::new(), None)
 }
 
 pub(crate) fn resume_session_with_env(
@@ -88,22 +81,12 @@ pub(crate) fn resume_session_with_env(
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    remote: Option<NativeConnection>,
-    attachment: Option<(String, crate::process::SessionAttachment)>,
 ) -> Result<()> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(artifact_key)?
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
-    let mut config = if remote.is_some() {
-        AgentConfig {
-            agent: session.provider.clone(),
-            cwd: Some(session.cwd.clone()),
-            ..Default::default()
-        }
-    } else {
-        crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?
-    };
+    let mut config = crate::agent::resolve_session_config(&session, &crate::lf::Cli::default())?;
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -111,9 +94,9 @@ pub(crate) fn resume_session_with_env(
         config.agent(),
     );
     if let Some(provider) = provider_session {
+        config.task_prompt.clear();
         config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
     }
-    config.session_attachment = attachment;
     config.env.extend(extra_environment.clone());
     config.env.insert(
         crate::session_record::CAPTURE_KEY_ENV.into(),
@@ -124,29 +107,16 @@ pub(crate) fn resume_session_with_env(
         crate::config::participant_name()?.unwrap_or_default(),
     );
     let context_file = crate::agent::write_system_prompt_file(&config, "resume-instructions")?;
-    let command = if let Some(remote) = remote {
-        if session.provider.as_deref() != Some("codex") {
-            bail!("This provider has no native remote connection");
-        }
-        // Attaching a client does not change a running provider's launch policy.
-        crate::agent::native_connection_command(
-            session.cwd.clone(),
-            provider_session.map(|provider| &provider.agent_session),
-            remote,
-            config.session_attachment.clone(),
-        )
-    } else {
-        build_session_command(
-            &config,
-            match provider_session {
-                Some(provider) => ProviderInvocation::Resume {
-                    session_id: &provider.agent_session,
-                },
-                None => ProviderInvocation::Terminal { session_id: None },
+    let command = build_session_command(
+        &config,
+        match provider_session {
+            Some(provider) => ProviderInvocation::Resume {
+                session_id: &provider.agent_session,
             },
-            context_file.as_deref(),
-        )?
-    };
+            None => ProviderInvocation::Terminal { session_id: None },
+        },
+        context_file.as_deref(),
+    )?;
     let environment = session_environment(&config, context_file.as_deref())?;
     spawn_session_command_with_env(
         &command,
@@ -345,6 +315,10 @@ fn session_command_status_with_env(
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
             let attachment =
                 crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
+            store.make_session_interactive(&session.id, &attachment)?;
+            if let Some(owner) = crate::transport::current() {
+                store.bind_session_transport(&session.id, &attachment, owner)?;
+            }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&attachment.caller(session.id.clone()))?,
@@ -752,22 +726,20 @@ async fn serve_codex_native(
         attachment: Some(attachment.clone()),
         account_id: account.clone(),
     };
-    // Decide whether the original input is pending before opening
-    // the UI. A resumed terminal can exit before it subscribes.
-    let empty = if thread.is_some() {
+    // Recover saved history before opening the UI, without replaying its input.
+    if thread.is_some() {
         tokio::time::timeout(
             std::time::Duration::from_secs(20),
             connection.recover_history(&endpoint),
         )
         .await
-        .context("Codex native history recovery timed out")??
-    } else {
-        true
-    };
+        .context("Codex native history recovery timed out")??;
+    }
     let initial = std::sync::Arc::new(tokio::sync::Mutex::new(
         crate::harness::codex_connection::NativeInput {
             params: Some(params),
-            text: (empty && !launch.task_prompt.is_empty()).then(|| launch.task_prompt.clone()),
+            text: (thread.is_none() && !launch.task_prompt.is_empty())
+                .then(|| launch.task_prompt.clone()),
             context: launch.conversation_context.clone(),
         },
     ));
@@ -1063,8 +1035,6 @@ mod tests {
                     &capture.artifact_key(),
                     Some(&session),
                     &BTreeMap::new(),
-                    None,
-                    None,
                     None,
                 )
             };

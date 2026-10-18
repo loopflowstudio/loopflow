@@ -752,21 +752,13 @@ final class SessionsStore {
 
     func reset(_ id: String) async throws -> SessionRecord {
         guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
-        let previous = sessions[index]
-        sessions[index].state = .opening
-        do {
-            let successor = try await query(for: previous.record).resetSession(
-                id: id, agent: previous.record.provider, cwd: repoPath)
-            if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
-            if let location = executionLocations[id] { retainLocation(location, for: successor) }
-            reconcile([successor])
-            adoptPreparation(successor)
-            if let current = _index(id) { sessions[current].state = .ended("Replaced by a fresh conversation.") }
-            return successor
-        } catch {
-            if let current = _index(id) { sessions[current] = previous }
-            throw error
-        }
+        let previous = sessions[index].record
+        let successor = try await query(for: previous).resetSession(
+            previous, agent: previous.provider, cwd: repoPath)
+        if let location = executionLocations[id] { retainLocation(location, for: successor) }
+        reconcile([successor])
+        adoptPreparation(successor)
+        return successor
     }
 
     func beginPaneLoad(_ id: String) {
@@ -1137,8 +1129,8 @@ struct SessionsContentView: View {
             .help("Choose Work (⌘K)").accessibilityIdentifier("work-location-picker")
             .accessibilityValue(title(for: currentKey))
             Spacer(minLength: 0)
-            if let task = fileTask, let wave = model.breadcrumb?.wave?.roadmap.wave {
-                TaskLifecycleActions(model: model, task: task.task, wave: wave,
+            if let task = fileTask {
+                TaskLifecycleActions(model: model, task: task.task,
                     work: model.taskWork[task.task.id])
                 workspaceCreation(for: workspace, task: task.task)
                 if multiplexer.zoomedPaneId != nil {

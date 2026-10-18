@@ -19,7 +19,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -61,7 +65,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "completed": {
     "task": {
@@ -83,7 +88,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -390,7 +399,8 @@
     "run_control": {
       "unavailable": "Task is complete"
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "stale": {
     "task": {
@@ -412,7 +422,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -767,7 +781,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "unavailable": {
     "task": {
@@ -789,7 +804,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -847,7 +866,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "user_wait": {
     "task": {
@@ -869,7 +889,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1225,7 +1249,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "dirty": {
     "task": {
@@ -1247,7 +1272,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1305,7 +1334,8 @@
     "run_control": {
       "unavailable": null
     },
-    "pr": null
+    "pr": null,
+    "workflow_source": "task"
   },
   "authored_commits": {
     "task": {
@@ -1327,7 +1357,11 @@
       "acquisition": {
         "state": "available",
         "observed_at": null
-      }
+      },
+      "repository_id": "repo_00000000000040008000000000000001",
+      "repo": "/repo",
+      "project_id": null,
+      "wave_id": null
     },
     "reference": {
       "issue_url": null,
@@ -1708,6 +1742,7 @@
       },
       "merge_commit": null,
       "abandoned_at": null
-    }
+    },
+    "workflow_source": "task"
   }
 }

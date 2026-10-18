@@ -8,6 +8,7 @@ use std::process::Command;
 use loopflow::flow::compile_flow;
 use loopflow::flow::load_flow;
 use loopflow::flow::{ConcreteStep, Skill, Step};
+use loopflow::store::sqlite::SqliteStore;
 use support::{codex_app_server_script, register_codex_account};
 use tempfile::TempDir;
 
@@ -72,6 +73,18 @@ fn step_fields(flow: &serde_json::Value, field: &str) -> Vec<serde_json::Value> 
         .iter()
         .map(|step| step[field].clone())
         .collect()
+}
+
+fn kill_recorded_flow(home: &Path, id: &str) {
+    let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let pid = store
+        .process(&id.parse().unwrap())
+        .unwrap()
+        .unwrap()
+        .pid
+        .unwrap();
+    // SAFETY: this is the recorded live Flow created by this fixture.
+    assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
 }
 
 /// Wait for a condition another process brings about; a bound, never a retry.
@@ -277,13 +290,14 @@ print(json.dumps({"report": {}, "metric_observations": [], "text": "finished"}))
         );
         repo.path().join("entered").exists()
     });
-    flow_process.kill().unwrap();
-    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
         flows.remove(0)
     };
+    kill_recorded_flow(home.path(), read()["entry"]["id"].as_str().unwrap());
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     // Reconciliation before and after the surviving effect completes must not
     // continue the dead process's Flow or execute its successor.
     for effect_finished in [false, true] {
@@ -1166,14 +1180,15 @@ fn killed_flow_process_leaves_its_agent_step_as_history_without_another_turn() {
         );
         home.path().join("entered").exists()
     });
-    flow_process.kill().unwrap();
-    flow_process.wait().unwrap();
     let read = || {
         let mut flows = flow_details(repo.path(), home.path());
         assert_eq!(flows.len(), 1);
         flows.remove(0)
     };
     let id = read()["entry"]["id"].as_str().unwrap().to_owned();
+    kill_recorded_flow(home.path(), &id);
+    flow_process.kill().unwrap();
+    flow_process.wait().unwrap();
     // Nothing restarts the Flow, before or after its orphaned turn ends.
     for command in ["resume", "start"] {
         let refused = run_lf(
@@ -2022,6 +2037,14 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-flow-read", &repo.head_sha());
     observe_planning(&task, &checkout);
+    task.store
+        .sqlite
+        .select_wave_workflow(
+            task.task.wave_id.as_ref().unwrap(),
+            "feature",
+            loopflow::workflow::builtin_workflow("feature").unwrap(),
+        )
+        .unwrap();
     for skill in [
         "implement-proof",
         "decide-proof",

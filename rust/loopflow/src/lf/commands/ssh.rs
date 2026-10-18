@@ -33,10 +33,9 @@ pub fn run(
     let resident_operation = matches!(
         &cli.command,
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::List { .. }
+            cmd: crate::lf::SessionCommand::Attach { .. }
+                | crate::lf::SessionCommand::List { .. }
                 | crate::lf::SessionCommand::Connect { .. }
-                | crate::lf::SessionCommand::Ensure { .. }
-                | crate::lf::SessionCommand::Resume(..)
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Admission { .. }
@@ -143,9 +142,7 @@ pub fn run(
     }
     let preparation = match &cli.command {
         Some(crate::lf::Commands::Session {
-            cmd:
-                crate::lf::SessionCommand::Connect { connection, .. }
-                | crate::lf::SessionCommand::Resume(connection),
+            cmd: crate::lf::SessionCommand::Connect { connection, .. },
         }) if connection.prepare && !preview => Some(connection),
         _ => None,
     };
@@ -260,10 +257,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     // Validate pushed code before any planning I/O can hide missing source work.
     let source = TaskSource::resolve(&store, selector).await?;
     let repo = match store.get_task_by_issue(selector).await? {
-        Some(task) => store
-            .get_wave(&task.wave_id)
-            .await?
-            .map(|wave| std::path::PathBuf::from(wave.repo())),
+        Some(task) => Some(crate::ops::task::repository_for_task(&store, &task)?),
         None => crate::repo::discover_repo_root(&crate::repo::working_directory()?)
             .ok()
             .flatten(),

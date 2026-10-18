@@ -413,8 +413,8 @@ fn require_repository(conn: &Connection, repo: &str, table: &str, target: &str) 
     let sql = match table {
         "waves" => "SELECT repo FROM waves WHERE id=?1",
         "projects" => "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-        "tasks" => "SELECT w.repo FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",
-        "task_comments" => "SELECT w.repo FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE c.id=?1",
+        "tasks" => "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE t.id=?1",
+        "task_comments" => "SELECT w.repo FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN repository_plans w ON w.id=t.repository_id WHERE c.id=?1",
         _ => return Err(invalid("unknown Work table")),
     };
     let actual: String = conn.query_row(sql, [target], |row| row.get(0))?;
@@ -429,8 +429,8 @@ fn require_repository(conn: &Connection, repo: &str, table: &str, target: &str) 
 const OWNED_CHANGES: &str = "WITH owned(record_table,object_id) AS (
     SELECT 'waves',id FROM waves WHERE repo=?1
     UNION ALL SELECT 'projects',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
-    UNION ALL SELECT 'tasks',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
-    UNION ALL SELECT 'task_comments',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
+    UNION ALL SELECT 'tasks',t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?1
+    UNION ALL SELECT 'task_comments',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?1
 )";
 
 fn route_repository(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {

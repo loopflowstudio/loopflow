@@ -18,18 +18,27 @@ pub(crate) struct TaskSeed {
 }
 
 /// Read a Task snapshot without refreshing providers or advancing a control cursor.
-pub(crate) async fn read_seed(store: &SharedStore, task: &Task, wave: &str) -> Result<TaskSeed> {
+pub(crate) async fn read_seed(
+    store: &SharedStore,
+    task: &Task,
+    wave: Option<&str>,
+) -> Result<TaskSeed> {
     let interrupt = store
         .latest_interrupt_id(&WorkRef::Task(task.id.clone()))
         .await?;
     let pr = store.active_task_pr(&task.id).await?;
-    let project = store
-        .get_project(&task.project_id)
-        .await?
-        .ok_or_else(|| anyhow!("Task Project is missing"))?;
+    let project = match &task.project_id {
+        Some(id) => Some(
+            store
+                .get_project(id)
+                .await?
+                .ok_or_else(|| anyhow!("Task Project is missing"))?,
+        ),
+        None => None,
+    };
     let message = format!(
         "{}\n\n{}",
-        task_seed(task, &project, pr.as_ref(), wave),
+        task_seed(task, project.as_ref(), pr.as_ref(), wave),
         crate::ops::task::task_workspace_context(task)?
     );
     Ok(TaskSeed {
@@ -132,9 +141,7 @@ async fn handle_attachment(
         return Ok(());
     }
     if line == "/detach" {
-        let _ = std::process::Command::new("tmux")
-            .args(["detach-client"])
-            .status();
+        crate::transport::detach_viewers()?;
         return Ok(());
     }
     if line == "/interrupt" {
@@ -149,9 +156,9 @@ async fn handle_attachment(
 
 pub(crate) fn task_seed(
     task: &Task,
-    project: &Project,
+    project: Option<&Project>,
     pr: Option<&crate::work::task::TaskPr>,
-    wave_name: &str,
+    wave_name: Option<&str>,
 ) -> String {
     let context = crate::ops::render_task_context(task, project, pr, wave_name);
     format!(

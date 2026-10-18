@@ -2823,14 +2823,6 @@ const SYSTEM_DEPS: &[SystemDep] = &[
         fallback: "https://docs.astral.sh/uv/getting-started/installation/",
     },
     SystemDep {
-        name: "tmux",
-        command: "tmux",
-        required: true,
-        macos_only: false,
-        brew: Some(Brew::Formula("tmux")),
-        fallback: "https://github.com/tmux/tmux/wiki/Installing",
-    },
-    SystemDep {
         name: "gh",
         command: "gh",
         required: true,

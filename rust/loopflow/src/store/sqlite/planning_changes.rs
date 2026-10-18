@@ -53,7 +53,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::durable::WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+            "SELECT 'task',t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND EXISTS(
                  SELECT 1 FROM task_changes c WHERE c.task_id=t.id
                  AND ((t.planning_deleted_at IS NULL AND c.field!='deleted')
@@ -310,8 +310,7 @@ impl<'a> PlanningChanges<'a> {
 
     fn observation_source(self) -> &'static str {
         match self {
-            Self::Task(_) => "tasks t JOIN projects p ON p.id=t.project_id
-                JOIN waves w ON w.id=p.wave_id
+            Self::Task(_) => "tasks t JOIN repository_plans w ON w.id=t.repository_id
                 JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
                 WHERE t.id=?1",
             Self::Project(_) => "projects p JOIN waves w ON w.id=p.wave_id
@@ -340,7 +339,7 @@ impl<'a> PlanningChanges<'a> {
             Edit::ProjectDescription(_) => ("o.description", "o.description_observed_at IS NOT NULL"),
             Edit::ProjectSummary(_) => ("o.summary", "o.summary IS NOT NULL"),
             Edit::ProjectStatus(_) => ("o.status", "o.status IS NOT NULL"),
-            Edit::Workflow(_) => ("o.workflow", "o.workflow IS NOT NULL"),
+            Edit::HistoricalProjectWorkflow(_) => return Ok(None),
             Edit::Krs(_) => ("o.krs", "o.krs IS NOT NULL"),
             Edit::MetricTargets(_) => ("o.metric_targets", "o.metric_targets IS NOT NULL"),
             Edit::TaskAssignee(_) => ("o.assignee", "o.assignee_observed"),
@@ -367,7 +366,6 @@ impl<'a> PlanningChanges<'a> {
                     Edit::ProjectStatus(_) => Some(Edit::ProjectStatus(serde_json::from_value(
                         serde_json::Value::String(row.get(1)?),
                     )?)),
-                    Edit::Workflow(_) => Some(Edit::Workflow(row.get(1)?)),
                     Edit::Krs(_) => {
                         Some(Edit::Krs(serde_json::from_str(&row.get::<_, String>(1)?)?))
                     }
@@ -375,7 +373,9 @@ impl<'a> PlanningChanges<'a> {
                         &row.get::<_, String>(1)?,
                     )?)),
                     Edit::TaskAssignee(_) => Some(Edit::TaskAssignee(row.get(1)?)),
-                    Edit::TaskProject(_) => row.get::<_, Option<String>>(1)?.map(Edit::TaskProject),
+                    Edit::TaskProject(_) => {
+                        Some(Edit::TaskProject(row.get::<_, Option<String>>(1)?))
+                    }
                     _ => unreachable!("receipt field was selected above"),
                 };
                 Ok(PlanningBaseline {
@@ -516,7 +516,9 @@ mod tests {
 
     use super::PlanningChanges;
     use crate::durable::TaskId;
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{
+        apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+    };
     use crate::work::edit::WorkValue;
 
     #[test]
@@ -606,19 +608,18 @@ mod tests {
                     [input.to_string()],
                 )
                 .unwrap();
-                conn.execute_batch(&current_draft_sql("planning_peers"))
-                    .unwrap();
+                upgrade_from_draft(&conn, "planning_peers");
                 let task = TaskId::from_raw("task-proof");
                 assert!(PlanningChanges::Task(&task)
                     .record(
                         &conn,
                         &if field_name == "project_id" {
-                            WorkValue::TaskProject("project-proof".into())
+                            WorkValue::TaskProject(Some("project-proof".into()))
                         } else {
                             WorkValue::TaskAssignee(Some("before".into()))
                         },
                         &if field_name == "project_id" {
-                            WorkValue::TaskProject("desired-project".into())
+                            WorkValue::TaskProject(Some("desired-project".into()))
                         } else {
                             WorkValue::TaskAssignee(Some("after".into()))
                         }
@@ -634,9 +635,7 @@ mod tests {
                 assert_eq!(
                     base.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
                     expected.map(|mut expected| {
-                        if field_name=="assignee" || !expected["value"].is_null() {
-                            expected["value"]=json!({"field":if field_name=="project_id" {"task_project"} else {"task_assignee"},"value":expected["value"]});
-                        }
+                        expected["value"]=json!({"field":if field_name=="project_id" {"task_project"} else {"task_assignee"},"value":expected["value"]});
                         expected
                     })
                 );

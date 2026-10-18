@@ -174,7 +174,7 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
-| `--wait-and-fix` | Wait up to 30 minutes for merge and repair failing CI; timeout retains the request Default: false. |
+| `--wait-and-fix` | Wait for verified merge and repair failing CI until interrupted or blocked Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
 | `--worktree / -w` | worktree |

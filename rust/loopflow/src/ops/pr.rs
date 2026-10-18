@@ -1168,10 +1168,14 @@ fn read_check_page(repo: &Path, number: u64, cursor: Option<&str>) -> OpsResult<
         command.args(["-f", &format!("endCursor={cursor}")]);
     }
     let output = super::read_retry::retry_read("GitHub check page", || {
-        super::read_retry::bounded_output(
-            command.current_dir(repo),
-            std::time::Duration::from_secs(30),
-        )
+        let output = command.current_dir(repo).output()?;
+        if !output.status.success() {
+            return Err(OpsError::CommandFailed {
+                command: "GitHub check page".into(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+        Ok(output)
     })?;
     serde_json::from_slice(&output.stdout).map_err(|error| {
         OpsError::Parse(format!(
@@ -1253,23 +1257,9 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         })
     });
     let mut seen = std::collections::HashSet::new();
-    let mut attempts = Vec::new();
     let mut required = Vec::new();
     let mut full = Vec::new();
     for context in contexts {
-        let attempt = match &context {
-            GhCheckContext::CheckRun {
-                name,
-                started_at,
-                details_url,
-                ..
-            } => format!("{name}:{started_at:?}:{details_url:?}"),
-            GhCheckContext::StatusContext {
-                context,
-                target_url,
-                ..
-            } => format!("{context}:{target_url:?}"),
-        };
         let (identity, name, state, link, is_required) = match context {
             GhCheckContext::CheckRun {
                 name,
@@ -1308,19 +1298,13 @@ fn project_checks(mut contexts: Vec<GhCheckContext>) -> Option<MergeGateReading>
         if !seen.insert(identity) {
             continue;
         }
-        attempts.push(attempt);
         let check = GhCheck::new(name, &state, link);
         if is_required {
             required.push(check.clone());
         }
         full.push(check);
     }
-    (!required.is_empty()).then(|| {
-        let mut reading = MergeGateReading::from_checks(required, full);
-        attempts.sort();
-        reading.attempt = attempts.join("\n");
-        reading
-    })
+    (!required.is_empty()).then(|| MergeGateReading::from_checks(required, full))
 }
 
 /// The merge-gate reading for one head: whether the required checks block the
@@ -1330,7 +1314,6 @@ pub struct MergeGateReading {
     pub failing: bool,
     pub pending: bool,
     pub failing_leaves: Vec<GhFailingCheck>,
-    pub attempt: String,
 }
 
 impl MergeGateReading {
@@ -1371,7 +1354,6 @@ impl MergeGateReading {
             failing: gate.failing,
             pending: gate.pending,
             failing_leaves,
-            attempt: String::new(),
         }
     }
 }
@@ -2404,6 +2386,20 @@ esac
         let reading = project_checks(serde_json::from_value(json!([pending])).unwrap()).unwrap();
         assert!(!reading.failing);
         assert!(reading.pending);
+    }
+
+    #[test]
+    fn completed_required_failure_is_actionable_while_other_checks_run() {
+        let failed = run("lint", "FAILURE", true, "2026-10-17T00:00:00Z");
+        let mut pending = run("integration", "SUCCESS", true, "2026-10-17T00:00:00Z");
+        pending["status"] = json!("IN_PROGRESS");
+        pending["conclusion"] = json!(null);
+        let reading =
+            project_checks(serde_json::from_value(json!([failed, pending])).unwrap()).unwrap();
+        assert!(reading.failing);
+        assert!(reading.pending);
+        assert_eq!(reading.failing_leaves.len(), 1);
+        assert_eq!(reading.failing_leaves[0].name, "lint");
     }
 
     #[test]

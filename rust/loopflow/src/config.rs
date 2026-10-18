@@ -362,15 +362,11 @@ fn default_summary_tokens() -> usize {
 #[serde(default)]
 pub struct AutomationConfig {
     pub retries: u32,
-    pub timeout_reruns: u32,
 }
 
 impl Default for AutomationConfig {
     fn default() -> Self {
-        Self {
-            retries: 1,
-            timeout_reruns: 1,
-        }
+        Self { retries: 1 }
     }
 }
 

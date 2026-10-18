@@ -17,6 +17,25 @@ proofs establish no installed continuity. LOO-475 retains installed acceptance;
 LOO-415's retained transport and attachment fences remain intact. Publication and
 the full affected gate remain unproved.
 
+## Waited landing (LOO-503, 2026-10-17)
+
+Jack Heart requires no elapsed-time termination or synthetic reruns in
+wait-and-fix supervision/repair. Source removes the outer, operation, admission
+and check-page cutoffs plus pending-CI timeout policy. Preserve real provider
+failures, explicit cancellation, exact-head intent and incident reservations.
+A repair can expose its new head before exiting; landing-wide worker liveness
+prevents duplicate admission and a false checkout-busy exit.
+
+Required failures outrank pending required checks; optional failures alone do
+not override a pending required aggregate. LOO-415's later failure snapshot
+cannot establish what was observable when its waiter exited.
+One paused-clock waiter now proves long-pending → repair → merge → requested
+Task completion with provider doubles. CLI/Flow fixtures separately publish a
+real Git head, retain review and complete at `end` before any status command.
+Merge cannot invent completion intent. Release's entry-point lesson still applies:
+configured GitHub delivery and installed upgrade remain unproved. Native repair
+startup also waits without a cutoff; viewer and release publication policies stay separate.
+
 ## Native terminal diagnostics (LOO-501, 2026-10-17)
 
 Jack Heart authorized repair/delivery preserving input, diagnostics and native
@@ -780,57 +799,41 @@ Desktop agreement remain unverified. Simulated liveness grants no signal authori
 preserve first PID/birth across missing samples and account for active tools.
 TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
 
-## Data model and performance decisions (reconciled 2026-09-30)
+## Data model and performance decisions (curated 2026-10-17)
 
 Jack Heart selected one SQLite owner per object, direct Processes and compiled
-Flows. September 30's counterexamples, delivery decisions and draft inventory
-remain at `72c58cac5d2f4f1700186379e0645446341b1373:wave/infrastructure/MEMORY.md`.
-Current contracts live in the architecture and CLI references.
+Flows. Current architecture supersedes historical Exec/FlowSession, conversion
+owners and S5 binding. Exact September decisions, migration counterexamples,
+draft inventory and linked proofs remain at
+`d476a8cfb6b7553bda4a52829fb854f128636dcb:.lf/wave/infrastructure/MEMORY.md`,
+this heading; LOO-298's checklist: `ab901f1f1:scratch/remaining-work.md`.
 
-Jack Heart's one-Home cutover and conversion counterexamples remain at
-`0514221be4:wave/infrastructure/MEMORY.md`, this heading; LOO-298's checklist is
-`ab901f1f1:scratch/remaining-work.md`. Manual Task moves prove no conversion.
-Preserve current Work/links, accounts and resumable Sessions; no fleet compatibility
-or historical import is required. Source checks use disposable stores without
-inherited authority; released SQL stays immutable. Before conversion, quiesce
-writers, retain consistent database/filesystem and executable backups, rehearse
-and verify before reopening. Live sidecar reads plus SQLite backup are not atomic.
-Preserve native IDs, reviews and captures; import no old turns or attachment authority.
+Preserve Work/links, accounts, native IDs, reviews, captures and resumable Sessions.
+No fleet compatibility, old-turn import or restored attachment authority is required.
+Use disposable stores without inherited authority; released SQL stays immutable.
+Conversion needs quiescent writers, consistent database/filesystem and executable
+backups, rehearsal and verification before reopening. Live sidecar reads plus
+SQLite backup are not atomic; manual Task moves prove no conversion.
 
-September 29–30 owner/compilation decisions and superseded schema proofs remain at
-`fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`, this heading.
-Current Process/AgentSession/compiled Flow contracts supersede Exec/FlowSession.
-Skill steps use ordinary commands. Process ancestry preserves proven generations
-but grants no Task/Flow authority. Loop passes are positions, not child Flows;
-retry retains the pass. Captured inputs belong to Session history. Deleted RunId
-and intermediate conversion owners stay deleted; older proofs establish no
-final-frontier or configured provider/Desktop continuity.
+Skill steps use ordinary commands. Ancestry preserves proven generations without
+Task/Flow authority. Loop passes are positions, not child Flows; retry retains the
+pass. Captured inputs belong to Session history. Selected successful turns supply
+decisions; Blocked needs a reason. Retired in-turn decision commands stay deleted.
+Bind permits done Tasks, preserves earlier usage and never splits a turn.
+Validate denormalization or delete it. Explicit Project selection supersedes
+status inference and backlog expiry; retain unreviewed work. No Chapter table.
+Event-renaming proposals remain unresolved; deleted owners grant no restoration.
 
-Jack Heart's typed Flow-result, write-once bind, prospective usage and optional
-chapter decisions remain at `0514221be4:wave/infrastructure/MEMORY.md`, this heading.
-Selected successful turns supply decisions; Blocked requires a reason. Retired
-in-turn decision commands stay deleted. Bind permits done Tasks, preserves earlier
-usage and never splits a turn. Validate denormalization or delete it; derive
-models from product objects. Explicit Project selection supersedes status inference
-and backlog expiry; retain unreviewed work until disposition. No Chapter table.
-The `session_events`/`agent_events` and earlier event-renaming proposals remain
-unresolved; deleted event owners are not authority to recreate them.
-
-LOO-298's gate, diff and unaudited real-provider fixture escape:
-`0f1858c647:wave/infrastructure/MEMORY.md`, this heading.
-Full gate, configured continuity and installed conversion remain unproved.
-Preserve Session ID ordering, dedicated PR stacking writes and Work-bound
-checkpoints. Provider stubs must contain conflict-agent launches.
+LOO-298's full gate, configured continuity and installed conversion remain unproved;
+the archive retains its unaudited real-provider fixture escape. Preserve Session
+ID ordering, PR stacking writes and Work-bound checkpoints; stubs must contain
+conflict-agent launches. Earlier proofs establish no final-frontier continuity.
+Current attribution and published-installation policy supersede historical
+source-install directions; discarded attribution needs no importer.
 
 Jack Heart retired numeric targets, soak and deeper optimization October 7.
-LOO-291/300's evidence limits are historical, not open acceptance:
-`07bbd801e:wave/infrastructure/MEMORY.md`, this heading;
-[scripts/benchmarks/desktop-performance](../../../scripts/benchmarks/desktop-performance).
-
-Historical S5 binding and source-install counterexamples:
-`d0a0a1ee3:wave/infrastructure/MEMORY.md`, this heading. Current Session attribution,
-write-once bind (including done Tasks) and published-installation policy supersede
-them; discarded historical attribution needs no importer.
+LOO-291/300's evidence limits are historical, not open acceptance; the archive
+and [benchmarks](../../../scripts/benchmarks/desktop-performance) retain them.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

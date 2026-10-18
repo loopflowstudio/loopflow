@@ -494,3 +494,71 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         "a live conversation never gets a second terminal"
     );
 }
+
+#[test]
+fn reopening_a_live_conversation_focuses_its_cmux_workspace() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let primary = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Design",
+        0,
+        1,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE processes SET terminal_id='cmux:WS-1' WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
+        [&primary],
+    )
+    .unwrap();
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+
+    let log = host(bin.path(), "cmux", "OK", 0);
+    let report = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", &url, "--host", "cmux", "--json"],
+    ));
+    assert_eq!(report["receipts"][0]["status"], "usable");
+    assert_eq!(report["receipts"][0]["destination"], "WS-1");
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "workspace select WS-1\n",
+        "the existing workspace is focused; nothing is created or resent"
+    );
+
+    // A closed workspace leaves the conversation where it is.
+    std::fs::remove_file(&log).unwrap();
+    host(bin.path(), "cmux", "", 1);
+    let report = json(&lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", &url, "--host", "cmux", "--json"],
+    ));
+    assert_eq!(report["receipts"][0]["status"], "elsewhere");
+    assert!(!std::fs::read_to_string(&log)
+        .unwrap()
+        .contains("workspace create"));
+}

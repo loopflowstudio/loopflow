@@ -386,7 +386,9 @@ fn run_native_session(
     attachment.0.record_session_terminal(
         &attachment.1,
         &attachment.2,
-        crate::session_record::current_terminal_id().as_deref(),
+        crate::session_record::current_terminal_id()
+            .or_else(super::open::host_placement)
+            .as_deref(),
     )?;
     if command.program == "codex" && command.remote.is_none() {
         return run_codex_native(

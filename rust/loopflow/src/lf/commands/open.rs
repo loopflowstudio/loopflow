@@ -739,14 +739,55 @@ fn set(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|value| !value.is_empty())
 }
 
+const CMUX_WORKSPACE: &str = "CMUX_WORKSPACE_ID";
+const CMUX_SOCKET: &str = "CMUX_SOCKET_PATH";
+const HERDR_ENV: &str = "HERDR_ENV";
+const HERDR_SOCKET: &str = "HERDR_SOCKET_PATH";
+const HERDR_WORKSPACE: &str = "HERDR_WORKSPACE_ID";
+const HERDR_PANE: &str = "HERDR_PANE_ID";
+
+/// Terminal-host context a direct caller carries. The link receiver removes
+/// it: an OS receiver's environment belongs to its first launch, not the click.
+pub(crate) const HOST_CONTEXT: &[&str] = &[
+    CMUX_WORKSPACE,
+    CMUX_SOCKET,
+    HERDR_ENV,
+    HERDR_SOCKET,
+    HERDR_WORKSPACE,
+    HERDR_PANE,
+];
+
 fn in_cmux() -> bool {
-    set("CMUX_WORKSPACE_ID") && set("CMUX_SOCKET_PATH")
+    set(CMUX_WORKSPACE) && set(CMUX_SOCKET)
 }
 
 fn in_herdr() -> bool {
-    std::env::var("HERDR_ENV").as_deref() == Ok("1")
-        && set("HERDR_SOCKET_PATH")
-        && set("HERDR_PANE_ID")
+    std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
+}
+
+/// The host workspace this direct process runs in, recorded as its attached
+/// terminal placement (`herdr:<workspace>` or `cmux:<workspace>`) so a later
+/// opening can focus that conversation instead of starting another client.
+pub(crate) fn host_placement() -> Option<String> {
+    let workspace = |name| std::env::var(name).ok().filter(|value| !value.is_empty());
+    if in_herdr() {
+        return workspace(HERDR_WORKSPACE).map(|id| format!("herdr:{id}"));
+    }
+    in_cmux()
+        .then(|| workspace(CMUX_WORKSPACE))
+        .flatten()
+        .map(|id| format!("cmux:{id}"))
+}
+
+fn placement_host(placement: &str) -> Option<(OpenHost, &str)> {
+    placement
+        .strip_prefix("cmux:")
+        .map(|id| (OpenHost::Cmux, id))
+        .or_else(|| {
+            placement
+                .strip_prefix("herdr:")
+                .map(|id| (OpenHost::Herdr, id))
+        })
 }
 
 /// Why one destination did not open. A definite failure created nothing, so
@@ -781,7 +822,7 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
             .find(|receipt| receipt.status == OpenStatus::Opening)
         {
             if let (Some(host), Some(destination)) = (receipt.host, &receipt.destination) {
-                focus_destination(host, destination);
+                let _ = focus_destination(host, destination);
             }
         }
     }
@@ -798,8 +839,22 @@ fn open_one(
     let elsewhere = elsewhere(target);
     let mut skipped = Vec::new();
     for &host in &route.hosts {
-        if let Some(reason) = elsewhere.clone().filter(|_| host != OpenHost::Desktop) {
-            return target.receipt(Some(host), OpenStatus::Elsewhere, Some(reason));
+        if let Some(live) = elsewhere.as_ref().filter(|_| host != OpenHost::Desktop) {
+            // Its own workspace in this host shows the conversation, draft intact.
+            // Focusing is the revalidation, so only the batch's one focus may use it.
+            if let Some(workspace) = live
+                .placement
+                .as_deref()
+                .and_then(placement_host)
+                .filter(|(placed, _)| focus && route.hosts.contains(placed))
+            {
+                if focus_destination(workspace.0, workspace.1).is_ok() {
+                    let mut receipt = target.receipt(Some(workspace.0), OpenStatus::Usable, None);
+                    receipt.destination = Some(workspace.1.to_owned());
+                    return receipt;
+                }
+            }
+            return target.receipt(Some(host), OpenStatus::Elsewhere, Some(live.reason.clone()));
         }
         let attempt = match host {
             OpenHost::Desktop => open_desktop(target, focus),
@@ -835,9 +890,15 @@ fn open_one(
     target.receipt(None, OpenStatus::Failed, Some(skipped.join("; ")))
 }
 
+struct Live {
+    reason: String,
+    /// The attached client's recorded host workspace, when it has one.
+    placement: Option<String>,
+}
+
 /// A live provider attached to another client keeps its conversation; ordinary
 /// opening never takes it over. Desktop shows and moves its own retained panes.
-fn elsewhere(target: &Resolved) -> Option<String> {
+fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
     let summary = store
@@ -845,10 +906,11 @@ fn elsewhere(target: &Resolved) -> Option<String> {
         .session_summary(id, time::OffsetDateTime::now_utc().unix_timestamp())
         .ok()
         .flatten()?;
-    (summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live).then(|| {
-        format!(
+    (summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live).then(|| Live {
+        reason: format!(
             "this conversation is already open in another client; move it here with `lf session connect {id} --takeover` (unsent text there is not transferred)"
-        )
+        ),
+        placement: summary.terminal_id,
     })
 }
 
@@ -1025,7 +1087,7 @@ fn open_terminal(
     ))
 }
 
-fn focus_destination(host: OpenHost, destination: &str) {
+fn focus_destination(host: OpenHost, destination: &str) -> Result<(), RouteError> {
     let command = match host {
         OpenHost::Cmux => {
             let mut command = Command::new("cmux");
@@ -1039,13 +1101,14 @@ fn focus_destination(host: OpenHost, destination: &str) {
             command.args(["workspace", "focus", destination]);
             command
         }
-        _ => return,
+        _ => return Ok(()),
     };
-    if let Err(RouteError::Definite(reason) | RouteError::Unknown(reason)) =
-        run_host(command, host.label())
-    {
-        tracing::warn!(%reason, "cannot focus the opened destination");
-    }
+    run_host(command, host.label())
+        .map(drop)
+        .inspect_err(|error| {
+            let (RouteError::Definite(reason) | RouteError::Unknown(reason)) = error;
+            tracing::warn!(%reason, "cannot focus the destination");
+        })
 }
 
 /// Run one host request with a finite timeout and return its stdout.

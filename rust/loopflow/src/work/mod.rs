@@ -2,6 +2,7 @@
 
 pub mod edit;
 pub mod link;
+pub mod link_receiver;
 pub mod project;
 pub mod selection;
 pub mod task;

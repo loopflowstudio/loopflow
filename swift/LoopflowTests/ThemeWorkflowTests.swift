@@ -71,7 +71,7 @@ struct ThemeWorkflowTests {
         let model = WorkModel(query: query, repoPath: wave.wave.repo)
         await model.refresh()
         model.bindWorkspaces(registry, repository: "repo")
-        model.navigation.pinNavigator() // Exercise Hide/Show from the explicitly pinned state.
+        model.navigation.showsNavigator = true
         let repoKey = try #require(registry.selectedWork)
         let repoWork = try #require(registry.retained(repoKey))
         model.select(.wave(id: wave.wave.id))
@@ -93,32 +93,41 @@ struct ThemeWorkflowTests {
         document.editor.string = "unsaved draft"
         document.editor.setSelectedRange(NSRange(location: 3, length: 2))
         let layout = work.multiplexer.layout
+        let selectedSession = model.navigation.selectedSessionId
         let store = work.sessionStore(repoPath: wave.wave.repo, query: query)
+        let member = fixtureViewContent(work: key, title: task.task.name)
+        model.applySelectionPlans([
+            fixtureViewPlan(owner: repoKey, members: [member, fixtureViewContent(work: waveKey,
+                title: wave.wave.name)]),
+            fixtureViewPlan(owner: waveKey, members: [member])
+        ], reason: "")
         func exerciseNavigation() throws {
             let navigator = WorkNavigator(model: model, onOpenSession: { model.openSession($0, store: store) })
                 .modifier(AppAppearance(appearance: appearance))
             model.navigation.resizeSidebar(460, availableWidth: 1200)
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
+            model.navigation.toggleNavigator()
             #expect(!model.navigation.showsNavigator)
             #expect(registry.selectedWork == key)
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-sidebar").button().tap()
+            model.navigation.toggleNavigator()
             #expect(model.navigation.showsNavigator)
             #expect(model.navigation.sidebarWidth == 460)
+            model.select(nil)
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-\(wave.wave.id)").button().tap()
             #expect(model.selection == .wave(id: wave.wave.id))
             #expect(registry.retained(waveKey) === waveWork)
             model.select(nil)
             #expect(registry.selectedWork == repoKey)
             #expect(registry.retained(repoKey) === repoWork)
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-\(task.id)").button().tap()
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(task.id)").button().tap()
             #expect(model.selection == .task(id: task.id))
-            #expect(model.navigation.selectedSessionId == record.id)
-            #expect(work.multiplexer.focusedPaneId == conversation.id)
+            #expect(model.navigation.selectedSessionId == selectedSession)
+            #expect(work.multiplexer.focusedPaneId == shell.id)
             #expect(work.multiplexer.pane(forSessionId: record.id)?.id == conversation.id)
             model.goBack()
             #expect(model.selection == nil)
+            model.select(nil)
             try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-\(wave.wave.id)").button().tap()
-            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-attention-task-\(task.id)").button().tap()
+            try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(task.id)").button().tap()
             work.multiplexer.setFocusedPane(shell.id)
             #expect(registry.selectedWork == key)
             #expect(registry.retained(key) === work)

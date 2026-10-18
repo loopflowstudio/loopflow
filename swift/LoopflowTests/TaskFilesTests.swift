@@ -431,9 +431,13 @@ struct TaskFilesTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
         #expect(store.navigator == .dropdown)
         #expect(store.selection == "draft.txt")
+        store.navigator = .pinned
         store.page = .task
-        store.page = .files
-        #expect(store.navigator == .dropdown)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(store.page == .files)
+        #expect(store.navigator == .pinned)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(store.navigator == .closed)
         #expect(store.selection == "draft.txt")
     }
 

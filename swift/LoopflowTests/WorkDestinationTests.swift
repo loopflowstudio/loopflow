@@ -124,7 +124,7 @@ struct WorkDestinationTests {
         // Inspect the production placeholder directly: ViewInspector cannot resolve
         // Observation environment objects while descending the workspace tree.
         let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
-            sessions: store, workspace: workspace, model: model, projected: false, onFocus: { _, _ in })
+            sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
             ._sessionPlaceholder(try #require(store.sessions.first))
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "session-retry-\(record.id)")
@@ -889,7 +889,7 @@ struct WorkDestinationTests {
             workspaces: registry, machineId: "local", repository: "fixture-repository", query: exactQuery
         )
         #expect(throws: Never.self) {
-            try retained.inspect().find(viewWithAccessibilityIdentifier: "work-location-picker")
+            try retained.inspect().find(viewWithAccessibilityIdentifier: "sessions-surface")
         }
         destination.bindWorkspaces(registry, repository: "fixture-repository")
         let selectedKey = try #require(registry.selectedWork)
@@ -1638,7 +1638,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], layout: nil, opening: nil)
+            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], layout: nil, view: nil, opening: nil)
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

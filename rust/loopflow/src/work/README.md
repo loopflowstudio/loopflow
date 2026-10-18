@@ -115,3 +115,9 @@ and explicit selection. Shell tabs retain recorded locations and optional Proces
 identity; these are not liveness or launch authority. File tabs reference the
 Task/location/path draft owner. Duplicate tools, duplicate documents, missing
 selected tabs and non-Task tools fail before a saved-layout write changes state.
+
+
+Desktop consumes the same plans in native Dashboards and `desktop view --plan`.
+`desktop view EXPRESSION` routes through the repository window; `desktop state`
+includes its selected view and actual geometry. Native Task workspaces own
+revision-checked pane/draft saves. Saved shell intent never authorizes a launch.

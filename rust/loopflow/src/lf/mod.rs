@@ -590,11 +590,11 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Derive a passive Work view for external hosts; never opens Desktop
+    /// Show a Work selection, or derive a passive plan for external hosts
     View {
         /// wave/task/query/kind/state expression; omitted uses the repository default
         expression: Option<String>,
-        #[arg(long, required = true)]
+        #[arg(long)]
         plan: bool,
         #[arg(long)]
         json: bool,

@@ -11,10 +11,7 @@ enum SessionProgramStatus {
     init(sessions: [SessionRecord], unavailable: String?) {
         if let unavailable { self = .unavailable(unavailable); return }
         // Preserve report identity: different terminals can use the same record id.
-        let ordered = sessions.sorted {
-            if $0.taskPrimary != $1.taskPrimary { return $0.taskPrimary }
-            return $0.id < $1.id
-        }
+        let ordered = sessions.sorted(by: Self.precedes)
         let reports = ordered.compactMap { session in
             session.programStatus?.summary.map { (session, $0) }
         }
@@ -29,6 +26,48 @@ enum SessionProgramStatus {
         }) {
             self = .available(available)
         } else { self = .unknown }
+    }
+
+    private static func precedes(_ lhs: SessionRecord, _ rhs: SessionRecord) -> Bool {
+        if lhs.taskPrimary != rhs.taskPrimary { return lhs.taskPrimary }
+        return lhs.id < rhs.id
+    }
+
+    var session: SessionRecord? {
+        switch self {
+        case .reported(let session, _), .available(let session): session
+        case .unknown, .unavailable: nil
+        }
+    }
+
+    /// Freshness changes presentation only, never the underlying execution status.
+    func preview(now: Date, fallback: String, sessions: [SessionRecord] = []) -> (text: String, help: String, age: String?) {
+        let candidate: SessionRecord?
+        switch self {
+        case .unavailable: candidate = nil
+        case .reported(_, let report) where report.state == .idle || report.state == .done: candidate = nil
+        default: candidate = session ?? sessions.min(by: Self.precedes)
+        }
+        if let session = candidate, session.programStatus?.seen != true || session.programStatus?.summary != nil,
+           session.state == .active, let excerpt = session.preview,
+           !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
+           session.agentProcessId != nil {
+            let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)
+            let available = session.attention == .available
+            if age >= 0, available || age <= 30 {
+                let safe = ProgramStatusReport.displaySafe(excerpt.text)
+                if !safe.isEmpty {
+                    let line = safe.split(separator: "\n").last.map(String.init) ?? safe
+                    let label = age < 60 ? "\(Int(age))s" : age < 3600 ? "\(Int(age / 60))m" : "\(Int(age / 3600))h"
+                    return (line, "\(session.title) (\(session.id)) · \(excerpt.source) · \(Int(age))s ago\n\(safe)", label)
+                }
+            }
+        }
+        let summary = ProgramStatusReport.displaySafe(fallback).split(separator: "\n").first.map(String.init) ?? "No current activity"
+        let detail: String
+        if case .unavailable(let reason) = self { detail = "Activity unavailable · \(reason)\nSummary · \(summary)" }
+        else { detail = "Summary · \(summary)" }
+        return ("Summary · \(summary)", detail, nil)
     }
 
     var label: String? {

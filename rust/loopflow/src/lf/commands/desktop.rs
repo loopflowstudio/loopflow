@@ -28,6 +28,7 @@ pub struct DesktopWindowInspection {
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
     pub layout: Option<DesktopWorkLayoutInspection>,
+    pub view: Option<crate::work::selection::ViewPlan>,
     pub opening: Option<DesktopOpening>,
 }
 
@@ -281,7 +282,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         .as_slice()
     {
         ["desktop", "state"] => Some(schema::<DesktopInspection>()),
-        ["desktop", "view"] => Some(schema::<crate::work::selection::ViewPlan>()),
+        ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
         ["desktop", "query" | "pin" | "unpin" | "arrange"] => {
             Some(schema::<crate::work::selection::Dashboard>())
         }
@@ -316,6 +317,14 @@ pub enum DesktopOpeningStatus {
     Opening,
     Usable,
     Failed,
+}
+
+/// A passive plan or the acceptance receipt for opening its native destination.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum DesktopViewResult<'a> {
+    Plan(&'a crate::work::selection::ViewPlan),
+    Opening(&'a DesktopOpening),
 }
 
 /// A proposed opening, not a LaunchServices or native-readiness receipt.
@@ -387,6 +396,13 @@ pub fn explain_open(
 fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool) -> Result<()> {
     let resolution = opening_context(cli, session)?;
     let url = opening_url(&resolution, diff)?;
+    open_url(url, json)
+}
+
+fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
+    // URLComponents treats '+' literally; retain spaces across the native link.
+    let query = url.query().map(|query| query.replace('+', "%20"));
+    url.set_query(query.as_deref());
     let status = std::process::Command::new("open")
         .args(["-a", "Loopflow", url.as_str()])
         .status()
@@ -400,7 +416,10 @@ fn open_work(cli: &crate::lf::Cli, session: Option<&str>, diff: bool, json: bool
         reason: None,
     };
     if json {
-        println!("{}", serde_json::to_string_pretty(&opening)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&DesktopViewResult::Opening(&opening))?
+        );
     } else {
         println!("Opening {}\nInspect with `lf desktop state --json`; launch acceptance does not establish usability.", opening.url);
     }
@@ -559,6 +578,11 @@ fn opening_url(
             .append_pair("machine", owner)
             .append_pair("repository", repository);
     }
+    if task.is_none() {
+        if let ContextFact::Bound { value: wave, .. } = &resolution.wave {
+            url.query_pairs_mut().append_pair("wave", wave);
+        }
+    }
     if let Some(session) = session {
         url.query_pairs_mut().append_pair("session", session);
     }
@@ -617,7 +641,12 @@ fn selection_repository(
         .context("repository has no recorded Work identity")
 }
 
-fn view_plan(cli: &crate::lf::Cli, expression: Option<&str>) -> Result<()> {
+fn view_plan(
+    cli: &crate::lf::Cli,
+    expression: Option<&str>,
+    passive: bool,
+    json: bool,
+) -> Result<()> {
     if let Some(expression) = expression {
         crate::work::selection::Selection::parse(expression, None)?;
     }
@@ -653,9 +682,27 @@ fn view_plan(cli: &crate::lf::Cli, expression: Option<&str>) -> Result<()> {
     } else {
         store.sqlite.view_plan(&repository, expression)?
     };
-    println!("{}", serde_json::to_string(&plan)?);
+    if passive {
+        println!(
+            "{}",
+            serde_json::to_string(&DesktopViewResult::Plan(&plan))?
+        );
+    }
     if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
         return Err(crate::process::CommandExit(3).into());
+    }
+    if !passive {
+        require_supported()?;
+        let resolution = opening_context(cli, None)?;
+        let repo = bound(&resolution.repository_path, "repository path")?;
+        let mut url = reqwest::Url::parse("loopflow://open")?;
+        url.query_pairs_mut().append_pair("repo", repo);
+        if let Some(expression) = expression {
+            url.query_pairs_mut().append_pair("view", expression);
+        } else if cli.task.is_some() || cli.wave.is_some() {
+            return open_work(cli, None, false, json);
+        }
+        return open_url(url, json);
     }
     Ok(())
 }
@@ -808,8 +855,13 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         | DesktopCommand::Layout { .. } => {
             return saved_intent(cli, command).map_err(selection_failure)
         }
-        DesktopCommand::View { expression, .. } => {
-            return view_plan(cli, expression.as_deref()).map_err(selection_failure)
+        DesktopCommand::View {
+            expression,
+            plan,
+            json,
+        } => {
+            return view_plan(cli, expression.as_deref(), *plan, *json || cli.json)
+                .map_err(selection_failure)
         }
         _ => {}
     }
@@ -1239,7 +1291,7 @@ fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
         .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
         // A lost reply does not prove the command had no effect. In particular,
-        // repeating a split allocates another pane; inspect before retrying.
+        // repeating shell creation allocates another tab; inspect before retrying.
         bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(output.stdout)

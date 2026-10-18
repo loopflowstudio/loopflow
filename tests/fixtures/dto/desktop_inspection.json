@@ -21,7 +21,6 @@
         "hide",
         "restore",
         "focus",
-        "split",
         "move",
         "resize",
         "zoom"
@@ -127,7 +126,8 @@
           "kind": "task",
           "id": "task_44444444444444444444444444444444"
         }
-      }
+      },
+      "view": null
     },
     {
       "repository": "repo_other",
@@ -142,7 +142,6 @@
         "hide",
         "restore",
         "focus",
-        "split",
         "move",
         "resize",
         "zoom"
@@ -164,7 +163,8 @@
       },
       "session": null,
       "opening": null,
-      "layout": null
+      "layout": null,
+      "view": null
     }
   ]
 }

@@ -1,70 +1,43 @@
-# LOO-497 — continue on the LOO-489 Console
+# LOO-497 — LOO-489 Console source
 
-Jack Heart requested integrating/rebasing onto LOO-489, rebuilding this Task’s
-prototype from its UX, and then said “keep going” after correcting the prototype
-query. Continue implementation through the current pursue edge. Do not stop again
-merely because 489 has not committed its working tree: the bounded source snapshot
-below supplies the missing handoff. No product permission is missing for routine
-integration. No merge/auto-merge authorization follows.
+Jack Heart requested integrating LOO-489, rebuilding the Dashboard prototype on
+its Console, and continuing after correcting the prototype query. The accepted
+boundary is publication for demo review, without merge or Task completion.
+The original integration procedure is preserved at
+`16c1b19c92:scratch/native-console-integration.md`.
 
-## Materialized handoff
+## Materialized handoff — October 17
 
 `scratch/history/loo489-console-source-2026-10-17/MANIFEST.json` lists 108 exact
 changed source files from LOO-489 at HEAD
-`ac973064c691581610fe563364ddf1a4f239798c`, with a second read verifying every hash.
-`source/<path>` contains the final source; `base/<path>` contains the corresponding
-HEAD version if one existed. `source_snapshot`/`base_snapshot` give exact paths;
-Markdown source is stored as `.md.txt` to avoid automatic context injection.
-Deleted files are explicit. The source checkout and
-its index were untouched. The complete current navigation contract, native demo,
-keyboard map and earlier tab handoff accompany the snapshot as `.txt` files.
-The local `scratch/navigation-console-contract.md` is also current.
+`ac973064c691581610fe563364ddf1a4f239798c`; a second read verified every hash.
+`source/<path>` contains the final source and `base/<path>` its HEAD version.
+`source_snapshot`/`base_snapshot` name exact paths; Markdown is stored as `.md.txt`
+to avoid ambient injection. Deletions are explicit. The source checkout/index
+were untouched. The navigation contract, demo notes and keyboard map accompany
+the snapshot; `navigation-console-contract.md` records the accepted navigation.
 
-Fresh reads found 489's latest pursue `72927d43-5e96-48ac-b1a9-134b4836a708`
-completed at demo, and no live 489 Flow. Its source is ahead of its branch HEAD.
-The snapshot is a supported integration input, not passing combined evidence.
-Don't mutate the sibling checkout or launch another 489 Flow.
+At capture, LOO-489 pursue `72927d43-5e96-48ac-b1a9-134b4836a708` had completed at
+demo, with no live Flow. The snapshot was ahead of committed ancestry. It supplied
+integration source, not passing combined evidence or missing product permission.
 
-## Integration order
+LOO-497 work was checkpointed at `16c1b19c92`; committed ancestry merged at
+`6e63af826e`. Three-way reconciliation adopted the Console navigation, retained
+workspace renderer, Session preview and provider recovery while preserving the
+newer Dashboard/tab contracts. The predecessor Console selection DTO/stream was
+removed in favor of LOO-497's shared `PlanningPart.selections` plans. Existing
+rounded cards, borders and pane gutters remain in the renderer.
 
-1. Preserve all existing 497 contributions. Checkpoint the current shared
-   Dashboard/API/tab work through `lf commit` after its required checks. Use the
-   installed `lf sync <489-branch> --manual` path for committed ancestry when
-   useful; its plan is merge_target on this protected branch, not a history rewrite.
-2. Reconcile the captured native changes into this checkout through their existing
-   owners. Use base/source/current three-way comparison; don't replace destination
-   files wholesale. 489 already adopted a bounded snapshot of our tab model, so
-   preserve our newer Dashboard/persistence contracts while taking its Console
-   navigation, renderer extraction, current Session preview and provider repairs.
-   Source `work/selection.rs` and `WorkSelection.swift` are predecessor consumers,
-   not authority to delete our separate Dashboard model. Remove displaced native
-   implementations instead of retaining both. Keep 489's actual rounded pane cards,
-   borders/shadows/gutters accepted in its latest native demo notes.
-3. Wire separate native Dashboards into that navigation and the existing retained
-   Task workspaces. Use Rust plans, not a Swift evaluator. Normal repository opens
-   its conversation; normal Wave opens conversation + full current Task inventory.
-   No custom selection replaces either. Stable working Task order is independent
-   of Dashboard query ordering; paused Tasks stay queryable while leaving working
-   slots. Cmd K is Find Work, including Dashboards and cross-repository windows.
-4. Complete native query editing and portable save/restore against the existing
-   shared Dashboard/Work intent APIs. 497 owns this Dashboard adoption in the
-   combined source; don't wait for 489 to build our API/editor. Preserve newer
-   tabs/drafts on delayed reads, expose save conflicts, and retain one native owner.
-   Keep 416's cross-launch attachment/lifetime boundary. Capture only a real,
-   specific unresolved transport dependency if encountered; do not infer a new
-   shell launch from saved intent or introduce another lifetime registry.
-5. Run focused combined build/tests, then the authored compression/refresh/publish
-   steps. Keep task disposition honest: no native demo claim from HTML or model
-   tests. Publish for review only; no merge/arming.
+The native Dashboard/editor and portable application persistence now use this
+combined Console. Ordinary repository/Wave navigation and stable working slots
+remain independent. Current behavior, review repairs, remaining transport evidence
+and check results live in `design.md` and `desktop-api-coordination.md`.
 
-## Latest query correction
+## Query correction
 
-Jack Heart rejected `query:product or query:available`: those were invisible
-hardcoded fixtures. The revised prototype uses
-`(wave:product state:open) or state:available`. Membership is explicit; no `repo:`
-predicate. This does not prohibit genuinely authored Dashboard references through
-the shared API, but the UX must identify their owner; do not invent aliases.
-
-Prototype code and screenshots are in `scratch/query-view`. Preserve it and the
-Task’s existing draft/history. It is a design study, not production rendering.
-Earlier “missing combined handoff” notes are superseded by this snapshot.
+Jack Heart rejected `query:product or query:available`, which named invisible
+hardcoded fixtures. The study now uses
+`(wave:product state:open) or state:available`, with implicit repository scope.
+Authored Dashboard references remain valid through the shared API and visible
+Dashboard discovery. Prototype code/screenshots in `scratch/query-view` remain
+a design study, distinct from native rendering evidence.

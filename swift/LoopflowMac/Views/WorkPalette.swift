@@ -21,13 +21,17 @@ extension WorkModel {
             let name = URL(fileURLWithPath: repoIdentity(repoPath)).lastPathComponent
             rows.append(.init(id: .repository, title: name, detail: "Repository", key: name))
         }
-        for wave in visibleRoadmaps {
-            rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave", key: wave.wave.name))
+        for repo in repos where repo.path.normalizedFilePath != repoPath?.normalizedFilePath {
+            rows.append(.init(id: .openRepository(repo.path), title: repo.displayName,
+                detail: "Repository · \(repo.path)", key: repo.displayName))
         }
-        for task in visibleTasks {
-            let home = visibleRoadmaps.first { $0.wave.id == task.task.waveId }?.wave.name ?? "No Wave"
+        for wave in roadmap.value?.waves ?? [] {
+            rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave · \(wave.wave.repo)", key: wave.wave.name))
+        }
+        for task in roadmap.value?.tasks.items ?? [] {
+            let home = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }?.wave.name ?? "No Wave"
             rows.append(.init(id: .task(task.id), title: task.task.name,
-                              detail: "Task · \(home) · \(task.task.identifier)", key: task.task.identifier))
+                              detail: "Task · \(home) · \(task.task.identifier) · \(task.task.repo)", key: task.task.identifier))
         }
         if let linked = navigation.selectedTaskEvidence,
            !rows.contains(where: { $0.id == .task(linked.task.id) }) {
@@ -40,6 +44,11 @@ extension WorkModel {
             if case .task = recent.id, !rows.contains(where: { $0.id == recent.id }) {
                 rows.append(recent)
             }
+        }
+        for dashboard in dashboards {
+            guard let id = dashboard.dashboardID else { continue }
+            rows.append(.init(id: .dashboard(id), title: dashboard.name ?? id,
+                detail: "Dashboard · " + id, key: id))
         }
         for flow in flowCatalog.value ?? [] {
             rows.append(.init(id: .flow(flow.name), title: flow.name,
@@ -65,12 +74,24 @@ extension WorkModel {
         return rows
     }
 
-    func searchDestinations(_ text: String) -> [WorkPaletteRow] {
+    func searchDestinations(_ text: String, sidebarOnly: Bool = false) -> [WorkPaletteRow] {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let rows = paletteRows
+        var rows = paletteRows
+        if sidebarOnly {
+            let sidebar = Set(sidebarTaskIDs.map { WorkDestination.task($0) }
+                + visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
+            rows.removeAll { !sidebar.contains($0.id) }
+        }
+        let working = Set(workingTaskIDs)
         func rank(_ row: WorkPaletteRow) -> Int {
             if query.isEmpty {
-                return navigation.recentDestinations.firstIndex { $0.id == row.id } ?? Int.max
+                let recent = navigation.recentDestinations.firstIndex { $0.id == row.id } ?? 999
+                switch row.id {
+                case .task(let id): return (working.contains(id) ? 0 : 2000) + recent
+                case .wave: return 4000 + recent
+                case .repository, .openRepository: return 6000 + recent
+                default: return 8000 + recent
+                }
             }
             let labels = [row.key.lowercased(), row.title.lowercased()]
             if labels.contains(query) { return 0 }
@@ -84,6 +105,103 @@ extension WorkModel {
             return l == r ? lhs.offset < rhs.offset : l < r
         }.map(\.element)
     }
+}
+
+struct WorkPalette: View {
+    @Bindable var model: WorkModel
+    var sidebarOnly = false
+    let activate: (WorkDestination) -> Void
+    @State private var search = ""
+    @State private var highlighted: WorkDestination?
+    @Environment(\.palette) private var palette
+
+    private var rows: [WorkPaletteRow] { model.searchDestinations(search, sidebarOnly: sidebarOnly) }
+
+    private func group(_ row: WorkPaletteRow, working: Set<String>) -> String {
+        switch row.id {
+        case .task(let id): working.contains(id) ? "Working Tasks" : "Other Tasks"
+        case .wave: "Waves"
+        case .dashboard: "Dashboards"
+        case .repository, .openRepository: "Repositories"
+        default: "Definitions and Session actions"
+        }
+    }
+
+    var body: some View {
+        let rows = rows
+        let working = Set(model.workingTaskIDs)
+        let selection = rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
+        VStack(alignment: .leading, spacing: 12) {
+            if sidebarOnly {
+                HStack {
+                    Text("Search sidebar").font(Typography.caption())
+                    Spacer()
+                    Button("Search all Work") { model.navigation.palette = .search }
+                }
+            }
+            PaletteSearchField(text: $search, move: move, submit: {
+                if let id = selection { activate(id) }
+            }, cancel: { model.navigation.palette = nil })
+            .frame(height: 24)
+            Divider()
+            Picker("Sidebar shows", selection: Binding(
+                get: { model.navigation.sidebarFilter },
+                set: { model.navigation.sidebarFilter = $0 }
+            )) {
+                ForEach(WorkNavigation.SidebarFilter.allCases, id: \.self) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .onChange(of: model.navigation.sidebarFilter) { _, _ in model.navigation.palette = nil }
+            if model.paletteIsStale {
+                Text("May be out of date · showing last available readings")
+                    .font(Typography.caption()).foregroundStyle(palette.textSecondary)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            if search.isEmpty, index == 0 || group(rows[index - 1], working: working) != group(row, working: working) {
+                                Text(group(row, working: working)).font(.caption).foregroundStyle(palette.textSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                            }
+                            Button { activate(row.id) } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(row.title).font(Typography.body())
+                                    Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                                .background(selection == row.id ? palette.surfaceMuted : .clear)
+                            }.buttonStyle(.plain).id(row.id)
+                        }
+                        if rows.isEmpty { Text("No matching destinations").font(Typography.caption()).padding() }
+                    }
+                }
+                .onChange(of: selection) { _, id in if let id { proxy.scrollTo(id) } }
+            }
+            Text("↑↓ Select    ↩ Open    Esc Cancel").font(Typography.caption()).foregroundStyle(palette.textSecondary)
+        }
+        .padding(20).frame(width: 560, height: 420).background(palette.background)
+        .onChange(of: search) { _, _ in highlighted = rows.first?.id }
+        .onExitCommand { model.navigation.palette = nil }
+        .task {
+            await model.loadFlowCatalog()
+            await model.loadWorkflowCatalog()
+            if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
+                let available = Set(model.paletteRows.map(\.id))
+                model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
+            }
+        }
+        .accessibilityIdentifier("work-palette")
+    }
+
+    private func move(_ offset: Int) {
+        let rows = rows
+        guard !rows.isEmpty else { return }
+        let index = rows.firstIndex { $0.id == highlighted } ?? 0
+        highlighted = rows[min(max(index + offset, 0), rows.count - 1)].id
+    }
+
 }
 
 struct TaskLinkView: View {
@@ -112,15 +230,22 @@ struct TaskLinkView: View {
     }
 }
 
-enum WorkNavigationShortcut {
+enum WorkNavigationShortcut: Equatable {
     case search
     case toggleSidebar
+    case task(Int)
+    case adjacent(Int)
 
     init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
         let keys = modifiers.intersection([.command, .shift, .control, .option])
         switch (characters?.lowercased(), keys) {
         case ("k", [.command]): self = .search
-        case ("s", [.command, .control]): self = .toggleSidebar
+        case ("\\", [.command]): self = .toggleSidebar
+        case ("\t", [.control]): self = .adjacent(1)
+        case ("\t", [.control, .shift]), ("\u{19}", [.control, .shift]): self = .adjacent(-1)
+        case (let character?, [.command]) where Int(character).map({ (1...9).contains($0) }) == true:
+            guard let slot = Int(character) else { return nil }
+            self = .task(slot - 1)
         default: return nil
         }
     }
@@ -131,14 +256,21 @@ struct WorkPaletteShortcut: NSViewRepresentable {
     let presented: Bool
     let restoreFocus: Bool
     let toggleSidebar: () -> Void
+    let navigate: (WorkNavigationShortcut) -> Void
+    var modifiersChanged: (Bool) -> Void = { _ in }
     let open: () -> Void
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         context.coordinator.view = view
-        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak coordinator = context.coordinator] event in
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak coordinator = context.coordinator] event in
             guard let coordinator, let window = coordinator.view?.window,
-                  event.window === window || window.childWindows?.contains(where: { $0 === event.window }) == true
+                  event.window === window, window.isKeyWindow, window.attachedSheet == nil,
+                  (window.firstResponder as? NSTextView)?.hasMarkedText() != true
             else { return event }
+            if event.type == .flagsChanged {
+                coordinator.modifiersChanged(event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command])
+                return event
+            }
             guard let shortcut = WorkNavigationShortcut(characters: event.charactersIgnoringModifiers,
                 modifiers: event.modifierFlags) else { return event }
             switch shortcut {
@@ -148,16 +280,19 @@ struct WorkPaletteShortcut: NSViewRepresentable {
                     coordinator.previous = window.firstResponder
                     coordinator.open()
                 }
+            case .task, .adjacent: coordinator.navigate(shortcut)
             }
             return nil
         }
         return view
     }
-    func makeCoordinator() -> Coordinator { Coordinator(open: open, toggleSidebar: toggleSidebar) }
+    func makeCoordinator() -> Coordinator { Coordinator(open: open, toggleSidebar: toggleSidebar, navigate: navigate) }
     func updateNSView(_ view: NSView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.modifiersChanged = modifiersChanged
         coordinator.open = open
         coordinator.toggleSidebar = toggleSidebar
+        coordinator.navigate = navigate
         if !coordinator.presented && presented && coordinator.previous == nil {
             coordinator.previous = view.window?.firstResponder
         }
@@ -170,17 +305,21 @@ struct WorkPaletteShortcut: NSViewRepresentable {
     }
     static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
         if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+        coordinator.modifiersChanged(false)
     }
     @MainActor final class Coordinator {
         weak var view: NSView?
         weak var previous: NSResponder?
         var monitor: Any?
+        var modifiersChanged: (Bool) -> Void = { _ in }
         var presented = false
         var open: () -> Void
         var toggleSidebar: () -> Void
-        init(open: @escaping () -> Void, toggleSidebar: @escaping () -> Void) {
+        var navigate: (WorkNavigationShortcut) -> Void
+        init(open: @escaping () -> Void, toggleSidebar: @escaping () -> Void, navigate: @escaping (WorkNavigationShortcut) -> Void) {
             self.open = open
             self.toggleSidebar = toggleSidebar
+            self.navigate = navigate
         }
     }
 }
@@ -250,5 +389,57 @@ struct WorkflowCatalogInspector: View {
                     WorkflowEditor(model: model, wave: wave, name: entry.name)
                 }
             }
+    }
+}
+
+/// The field editor owns arrows while typing; handle its navigation commands
+/// directly rather than relying on SwiftUI's unfocused move-command responder.
+private struct PaletteSearchField: NSViewRepresentable {
+    @Environment(\.palette) private var palette
+    @Binding var text: String
+    let move: (Int) -> Void
+    let submit: () -> Void
+    let cancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeNSView(context: Context) -> SearchField {
+        let field = SearchField()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
+        field.placeholderString = "Go to a Task, Wave or repository"
+        field.setAccessibilityIdentifier("work-palette-search")
+        field.delegate = context.coordinator
+        return field
+    }
+    func updateNSView(_ field: SearchField, context: Context) {
+        context.coordinator.parent = self
+        field.textColor = NSColor(palette.text)
+        if let editor = field.currentEditor() as? NSTextView { editor.applyPalette(palette) }
+        if field.stringValue != text { field.stringValue = text }
+    }
+    final class SearchField: NSTextField {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.makeFirstResponder(self)
+        }
+    }
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: PaletteSearchField
+        init(parent: PaletteSearchField) { self.parent = parent }
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.moveDown(_:)): parent.move(1)
+            case #selector(NSResponder.moveUp(_:)): parent.move(-1)
+            case #selector(NSResponder.insertNewline(_:)): parent.submit()
+            case #selector(NSResponder.cancelOperation(_:)): parent.cancel()
+            default: return false
+            }
+            return true
+        }
     }
 }

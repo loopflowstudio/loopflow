@@ -62,7 +62,7 @@ struct SessionsPolishTests {
         )
 
         #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
-        #expect(other.multiplexer.focusedPane == otherShell)
+        #expect(other.multiplexer.focusedPane.content.selectedShell?.location == other.location)
     }
 }
 #endif

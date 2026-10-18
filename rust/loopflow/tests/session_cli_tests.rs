@@ -1544,6 +1544,88 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
 
 #[cfg(unix)]
 #[test]
+fn provider_switch_without_transcript_preserves_conversation_and_retries() {
+    let home = tempfile::tempdir().unwrap();
+    let (id, input, _) =
+        prepare_conversation(home.path(), home.path(), "claude", "Keep this conversation");
+    let native = uuid::Uuid::new_v4().to_string();
+    record_native(home.path(), &id, &input, &native);
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let before = store.session(&id).unwrap().unwrap();
+    let history = store.session_history(&id, 0, 1000).unwrap();
+    let connect = |prepare: bool| {
+        let mut args = vec!["session", "connect", &id, "--takeover", "--agent", "codex"];
+        if prepare {
+            args.extend(["--prepare", "--json"]);
+        }
+        command(home.path(), &args)
+            .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+            .env("CODEX_HOME", home.path().join("codex"))
+            .env(
+                "PATH",
+                format!("{}/bin:/usr/bin:/bin", home.path().display()),
+            )
+            .output()
+            .unwrap()
+    };
+    for prepare in [true, false] {
+        let failed = connect(prepare);
+        assert!(!failed.status.success());
+        let error = String::from_utf8_lossy(&failed.stderr);
+        assert!(
+            error.contains("transcript") && error.contains("retry"),
+            "{error}"
+        );
+        let retained = store.session(&id).unwrap().unwrap();
+        assert_eq!(retained.artifact_key, input);
+        assert_eq!(retained.provider, before.provider);
+        assert_eq!(retained.title, before.title);
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let thread: String = db
+            .query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(thread, native);
+        assert_eq!(
+            store.session_history(&id, 0, 1000).unwrap().len(),
+            history.len()
+        );
+    }
+    let transcripts = home.path().join("claude/projects/fixture");
+    std::fs::create_dir_all(&transcripts).unwrap();
+    std::fs::write(transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"Keep the original request"}}"#).unwrap();
+    let prepared = connect(true);
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    install_codex_fixture(home.path(), None);
+    let recovered = connect(false);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    let continued = store.session(&id).unwrap().unwrap();
+    assert_eq!(continued.id, id);
+    assert_eq!(continued.title, before.title);
+    assert_eq!(continued.provider.as_deref(), Some("codex"));
+    assert!(continued
+        .request
+        .unwrap()
+        .contains("Keep the original request"));
+    assert!(store.session_history(&id, 0, 1000).unwrap().len() > history.len());
+}
+
+#[cfg(unix)]
+#[test]
 fn provider_switch_stops_startup_output_before_codex_opens() {
     use std::fs;
     use std::io::Read;

@@ -91,10 +91,8 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known: false,
         });
     }
-    let mut tasks = Vec::new();
-    for wave in &waves {
-        tasks.extend(super::children::tasks_in(conn, Some(wave.id()))?);
-    }
+    let mut tasks = super::children::tasks_in(conn, None)?;
+    tasks.retain(|task| &task.repository_id == repository);
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let sessions = super::sessions::session_summaries_in(
         conn,
@@ -159,7 +157,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
         work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Task, task.id.to_string()),
-            parent_wave: Some(task.wave_id),
+            parent_wave: task.wave_id,
             open: Some(open),
             name: task.identifier,
             states,
@@ -612,7 +610,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute_batch(include_str!(
-                "../../../tests/fixtures/migrations/saved_selection_work.sql"
+                "../../../tests/fixtures/saved_selection_work.sql"
             ))
             .unwrap();
         let repo = RepositoryId::parse("repo_11111111111111111111111111111111").unwrap();
@@ -729,6 +727,36 @@ mod tests {
                 .unwrap(),
             2
         );
+    }
+
+    #[test]
+    fn repository_queries_include_tasks_without_a_wave() {
+        let (_dir, store, repo) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET project_id=NULL WHERE issue_identifier='FIX-2'",
+                [],
+            )
+            .unwrap();
+        let plan = store.view_plan(&repo, Some("task:FIX-2")).unwrap();
+        assert_eq!(plan.contents.len(), 1);
+        assert_eq!(plan.contents[0].title, "Idle");
+        assert!(store
+            .view_plan(&repo, None)
+            .unwrap()
+            .contents
+            .iter()
+            .any(|content| content.work == plan.contents[0].work));
+        let wave = store
+            .view_plan(&repo, Some("wave:Product state:open"))
+            .unwrap();
+        assert!(!wave
+            .contents
+            .iter()
+            .any(|content| content.work == plan.contents[0].work));
     }
 
     #[test]
@@ -1275,10 +1303,7 @@ mod tests {
             "../../../tests/fixtures/migrations/saved_selection_work.sql"
         ))
         .unwrap();
-        conn.execute_batch(&crate::store::migrations::current_draft_sql(
-            "saved_selections",
-        ))
-        .unwrap();
+        crate::store::migrations::upgrade_from_draft(&conn, "saved_selections");
         drop(conn);
         let store = SqliteStore {
             conn: std::sync::Arc::new(std::sync::Mutex::new(

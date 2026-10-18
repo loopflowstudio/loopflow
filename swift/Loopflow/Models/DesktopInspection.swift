@@ -38,19 +38,20 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let session: DesktopSessionInspection?
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
+    public let view: WorkViewPlan?
     public let layout: DesktopWorkLayoutInspection?
     public let opening: DesktopOpening?
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layout: DesktopWorkLayoutInspection?, opening: DesktopOpening?) {
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layout: DesktopWorkLayoutInspection?, view: WorkViewPlan?, opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layout = layout; self.opening = opening
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layout = layout; self.view = view; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, layout, opening
+        case repository, window, path, reading, reason, task, session, workspaces, layout, view, opening
         case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
     }
@@ -225,6 +226,15 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     }
     enum CodingKeys: String, CodingKey {
         case repository, window, work, pane, incarnation, tab
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(window, forKey: .window)
+        try values.encode(work, forKey: .work)
+        try values.encode(pane, forKey: .pane)
+        try values.encode(incarnation, forKey: .incarnation)
+        try values.encode(tab, forKey: .tab)
     }
 }
 

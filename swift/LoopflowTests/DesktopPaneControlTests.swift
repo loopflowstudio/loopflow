@@ -34,7 +34,7 @@ struct DesktopPaneControlTests {
             DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
                 selectionKind: "repository", selectionId: repository, reading: "current", reason: nil,
                 task: nil, session: nil, supportedOperations: ["state"], workspaces: registry.inspect(),
-                layout: registry.layout?.inspection, opening: nil)
+                layout: registry.layout?.inspection, view: nil, opening: nil)
         }, controlPane: { _ in throw RegistryQueryError("No mutation expected") },
         readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
         let window = try #require(router.inspect().windows.first)
@@ -83,9 +83,9 @@ struct DesktopPaneControlTests {
         guard case .split(.vertical, _, _, let ratio) = store.layout else { Issue.record("Missing vertical split"); return }
         #expect(ratio == LayoutNode.goldenRatio)
         store.updateRatio(between: main.id, and: browser.id, ratio: 0.6)
-        try workspace.selectContent(.flowLog(taskId: "task", location: identity), in: main)
-        #expect(store.focusedPane.content == .flowLog(taskId: "task", location: identity))
-        #expect(store.layout.allPanes.count == 3)
+        try workspace.selectContent(.files(taskId: "task", location: identity), in: main)
+        #expect(store.focusedPaneId == browser.id)
+        #expect(store.layout.allPanes.count == 2)
         #expect(store.layout.pane(for: main.id) == main)
         let retained = store.layout
         workspace.prepareTaskPanes()
@@ -141,7 +141,7 @@ struct DesktopPaneControlTests {
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "split", "move", "resize", "zoom"],
-                    workspaces: registry.inspect(), layout: registry.layout?.inspection, opening: nil)
+                    workspaces: registry.inspect(), layout: registry.layout?.inspection, view: nil, opening: nil)
             }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
     }
 
@@ -296,7 +296,7 @@ struct DesktopPaneControlTests {
         let workspace = registry.open(workKey, title: "Task", location: identity), store = workspace.multiplexer
         store.newShell(location: identity)
         let pane = store.focusedPane
-        store.newShell(location: identity)
+        store.load(sessionId: "other", location: identity)
         let otherPane = store.focusedPane
         let terminal = try #require(pane.terminal)
         let other = try #require(otherPane.terminal)
@@ -715,7 +715,8 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         store.close(shell.id)
         store.undoClose()
-        #expect(store.focusedPane.content.selectedShell?.location == identity)
+        #expect(store.focusedPane.content.selectedShell?.id == shell.content.selectedShell?.id)
+        #expect(store.focusedPane.content.selectedShell?.command == nil)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(DesktopPaneCommand(target: target(shell, window: window), action: .hide))
         }

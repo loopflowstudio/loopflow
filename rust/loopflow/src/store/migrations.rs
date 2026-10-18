@@ -2956,6 +2956,22 @@ mod tests {
         assert_eq!(addresses, ("/before/task".into(), "/before/task".into()));
     }
 
+    #[test]
+    fn session_preview_upgrades_released_activity_without_inventing_output() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "session_preview");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/session_preview_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("session_preview"))
+            .unwrap();
+        let activity: (i64, i64, Option<String>) = conn.query_row(
+            "SELECT observed_at,pending_input,preview FROM session_activity WHERE session_id='retained'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(activity, (100, 1, None));
+    }
+
     pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);

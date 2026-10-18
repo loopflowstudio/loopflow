@@ -70,7 +70,8 @@ native state. Rust and Swift round-trip it; a proposal is not an opening receipt
 
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
 `desktop_inspection.json` requires top-level `openings` for failures before window
-registration. Window receipts own Task/Session outcomes. Fixture shape is not native
+registration. Optional window `view` contains the same shared selection plan,
+including hidden/suppressed occurrences. Window receipts own Task/Session outcomes. Fixture shape is not native
 readiness proof.
 
 `task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow

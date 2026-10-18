@@ -28,11 +28,11 @@ indirect enum WorkLayout: Equatable {
         }
     }
 
-    func removing(_ key: WorkWorkspaceKey) -> WorkLayout? {
+    func visible(excluding hidden: Set<WorkWorkspaceKey>) -> WorkLayout? {
         switch self {
-        case .workspace(let current): return current == key ? nil : self
+        case .workspace(let current): return hidden.contains(current) ? nil : self
         case .split(let axis, let first, let second, let ratio):
-            switch (first.removing(key), second.removing(key)) {
+            switch (first.visible(excluding: hidden), second.visible(excluding: hidden)) {
             case let (first?, second?): return .split(axis, first, second, ratio)
             case let (first?, nil): return first
             case let (nil, second?): return second

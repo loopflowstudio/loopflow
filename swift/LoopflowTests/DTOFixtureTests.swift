@@ -745,6 +745,8 @@ struct DTOFixtureTests {
             id: "task_00000000000000000000000000000001"
         ))
         #expect(session.title == "Simplify cross-Work questions")
+        #expect(session.preview?.providerTurn == "turn-fixture")
+        #expect(session.preview?.observedAt == 1700000000)
         #expect(session.titleSource == .human)
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
@@ -879,8 +881,8 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history", "selections"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
         guard case .taskHistory(let history?) = frames[9].content else {
             Issue.record("diagnostic history frame missing")
             return

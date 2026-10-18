@@ -72,15 +72,9 @@ hide/restore. Product watch demonstrates overlapping queries; explicit unstarted
 Tasks show briefs. The study adds no production lifecycle or query evaluator.
 These new Dashboard controls are reviewable proposals, not a completed native demo.
 
-Native integration still needs the committed 489 Console source. At this read,
-489 has live work and branch head `ac973064c6` predates its uncommitted native UX.
-`lf sync <489-branch> --plan` chooses `merge_target` for this protected branch;
-use that supported integration path after checkpointing 497 and obtaining the
-489 checkpoint, preserving both Tasks’ work. Do not start a competing navigation
-implementation. Coordination steer `79a4b081-91db-4e70-9091-0fa14a962356` was saved
-for the existing 489 operator conversation. The revised prototype does not depend
-on that native handoff and is ready for interaction review.
-
+Console source is captured under `scratch/history/loo489-console-source-2026-10-17`.
+The original 497 work is checkpointed at `16c1b19c92`; committed Console ancestry
+is merged at `6e63af826e`. Snapshot changes are reconciled through existing owners.
 
 ## Owners and implemented boundary
 
@@ -108,9 +102,8 @@ layout reads rather than repeated observation plans.
 
 `work_pane_layouts` remains keyed solely by Work. Independent Dashboards resolve
 the same pane revision/face and recover the same Task draft record; neither hiding
-nor deleting a Dashboard owns or deletes the Task's content. Rust store tests prove
-portable recovery, not native restoration. Swift WorkLayout/MultiplexerStore remain
-the live owners. No native query engine, navigation or lifecycle owner was replaced.
+nor deleting a Dashboard owns or deletes the Task's content. Swift WorkLayout/MultiplexerStore remain the live owners. Native destinations
+consume the shared plans; navigation and provider lifetime keep their existing owners.
 
 The accepted tab payload now spans Rust `PaneIntent`, Swift `WorkPaneIntent`,
 fixtures and native tool state. Shell contains ordered `{id, location,
@@ -135,12 +128,13 @@ Task Files store handles aliases and keeps document drafts/Undo through tab clos
 reconstructed shells have fresh incarnations and no launch command; they display
 unattached. Matching shells already in memory retain their runtime state.
 Recovered drafts remain read-only until the existing disk reconciliation runs.
-`restore` replaces the tree/selection and `restoreTabs` replaces the file-tab list;
-only matching shell runtime objects and already-dirty documents are preserved.
-These conversions are not a policy for merging late snapshots with newer tabs,
-selection or drafts. Shared SQLite round trips are tested, but application
-save/load callers and Process attachment are still unintegrated. Local native
-retention proves neither quit continuity nor cross-machine restoration.
+The application now loads and saves this intent through `SessionsWorkspace`.
+A delayed read merges missing content into newer geometry, tabs, selection and
+drafts. Saves are serialized, debounced and revision-checked; responses advance
+only the revision. Conflicts retain live edits and durable state, display an error,
+and offer an explicit reload. Drafts reconcile with disk before becoming writable;
+unavailable locations retain their recovery text. Matching native pane and tab
+objects retain their incarnations. Cold restore carries no shell launch command.
 
 ## Delete — do not maintain
 
@@ -185,41 +179,37 @@ surviving fixtures that still treated a pane ID or a newly allocated shell as th
 retained terminal identity. Display-only input/continuity fixtures compile; their
 runtime checks remain with gate/demo.
 
-Remaining native predecessors and exact consumer cutovers are listed in
-`desktop-api-coordination.md`: leaf-dropping outer hide, Swift
-working-set predicates and direct selection mutations. Their replacement depends
-on the native owner handoff; no parallel engine is introduced here.
+Console integration removed the older `ViewPlan`/`ViewMember` and separate
+selections stream; `PlanningPart.selections` owns the full shared plans. The
+leaf-dropping `SessionsWorkspaceRegistry.hide` is replaced with a retained tree
+plus hidden Work. Console working-slot predicates remain: Jack's accepted default
+navigation intentionally differs from Dashboard membership. Pane hide/focus/move
+commands still operate on exact native panes; Dashboard membership edits use the
+revisioned `arrange` API. These are distinct scopes, not competing authorities.
 
-## Remaining work and dependencies
+## Implemented native boundary — October 17
 
-**Current continuation:** Jack Heart said “keep going.” Read
-`native-console-integration.md` first. Its verified local 489 source snapshot
-supersedes the historical missing-handoff blockers below. 497 now integrates
-its Dashboard/editor/persistence callers into the captured Console owners.
+Separate Dashboard destinations, pinned discovery, Cmd K entries and name/query/
+pin editing consume Rust plans. Tiles reuse retained Task workspaces, show their
+primary Session or explicit zoom, and leave backlog passive. Hide/restore, drag
+swap and split resize edit the full saved occurrence tree; resize commits once
+per gesture. Ordinary repository/Wave views retain the Console contract.
 
+Live `lf view EXPRESSION` opens the existing repository URL route; `--plan` stays
+headless. Native inspection reports the selected full plan, including suppressed
+occurrences. Opening generations fence late reads. Named plans refresh through
+the planning frame; unsaved queries re-read the shared planner when it changes.
+The CLI result schema includes passive plans and live opening receipts.
 
-1. Integrate the tab conversion boundary through a supported LOO-489/416 code
-   handoff. LOO-489 owns application save/load against Dashboard and Work-pane
-   records. Pending reads must not overwrite newer native tabs, selected tabs or
-   drafts; pending writes must preserve revision conflicts and visible save errors.
-   No combined handoff is available. The missing adoption policy is substantial
-   application work, not another DTO or snapshot-conversion rewrite.
-2. LOO-489 native navigation must consume observation plans and use a shared live
-   selection entry point for clicks, deep links and view/open/query. Current `view`
-   requires `--plan`; saved Dashboard query edits do not change a live container.
-   Window-wide occurrence targeting and first-wins composition remain unimplemented.
-3. LOO-416 owns attach-only transport, surfaces and Process reattachment. Restored
-   shells must attach without replaying launch commands; actual process/output
-   continuity and restart remain unproved. Cross-machine identity/record transport
-   and application-level restored file-base reconciliation remain unimplemented.
-   The document conversion test covers base reconciliation, not the app caller.
-4. Native query-editor UX belongs to LOO-497, integrated through the same live
-   selection bridge. Dashboard creation/pinning presentation is still a native
-   design choice. The accepted prototype supplies behavior, not a production engine.
-5. Complete scripting/readiness integration, exact Session/Changes intents,
-   opening generations, scoped input/read fences and headless native acceptance
-   remain in the coordination contract. Readiness/events stay with LOO-453;
-   program status with LOO-422/415; remote launch with LOO-414.
+## Remaining verification and transport
+
+Gate owns broader combined native/Linux acceptance; demo owns rendered continuity.
+The concrete LOO-416 dependency is cold Shell attachment: existing native launches
+do not record an `lf_process_id` on the Shell tab, and portable restore has no
+transport admission handle. Restored shells therefore stay unattached. It cannot
+establish quit/relaunch or cross-machine Process continuity. No provider launch,
+second lifetime registry, or saved attachment authority was introduced.
+Publication and demonstration belong to the following authored Flow steps.
 
 ## Acceptance and review
 
@@ -246,8 +236,11 @@ Review found query mutation treated `query:ID` as a literal ID while planning an
 other mutations stripped the prefix. All Dashboard edits now use the same target
 interpretation; CLI coverage creates through `query:backlog` then reopens it.
 
-The production delayed-read/stale-save cases in `desktop-api-coordination.md`
-remain untested; direct conversion calls cannot substitute for application entry.
+Production application tests now cover delayed restoration after newer Shell/Files
+tabs and draft edits, stale writes preserving live and durable state, cold shells
+without commands, later edits persisting, and Dashboard/default navigation retaining
+one Task owner. Review also repaired hidden outer placement, URL space decoding
+and observation refresh revealing a deliberately collapsed primary pane.
 Gate owns the affected suites and combined headless native acceptance described
 in `desktop-api-coordination.md`, including Linux planning. Demo judges rendered
 continuity: normal Wave → custom Dashboard → hide A → resize B → enter A/draft →
@@ -255,7 +248,7 @@ restart/restore A, preserving geometry and the same Task workspace while the Wav
 still shows its built-in default. Unavailable Work must not appear deleted; failed
 saves stay visible and stale writes preserve newer state.
 
-Check (October 17, realign): `git diff --check` — passed; `lf context` — within both budgets; prose-only reconciliation reuses compression's passing `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --test integration cli_discovery::desktop_query_plan_reads_backlog_without_execution_or_desktop < /dev/null` (1), `scripts/test_desktop.sh --filter 'ToolTabTests|WorkSelectionTests' -Xswiftc -gnone` (8), formatting and clippy. Earlier 50 Rust / 76 Swift results and commands remain in the pre-compression reference. Combined native/Linux acceptance remains gate-owned; rendered continuity remains demo-owned.
+Check (October 17, implement): `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests|ConsoleWorkspaceTests|ToolTabTests|WorkSelectionTests|DTOFixtureTests/desktop|WorkspacePanesTests' -Xswiftc -gnone` — build and 25 tests pass; `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::selections::tests < /dev/null` — 14 pass; same runner with `--test integration cli_discovery::desktop` / `cli_discovery::structured_help_describes_pane_creation_and_read_results_without_desktop` / `dto_fixtures::desktop` — 4 / 1 / 6 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context` — pass/within limits. Gate owns broader native/Linux acceptance; demo owns rendered continuity.
 
 ## Handoff status
 

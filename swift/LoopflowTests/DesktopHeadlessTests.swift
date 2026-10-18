@@ -134,8 +134,8 @@ struct DesktopHeadlessTests {
         await model.refresh()
         model.select(.wave(id: wave.id))
         await model.loadWorkflowCatalog()
-        let view = WaveWorkflowView(model: model, wave: wave, name: "code")
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "Stored in this Wave")
+        let view = WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == "code" }, model: model)
+        #expect(try view.inspect().find(text: "Stored in this Wave").string() == "Stored in this Wave")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         _ = try view.inspect().find(button: "Edit")
         let updated = "nodes: {review: demo}\nedges: []\n"
@@ -219,7 +219,7 @@ struct DesktopHeadlessTests {
         feed.send(try frame("planning", sequence: 1, answers: 0, body: planning))
         try await eventually { model.task(id: "issue-now") != nil }
         let found = try #require(model.task(id: "issue-now"))
-        let (task, wave) = (found.task, found.wave!.wave)
+        let task = found.task
         model.select(.task(id: task.id))
         model.syncWorkScope()
         try await eventually { feed.requests.last?.id == 2 }
@@ -348,45 +348,22 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(button: "Refresh")
     }
 
-    @Test("A Wave's default Workflow is drawn, is set through lf, and keeps an invalid file visible")
-    func waveDefault() async throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first).wave
-        let catalog = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json")), as: UTF8.self)
-        let calls = Recorder()
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            await calls.add(args)
-            if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["wave", "workflow", "set"], args.dropFirst(3).first == "broken" {
-                throw RegistryQueryError("broken does not load")
-            }
-            if args.prefix(2) == ["wave", "show"] { return String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self) }
-            return "{}"
-        })
-        await model.refresh()
+    @Test("The workflow inspector draws builtins and keeps invalid definitions editable")
+    func workflowDefinitions() async throws {
+        let catalog = try String(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
+        let model = WorkModel(query: RegistryQuery { _, _ in catalog })
         await model.loadWorkflowCatalog()
-        func view(_ name: String) -> WaveWorkflowView { WaveWorkflowView(model: model, wave: wave, name: name) }
-
-        // A builtin workflow is drawn before any Task has run it, and editing it is an explicit Customize.
+        func view(_ name: String) -> WorkflowCatalogInspector {
+            WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+        }
         let builtin = view("code")
         _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "builtin workflow")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Customize")
-        try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().tap()
-
-        // An invalid repository file stays listed with its reason and can still be opened.
+        _ = try builtin.inspect().find(text: "builtin Workflow")
+        _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("proof")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-invalid").text().string().contains("unreachable"))
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == ".lf/workflows/proof.yaml")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Edit")
-
-        // Setting the workflow changes only that line; a refusal is shown on the Wave.
-        await model.setWorkflow("code", wave: wave)
-        #expect(await calls.calls.contains(["wave", "workflow", "set", "code", wave.id]))
-        #expect(model.workflowErrors[wave.id] == nil)
-        await model.setWorkflow("broken", wave: wave)
-        #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-error").text().string() == "broken does not load")
+        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("unreachable") }
+        _ = try invalid.inspect().find(text: ".lf/workflows/proof.yaml")
+        _ = try invalid.inspect().find(button: "Edit")
     }
 
     @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
@@ -623,6 +600,9 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            fixtureViewContent(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
+        ])], reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
             .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()

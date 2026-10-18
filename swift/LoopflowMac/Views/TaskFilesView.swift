@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Compact document controls leave room for the file itself.
 enum TaskFileChrome {
-    static let headerHeight: CGFloat = 40
+    static let headerHeight: CGFloat = 30
 }
 
 struct TaskFilesView: View {
@@ -23,7 +23,26 @@ struct TaskFilesView: View {
     }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+              ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    if task != nil { Button("Brief") { store.page = .task } }
+                    Button("Changes") { store.page = .files; store.mode = .diff; store.navigator = .pinned }
+                    if prURL != nil { Button("Pull request") { store.page = .pullRequest } }
+                    ForEach(store.tabs) { tab in
+                        HStack(spacing: 4) {
+                            Button(tab.path) { store.page = .files; store.selectFile(tab.path, mode: .file) }
+                                .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
+                            Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
+                                .accessibilityLabel("Close \(tab.path)")
+                        }
+                    }
+                }.buttonStyle(.plain).font(.caption).padding(8)
+              }
+              navigationBar
+            }
+            Divider()
             if let task, store.page == .task {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
@@ -40,19 +59,6 @@ struct TaskFilesView: View {
                 TaskPullRequestView(store: store.pullRequest, url: prURL)
             } else {
                 VStack(spacing: 0) {
-                    navigationBar
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 4) {
-                            ForEach(store.tabs) { tab in
-                                HStack(spacing: 4) {
-                                    Button(tab.path) { store.selectFile(tab.path, mode: store.mode) }
-                                        .fontWeight(store.selection == tab.path ? .semibold : .regular)
-                                    Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
-                                        .accessibilityLabel("Close \(tab.path)")
-                                }.buttonStyle(.plain).padding(6)
-                            }
-                        }
-                    }
                     GeometryReader { geometry in
                         let docked = store.navigator == .pinned && geometry.size.width >= 360
                         HSplitView {
@@ -102,7 +108,9 @@ struct TaskFilesView: View {
     }
 
     private func toggleNavigator() {
-        store.toggleNavigator()
+        let wasFiles = store.page == .files
+        store.page = .files
+        if wasFiles || store.navigator == .closed { store.toggleNavigator() }
         navigatorFocused = store.navigator != .closed
     }
 
@@ -177,20 +185,14 @@ struct TaskFilesView: View {
     private var navigationBar: some View {
         HStack(spacing: 8) {
             Button { toggleNavigator() } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                    Text(store.selection ?? "Scratch & changes")
-                        .font(Typography.strong(12)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 0)
-                    Text("⌘P").font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
-                    Image(systemName: store.navigator == .closed ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 9, weight: .semibold))
-                }.contentShape(Rectangle())
+                Image(systemName: "sidebar.left")
+                    .frame(width: 24, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Choose file")
+            .help("Show or hide file browser (⌘P)")
+            .accessibilityLabel("Show or hide file browser")
             .accessibilityIdentifier("files-toggle-navigator")
-            if let document = store.selectedDocument, document.snapshot?.state == .text {
+            if store.page == .files, let document = store.selectedDocument, document.snapshot?.state == .text {
                 Button {
                     Task {
                         await document.save(issue: store.issue, cwd: store.cwd, query: store.query)
@@ -206,16 +208,18 @@ struct TaskFilesView: View {
                 .keyboardShortcut("s", modifiers: .command)
                 .fixedSize()
             }
-            Picker("View", selection: $store.mode) {
+            if store.page == .files {
+              Picker("View", selection: $store.mode) {
                 Text("File").tag(TaskFilesStore.Mode.file)
                 Text("Diff").tag(TaskFilesStore.Mode.diff)
                     .disabled(store.changesError != nil)
             }.pickerStyle(.menu).labelsHidden()
                 .accessibilityLabel("View").frame(width: 65).fixedSize()
+            }
         }
         .font(Typography.caption(11)).padding(.horizontal, 10)
         .frame(height: TaskFileChrome.headerHeight)
-        .background(palette.surfaceMuted)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
 

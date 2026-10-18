@@ -345,6 +345,7 @@ public final class MultiplexerStore {
                 case .files(let place, _, _): content = .files(taskId: saved.work.id, location: location(place))
                 case .log(let place): content = .flowLog(taskId: saved.work.id, location: location(place))
                 }
+                if let retained = layout.pane(for: id), retained.content == content { return .leaf(retained) }
                 return .leaf(PaneState(id: id, content: content))
             }
         }

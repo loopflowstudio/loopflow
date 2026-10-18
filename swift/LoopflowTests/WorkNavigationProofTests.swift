@@ -250,7 +250,7 @@ struct WorkNavigationProofTests {
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<3 {
             workspace.multiplexer.newShell(location: workspace.location)
-            let pane = workspace.multiplexer.focusedPaneId
+            let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
@@ -564,7 +564,7 @@ struct WorkNavigationProofTests {
             let workspace = fixtureWork(registry, fixtureWorkspace(path))
             for _ in 0..<2 {
                 workspace.multiplexer.newShell(location: workspace.location)
-                let pane = workspace.multiplexer.focusedPaneId
+                let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
                 let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
                 terminal.frame = CGRect(x: 0, y: 0, width: 500, height: 350)
                 terminal.workingDirectory = NSTemporaryDirectory()

@@ -7,6 +7,13 @@ import Observation
 /// launched has no AgentProcess; that absence is itself the reading.
 struct SessionProviderReading: Equatable, Sendable {
     let agentProcessId: String?
+
+    init(agentProcessId: String?) { self.agentProcessId = agentProcessId }
+
+    init?(record: SessionRecord, terminal: String) {
+        guard record.state == .active, record.terminalIds.contains(terminal) else { return nil }
+        agentProcessId = record.agentProcessId
+    }
 }
 
 /// Owned by a retained surface, never by a SwiftUI mount or its current focus.
@@ -57,11 +64,13 @@ final class ProgramStatusSurface {
         if snapshot != reducer.snapshot { snapshot = reducer.snapshot }
         guard sessionReducer.snapshot.seen, let sessionId, let terminalId, let provider else { return }
         if writer == nil {
+            association = UUID()
             let association = self.association
             writer = ProgramStatusWriter(sessionId: sessionId, terminalId: terminalId, provider: provider) { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.active, self.association == association else { return }
                     self.observationError = error
+                    if error != nil { self.writer = nil }
                 }
             }
         }
@@ -89,7 +98,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private let sessionId: String
     private let terminalId: String
     private let provider: SessionProviderReading
-    private let failure: @Sendable (String) -> Void
+    private let observation: @Sendable (String?) -> Void
     private var process: Process?
     private var input: FileHandle?
     private var pending: Data?
@@ -100,11 +109,11 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private var drainDeadline: Date?
     private var last: ProgramStatusRecords?
 
-    init(sessionId: String, terminalId: String, provider: SessionProviderReading, failure: @escaping @Sendable (String) -> Void) {
+    init(sessionId: String, terminalId: String, provider: SessionProviderReading, observation: @escaping @Sendable (String?) -> Void) {
         self.sessionId = sessionId
         self.terminalId = terminalId
         self.provider = provider
-        self.failure = failure
+        self.observation = observation
     }
 
     func submit(_ snapshot: ProgramStatusRecords) {
@@ -179,15 +188,20 @@ private final class ProgramStatusWriter: @unchecked Sendable {
         }
         if written > 0 {
             offset += written
-            if offset == frame.count { frame = Data(); offset = 0 }
+            if offset == frame.count {
+                frame = Data()
+                offset = 0
+                observation(nil)
+            }
         } else if written < 0, errno != EAGAIN, errno != EINTR {
             fail("Status observation unavailable")
         }
     }
 
     private func fail(_ message: String) {
-        failure(message)
+        guard !stopped else { return }
         finish()
+        observation(message)
     }
 
     func stop(drain: Bool = false) {

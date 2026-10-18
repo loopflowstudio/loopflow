@@ -22,9 +22,10 @@ struct TerminalPaneLayoutTests {
             .environment(\.theme, theme).environment(\.palette, theme.palette)
         let workspace = try #require(registry.selectedWork.flatMap { registry.retained($0) })
         workspace.presentation.content = .terminals
-        let first = try #require(workspace.multiplexer.newShell(location: fixtureWorkspace("/repo")))
-        let second = try #require(workspace.multiplexer.show(.session(id: "companion", location: fixtureWorkspace("/repo"))))
-        workspace.multiplexer.move(second.id, beside: first.id, axis: axis)
+        workspace.multiplexer.load(sessionId: "first")
+        let first = workspace.multiplexer.focusedPane
+        workspace.multiplexer.reveal(sessionId: "second")
+        workspace.multiplexer.move(workspace.multiplexer.focusedPaneId, beside: first.id, axis: axis)
         // Prepared Sessions expose the production pane chrome without mounting
         // Ghostty or reading unmounted Observation environment objects.
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

@@ -11,135 +11,14 @@ import ViewInspector
 private let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 
-/// Program headers identify each nonempty pane. Their controls appear on hover
-/// of the focused pane; split, close and zoom also answer to keybinds. Each proof mounts
+/// Each proof mounts
 /// the production `SessionsView` over real Ghostty `/bin/cat` PTYs and checks
 /// the terminal, its unfinished draft and its companion survive.
 @Suite(.requiresDisplay, .serialized)
 @MainActor
 struct SessionChromeProofTests {
-    @Test("Program headers survive closing a companion; controls follow hover and focus",
-          arguments: [CGSize(width: 1440, height: 900), CGSize(width: 1100, height: 800)])
-    func paneStripTrioFollowsHoverAndFocus(size: CGSize) async throws {
-        _ = NSApplication.shared
-        GhosttyManager.shared.initialize()
-        try #require(GhosttyManager.shared.state == .ready)
-        let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let workspace = fixtureWork(registry, fixtureWorkspace(repo))
-        var terminals: [GhosttyMetalView] = []
-        for _ in 0..<2 {
-            workspace.multiplexer.newShell(location: workspace.location)
-            let pane = workspace.multiplexer.focusedPaneId
-            let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
-            terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
-            terminal.workingDirectory = NSTemporaryDirectory()
-            terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
-            terminal.createSurface(manager: GhosttyManager.shared)
-            terminals.append(terminal)
-        }
-        defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
-        let surfaces = try terminals.map { try #require($0.surface) }
-        let panes = workspace.multiplexer.layout.allPanes.map(\.id)
-        workspace.multiplexer.setFocusedPane(panes[0])
-
-        let (roadmap, invocation) = try latestRoadmap()
-        let task = WorkReference.task(id: "ts_review00000000000000000000000000")
-        let record = try renameFixtureRecord("release", title: "Release outcomes", source: "human", work: task)
-        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-        value["state"] = "active"
-        value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(state: "active")
-        value["terminal_ids"] = [panes[0]]
-        value["open_argv"] = ["must-not-launch"]
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "flow_lf_process_id": invocation,
-                                    "step": "realign", "occurrence": "current", "node": 5, "iterations": [[2, 1]]]
-        let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
-        let query = RegistryQuery { args, _ in
-            switch (args.first, args.dropFirst().first) {
-            case ("wave", "show"): return roadmap
-            case ("wave", "list"): return "[]"
-            case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return #"{"entries":\#(sessions),"next":null}"#
-            default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
-            }
-        }
-        let model = WorkModel(query: query, repoPath: repo)
-        await model.refresh()
-        model.select(.task(id: "issue-review"))
-        model.navigation.selectedSessionId = "release"
-        model.navigation.content = .terminals
-        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: view)
-        window.contentView = host
-        host.frame = window.contentLayoutRect
-        defer { window.contentView = nil }
-        try await settle(window)
-        try #require(terminals.allSatisfy { $0.window === window })
-        let draft = "chrome-draft"
-        draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
-
-        // The Task toolbar carries the conversation and worktree, without Flow provenance.
-        #expect(throws: Never.self, "session crumb") {
-            let name = try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-session").text().string()
-            #expect(name == "Release outcomes")
-        }
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership")
-        }
-        #expect(throws: (any Error).self) {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
-        }
-
-        model.navigation.selectedSessionId = nil
-        try await settle(window)
-        let selectedKey = try #require(registry.selectedWork)
-        #expect(registry.retained(selectedKey)?.location?.worktree == repo)
-        model.navigation.selectedSessionId = "release"
-        try await settle(window)
-
-        // Two panes: a strip each, no trio at rest, none on the unfocused pane's hover.
-        for pane in panes {
-            #expect(throws: Never.self, "strip \(pane)") {
-                _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(pane)")
-            }
-        }
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-actions") }
-        try hover(panes[1], inside: true, in: window)
-        try await settle(window)
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-actions") }
-        try hover(panes[0], inside: true, in: window)
-        try await settle(window)
-        for id in ["pane-split-right", "pane-split-down", "pane-close"] {
-            #expect(throws: Never.self, "\(id) after hover") {
-                _ = try view.inspect().find(viewWithAccessibilityIdentifier: id).button()
-            }
-        }
-        try snapshot(window, "two-panes-\(Int(size.width))x\(Int(size.height))")
-
-        // Closing the companion keeps the remaining program header and terminal.
-        try hover(panes[0], inside: false, in: window)
-        workspace.multiplexer.setFocusedPane(panes[1])
-        try await settle(window)
-        try hover(panes[1], inside: true, in: window)
-        try await settle(window)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "pane-close").button().tap()
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [panes[0]])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(panes[0])")
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "pane-actions") }
-        try snapshot(window, "one-pane-\(Int(size.width))x\(Int(size.height))")
-
-        // The conversation's terminal, its draft and its reply are untouched.
-        #expect(terminals[0].surface == surfaces[0])
-        #expect(terminals[0].window === window)
-        try await expectEcho(draft, on: surfaces[0])
-    }
-
-    @Test("⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ and ⌘W act on the focused pane and keep its terminal")
-    func keybindsSplitZoomAndClose() async throws {
+    @Test("⌘T and ⌘W add and close shell tabs without replacing the original terminal")
+    func keybindsRetainShellTabs() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
@@ -147,7 +26,7 @@ struct SessionChromeProofTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         workspace.multiplexer.newShell(location: workspace.location)
-        let pane = workspace.multiplexer.focusedPaneId
+        let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
         let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
         terminal.workingDirectory = NSTemporaryDirectory()
@@ -166,8 +45,11 @@ struct SessionChromeProofTests {
         }
         let model = WorkModel(query: query, repoPath: repo)
         await model.refreshSessions()
+        model.bindWorkspaces(registry, repository: workspace.key.repository)
+        model.select(.task(id: workspace.key.id))
         model.navigation.content = .terminals
-        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let view = SessionsContentView(model: model, repoPath: repo, workspaces: registry,
+            machineId: fixtureMachineId, repository: workspace.key.repository, query: query)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 700),
                               styleMask: [.titled], backing: .buffered, defer: false)
         let host = NSHostingView(rootView: view)
@@ -179,61 +61,30 @@ struct SessionChromeProofTests {
         let draft = "keybind-draft"
         draft.withCString { ghostty_surface_text(surface, $0, UInt(draft.utf8.count)) }
 
-        try press("t", keyCode: 17, modifiers: [.command], in: window)
-        try await settle(window)
-        guard case .split(.vertical, _, _, _) = workspace.multiplexer.layout else {
-            Issue.record("First Command-T must split right")
-            return
+        let shellPane = workspace.multiplexer.focusedPaneId
+        for count in [2, 3] {
+            try press("t", keyCode: 17, modifiers: [.command], in: window)
+            try await settle(window)
+            #expect(workspace.multiplexer.layout.allPanes.count == 1)
+            guard case .shell(let tabs, _) = workspace.multiplexer.focusedPane.content else {
+                Issue.record("Missing Shell tool"); return
+            }
+            #expect(tabs.count == count)
+            #expect(workspace.multiplexer.focusedPaneId == shellPane)
         }
-        let firstCompanion = workspace.multiplexer.focusedPaneId
-        try press("t", keyCode: 17, modifiers: [.command], in: window)
-        try await settle(window)
-        guard case .split(.vertical, _, .split(.horizontal, _, _, _), _) = workspace.multiplexer.layout else {
-            Issue.record("Second Command-T must split down")
-            return
+        for _ in 0..<2 {
+            try press("w", keyCode: 13, modifiers: [.command], in: window)
+            try await settle(window)
         }
-        #expect(workspace.multiplexer.focusedPaneId != firstCompanion)
-        try press("w", keyCode: 13, modifiers: [.command], in: window)
-        try await settle(window)
-        try press("w", keyCode: 13, modifiers: [.command], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
-
-        try press("d", keyCode: 2, modifiers: [.command], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.count == 2)
-        let split = workspace.multiplexer.focusedPaneId
-        #expect(split != pane)
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-strip-\(pane)")
-
-        try press("\r", keyCode: 36, modifiers: [.command, .shift], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.zoomedPaneId == split)
-        try press("\r", keyCode: 36, modifiers: [.command, .shift], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.zoomedPaneId == nil)
-
-        try press("w", keyCode: 13, modifiers: [.command], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
-        #expect(workspace.multiplexer.focusedPaneId == pane)
-        #expect(!registry.surfaces.hasSurface(.shell(split, machineId: fixtureMachineId)))
-
-        // Shift-D reaches AppKit as "D"; the binding must still split down.
-        try press("D", keyCode: 2, modifiers: [.command, .shift], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.count == 2)
-        if case .split(let axis, _, _, _) = workspace.multiplexer.layout { #expect(axis == .horizontal) }
-        try press("w", keyCode: 13, modifiers: [.command], in: window)
-        try await settle(window)
-        #expect(workspace.multiplexer.layout.allPanes.map(\.id) == [pane])
+        #expect(workspace.multiplexer.focusedPane.content.selectedShell?.id == pane)
+        #expect(workspace.multiplexer.focusedPaneId == shellPane)
 
         #expect(terminal.surface == surface)
         #expect(terminal.window === window)
         try await expectEcho(draft, on: surface)
     }
 
-    @Test("Cmd-K opens the old navigator over retained PTYs; pin restores the sidebar")
+    @Test("Cmd-K searches over retained PTYs and restores terminal input")
     func paletteRetainsTerminalInput() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
@@ -244,7 +95,7 @@ struct SessionChromeProofTests {
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell(location: workspace.location)
-            let pane = workspace.multiplexer.focusedPaneId
+            let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
@@ -263,7 +114,7 @@ struct SessionChromeProofTests {
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
             value["actions"] = sessionActionFixture(state: "active")
-            if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
+            if case .shell(let pane, _) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
@@ -278,6 +129,7 @@ struct SessionChromeProofTests {
         }
         let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
+        model.navigation.showsNavigator = false
         model.select(.task(id: "issue-review"))
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -294,7 +146,7 @@ struct SessionChromeProofTests {
         try await settle(window)
         #expect(model.navigation.palette == .search)
         let sheet = try #require(NSApp.keyWindow)
-        #expect(sheet === window)
+        #expect(sheet.sheetParent === window)
         try await settle(sheet)
         for char in "never-pty" { try press(String(char), keyCode: 0, modifiers: [], in: sheet) }
         try await settle(sheet)
@@ -305,19 +157,6 @@ struct SessionChromeProofTests {
         #expect(model.navigation.palette == nil)
         #expect(window.firstResponder === terminals[1])
         try await expectEcho(draft, on: surfaces[1])
-
-        try press("k", keyCode: 40, modifiers: [.command], in: window)
-        try await settle(window)
-        let pinChooser = try #require(NSApp.keyWindow)
-        #expect(pinChooser === window)
-        try press("s", keyCode: 1, modifiers: [.command, .control], in: pinChooser)
-        try await settle(window)
-        #expect(model.navigation.palette == nil)
-        #expect(model.navigation.showsNavigator)
-        try press("s", keyCode: 1, modifiers: [.command, .control], in: window)
-        try await settle(window)
-        #expect(!model.navigation.showsNavigator)
-        #expect(window.firstResponder === terminals[1])
 
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
@@ -336,26 +175,6 @@ struct SessionChromeProofTests {
         ))
         // Local event monitors run inside `sendEvent`, before dispatch.
         NSApp.sendEvent(event)
-    }
-
-    /// A real mouse-entered/exited event to the strip's AppKit tracking view.
-    private func hover(_ paneId: String, inside: Bool, in window: NSWindow) throws {
-        let region = try #require(findView(identifier: "pane-hover-\(paneId)", in: window.contentView))
-        let point = region.convert(NSPoint(x: region.bounds.midX, y: region.bounds.midY), to: nil)
-        let event = try #require(NSEvent.enterExitEvent(
-            with: inside ? .mouseEntered : .mouseExited, location: point, modifierFlags: [], timestamp: 0,
-            windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
-        ))
-        if inside { region.mouseEntered(with: event) } else { region.mouseExited(with: event) }
-    }
-
-    private func findView(identifier: String, in view: NSView?) -> NSView? {
-        guard let view else { return nil }
-        if view.identifier?.rawValue == identifier { return view }
-        for child in view.subviews {
-            if let found = findView(identifier: identifier, in: child) { return found }
-        }
-        return nil
     }
 
     private func latestRoadmap() throws -> (roadmap: String, invocation: String) {
@@ -379,11 +198,6 @@ struct SessionChromeProofTests {
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         return (String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self), invocation)
-    }
-
-    private func snapshot(_ window: NSWindow, _ name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_SESSION_CHROME_CAPTURE_DIR"] else { return }
-        _ = try SnapshotService().snapshotWindow(window, to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
     }
 
     private func settle(_ window: NSWindow) async throws {

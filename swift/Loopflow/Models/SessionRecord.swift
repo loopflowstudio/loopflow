@@ -151,7 +151,23 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
 
 /// One resumable Session and the exact command that opens it.
 /// Rust owns completion, FlowStep decisions, and provider-client liveness.
+public struct SessionPreview: Codable, Hashable, Sendable {
+    public let providerThread: String
+    public let providerTurn: String
+    public let observedAt: Int64
+    public let source: String
+    public let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case providerThread = "provider_thread"
+        case providerTurn = "provider_turn"
+        case observedAt = "observed_at"
+        case source, text
+    }
+}
+
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
+    public let preview: SessionPreview?
     public let primaryScope: String?
     public let attention: SessionAttention?
     public let programStatus: ProgramStatusRecords?
@@ -177,7 +193,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let cwd: String
     public let state: SessionState
     public let readySummary: String?
-    public let openArgv: [String]
+    public var openArgv: [String]
     public let terminalIds: [String]
 
     /// One word for a row: Available for a person wins over what its client is doing.
@@ -196,6 +212,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
+        case preview
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"

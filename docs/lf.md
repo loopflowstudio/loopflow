@@ -64,7 +64,8 @@ lf task run LOO-438 pursue -a claude:opus
 `harness[:model]` for the entire invocation, overriding agents named in Tasks,
 Flows and skills, including nested Flows and child `lf` commands. Without it,
 definitions and defaults apply. Put literal skill arguments after `--`.
-Resuming native history keeps its provider; changing providers requires a new Session.
+Use `lf connect SESSION -a codex` to continue the same Session on another provider
+from its saved conversation history. Missing history leaves the Session unchanged.
 
 ## Run a Flow interactively
 
@@ -828,6 +829,7 @@ lf history show PROCESS_LFID --explain
 lf --task LOO-427 desktop open --diff --json  # conversation plus Changes
 lf desktop open --session SESSION_ID --diff  # exact Task-associated Session
 lf desktop state --json                       # read an already-running Mac app
+lf desktop view 'query:attention'             # open a Dashboard in its repository window
 lf desktop view 'state:available' --plan       # derive Work without opening Desktop
 lf desktop query attention 'state:available'  # create a Dashboard; edits need --revision
 ```
@@ -840,6 +842,11 @@ execution observation. The timestamp dates this read, not planning freshness or
 permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
+
+`desktop view EXPRESSION` opens the same shared selection in the Mac app. Save an
+ad hoc view as a Dashboard to name, pin and arrange it. `state --json` includes the
+selected `view` plan, retained occurrences, hidden members and duplicate winners.
+Repository and Wave navigation still opens their ordinary conversations.
 
 `desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange` and
 `layout` work without macOS. Plans contain

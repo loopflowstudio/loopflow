@@ -184,8 +184,8 @@ struct WorktreeWorkspaceTests {
         #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell?.id ?? "", machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
     }
 
-    @Test("A conversation launch does not replace a live shell or another conversation")
-    func launchingPreservesExistingPanes() {
+    @Test("Conversation launch adds a tab and undo never replays its command")
+    func launchingPreservesExistingPanes() throws {
         let store = MultiplexerStore()
         store.newShell()
         let shell = store.focusedPaneId
@@ -200,28 +200,19 @@ struct WorktreeWorkspaceTests {
         store.undoClose()
         #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command == nil)
     }
+
 }
 
-@Suite("Scope-aware conversations")
-struct ConversationLaunchTests {
-    @Test("Each zoom level binds its subject and keeps the configured destination")
-    func scopeDefaults() {
-        let cases: [(ConversationScope, [String], String)] = [
-            (.repo("/repo"), [], "repository"),
-            (.wave(repo: "/repo", id: "product"), ["--wave", "product"], "Wave"),
-            (.task(repo: "/repo.task", id: "LOO-123"), ["--task", "LOO-123"], "Task"),
-        ]
-        for (scope, binding, subject) in cases {
-            let launch = ConversationLaunch(scope: scope)
-            let command = launch.arguments(lf: "/App/lf")
-            #expect(Array(command.dropFirst(2).dropLast(2)) == binding)
-            #expect(command.last?.contains(subject) == true)
-            #expect(command.contains("--interactive"))
-            #expect(!command.contains("tui"))
-            #expect(!command.contains("ide"))
-            #expect(!command.contains("wave/operate"))
-            #expect(!command.contains("project/operate"))
-        }
+@Suite("Independent Task conversations")
+struct TaskConversationLaunchTests {
+    @Test("New conversation binds the Task without selecting an operating skill")
+    func taskContext() {
+        let launch = TaskConversationLaunch(task: "LOO-123")
+        #expect(launch.arguments(lf: "/App/lf") == [
+            "/App/lf", "--interactive", "--task", "LOO-123", ":", launch.prompt,
+        ])
+        #expect(launch.prompt.contains("Task"))
+        #expect(launch.prompt.contains("does not request an autonomous operating pass"))
     }
 }
 #endif

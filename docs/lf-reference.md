@@ -1025,7 +1025,7 @@ Select Work and control Loopflow Desktop
 
 ## lf desktop view
 
-Derive a passive Work view for external hosts; never opens Desktop
+Show a Work selection, or derive a passive plan for external hosts
 
 | Argument | What it does |
 |---|---|

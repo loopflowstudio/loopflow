@@ -64,3 +64,16 @@ struct WorkSelectionTests {
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
     }
 }
+
+func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content]) -> WorkViewPlan {
+    let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
+    return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository,
+        observedAt: 0, selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
+        resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
+        arrangement: WorkArrangement(tree: nil, hidden: [], mode: .auto),
+        projection: WorkArrangementProjection(visible: nil, suppressed: []), contents: members)
+}
+func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
+    WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,
+        states: [.open], primarySession: nil, location: nil, argv: nil, unavailable: [])
+}

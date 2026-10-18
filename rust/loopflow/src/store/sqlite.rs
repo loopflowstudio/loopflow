@@ -706,9 +706,8 @@ impl SqliteStore {
                 ),
                 2 => (
                     WorkRef::Task(TaskId::from_raw(id)),
-                    Some(WorkRef::Project(ProjectId::from_raw(
-                        row.get::<_, String>(2)?,
-                    ))),
+                    row.get::<_, Option<String>>(2)?
+                        .map(|id| WorkRef::Project(ProjectId::from_raw(id))),
                 ),
                 _ => unreachable!("identity query selects only Wave, Project, and Task"),
             };
@@ -2137,7 +2136,7 @@ mod frontier_tests {
              INSERT INTO waves VALUES ('00000000-0000-0000-0000-000000000001', 'product', 1, NULL);
              INSERT INTO projects VALUES ('proj_desktop', '00000000-0000-0000-0000-000000000001', 'desktop', 'linear-project', 2);
              INSERT INTO tasks VALUES ('task_watcher', 'proj_desktop', 'LOO-293', 'linear-issue', 3);
-             INSERT INTO tasks VALUES ('task_abcdef10000000000000000000000001', 'proj_desktop', 'lf-abcdef10000000000000000000000001', NULL, 4);",
+             INSERT INTO tasks VALUES ('task_abcdef10000000000000000000000001', NULL, 'lf-abcdef10000000000000000000000001', NULL, 4);",
         ).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let reference =
@@ -2160,6 +2159,7 @@ mod frontier_tests {
         let identities = store.work_identities().unwrap();
         assert_eq!(identities.len(), 4);
         assert_eq!(identities[3].subject, "abcdef");
+        assert!(identities[3].parent.is_none());
         assert_eq!(identities[2].subject, "LOO-293");
         assert_eq!(identities[2].external_id.as_deref(), Some("linear-issue"));
         assert_eq!(identities[2].parent.as_ref(), Some(&identities[1].work));

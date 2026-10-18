@@ -1186,6 +1186,11 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         definition["result_schema"]["properties"]["work"]["$ref"],
         "#/$defs/WorkWorkspaceKey"
     );
+    let view = describe_command(&["desktop".into(), "view".into()], false).unwrap();
+    let schema = &view["definition"]["result_schema"];
+    assert_eq!(schema["anyOf"].as_array().unwrap().len(), 2);
+    assert!(schema["$defs"]["ViewPlan"].is_object());
+    assert!(schema["$defs"]["DesktopOpening"].is_object());
     let read = describe_command(&["desktop".into(), "read".into()], false).unwrap();
     let region = read["definition"]["arguments"]
         .as_array()
@@ -1226,7 +1231,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         ))
         .unwrap();
     let conn = rusqlite::Connection::open(&database).unwrap();
-    conn.execute_batch(include_str!("fixtures/migrations/saved_selection_work.sql"))
+    conn.execute_batch(include_str!("fixtures/saved_selection_work.sql"))
         .unwrap();
     let path = repo.path().canonicalize().unwrap().display().to_string();
     conn.execute("UPDATE repository_plans SET repo=?1", [&path])

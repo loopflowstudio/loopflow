@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>loopflow</title>
+<style>
+@font-face{font-family:Lato;src:url('../../swift/Loopflow/Fonts/Lato-Regular.ttf')}
+@font-face{font-family:Lato;src:url('../../swift/Loopflow/Fonts/Lato-Bold.ttf');font-weight:700}
+@font-face{font-family:Mono;src:url('../../swift/Loopflow/Fonts/JetBrainsMono-Regular.ttf')}
+
+/* Loopflow Light / Dark tokens, from swift/Loopflow/Themes/Catalogue */
+[data-theme="light"]{
+  --bg:#faf8f5;--surface:#fffdf9;--side:#f3eee7;--element:#ece6dd;--raised:#fffdf9;
+  --border:#e6dfd6;--border-strong:#d6ccc0;--text:#2a2624;--text2:#5f5752;--text3:#685f58;
+  --accent:#722f37;--title-text:#faf8f5;--title-dim:#ebdcd8;
+  --working:#3269aa;--waiting:#87601b;--success:#3b734c;--idle:#b5ada3;
+  --t-green:#31633e;--t-yellow:#79520d;--t-blue:#24579e;--t-mag:#722f37;--t-cyan:#246568;--t-dim:#685f58;
+}
+[data-theme="dark"]{
+  --bg:#2b3036;--surface:#343b44;--side:#262b31;--element:#3c4550;--raised:#343b44;
+  --border:#3a424c;--border-strong:#56606b;--text:#f5f1ea;--text2:#c8c1b8;--text3:#a79f97;
+  --accent:#722f37;--title-text:#faf8f5;--title-dim:#e3cfcf;
+  --working:#a5c0e1;--waiting:#d3bb8e;--success:#a7c5af;--idle:#6b7683;
+  --t-green:#8b9a6b;--t-yellow:#d4a574;--t-blue:#7b8fa8;--t-mag:#c69bb3;--t-cyan:#7fafaf;--t-dim:#7f766f;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font:13px/1.45 Lato,system-ui,sans-serif;background:#e4ded5;min-height:100vh}
+body.dark{background:#1b1f23;color:#f5f1ea}
+button,input{font:inherit;color:inherit}
+button{border:0;background:none;cursor:pointer;padding:0;text-align:left}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ---- study chrome (not proposed UI) ---- */
+.study{max-width:1280px;margin:0 auto;padding:16px 20px 24px}
+.bar{display:flex;align-items:center;gap:12px;font-size:12px;margin-bottom:12px}
+.bar b{margin-right:4px}
+.seg{display:flex;background:#00000010;border-radius:7px;padding:2px}
+.dark .seg{background:#ffffff14}
+.seg button{padding:5px 11px;border-radius:5px}
+.seg button[aria-pressed="true"]{background:#fffdf9;box-shadow:0 1px 2px #0002}
+.dark .seg button[aria-pressed="true"]{background:#444e59}
+.bar .sp{flex:1}
+.note{font-size:11.5px;opacity:.65;margin-top:10px}
+.note kbd{font:10.5px Mono,monospace;border:1px solid currentColor;border-radius:3px;padding:0 4px}
+
+/* ---- window ---- */
+.win{background:var(--bg);color:var(--text);border-radius:10px;overflow:hidden;border:1px solid var(--border-strong);box-shadow:0 18px 50px #0003;display:flex;flex-direction:column;height:min(760px,calc(100vh - 110px));min-height:520px;position:relative}
+.win[data-size="small"]{max-width:1000px;height:640px}
+
+/* titlebar: the only burgundy surface; the only header row */
+.tb{height:38px;flex:none;display:flex;align-items:center;gap:2px;padding:0 8px 0 12px;background:var(--accent);color:var(--title-text)}
+.traffic{display:flex;gap:8px;margin-right:12px}
+.traffic i{width:12px;height:12px;border-radius:50%;background:#ec6a5e}.traffic i:nth-child(2){background:#f4bf4f}.traffic i:nth-child(3){background:#61c554}
+.ib{width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;opacity:.82;flex:none}
+.ib:hover{opacity:1;background:#ffffff1f}
+.ib:disabled{opacity:.3;background:none;cursor:default}
+.ib[aria-pressed="true"]{opacity:1;background:#ffffff26}
+.crumbs{display:flex;align-items:center;min-width:0;margin-left:6px;font-size:12.5px}
+.crumbs button{padding:3px 7px;border-radius:5px;white-space:nowrap;color:var(--title-dim)}
+.crumbs button:hover{background:#ffffff1f;color:var(--title-text)}
+.crumbs .repo{font-weight:700;color:var(--title-text)}
+.crumbs .repo .chev{font-weight:400;opacity:.7;margin-left:4px;font-size:10px}
+.crumbs .cur{color:var(--title-text);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.crumbs .cur .key{font:11.5px Mono,monospace;margin-right:6px;opacity:.85}
+.crumbs .sep{opacity:.4;padding:0 1px}
+.tb .right{margin-left:auto;display:flex;align-items:center;gap:2px;padding-left:10px}
+
+.body{flex:1;display:flex;min-height:0}
+
+/* ---- sidebar ---- */
+.side{width:240px;flex:none;background:var(--side);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0;transition:width .15s}
+.side.hidden{width:0;border:0;overflow:hidden}
+.scroll{flex:1;overflow-y:auto;padding:6px 6px 12px}
+.sec{display:flex;justify-content:space-between;font:10px Mono,monospace;letter-spacing:.6px;color:var(--text3);padding:8px 8px 5px 10px;text-transform:uppercase}
+.row{display:block;width:100%;position:relative;padding:7px 8px 8px 12px;border-radius:6px;margin-bottom:1px;border:1px solid transparent}
+.row::before{content:"";position:absolute;left:3px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--idle)}
+.row.available::before{background:var(--waiting)}
+.row.running::before{background:var(--working)}
+.row:hover{background:color-mix(in srgb,var(--element) 55%,transparent)}
+/* selection: neutral raised surface, never a hue */
+.row.sel{background:var(--raised);border-color:var(--border);box-shadow:0 1px 2px #0000001a}
+.row .t{font-size:12.5px;line-height:1.3;color:var(--text2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row.sel .t{color:var(--text);font-weight:700}
+.row .tail{font:11px/1.45 Mono,monospace;color:var(--text3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row.available .tail{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text2)}
+.row .m{display:flex;gap:7px;margin-top:3px;font:10.5px Mono,monospace;color:var(--text3)}
+.row .m .s-available{color:var(--waiting)}
+.row .m .s-running{color:var(--working)}
+.row .m .ok{color:var(--success)}
+.row .m .age{margin-left:auto}
+.row .num{position:absolute;right:7px;top:6px;font:10px Mono,monospace;color:var(--text3);background:var(--element);border-radius:3px;padding:0 4px;opacity:0;transition:opacity .1s}
+.show-nums .row .num{opacity:1}
+.wave{display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px 5px 12px;border-radius:5px;font-size:12.5px;color:var(--text2)}
+.wave:hover{background:color-mix(in srgb,var(--element) 55%,transparent)}
+.wave.sel{background:var(--raised);color:var(--text);font-weight:700;box-shadow:0 1px 2px #0000001a}
+.wave .n{margin-left:auto;font:10.5px Mono,monospace;color:var(--text3);font-weight:400}
+
+/* ---- center ---- */
+.center{flex:1;min-width:0;display:flex;background:var(--bg)}
+.term{flex:1;min-width:0;overflow:auto;padding:12px 16px;font:12px/1.6 Mono,ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
+.term .dim{color:var(--t-dim)}.term .green{color:var(--t-green)}.term .yellow{color:var(--t-yellow)}.term .blue{color:var(--t-blue)}.term .mag{color:var(--t-mag)}.term .cyan{color:var(--t-cyan)}
+.term .in{outline:none}
+.term .cursor{display:inline-block;width:7px;height:14px;background:var(--text);vertical-align:-2px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.companion{width:340px;flex:none;border-left:1px solid var(--border);overflow:auto;padding:14px 16px;font-size:12.5px;background:var(--side)}
+.companion h3{font:10px Mono,monospace;letter-spacing:.6px;text-transform:uppercase;color:var(--text3);margin:0 0 10px;font-weight:400}
+.companion p{margin:0 0 10px;color:var(--text2)}
+.companion .file{font:11.5px Mono,monospace;display:flex;gap:8px;padding:3px 0;color:var(--text2)}
+.companion .file .add{color:var(--success)}.companion .file .del{color:#b0443b}
+
+/* wave view: same language as the sidebar, one column wider */
+.wave-view{flex:1;overflow:auto;padding:10px 16px}
+.wave-view .head{display:flex;align-items:baseline;gap:10px;padding:4px 4px 10px;border-bottom:1px solid var(--border);margin-bottom:6px}
+.wave-view .head b{font-size:14px}
+.wave-view .head span{font:11px Mono,monospace;color:var(--text3)}
+.wave-view .row{display:grid;grid-template-columns:72px minmax(0,1fr) minmax(0,1.3fr) 104px;gap:12px;align-items:baseline;padding:8px 10px 8px 14px}
+.wave-view .row .k{font:11px Mono,monospace;color:var(--text3)}
+.wave-view .row .t{-webkit-line-clamp:1}
+.wave-view .row .tail{margin:0}
+.wave-view .row .age{font:10.5px Mono,monospace;color:var(--text3);text-align:right;white-space:nowrap}
+
+/* ---- navigator ---- */
+.scrim{position:absolute;inset:0;background:#00000040;z-index:20;display:none}
+.scrim.open{display:block}
+.nav{position:absolute;left:50%;top:52px;transform:translateX(-50%);width:min(560px,calc(100% - 32px));background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 24px 60px #0000004a;overflow:hidden}
+.nav input{width:100%;border:0;border-bottom:1px solid var(--border);background:transparent;padding:12px 14px;font-size:14px;outline:none}
+.nav .res{max-height:380px;overflow:auto;padding:5px}
+.nav .g{font:10px Mono,monospace;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);padding:7px 9px 3px}
+.nav .it{display:flex;align-items:center;gap:10px;width:100%;padding:6px 9px;border-radius:6px}
+.nav .it .k{font:11px Mono,monospace;color:var(--text3);min-width:58px}
+.nav .it .r{margin-left:auto;font-size:11px;color:var(--text3)}
+.nav .it.hl{background:var(--element)}
+.nav .it .bar2{width:2px;height:14px;border-radius:2px;background:var(--idle);flex:none}
+.nav .it .bar2.available{background:var(--waiting)}.nav .it .bar2.running{background:var(--working)}
+.nav .foot{display:flex;gap:14px;padding:6px 12px;border-top:1px solid var(--border);font-size:11px;color:var(--text3)}
+.menu{position:absolute;right:8px;top:36px;z-index:21;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:8px;box-shadow:0 14px 40px #0000003a;padding:4px;min-width:220px;display:none}
+.menu.open{display:block}
+.menu button{display:flex;width:100%;padding:6px 10px;border-radius:5px;font-size:12.5px}
+.menu button:hover{background:var(--element)}
+.menu button kbd{margin-left:auto;font:10.5px Mono,monospace;color:var(--text3)}
+.menu hr{border:0;border-top:1px solid var(--border);margin:4px}
+</style>
+</head>
+<body>
+<div class="study">
+  <div class="bar"><b>Console, revised</b>
+    <div class="seg" id="theme"><button data-t="dark">Loopflow Dark</button><button data-t="light">Loopflow Light</button></div>
+    <div class="seg" id="size"><button data-s="large">1280 wide</button><button data-s="small">1000 wide</button></div>
+    <span class="sp"></span><span style="opacity:.6">Sample work · nothing runs</span>
+  </div>
+  <div id="host"></div>
+  <div class="note">Hold <kbd>⌘</kbd> to see Task numbers · <kbd>⌘1</kbd>–<kbd>⌘9</kbd> jump · <kbd>⌃Tab</kbd> / <kbd>⌃⇧Tab</kbd> next/previous · <kbd>⌘K</kbd> navigate · <kbd>⌘\</kbd> sidebar · <kbd>⌘[</kbd> <kbd>⌘]</kbd> back/forward · <kbd>⌘⇧B</kbd> brief · <kbd>⌘⇧D</kbd> changes · type into the terminal; drafts stay with their Task.</div>
+</div>
+<script>
+const REPOS = {
+  loopflow: {prefix:'LOO', waves:[{id:'product',name:'Product'},{id:'infrastructure',name:'Infrastructure'}], tasks:[
+    {id:'489',title:'Make navigation feel like home',wave:'product',state:'available',agent:'codex',time:'4m',branch:'loo-489-navigation',pr:null,
+     tail:'Three redesigns are ready. Which direction should the native sidebar take?',prompt:'Let’s compare the navigation options before we build.',
+     work:[['Read','scratch/navigation-studies/README.md'],['Read','swift/LoopflowMac/Views/WorkNavigator.swift'],['Ran','node --test model.test.cjs','5 passed']],
+     reply:'Three redesigns are ready. Each keeps one selected workspace and the Tasks-then-Waves sidebar.',ask:'Which direction should the native sidebar take?',
+     brief:'Jack Heart wants to see and work several Loopflow Tasks at once without losing his place.',changes:[['swift/LoopflowMac/Views/WorkNavigator.swift',212,180],['swift/LoopflowMac/WorkModel.swift',64,22]]},
+    {id:'499',title:'Make conversations easy to continue',wave:'product',state:'available',agent:'claude',time:'12m',branch:'loo-499-opening',pr:'#1591',prState:'open',
+     tail:'Opening a Task now reveals its existing conversation. Approve the fresh-start action?',prompt:'Make it obvious which conversation I am continuing.',
+     work:[['Read','rust/loopflow/src/lf/commands/session.rs'],['Edit','swift/LoopflowMac/Views/SessionsView.swift','+41 −18'],['Ran','cargo test session::open','14 passed']],
+     reply:'Opening a Task now reveals its existing conversation. Starting fresh is explicit.',ask:'Should “New conversation” live in the Task’s action menu?',
+     brief:'Reopening a scope reuses its conversation and checkout; starting fresh is explicit.',changes:[['swift/LoopflowMac/Views/SessionsView.swift',41,18]]},
+    {id:'505',title:'Allow Tasks without a Wave',wave:'product',state:'running',agent:'codex',time:'now',branch:'loo-505-waveless',pr:null,
+     tail:'Reading rust/loopflow/src/work/mod.rs — 6 call sites still require a Wave',prompt:'A Task can have one home, or no Wave yet.',
+     work:[['Search','wave_id.expect','6 matches'],['Read','rust/loopflow/src/work/mod.rs']],brief:'A Task has zero or one Wave and at most one Project.',changes:[]},
+    {id:'416',title:'Keep Sessions across app restart',wave:'infrastructure',state:'running',agent:'codex',time:'now',branch:'loo-416-retain',pr:'#1588',prState:'checks',
+     tail:'cargo test session::reattach — 12 passed; verifying pane + draft return together',prompt:'Returning should feel exactly like leaving it.',
+     work:[['Read','rust/loopflow/src/session/attach.rs'],['Ran','cargo test session::reattach','12 passed'],['Edit','swift/Loopflow/Services/WorkObservation.swift','+12 −3']],
+     brief:'Retained Session identity survives app restart, with its pane and draft.',changes:[['swift/Loopflow/Services/WorkObservation.swift',12,3]]},
+    {id:'497',title:'Compose custom workspaces',wave:'product',state:'idle',agent:'claude',time:'1h',branch:'loo-497-dashboards',pr:null,
+     tail:'Paused after kickoff. Navigation lands first in LOO-489.',prompt:'Keep navigation separate from custom composition.',
+     work:[['Read','scratch/dashboard-design.md']],reply:'This Task owns custom dashboards, multi-work grids and the API.',brief:'Custom dashboards, multi-work grid layout, selection API.',changes:[]},
+    {id:'503',title:'Keep repair running through merge',wave:'infrastructure',state:'available',agent:'codex',time:'8m',branch:'loo-503-repair',pr:'#1586',prState:'passing',
+     tail:'Two retry boundaries are possible: after rebase, or after gate. Pick one.',prompt:'Keep the repair going until it can land.',
+     work:[['Ran','lf sync --continue','merged'],['Ran','cargo test flow::repair','9 passed']],reply:'The interrupted repair is isolated.',ask:'Retry after rebase, or after gate?',
+     brief:'Repairs continue through merge conflicts until they can land.',changes:[['rust/loopflow/src/flow/repair.rs',58,12]]},
+  ], extra:[
+    {id:'330',title:'Give Waves a clearer structure',wave:'product',state:'idle',agent:'claude',time:'2h',branch:'loo-330-waves',pr:null,tail:'Design notes saved.',prompt:'Keep the hierarchy understandable.',work:[],reply:'Notes saved.',brief:'One owner per Task.',changes:[]},
+    {id:'504',title:'Bring OpenCode to parity',wave:'infrastructure',state:'running',agent:'opencode',time:'now',branch:'loo-504-opencode',pr:null,tail:'lf smoke --provider opencode — 7/11 passing',prompt:'Prove the same workflow across providers.',work:[['Ran','lf smoke --provider opencode','7/11']],brief:'Provider parity.',changes:[]},
+  ]},
+  fieldnotes: {prefix:'FN', waves:[{id:'editor',name:'Editor'}], tasks:[
+    {id:'101',title:'Make offline notes reliable',wave:'editor',state:'available',agent:'codex',time:'3m',branch:'fn-101-offline',pr:null,tail:'Two conflicting paragraphs need a decision before sync.',prompt:'Keep my notes intact when I reconnect.',work:[['Ran','npm test sync','31 passed']],reply:'Offline edits are preserved.',ask:'Keep both paragraphs, or the newer one?',brief:'Offline edits survive reconnect.',changes:[]},
+  ], extra:[]},
+};
+for (const [repo, r] of Object.entries(REPOS)) for (const t of [...r.tasks, ...r.extra]) { t.repo = repo; t.key = `${r.prefix}-${t.id}`; }
+
+const q = new URLSearchParams(location.search);
+const S = {theme:q.get('theme')||'dark', size:q.get('size')||'large', repo:'loopflow', route:{kind:'task',id:'489'}, back:[], fwd:[],
+  hidden:false, scope:'working', companion:null, nav:false, query:'', hl:0, menu:false, nums:false, frame:0};
+const drafts = {};
+const R = () => REPOS[S.repo];
+const all = (repo=S.repo) => [...REPOS[repo].tasks, ...REPOS[repo].extra];
+const task = id => all().find(t => t.id === id);
+const wname = id => R().waves.find(w => w.id === id)?.name ?? id;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+const word = s => ({available:'Available',running:'Working',idle:'Idle'})[s];
+// Stable order: the working set is never re-sorted; opening a Task appends it.
+function listed() {
+  if (S.scope === 'available') return all().filter(t => t.state === 'available');
+  if (S.scope === 'running') return all().filter(t => t.state === 'running');
+  return R().tasks;
+}
+const scopeName = () => ({working:'Working tasks',available:'Available',running:'Running'})[S.scope];
+
+function go(route, record=true) {
+  if (JSON.stringify(route) === JSON.stringify(S.route)) return render();
+  if (record) { S.back.push({route:S.route, repo:S.repo}); S.fwd = []; }
+  if (route.kind === 'task') { const t = task(route.id); if (t && !R().tasks.includes(t)) R().tasks.push(t); }
+  S.route = route; render();
+}
+function travel(d) { const from = d<0?S.back:S.fwd, to = d<0?S.fwd:S.back; const it = from.pop(); if (!it) return; to.push({route:S.route, repo:S.repo}); S.route = it.route; S.repo = it.repo; render(); }
+function step(d) { const l = listed(); const i = l.findIndex(t => S.route.kind==='task' && t.id === S.route.id); const n = l[(i + d + l.length) % l.length]; if (n) go({kind:'task', id:n.id}); }
+
+const I = {
+  side:'<svg width="16" height="16" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 3v10" stroke="currentColor" stroke-width="1.2"/></svg>',
+  back:'<svg width="15" height="15" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  fwd:'<svg width="15" height="15" viewBox="0 0 16 16"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  brief:'<svg width="15" height="15" viewBox="0 0 16 16"><path d="M4 2.5h6l2.5 2.5v8.5h-8.5z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 7.5h4M6 10h4" stroke="currentColor" stroke-width="1.2"/></svg>',
+  diff:'<svg width="15" height="15" viewBox="0 0 16 16"><path d="M5 2.5v7M2 6h6M8.5 12.5h5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  more:'<svg width="15" height="15" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>',
+};
+
+function titlebar() {
+  const t = S.route.kind === 'task' ? task(S.route.id) : null;
+  const crumbs = [`<button class="repo" data-act="nav" title="Navigate ⌘K">${S.repo}<span class="chev">⌄</span></button>`];
+  if (t) crumbs.push(`<button data-wave="${t.wave}">${wname(t.wave)}</button>`, `<button class="cur" data-act="nav" title="${esc(t.title)}"><span class="key">${t.key}</span>${esc(t.title)}</button>`);
+  else crumbs.push(`<button class="cur">${wname(S.route.id)}</button>`);
+  return `<div class="tb"><div class="traffic"><i></i><i></i><i></i></div>
+    <button class="ib" data-act="side" title="Sidebar ⌘\\" aria-pressed="${!S.hidden}">${I.side}</button>
+    <button class="ib" data-act="back" title="Back ⌘[" ${S.back.length?'':'disabled'}>${I.back}</button>
+    <button class="ib" data-act="fwd" title="Forward ⌘]" ${S.fwd.length?'':'disabled'}>${I.fwd}</button>
+    <nav class="crumbs">${crumbs.join('<span class="sep">/</span>')}</nav>
+    <div class="right">${t ? `<button class="ib" data-act="brief" title="Brief ⌘⇧B" aria-pressed="${S.companion==='brief'}">${I.brief}</button><button class="ib" data-act="diff" title="Changes ⌘⇧D" aria-pressed="${S.companion==='diff'}">${I.diff}</button>` : ''}<button class="ib" data-act="menu" title="Actions">${I.more}</button></div></div>`;
+}
+
+function row(t, i) {
+  const sel = S.route.kind === 'task' && S.route.id === t.id;
+  const pr = !t.pr ? '' : t.prState === 'passing' ? `<span class="ok">${t.pr} ✓</span>` : `<span>${t.pr}${t.prState==='checks'?' ⋯':''}</span>`;
+  const spin = t.state === 'running' ? `<span class="spin" style="color:var(--working)">${SPIN[S.frame%10]}</span> ` : '';
+  return `<button class="row ${t.state} ${sel?'sel':''}" data-task="${t.id}">
+    ${i < 9 ? `<span class="num">⌘${i+1}</span>` : ''}
+    <div class="t">${esc(t.title)}</div>
+    <div class="tail">${spin}${esc(t.tail)}</div>
+    <div class="m"><span>${t.key}</span><span class="s-${t.state}">${word(t.state)}</span>${pr}<span class="age">${t.time}</span></div></button>`;
+}
+function sidebar() {
+  const l = listed();
+  return `<aside class="side ${S.hidden?'hidden':''} ${S.nums?'show-nums':''}"><div class="scroll">
+    <div class="sec"><span>${scopeName()}</span><span>${l.length}</span></div>${l.map(row).join('')}
+    <div class="sec" style="margin-top:8px"><span>Waves</span></div>
+    ${R().waves.map(w => `<button class="wave ${S.route.kind==='wave'&&S.route.id===w.id?'sel':''}" data-wave="${w.id}">${w.name}<span class="n">${all().filter(t=>t.wave===w.id).length}</span></button>`).join('')}
+  </div></aside>`;
+}
+function terminal(t) {
+  const L = [`<span class="dim">${t.agent} · ${t.branch} · ~/src/${t.repo}.${t.branch}</span>`, '', `<span class="dim">›</span> ${esc(t.prompt)}`, ''];
+  for (const [verb, what, res] of t.work) L.push(`<span class="green">●</span> ${verb} <span class="cyan">${esc(what)}</span>${res ? `\n  <span class="dim">└</span> ${/passed|merged/.test(res)?`<span class="green">${res}</span>`:`<span class="yellow">${res}</span>`}` : ''}`);
+  if (t.reply) L.push('', esc(t.reply));
+  if (t.ask) L.push('', `<span class="yellow">?</span> ${esc(t.ask)}`);
+  if (t.state === 'running') L.push('', `<span class="blue spin">${SPIN[S.frame%10]}</span> <span class="dim">Working… esc to interrupt</span>`);
+  L.push('', `<span class="dim">›</span> <span class="in" contenteditable="true" spellcheck="false" data-draft="${t.key}">${esc(drafts[t.key]??'')}</span><span class="cursor"></span>`);
+  return `<div class="term" id="term">${L.join('\n')}</div>`;
+}
+function companion(t) {
+  if (!S.companion) return '';
+  if (S.companion === 'brief') return `<aside class="companion"><h3>Brief · ${t.key}</h3><p><b>${esc(t.title)}</b></p><p>${esc(t.brief)}</p><p style="color:var(--text3)">${wname(t.wave)} · ${t.agent} · ${t.branch}</p></aside>`;
+  return `<aside class="companion"><h3>Changes · ${t.branch}</h3>${t.changes.length ? t.changes.map(([f,a,d]) => `<div class="file"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${f}</span><span class="add">+${a}</span><span class="del">−${d}</span></div>`).join('') : '<p>No changes yet.</p>'}</aside>`;
+}
+function waveView(id) {
+  const ts = all().filter(t => t.wave === id);
+  return `<div class="wave-view"><div class="head"><b>${wname(id)}</b><span>${ts.length} open · the Wave conversation and multi-Task grid arrive with LOO-497</span></div>
+    ${ts.map(t => `<button class="row ${t.state}" data-task="${t.id}"><span class="k">${t.key}</span><span class="t">${esc(t.title)}</span><span class="tail">${esc(t.tail)}</span><span class="age">${word(t.state)} · ${t.time}</span></button>`).join('')}</div>`;
+}
+function center() {
+  if (S.route.kind === 'wave') return `<main class="center">${waveView(S.route.id)}</main>`;
+  const t = task(S.route.id);
+  return `<main class="center">${terminal(t)}${companion(t)}</main>`;
+}
+
+// Navigator: Tasks first, then Waves, sidebar scope, repositories.
+function results() {
+  const s = S.query.trim().toLowerCase(), m = x => !s || x.toLowerCase().includes(s), out = [];
+  const ts = Object.keys(REPOS).flatMap(r => all(r)).filter(t => m(`${t.key} ${t.title} ${t.tail} ${t.state} ${t.repo}`))
+    .sort((a,b) => (a.repo===S.repo?0:1) - (b.repo===S.repo?0:1));
+  if (ts.length) { out.push({g:'Tasks'}); for (const t of ts.slice(0,8)) out.push({k:t.key, bar:t.state, label:t.title, r:t.repo===S.repo?wname(t.wave):`${t.repo} window`, act:() => { if (t.repo !== S.repo) { S.back.push({route:S.route,repo:S.repo}); S.repo = t.repo; } go({kind:'task',id:t.id}, false); }}); }
+  const ws = R().waves.filter(w => m(`wave ${w.name}`)); if (ws.length) { out.push({g:'Waves'}); for (const w of ws) out.push({k:'wave', label:w.name, r:`${all().filter(t=>t.wave===w.id).length}`, act:() => go({kind:'wave',id:w.id})}); }
+  const sc = [['working','Working tasks'],['available','Available'],['running','Running']].filter(([,n]) => m(`sidebar show ${n}`));
+  if (sc.length) { out.push({g:'Sidebar shows'}); for (const [id,n] of sc) out.push({k:'show', label:n, r:S.scope===id?'current':'', act:() => { S.scope = id; render(); }}); }
+  const rs = Object.keys(REPOS).filter(r => r !== S.repo && m(`repo ${r}`)); if (rs.length) { out.push({g:'Repositories'}); for (const r of rs) out.push({k:'repo', label:r, r:'⌘` cycles windows', act:() => { S.back.push({route:S.route,repo:S.repo}); S.repo = r; S.scope='working'; go({kind:'task',id:REPOS[r].tasks[0].id}, false); }}); }
+  return out;
+}
+const actionable = () => results().filter(r => !r.g);
+function navHTML() {
+  let i = -1;
+  const items = results().map(r => r.g ? `<div class="g">${r.g}</div>` : (i++, `<button class="it ${i===S.hl?'hl':''}" data-ri="${i}">${r.bar?`<span class="bar2 ${r.bar}"></span>`:''}<span class="k">${r.k}</span><span>${esc(r.label)}</span><span class="r">${esc(r.r)}</span></button>`)).join('');
+  return `<div class="res">${items || '<div class="g">No matches</div>'}</div>`;
+}
+const menu = () => {
+  const t = S.route.kind === 'task' ? task(S.route.id) : null;
+  const items = t ? [['New conversation','⌘N'],['Open pull request',''],['Open in editor','⌘O'],['Copy branch name',''],null,['Move to Wave…',''],['Complete Task','']] : [['Open Wave conversation',''],['New Task in Wave','⌘N']];
+  return `<div class="menu ${S.menu?'open':''}">${items.map(x => x ? `<button data-menu>${x[0]}<kbd>${x[1]}</kbd></button>` : '<hr>').join('')}</div>`;
+};
+
+function render() {
+  document.body.classList.toggle('dark', S.theme === 'dark');
+  for (const b of document.querySelectorAll('#theme button')) b.setAttribute('aria-pressed', b.dataset.t === S.theme);
+  for (const b of document.querySelectorAll('#size button')) b.setAttribute('aria-pressed', b.dataset.s === S.size);
+  const focused = document.activeElement?.dataset?.draft;
+  document.getElementById('host').innerHTML = `<div class="win" data-theme="${S.theme}" data-size="${S.size}">${titlebar()}<div class="body">${sidebar()}${center()}</div>${menu()}
+    <div class="scrim ${S.nav?'open':''}" data-act="close">${S.nav ? `<div class="nav" data-stop><input id="nq" value="${esc(S.query)}" placeholder="Go to a Task, Wave, repository, or choose what the sidebar shows…" autocomplete="off">${navHTML()}<div class="foot"><span>↑↓ choose</span><span>↵ open</span><span>esc close</span></div></div>` : ''}</div></div>`;
+  const nq = document.getElementById('nq'); if (nq) { nq.focus(); nq.setSelectionRange(nq.value.length, nq.value.length); }
+  else if (focused) { const el = document.querySelector(`[data-draft="${focused}"]`); if (el) caretEnd(el); }
+  const term = document.getElementById('term'); if (term) term.scrollTop = term.scrollHeight;
+  document.title = S.route.kind === 'task' ? `${S.repo} — ${task(S.route.id).key}` : S.repo;
+}
+function caretEnd(el) { el.focus(); const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+function openNav() { S.nav = true; S.query = ''; S.hl = 0; S.menu = false; render(); }
+function closeNav() { S.nav = false; render(); }
+function choose(i) { const r = actionable()[i]; S.nav = false; S.query = ''; if (r) r.act(); else render(); }
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-t],[data-s],[data-task],[data-wave],[data-act],[data-ri],[data-stop],[data-menu]');
+  if (S.menu && !e.target.closest('.menu')) { S.menu = false; if (!el || el.dataset.act !== 'menu') return render(); }
+  if (!el) return;
+  if (el.dataset.t) { S.theme = el.dataset.t; return render(); }
+  if (el.dataset.s) { S.size = el.dataset.s; return render(); }
+  if (el.dataset.ri !== undefined) return choose(+el.dataset.ri);
+  if (el.dataset.menu !== undefined) { S.menu = false; return render(); }
+  if (el.dataset.stop !== undefined) return;
+  if (el.dataset.task) return go({kind:'task', id:el.dataset.task});
+  if (el.dataset.wave) return go({kind:'wave', id:el.dataset.wave});
+  const a = el.dataset.act;
+  if (a === 'back') travel(-1); else if (a === 'fwd') travel(1);
+  else if (a === 'side') { S.hidden = !S.hidden; render(); }
+  else if (a === 'nav') openNav(); else if (a === 'close') closeNav();
+  else if (a === 'brief' || a === 'diff') { const c = a === 'brief' ? 'brief' : 'diff'; S.companion = S.companion === c ? null : c; render(); }
+  else if (a === 'menu') { S.menu = !S.menu; render(); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'nq') { S.query = e.target.value; S.hl = 0; document.querySelector('.nav .res').outerHTML = navHTML(); }
+  if (e.target.dataset?.draft) drafts[e.target.dataset.draft] = e.target.textContent;
+});
+document.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (e.key === 'Meta' && !S.nums) { S.nums = true; document.querySelector('.side')?.classList.add('show-nums'); }
+  if (e.ctrlKey && e.key === 'Tab') { e.preventDefault(); return step(e.shiftKey ? -1 : 1); }
+  if (mod && /^[1-9]$/.test(e.key)) { e.preventDefault(); const t = listed()[+e.key - 1]; if (t) go({kind:'task', id:t.id}); return; }
+  if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); return S.nav ? closeNav() : openNav(); }
+  if (mod && e.key === '\\') { e.preventDefault(); S.hidden = !S.hidden; return render(); }
+  if (mod && e.key === '[') { e.preventDefault(); return travel(-1); }
+  if (mod && e.key === ']') { e.preventDefault(); return travel(1); }
+  if (mod && e.shiftKey && /^[bd]$/i.test(e.key) && S.route.kind === 'task') { e.preventDefault(); const c = e.key.toLowerCase() === 'b' ? 'brief' : 'diff'; S.companion = S.companion === c ? null : c; return render(); }
+  if (!S.nav) { if (e.key === 'Escape' && S.menu) { S.menu = false; render(); } return; }
+  const n = actionable().length;
+  if (e.key === 'Escape') { e.preventDefault(); closeNav(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); S.hl = (S.hl + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; document.querySelector('.nav .res').outerHTML = navHTML(); }
+  else if (e.key === 'Enter') { e.preventDefault(); choose(S.hl); }
+});
+document.addEventListener('keyup', e => { if (e.key === 'Meta') { S.nums = false; document.querySelector('.side')?.classList.remove('show-nums'); } });
+addEventListener('blur', () => { S.nums = false; document.querySelector('.side')?.classList.remove('show-nums'); });
+setInterval(() => { S.frame++; for (const el of document.querySelectorAll('.spin')) el.textContent = SPIN[S.frame % 10]; }, 110);
+if (q.get('nav')) setTimeout(openNav);
+if (q.get('companion')) S.companion = q.get('companion');
+if (q.get('wave')) S.route = {kind:'wave', id:q.get('wave')};
+render();
+</script>
+</body>
+</html>

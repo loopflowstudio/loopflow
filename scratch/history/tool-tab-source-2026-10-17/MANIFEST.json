@@ -1,0 +1,102 @@
+{
+  "source_checkout": "/Users/jack/src/loopflow.loo-497-drive-desktop-through",
+  "source_head": "959c714fbb91eac1e52c5b2f9233f66f0da9aa28",
+  "purpose": "Immutable source evidence for adopting existing native tool tabs in LOO-489; not permission to absorb dashboards/API or change sibling source. Current integration must build and test adapted production owners.",
+  "files": [
+    {
+      "source": "scratch/design.md",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/scratch/design.md.txt",
+      "sha256": "eca06989f6b979b24d9fe389b71d221eeaea794ca6a6fdf6f04fab89470d31c3"
+    },
+    {
+      "source": "scratch/desktop-api-coordination.md",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/scratch/desktop-api-coordination.md.txt",
+      "sha256": "04211a23c74b70ac2fe231cb5d3f1745302cd71a44b97c7a3635e6008800b2d1"
+    },
+    {
+      "source": "swift/Loopflow/Models/MultiplexerLayout.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Models/MultiplexerLayout.swift.txt",
+      "sha256": "305d998b184d0e3462ef9c00c60ff89ebb0fcefa98db4bf7cbdef69dac408a8a"
+    },
+    {
+      "source": "swift/Loopflow/Models/MultiplexerStore.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Models/MultiplexerStore.swift.txt",
+      "sha256": "a1d3e24c3c82a6397969522ea49bbf7309142933daec66e0d2ef1c444b9c3106"
+    },
+    {
+      "source": "swift/Loopflow/Models/TaskWorkspace.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Models/TaskWorkspace.swift.txt",
+      "sha256": "a3c42f0f901f909552e08e626da733fa5eb29666a9eab1286cd24fe8f09a31b6"
+    },
+    {
+      "source": "swift/Loopflow/Models/WorkSelection.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Models/WorkSelection.swift.txt",
+      "sha256": "37714b9764a9fee6f03e1f38a4de0a74792a3db26abdee8f9e90452cdb1fa0d7"
+    },
+    {
+      "source": "swift/Loopflow/Models/DesktopInspection.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Models/DesktopInspection.swift.txt",
+      "sha256": "f1b98c37f44f07b81d9b7c68b44f1c4e764fa16f9b204ad3e7740d508162780d"
+    },
+    {
+      "source": "swift/Loopflow/Services/RegistryQuery.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/Loopflow/Services/RegistryQuery.swift.txt",
+      "sha256": "bfdb8f87162e27135182e1a26583688d9ccabbfca281d01d1af909b942e994ac"
+    },
+    {
+      "source": "swift/LoopflowMac/TaskFileDocument.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowMac/TaskFileDocument.swift.txt",
+      "sha256": "834087941d09c80a3747c2500fce81b2e463d275de7664ade63d9259847a3e84"
+    },
+    {
+      "source": "swift/LoopflowMac/Views/SessionsView.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowMac/Views/SessionsView.swift.txt",
+      "sha256": "fa0e8a0b47bb234838d012aab2cbed84e05184ea812db1d4b4264217c985a24d"
+    },
+    {
+      "source": "swift/LoopflowMac/Views/TaskFilesView.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowMac/Views/TaskFilesView.swift.txt",
+      "sha256": "1d1704fb0a203f275958d8e1eb21a969ed825ba114c3f6a9aa46b95e62ca0c4f"
+    },
+    {
+      "source": "swift/LoopflowMac/WorkDestination.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowMac/WorkDestination.swift.txt",
+      "sha256": "32cda89e7e443e8f5b16ab08ebc82c8ff579c6939fc60fa7c8abe574280406bf"
+    },
+    {
+      "source": "swift/LoopflowTests/ToolTabTests.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowTests/ToolTabTests.swift.txt",
+      "sha256": "b27f4b98dc91e525bbcbf742382abe880b9588c32db2b4e9185a9f7812227d1f"
+    },
+    {
+      "source": "swift/LoopflowTests/MultiplexerLayoutTests.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowTests/MultiplexerLayoutTests.swift.txt",
+      "sha256": "9ebf98152f825a0e5beb4da9f2906db895ee6888eb6ffa7ee46264de32badc46"
+    },
+    {
+      "source": "swift/LoopflowTests/MultiplexerStoreTests.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowTests/MultiplexerStoreTests.swift.txt",
+      "sha256": "dfac181d38078872cc7a0ed2dcdb6f5ca4b26e738977361cec2ad66cbb1baea6"
+    },
+    {
+      "source": "swift/LoopflowTests/TaskFilesTests.swift",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/swift/LoopflowTests/TaskFilesTests.swift.txt",
+      "sha256": "8ec55eedf354b7b3bb128e98c7c4b47337609789cfa783bdf86aa5f2b40b3bbd"
+    },
+    {
+      "source": "rust/loopflow/src/work/selection.rs",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/rust/loopflow/src/work/selection.rs.txt",
+      "sha256": "100b187875b6dcd5f524467c6dcde8eeb7370d8bbd6c322877ba39f0317f70c7"
+    },
+    {
+      "source": "rust/loopflow/src/work/selection/panes.rs",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/rust/loopflow/src/work/selection/panes.rs.txt",
+      "sha256": "6ed0c96e56d47980ed50ea4c824da338e5874f62186843f801df1cc872f5161c"
+    },
+    {
+      "source": "tests/fixtures/dto/pane_layout.json",
+      "copy": "scratch/history/tool-tab-source-2026-10-17/tests/fixtures/dto/pane_layout.json.txt",
+      "sha256": "caf1f9425c435debcda82e766f14733bb9364645bd68dc1dc55ee3c79ceefd10"
+    }
+  ]
+}

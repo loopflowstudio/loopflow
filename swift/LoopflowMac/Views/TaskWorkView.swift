@@ -220,62 +220,66 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// One compact control; hover or click reveals the Task's lifecycle actions.
-struct TaskLifecycleActions: View {
+/// Shared Task actions for keyboard access and sidebar context menus.
+struct TaskActionItems: View {
     let model: WorkModel
     let task: RoadmapTask
-    let work: WorkReading<TaskOverview>
-    @State private var hovering = false
-    @State private var expanded = false
-    @State private var confirmingAbandon = false
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+    @State private var copied: String?
 
     private var unavailable: Bool {
-        model.navigation.taskRunDrafts[task.id]?.acting == true
-            || work.errorMessage != nil || model.roadmap.errorMessage != nil || model.showsSavedPlanning
+        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button { expanded.toggle() } label: {
-                Label("Task", systemImage: "ellipsis.circle")
+        Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
+        Menu("Move to Wave") {
+            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
+                .disabled(task.task.waveId == nil)
+            ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
+                Button(destination.wave.displayName) {
+                    Task { await model.moveTask(task, toWave: destination.wave.id) }
+                }.disabled(destination.wave.id == task.task.waveId)
             }
-            .help("Complete, pause, or abandon this Task")
-            .accessibilityIdentifier("task-lifecycle-menu")
-            .accessibilityValue(expanded || hovering ? "Expanded" : "Collapsed")
-            if let error = model.navigation.taskRunDrafts[task.id]?.error ?? task.runtime?.completionPending {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.red).help(error).accessibilityLabel(error)
+        }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
+        if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        } else {
+            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
+                Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+            }.disabled(unavailable)
+        }
+        if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
+        Divider()
+        Button(copied == "id" ? "Copied Task ID" : "Copy Task ID") { copy(task.task.identifier, key: "id") }
+        if let url = task.reference.issueUrl {
+            Button(copied == "link" ? "Copied Task link" : "Copy Task link") { copy(url.absoluteString, key: "link") }
+        }
+        if let branch = task.reference.workspace?.branch {
+            Button(copied == "branch" ? "Copied branch" : "Copy branch") { copy(branch, key: "branch") }
+        }
+        if let pr = task.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
+        ForEach(model.taskSessions(task.id)) { session in
+            Button("Open \(session.title)") { openSession?(session) }.disabled(openSession == nil)
+            if !session.taskPrimary, session.titleSource != .unavailable {
+                Button("Rename \(session.title)…") { model.beginSessionRename(session) }
             }
-            if expanded || hovering {
-                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task) } }
-                        .accessibilityIdentifier("task-reopen")
-                } else {
-                    Button(task.runtime?.completionPending == nil ? "Complete" : "Retry completion") { Task { await model.completeTask(task) } }
-                        .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
-                    }
-                    .accessibilityIdentifier("task-pause-resume")
-                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
-                        .accessibilityIdentifier("task-abandon")
-                }
+            if session.work?.kind != .task {
+                Button("Bind \(session.title) to Task…") { model.beginSessionBinding(session) }
             }
         }
-        .disabled(unavailable)
-        .font(Typography.body(11))
-        .fixedSize()
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
-            Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task) }
-            }
-        } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
-        }
+        if let error = model.navigation.taskRunDrafts[task.id]?.error { Text(error) }
+    }
+
+    private func copy(_ value: String, key: String) {
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(value, forType: .string) { copied = key }
     }
 }
+
 
 /// The Task due date stays beside the conversation and in Task details.
 struct TaskDueDateView: View {

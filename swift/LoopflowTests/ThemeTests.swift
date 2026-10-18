@@ -45,7 +45,7 @@ struct ThemeTests {
         return url
     }
 
-    @Test func loopflowLightRetainsItsOriginalDesign() {
+    @Test func loopflowUsesNeutralWorkSelection() {
         let light = ThemeDefinition.light.palette.definition
         #expect(ThemeDefinition.light.name == "Loopflow Light")
         #expect(light.background.hex == 0xFAF8F5)
@@ -57,15 +57,15 @@ struct ThemeTests {
         #expect(light.accent.hex == 0x722F37)
         #expect(light.accentHover.hex == 0x5E2630)
         #expect(light.emphasisInk.hex == 0x722F37)
-        #expect(light.workSelectedFill.hex == 0x7A333D)
-        #expect(light.workSelectedText.hex == 0xFFFAF3)
+        #expect(light.workSelectedFill.hex == 0xE1D9CE)
+        #expect(light.workSelectedText.hex == 0x2A2624)
         let dark = ThemeDefinition.dark.palette.definition
         #expect(ThemeDefinition.dark.name == "Loopflow Dark")
         #expect(dark.background.hex == 0x2B3036)
         #expect(dark.surface.hex == 0x343B44)
         #expect(dark.accent.hex == 0x722F37)
         #expect(dark.emphasisInk.hex == 0xCEBFA9)
-        #expect(dark.workSelectedFill.hex == 0xAB9B86)
+        #expect(dark.workSelectedFill.hex == 0x515A65)
         // Loopflow's authored design is independent of the import conversion.
         #expect(light != GhosttyThemeMapping.palette(ThemeDefinition.light.terminal))
         #expect(dark != GhosttyThemeMapping.palette(ThemeDefinition.dark.terminal))

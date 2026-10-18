@@ -1,0 +1,194 @@
+#if os(macOS)
+import Foundation
+import SwiftUI
+import Testing
+import ViewInspector
+@testable import Loopflow
+@testable import LoopflowMac
+
+@Suite("Built-in retained Work grids")
+@MainActor
+struct WorkSelectionTests {
+    private let repo = "/fixture"
+    private let repository = "repo"
+    private var wave: WorkWorkspaceKey { .init(repository: repository, kind: .wave, id: "wave") }
+    private var root: WorkWorkspaceKey { .init(repository: repository, kind: .repository, id: repository) }
+    private func member(_ id: String, attention: Bool = false) -> ViewMember {
+        .init(work: .init(repository: repository, kind: .task, id: id), title: id,
+              attention: attention, primarySession: "session-\(id)")
+    }
+
+    @Test("Attention sizes automatic layouts; resizing freezes survivors and arrivals append")
+    func retainedArrangement() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: "machine")
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") }, repoPath: repo)
+        model.bindWorkspaces(registry, repository: repository)
+        let a = member("a", attention: true), b = member("b"), c = member("c")
+        _ = registry.workspace(for: a.work, title: "a", location: nil)
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [a, b])], reason: "")
+        let container = try #require(registry.retained(wave))
+        guard case .split(_, _, _, let ratio) = container.selectionLayout else { Issue.record("Expected split"); return }
+        #expect(abs(ratio - 2.0 / 3) < 0.001)
+        container.resizeSelection(between: a.work, and: b.work, ratio: 0.6)
+        let arranged = try #require(container.selectionLayout)
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [b, member("a"), c])], reason: "")
+        #expect(container.selectionLayout?.keys == [a.work, b.work, c.work])
+        guard case .split(_, let survivors, _, _) = container.selectionLayout else { Issue.record("Expected arrival split"); return }
+        #expect(survivors == arranged)
+        model.applySelectionPlans(nil, reason: "Store unavailable")
+        #expect(container.selectionLayout?.keys == [a.work, b.work, c.work])
+        #expect(container.selectionError == "Store unavailable")
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [c, b])], reason: "")
+        #expect(container.selectionLayout?.keys == [b.work, c.work])
+        #expect(registry.retained(a.work) != nil)
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [])], reason: "")
+        #expect(container.selectionLayout == nil)
+        #expect(container.members == [])
+        #expect(registry.retained(a.work) != nil)
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [b])], reason: "")
+        #expect(container.selectionLayout == .workspace(b.work))
+    }
+
+    @Test("The production center and sidebar read plans without acquiring; enter and Back retain panes and drafts")
+    func renderAndReturn() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering cannot execute") }
+        let registry = SessionsWorkspaceRegistry(localMachineId: "machine")
+        let model = WorkModel(query: query, repoPath: repo)
+        let view = SessionsContentView(model: model, repoPath: repo, workspaces: registry,
+            machineId: "machine", repository: repository, query: query)
+        let a = member("a"), b = member("b")
+        model.applySelectionPlans([ViewPlan(owner: wave, members: [a, b]), ViewPlan(owner: root, members: [a, b])], reason: "")
+        let workspace = registry.workspace(for: a.work, title: "a", location: nil)
+        let location = WorkspaceIdentity(machineId: "machine", worktree: "/fixture/a")
+        workspace.multiplexer.load(sessionId: "session-a", location: location)
+        let pane = workspace.multiplexer.focusedPane
+        let original = try renameFixtureRecord("session-a", title: "A primary", work: .task(id: "a"))
+        var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        wire["task_primary"] = true
+        wire["state"] = "unknown"
+        wire["workspace"] = ["machine_id": "machine", "worktree": location.worktree, "task_id": "a", "unavailable": NSNull()]
+        let primary = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        registry.sessionStore(repository: repository, repoPath: repo, query: query).reconcile([primary])
+        #expect(TaskPaneProjection.resolve(in: workspace.multiplexer, sessions: [primary]) == .pane(id: pane.id))
+        let files = workspace.files(taskId: "a", issue: "a", cwd: location.worktree, query: query)
+        let draft = files.document("notes.md")
+        draft.editor.string = "unsaved draft"
+        model.select(wave.reference)
+        let container = try #require(registry.retained(wave))
+        let geometry = container.selectionLayout
+        _ = try view.body.inspect().find(viewWithAccessibilityIdentifier: "work-selection-wave")
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        _ = try sidebar.inspect().find(viewWithAccessibilityIdentifier: "work-task-a")
+        model.select(a.work.reference)
+        #expect(registry.retained(a.work) === workspace)
+        #expect(workspace.multiplexer.focusedPane == pane)
+        model.goBack()
+        #expect(model.selection == wave.reference)
+        #expect(container.selectionLayout == geometry)
+        #expect(files.document("notes.md") === draft)
+        #expect(draft.editor.string == "unsaved draft")
+        #expect(workspace.multiplexer.focusedPane == pane)
+        #expect(registry.surfaces.surfaceIncarnation(for: .session("session-a", machineId: "machine")) == nil)
+    }
+
+    @Test("Sidebar sections label shared attention and keep quiet Tasks and Waves distinct")
+    func sidebarSections() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") }, repoPath: repo)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "machine")
+        model.bindWorkspaces(registry, repository: repository)
+        let a = member("a", attention: true), b = member("b")
+        let waveMember = ViewMember(work: wave, title: "Wave", attention: false, primarySession: nil)
+        model.applySelectionPlans([ViewPlan(owner: root, members: [a, b, waveMember])], reason: "")
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        for label in ["AVAILABLE", "TASKS", "WAVES"] {
+            _ = try sidebar.inspect().find(text: label)
+        }
+        try sidebar.inspect().find(viewWithAccessibilityIdentifier: "work-task-b").button().tap()
+        #expect(model.selection == b.work.reference)
+        #expect(registry.retained(b.work)?.title == b.title)
+        #expect(registry.retained(b.work)?.multiplexer.focusedPane.content == .empty)
+    }
+
+    @Test("Explicit opening resolves a grid Task and explains unavailable planning")
+    func openingWithoutPlanning() async throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Planning unavailable") }
+        let model = WorkModel(query: query, repoPath: repo)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "machine")
+        model.bindWorkspaces(registry, repository: repository)
+        let a = member("a")
+        model.applySelectionPlans([ViewPlan(owner: root, members: [a])], reason: "")
+        model.select(a.work.reference)
+        await model.openTaskConversation(a.work.id)
+        #expect(model.taskOpening?.status == .failed)
+        #expect(model.taskLinkReading.errorMessage == "Planning unavailable")
+        #expect(model.showsTaskLink)
+        #expect(model.selection == a.work.reference)
+    }
+
+    @Test("Repeated Tasks mount only the first visible occurrence regardless of focus")
+    func firstOccurrence() throws {
+        let registry = SessionsWorkspaceRegistry()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") }, repoPath: repo)
+        model.bindWorkspaces(registry, repository: repository)
+        let a = member("a")
+        model.applySelectionPlans([ViewPlan(owner: root, members: [a]), ViewPlan(owner: wave, members: [a])], reason: "")
+        model.select(nil)
+        model.select(wave.reference, besideFocused: true)
+        #expect(registry.visibleOwner(of: a.work) == root)
+        model.select(a.work.reference, besideFocused: true)
+        #expect(registry.visibleOwner(of: a.work) == root)
+        model.hideWorkspace(root)
+        #expect(registry.visibleOwner(of: a.work) == wave)
+    }
+
+    @Test("Work observation applies selection frames and failed readings preserve known membership")
+    func streamedPlans() async throws {
+        let (frames, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
+        let observation = WorkObservation(frames: frames, request: { _ in }, cancel: { continuation.finish() })
+        let query = RegistryQuery(watchWork: { observation }) { _, _ in throw RegistryQueryError("Unexpected execution") }
+        let model = WorkModel(query: query, repoPath: repo)
+        let registry = SessionsWorkspaceRegistry()
+        model.bindWorkspaces(registry, repository: repository)
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel(); continuation.finish() }
+        let plans = [ViewPlan(owner: root, members: [member("a")])]
+        continuation.yield(WorkFrame(sequence: 1, answers: 100, home: "/fixture-home", revisions: nil,
+            unavailable: nil, content: .selections(.init(repo: repo, plans: plans)), wire: nil))
+        try await eventually { model.selectionPlans.value == plans }
+        continuation.yield(WorkFrame(sequence: 2, answers: 100, home: "/fixture-home", revisions: nil,
+            unavailable: "read failed", content: .selections(nil), wire: nil))
+        try await eventually { model.selectionPlans.errorMessage == "read failed" }
+        #expect(model.selectionPlans.value == plans)
+        #expect(registry.retained(root)?.selectionLayout?.keys == plans[0].members.map(\.work))
+    }
+
+    @Test("Find Work spans repositories and routes another repo without changing this window")
+    func crossRepositoryPalette() async throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
+        let remoteWave = try #require(roadmap.waves.first)
+        let remoteTask = try #require(remoteWave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Routing must not launch here") }, repoPath: repo)
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+        var destinations: [(String, URL?)] = []
+        model.openRepository = { destinations.append(($0, $1)) }
+        #expect(model.searchDestinations(remoteTask.task.identifier).contains { $0.id == .task(remoteTask.id) })
+        await model.openPaletteTask(remoteTask.id)
+        model.openPaletteWave(remoteWave.wave.id)
+        #expect(destinations.count == 2)
+        #expect(destinations.allSatisfy { $0.0 == remoteWave.wave.repo })
+        #expect(destinations.first?.1?.host == "task")
+        #expect(destinations.last?.1?.host == "open")
+        #expect(model.repoPath == repo)
+        #expect(model.selection == nil)
+    }
+
+    private func eventually(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline { await Task.yield() }
+        try #require(condition())
+    }
+}
+#endif

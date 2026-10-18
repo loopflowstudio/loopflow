@@ -470,7 +470,6 @@ struct WorkModelStreamTests {
         cache.saveSelection(.task(id: "issue-review"), repo: "/src/loopflow")
         cache.flush()
         let cacheURL = directory.appendingPathComponent("workspace.json")
-        let saved = try Data(contentsOf: cacheURL)
         let feed = WorkFeed()
         let registry = SessionsWorkspaceRegistry()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
@@ -483,8 +482,11 @@ struct WorkModelStreamTests {
         workspace.multiplexer.load(sessionId: "retained")
         let layout = workspace.multiplexer.layout
         model.navigation.renaming = SessionRenameDraft(sessionId: "retained", text: "Unsent name")
-        let initial = model.visibleWork.outline(collapsed: [], search: "", planningReadable: true)
+        let initial = model.visibleWork.waves.flatMap(\.tasks)
         #expect(initial.contains { $0.id == key })
+        // Explicit opening now persists the working slot before any failed read.
+        cache.flush()
+        let saved = try Data(contentsOf: cacheURL)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         try await feed.opened(1)
@@ -492,7 +494,7 @@ struct WorkModelStreamTests {
         await feed.send(WorkFrame(sequence: 1, answers: scope.id, home: "/home", revisions: nil,
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage?.contains("t.paused") == true }
-        #expect(model.visibleWork.outline(collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+        #expect(model.visibleWork.waves.flatMap(\.tasks).map(\.id) == initial.map(\.id))
         #expect(model.selection == key.work)
         #expect(workspace.multiplexer.layout == layout)
         for (index, truncated) in [false, true].enumerated() {
@@ -511,12 +513,11 @@ struct WorkModelStreamTests {
             await feed.send(try fixture.frame("planning", sequence: index + 2, answers: scope.id,
                 body: "{\"roadmap\":\(roadmap),\"waves\":\(fixture.wavesJSON)}"))
             try await eventually { model.roadmap.errorMessage?.contains(truncated ? "incomplete" : "Task snapshot") == true }
-            #expect(model.visibleWork.outline(collapsed: [], search: "", planningReadable: false).map(\.id) == initial.map(\.id))
+            #expect(model.visibleWork.waves.flatMap(\.tasks).map(\.id) == initial.map(\.id))
             #expect(model.selection == key.work)
             #expect(model.navigation.renaming?.text == "Unsent name")
             #expect(registry.retained(workspaceKey) === workspace)
             #expect(workspace.multiplexer.layout == layout)
-            #expect(!model.repositoryEntryReady)
             #expect(model.showsSavedPlanning)
             cache.flush()
             #expect(try Data(contentsOf: cacheURL) == saved)
@@ -675,7 +676,7 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         let listed = { (filter: TaskHistoryFilter) -> Bool in
             guard let row = model.task(id: "issue-now")?.task else { return false }
-            return filter.includes(row.task, condition: row.condition, now: model.taskHistoryNow)
+            return filter.includes(row.task, condition: row.condition, now: Date())
         }
         var completed = TaskHistoryFilter()
         completed.showCompleted = true
@@ -931,27 +932,77 @@ struct WorkModelStreamTests {
         #expect(model.task(id: "issue-now") != nil)
     }
 
-    @Test("A reader that ends leaves the last reading marked unavailable, then recovers")
+    @Test("New turns clear previews and an ended reader recovers without reviving old output")
     func readerEndRecovers() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
-        let model = WorkModel(query: fixture.streaming(feed))
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
+        let now = Date(timeIntervalSince1970: 1000)
+        let entries = try fixture.sessionEntries()
+        let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
+        model.navigation.retainWorkingTask("preview-task")
+        var answers = 0
+        func sessionFrame(_ sequence: Int, turn: String?, available: Bool = false) throws -> WorkFrame {
+            var entry = original
+            entry["state"] = "active"
+            entry["task_ids"] = ["preview-task"]
+            entry["program_status"] = available ? NSNull() : ["seen": true, "records": [[
+                "state": "working", "id": NSNull(), "kind": NSNull(), "progress": NSNull(),
+                "app": NSNull(), "title": NSNull(), "msg": NSNull()
+            ]]] as Any
+            entry["attention"] = available ? "available" : NSNull()
+            entry["agent_process_id"] = "retained-agent"
+            entry["preview"] = turn.map {
+                ["provider_thread": "thread", "provider_turn": $0, "source": "codex",
+                 "observed_at": 995, "text": $0] as [String: Any]
+            } ?? NSNull() as Any
+            let json = String(decoding: try JSONSerialization.data(withJSONObject: [entry]), as: UTF8.self)
+            return try fixture.sessionsFrame(sequence: sequence, answers: answers, repo: "/src/loopflow", entries: json)
+        }
+        func preview() -> String {
+            let records = model.sessions.value ?? []
+            return SessionProgramStatus(sessions: records, unavailable: model.sessions.errorMessage)
+                .preview(now: now, fallback: "brief", sessions: records).text
+        }
 
         try await feed.opened(1)
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
-        try await eventually { model.roadmap.value != nil }
+        answers = try await feed.request(1).id
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
+        await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
+        try await eventually { preview() == "Previous result" }
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs == ["preview-task"])
+        await feed.send(try sessionFrame(3, turn: nil))
+        try await eventually { preview() == "Summary · brief" }
+        await feed.send(try sessionFrame(4, turn: "New turn output"))
+        try await eventually { preview() == "New turn output" }
+        model.navigation.sidebarFilter = .running
+        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
-        try await eventually { model.roadmap.errorMessage == "reader exited" }
+        try await eventually { model.sessions.errorMessage == "reader exited" }
+        #expect(model.sessions.value?.first?.preview?.text == "New turn output")
+        #expect(preview() == "Summary · brief")
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.navigation.sidebarFilter = .working
+        #expect(model.sidebarTaskIDs == ["preview-task"])
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 
         try await feed.opened(2, within: .seconds(5))
-        // The new reader numbers its frames from one.
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: nil, renaming: "After restart"))
+        answers = try await feed.request(2).id
+        // Planning recovery alone cannot revive the old Session reading.
+        await feed.send(try fixture.planningFrame(sequence: 1, answers: answers, renaming: "After restart"))
         try await eventually { model.task(id: "issue-now")?.task.task.name == "After restart" }
-        #expect(model.roadmap.errorMessage == nil)
+        #expect(preview() == "Summary · brief")
+        await feed.send(try sessionFrame(2, turn: nil))
+        try await eventually { model.sessions.errorMessage == nil }
+        #expect(preview() == "Summary · brief")
+        await feed.send(try sessionFrame(3, turn: "Recovered result", available: true))
+        try await eventually { preview() == "Recovered result" }
     }
 
     private func eventually(_ condition: @MainActor () -> Bool) async throws {

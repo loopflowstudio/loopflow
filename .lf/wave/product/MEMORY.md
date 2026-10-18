@@ -147,8 +147,8 @@ October 13 replaced their visible strip with sidebar switching, retaining owners
 hide/reopen retains panes, drafts and zoom.
 `37fa81df13`: terminals retain captured locations; Files/logs prefer recorded
 owners, including unavailable ones. Pane moves preserve locations, not execution
-transfer. Shell-default Split and
-no-acquisition bare navigation survive. Logs reuse the matching local stream or
+transfer. October 17 replaces shell-per-pane Split with Shell tabs;
+no-acquisition bare navigation survives. Logs reuse the matching local stream or
 owner-pinned reads. Foreign physical Task IDs cannot disprove local correspondence;
 late preparation retains its original Work. Files refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
 this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
@@ -441,45 +441,22 @@ observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
 Provider adoption and composed native-pane acceptance remain unproven; this does
 not establish status in cmux or herdr.
 
-## Current Tasks and completion history (2026-10-02)
+## Current Tasks and completion history (reconciled 2026-10-17)
 
-LOO-371's retired measurements and observer failures remain in the archive below;
-LOO-408 owns installed settlement.
+Jack Heart's October 17 Console approval replaces the sidebar's completion-range
+controls and selected-terminal-Task exception with explicit retained working order.
+The October 2–14 decisions, Growth counterexample, inline-edit semantics and proof
+limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading, and
+[the review evidence](../../../docs/reviews/task-history.md). Historical records
+survive; navigation/filtering never completes Work or evicts panes and drafts.
 
-Jack Heart requested current work without obsolete duplicates, completed Tasks
-hidden initially, and Show completed with 7 days, positive N days and All time
-(LOO-369). Coordinator guidance limits that control to successful completions;
-it is not attributed as a separate decision from Jack. Canceled/duplicate history
-remains in the shared inventory and Linear. Window-local filters affect displayed
-rows and their count, never Task lifecycle, Flow settlement or Session membership.
-
-The observed Growth snapshot already contained canceled states; the Task summary
-dropped them. Preserve provider state separately from successful completion and
-carry actual completion time. Unknown dates belong only in All time; reopening
-makes planning current despite an old timestamp. Equal-revision storage enrichment
-may fill a genuinely absent completion-date key, but cannot change an observed
-null or date. Snapshot acquisition and unrelated updates cannot establish recency.
-
-Jack relayed that removed checkouts alone must not keep settled Tasks current.
-Started and unresolved execution own ordinary sidebar membership (LOO-462).
-October 14: Jack Heart selected an exception for the selected completed/canceled
-Task, with green Completed/red Canceled header text. Navigation away removes the
-exception; Back restores the same workspace and row without reopening execution.
-History/filter changes never evict native surfaces, files or drafts. Real CLI
-create/start/complete/abandon reaches the open subscription and production outline;
-retained native-view identity is synthetic/unmounted, not native acceptance.
-
-Jack Heart approved inline checkbox/number editing: remembered range starts at
-seven days; zero means All Tasks. Enter/blur applies, Escape cancels, invalid
-drafts preserve the range. Wave-scoped native text preserves glyph placement and
-scrolls long integers. Prototype details: the archive below.
-
-Earlier gate, seven focused tests and Jack's Growth screenshot are preserved at
-`c89c789fd1:.lf/wave/product/MEMORY.md`, this heading, and
-[the review evidence](../../../docs/reviews/task-history.md). The offline capture
-had no successful completions or Sessions: recency, native focus/continuation,
-live refresh and retained-Session review remain unproved. No sustained-use KR or
-external-progress credit follows.
+Preserve provider cancellation separately from successful completion and actual
+completion time. Reopening makes planning current despite an old timestamp;
+snapshot acquisition cannot establish recency. Equal-revision enrichment may fill
+an absent key, never replace an observed null or date. Missing checkouts alone
+cannot establish settlement. CLI subscription fixtures establish neither mounted
+input continuity nor native acceptance. LOO-408 retains installed settlement;
+retired numeric/soak obligations remain historical. No external-progress credit follows.
 
 ## Ask removal decision (2026-10-01)
 
@@ -641,23 +618,44 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (September 26–October 15)
+## Workspace redesign decisions (reconciled 2026-10-17)
 
-Jack Heart rejected September 26's composition despite structural fidelity:
-its warmth and chrome did not match the mocks. Full decisions, deferred owners
-and counterevidence: `77ff8e8eb8:.lf/wave/product/MEMORY.md`, **Workspace redesign decisions (2026-09-26)**.
-Retain serif repo/page/Task titles, sans Wave rows without decorative glyph/count,
-shared Work binding and native surface ownership. October 14's semantic roles
-cover both appearances, superseding the light-first emphasis.
+Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
+superseding dashboard/grid, favorites, attention sorting and automatic sidebar
+collapse proposals. Stable working Tasks precede direct Wave rows in one scrolling
+sidebar. One native titlebar holds breadcrumbs, tools and actions; Lato controls,
+mono excerpts, neutral selection and quiet Dark burgundy replace older serif/Ink
+on Paper navigation. Prior rejected compositions and limits remain at
+`ac973064c6:.lf/wave/product/MEMORY.md`, this heading.
 
-October 15, LOO-462: Jack selected Ink on Paper, one Work selection mirrored in
-Needs you, drill-in Repo/Wave/Task navigation and nested Work/pane layouts.
-Command-click adds adjacent Work; ordinary click replaces the focused slot;
-close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
-Back/Forward replace persistent adjacent columns and visible history buttons.
-Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
-Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
-acceptance. Cross-launch layout restoration remains excluded.
+Explicitly opening started, unpaused work appends once; attention/filter changes
+cannot reorder slots. Pause hides membership without discarding retained order,
+panes or drafts. Completion does not automatically remove retained work. A Wave
+pairs its conversation with all current planned and started Tasks. The shared
+default query excludes unstarted/terminal Tasks, so its members cannot stand in
+for planning inventory. Repository/Wave selection stays passive; unstarted Task
+entry shows its brief. LOO-505 supplies standalone membership and moves.
+
+Jack accepted LOO-497's Shell/Files tabs in the same cut: one Shell tool, multiple
+terminal tabs; Files owns document/Brief/Changes tabs. Hiding tools preserves their
+clients and drafts. Existing workspace/layout/surface owners remain authoritative;
+the unused compact tile renderer was removed. LOO-497 retains dashboards/public
+APIs, LOO-416 cross-launch attachment, LOO-452 rebinding. Cmd-number uses stable
+slots; Ctrl-Tab cycles them; history retains Cmd-brackets. Publication for demo
+review is authorized, not merge or Task completion.
+
+Preview freshness is separate from execution state: Codex records thread/turn/time,
+clears on turn start and fences replacement attachments. Swift pairs status/text
+from one Session; running text falls back to summary after 30 seconds, Available
+results retain their age. Other providers lack qualified previews.
+
+October 17 recovery: the demo retained a Codex draft but Claude → Codex failed
+before Claude saved a transcript; later transfer succeeded. Preparation now reads
+requested-provider history before terminal release; failure preserves concurrent
+Session updates and permits retry. Missing history is not an empty conversation.
+An exited status writer restarts on a later event. Headless checks cover refusal,
+retry, new-turn clearing and observation recovery; mounted retention and visual
+acceptance remain open. Jack Heart cut Open in editor on October 17.
 
 October 15, LOO-492: Jack Heart clarified that nested corner curves need even
 clearance; text padding alone does not satisfy the defect. The implementation
@@ -733,18 +731,17 @@ preserve the failed attempts and superseded proposals. Current usage lives in
 
 ## Accepted calmer workspace (2026-09-25)
 
-Repo → Wave → Task is current navigation (LOO-462); conversations live inside
-retained Work. Project owns chapters. Optimize one repository: connected
-header/sidebar and bottom search. The older started-only rule does not hide
+LOO-489's October 17 Console contract above owns current navigation; conversations
+live inside retained Work and Project owns chapters. The older started-only rule does not hide
 new standalone captures under LOO-505. Starting work is durable evidence, independent
 of Session/process liveness; inspection never starts Task execution. The accepted
 September 30 desktop discovery operation ensures primary repo/Wave conversations;
 ordinary list/status reads remain read-only. Wave detail holds its
 objective, Current KRs and complete Task plan, including unstarted Tasks.
 
-October 15's Work navigation/selection and themes supersede September's D
-composition (`ffdcf68935:.lf/wave/product/MEMORY.md`, this heading).
-Retain serif titles, sans body, lowercase mono Flow skills and one Task title.
+October 17's Console supersedes the older navigation typography and chrome;
+September's D composition remains at `ffdcf68935:.lf/wave/product/MEMORY.md`, this heading.
+Retain lowercase mono Flow skills and one Task title.
 Description holds current scope/blockers; collapsed Comments hold dated updates.
 Omit ELSEWHERE, Local work evidence and preview jargon.
 

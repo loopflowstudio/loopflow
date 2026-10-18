@@ -221,7 +221,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL)
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
+        (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
+         AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
+         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -286,6 +289,11 @@ fn read_summary(
             .transpose()?
             .flatten();
         Ok(crate::session::SessionSummary {
+            preview: row
+                .get::<_, Option<String>>(36)?
+                .map(|json| serde_json::from_str(&json))
+                .transpose()?
+                .filter(|_| live),
             terminal_id: row.get::<_, Option<String>>(35)?.filter(|_| live),
             task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
             primary_scope: row.get(26)?,

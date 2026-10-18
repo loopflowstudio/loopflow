@@ -51,7 +51,7 @@ struct MultiplexerLayoutTests {
         let split = layout.splitting(base.id, axis: .vertical, newPane: shell)
 
         #expect(split.allPanes.count == 2)
-        #expect(split.pane(for: shell.id)?.content == .shell(location: nil))
+        #expect(split.pane(for: shell.id) == shell)
         if case .split(let axis, _, _, let ratio) = split {
             #expect(axis == .vertical)
             #expect(ratio == 0.5)

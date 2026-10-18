@@ -1,0 +1,22 @@
+# LOO-489 current direction
+
+Jack Heart approved A/B/A plus cross-repository ⌘K, then on October 17 requested
+bringing the query system into LOO-489 to render repo/Wave multi-Session center
+views. Editable Dashboards and lf desktop API are explicitly excluded.
+The current scope and ownership are in dashboard-design.md. Earlier dependency
+reports are superseded: a preserved LOO-497 read-model snapshot is available here;
+LOO-489 owns this integration, while LOO-497 retains editor/API delivery.
+Native demo remains after implementation; no design reapproval is required.
+
+October 17 implementation assumption: built-in view arrangement remains window-owned
+in SessionsWorkspace, matching the bounded scope's explicit exclusion of durable
+Dashboard/pane storage. Cross-repository Wave jumps carry a Wave ID through the
+existing repository window router; Task jumps keep the existing Task link path.
+Passive matching never allocates a Task workspace merely to show a placeholder.
+
+October 17 merge resolution: the accepted built-in-grid design supersedes the
+merged sidebar dropdown. Preserve newer companion-pane, theme and divider
+behavior. Pre-resolution inputs are in `history/2026-10-17-conflict-input/`;
+the incoming implementation is also preserved by stash commit
+`8fed423c6214da591305320b341cefdd2fc58da0`. The later concept-review proposal
+remains unaccepted; no passive attachment or lifecycle changes were added.

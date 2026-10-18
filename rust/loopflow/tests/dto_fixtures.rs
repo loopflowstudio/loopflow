@@ -536,6 +536,10 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
+    let WorkContent::Selections(Some(selections)) = &frames[10].content else {
+        panic!("selection plans frame");
+    };
+    assert_eq!(selections.plans[0].members[0].title, "Retained work");
     assert!(matches!(frames[8].content, WorkContent::Checkpoint));
     assert_eq!(frames[8].answers, Some(8));
     let WorkContent::TaskHistory(Some(history)) = &frames[9].content else {

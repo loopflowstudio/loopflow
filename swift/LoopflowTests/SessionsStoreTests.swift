@@ -21,7 +21,34 @@ struct SessionsStoreTests {
         #expect(prepared.record.title == previous.record.title)
         #expect(prepared.launchId != previous.launchId)
         #expect(prepared.launchArguments == ["lf", "session", "connect", "main", "--takeover", "--agent", agent])
+        #expect(prepared.presentationProvider == agent)
         #expect(item(store, "other")?.state == .pending)
+    }
+
+    @Test("Prepared Sessions accept current provider and terminal evidence without losing their launch")
+    func preparationRetainsCommandButRefreshesProvider() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            session(id: "main", state: "closed", replacing: true)
+        })
+        store.reconcile(try records([session(id: "main", state: "active")]))
+        try await store.switchProvider("main", to: "claude")
+        let launch = try #require(item(store, "main")).launchArguments
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(session(id: "main", state: "active").utf8)) as? [String: Any])
+        wire["provider"] = "claude"
+        wire["agent_process_id"] = "new-agent"
+        wire["terminal_ids"] = ["current-terminal"]
+        let observed = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        store.reconcile([observed])
+        let prepared = try #require(item(store, "main"))
+        #expect(prepared.record.provider == "claude")
+        #expect(prepared.record.agentProcessId == "new-agent")
+        #expect(prepared.launchArguments == launch)
+        #expect(SessionProviderReading(record: prepared.record, terminal: "current-terminal")?.agentProcessId == "new-agent")
+        #expect(SessionProviderReading(record: prepared.record, terminal: "previous-terminal") == nil)
+        store.recordPaneLive("main")
+        store.reconcile([observed])
+        #expect(item(store, "main")?.agentOverride == nil)
+        #expect(item(store, "main")?.presentationProvider == "claude")
     }
 
     @Test("A refused provider change preserves the original Session presentation")
@@ -33,6 +60,44 @@ struct SessionsStoreTests {
         let previous = item(store, "main")
         await #expect(throws: RegistryQueryError.self) { try await store.switchProvider("main", to: "claude") }
         #expect(item(store, "main") == previous)
+    }
+
+    @Test("A failed transfer retains concurrent Session updates and can retry")
+    func failedTransferCanRetry() async throws {
+        let (requests, request) = AsyncStream<Void>.makeStream()
+        let (responses, response) = AsyncStream<Bool>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args.suffix(2) == ["--agent", "codex"] else {
+                throw RegistryQueryError("Transfer preparation did not select Codex")
+            }
+            request.yield(())
+            for await fails in responses {
+                if fails { throw RegistryQueryError("Claude transcript was not found. Retry after Claude saves its first turn.") }
+                break
+            }
+            return session(id: "main", state: "closed", replacing: true)
+        })
+        let original = try #require(records([session(id: "main", state: "closed")]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        let previous = try #require(item(store, "main"))
+        let transfer = Task { try await store.switchProvider("main", to: "codex") }
+        for await _ in requests { break }
+        #expect(item(store, "main") == previous)
+        let updated = try #require(records([session(id: "main", state: "active")
+            .replacingOccurrences(of: "Design the control surface", with: "Retained conversation")]).first)
+        store.reconcile([updated])
+        response.yield(true)
+        await #expect(throws: RegistryQueryError.self) { try await transfer.value }
+        #expect(item(store, "main")?.record.title == "Retained conversation")
+        #expect(item(store, "main")?.launchId == previous.launchId)
+        #expect(item(store, "main")?.agentOverride == nil)
+        response.yield(false)
+        try await store.switchProvider("main", to: "codex")
+        #expect(item(store, "main")?.id == original.id)
+        #expect(item(store, "main")?.state == .prepared)
+        #expect(item(store, "main")?.presentationProvider == "codex")
     }
 
     @Test("Reset prepares the successor and keeps the old conversation accessible", arguments: [false, true])

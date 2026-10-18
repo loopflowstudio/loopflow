@@ -652,7 +652,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Add a shell on the recorded Machine beside a pane without changing selection
+    /// Add a shell tab on the Task’s recorded Machine
     Shell {
         #[arg(long)]
         pane: Option<String>,
@@ -670,15 +670,6 @@ pub enum DesktopCommand {
     FlowLog {
         #[arg(long)]
         pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Add a shell split beside an exact pane, retaining selection and clients
-    Split {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long, value_enum)]
-        axis: commands::desktop::DesktopSplitAxis,
         #[arg(long)]
         json: bool,
     },

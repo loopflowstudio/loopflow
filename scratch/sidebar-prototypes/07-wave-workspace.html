@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Loopflow · Wave workspace</title><link rel="stylesheet" href="wave-workspace.css"></head>
+<body>
+<header class="study"><div><span>LOO-489 · STUDY 07</span><strong>The Wave as a workspace</strong></div><a href="06-dashboards.html">Repo dashboard study ↗</a><p>Illustrative Work · No execution</p></header>
+<div class="window">
+  <header class="titlebar"><span class="traffic" aria-hidden="true">● ● ●</span><span>loopflow</span><span class="window-path">Product</span></header>
+  <div class="app">
+    <aside class="sidebar">
+      <a class="repo" href="06-dashboards.html">loopflow</a>
+      <h2>Needs you · 1</h2>
+      <button class="attention" data-open="LOO-489">Dashboard design<small>Product · LOO-489</small></button>
+      <h2>Waves</h2>
+      <button class="wave current" id="wave-home">Product<small>A calm place to choose, shape,<br>and finish useful work.</small></button>
+      <button class="side-task" data-open="LOO-487">Terminal feedback and color<small>LOO-487 · Working</small></button>
+      <div class="other-wave">Infrastructure<small>Reliable tools. Fewer interruptions.</small></div>
+      <div class="sidebar-bottom">⌕ &nbsp; Find Work <kbd>⌘K</kbd></div>
+    </aside>
+    <main>
+      <header class="workbar"><strong>Product</strong><span>Wave</span><button id="reset-layout" title="Restore the initial pane proportions">Reset split</button></header>
+      <div class="split" id="split">
+        <section class="session-pane" aria-label="Wave session">
+          <header class="pane-header"><span class="program-icon">⌘</span><div><strong>Codex</strong><small>Product conversation</small></div><span class="pane-status">Waiting</span><button id="focus-session" title="Focus Wave conversation" aria-label="Focus Wave conversation">⌖</button></header>
+          <div class="session-body">
+            <p class="session-location">loopflow.product-wave <span>· main</span></p>
+            <div class="message user"><span>you</span><p>What should we pick up next in Product?</p></div>
+            <div class="message assistant"><span>codex</span><p>The dashboard design is waiting for review. Terminal feedback is still moving, and the workspace restoration Task is paused.</p><p>The current chapter has six Tasks that haven’t started. You can inspect their briefs in the Task pane.</p><p class="quiet">Your place here stays with the Wave.</p></div>
+            <div class="composer"><span aria-hidden="true">›</span><textarea id="wave-draft" aria-label="Product conversation draft" placeholder="Continue the conversation…"></textarea></div>
+            <div class="session-foot"><span>Product conversation</span><span>Draft retained while browsing Tasks</span></div>
+          </div>
+        </section>
+        <div class="divider" id="divider" role="separator" aria-label="Resize Wave session and Task list" aria-orientation="vertical" aria-valuemin="40" aria-valuemax="78" aria-valuenow="62" tabindex="0"></div>
+        <section class="task-pane" aria-label="Wave Tasks">
+          <header class="pane-header"><span class="program-icon">☷</span><div><strong>Tasks</strong><small>Product</small></div><span class="task-count">9</span></header>
+          <div class="task-browser" id="task-browser">
+            <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="task-search" type="search" aria-label="Find a Task" placeholder="Find a Task…"><kbd>⌕</kbd></div>
+            <div class="task-scroll" id="task-list"></div>
+            <footer class="task-footer">Open Tasks · All chapters</footer>
+          </div>
+          <div id="task-detail" class="task-detail" hidden></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<footer class="study-footer"><span>Wave conversation + Task browser · 62 / 38 starting split</span><span>Drag the divider, or focus it and use ← →</span></footer>
+<script src="wave-workspace.js"></script>
+</body></html>

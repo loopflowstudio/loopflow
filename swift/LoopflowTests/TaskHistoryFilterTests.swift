@@ -97,39 +97,12 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
     }
 
-    @Test func pausedWorkLeavesSidebarButRemainsInWavePlan() throws {
-        let row = try task("started", date: nil, runtime: "paused", missing: true, review: true)
-        let projection = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [])
-        #expect(!projection.inWorkingSet)
-        let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
-        let retained = TaskProjection(id: projection.id, task: row, sessions: [try #require(sessions.first)])
-        #expect(!retained.inWorkingSet)
-        #expect(retained.sessions.first?.id == sessions.first?.id)
-        #expect(visible(row, TaskHistoryFilter()))
-        #expect(row.runtime?.status == .paused)
-        #expect(row.runtime?.status.isTerminal == false)
-    }
-
-    @Test func locallySettledWorkLeavesTheSidebarBeforePlanningCatchesUp() throws {
-        func sidebar(_ row: RoadmapTask) -> Bool {
-            TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: []).inWorkingSet
-        }
-        for runtime in ["done", "abandoned"] {
-            let row = try task("unstarted", date: nil, runtime: runtime, missing: true)
-            #expect(!sidebar(row))
-            // The Wave plan still lists what planning calls open.
-            #expect(visible(row, TaskHistoryFilter()))
-        }
-        #expect(sidebar(try task("unstarted", date: nil, runtime: "ready", missing: true)))
-    }
-
     @Test func unresolvedFlowAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
         #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
         let retained = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
         #expect(!visible(row, TaskHistoryFilter()))
-        #expect(!retained.inWorkingSet) // A Session alone does not make settled Task work current.
         #expect(retained.sessions.first?.id == sessions.first?.id)
     }
 
@@ -249,72 +222,28 @@ struct TaskHistoryFilterTests {
         }
     }
 
-    @Test func waveControlsFilterRowsAndCountTogether() async throws {
-        let wire = try roadmapWire()
-        let payload = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
-        let catalog = try String(contentsOf: fixtures.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
-        let query = RegistryQuery { args, _ in args == ["flow", "list", "--json"] ? catalog : payload }
+    @Test func waveInventoryShowsEveryCurrentTaskAndSelectionDoesNotStartWork() async throws {
+        let payload = String(decoding: try JSONSerialization.data(withJSONObject: roadmapWire()), as: UTF8.self)
+        let query = RegistryQuery { _, _ in payload }
         let roadmap = try await query.roadmap()
         let wave = try #require(roadmap.waves.first)
         let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), workActivity: .loading, repos: [])
-        await model.loadFlowCatalog()
         model.select(.wave(id: wave.wave.id))
-        model.taskHistoryNow = now
-        var opened: WorkReference?
-        let view = WorkSurfaceView(model: model, onOpenTask: { opened = $0 })
-        func rows() throws -> [String] {
-            try view.inspect().findAll(ViewType.Button.self).compactMap { button in
-                guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("loopflow-task-") else { return nil }
-                return String(id.dropFirst("loopflow-task-".count))
-            }
+        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
+        let overview = WaveOverview(model: model, roadmap: wave)
+        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-objective").text().string()
+            == (wave.wave.goal.isEmpty ? "No objective recorded." : wave.wave.goal))
+        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()
+            == wave.wave.status.label.capitalized)
+        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-project-history").button().isDisabled() == false)
+        #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-realign-projects").button().isDisabled() == false)
+        for task in wave.tasks.items {
+            let button = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(task.id)").button()
+            try button.tap()
+            #expect(model.selection == .task(id: task.id))
         }
-        func checkCount() throws {
-            let visibleRows = try rows()
-            for id in [318, 315, 314, 313, 310, 308, 307] {
-                #expect(!visibleRows.contains("LOO-\(id)"))
-            }
-            #expect(visibleRows.contains("unresolved"))
-            for id in visibleRows {
-                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(id)").button()
-                #expect(button.isDisabled() == false)
-                try button.tap()
-                #expect(opened == .task(id: id))
-            }
-            let heading = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-count")
-            let count = try heading.findAll(ViewType.Text.self).map { try $0.string() }
-            #expect(count.contains(String(visibleRows.count)))
-        }
-        try checkCount()
-        _ = try view.inspect().find(text: "Canceled")
-        #expect(try rows() == ["LOO-309", "LOO-316", "LOO-312", "LOO-306", "reopened", "unresolved"])
-        let control = try view.inspect().find(TaskHistoryInlineControl.self).actualView()
-        let native = TaskHistoryInlineView(filter: control.filter, palette: control.palette, onChange: { control.filter = $0 })
-        native.activateLabel()
-        model.taskHistoryNow = now
-        #expect(try rows().contains("recent"))
-        try checkCount()
-        #expect(try !rows().contains("old"))
-        native.activateLabel()
-        native.number.string = "30"
-        native.finishEditing()
-        model.taskHistoryNow = now
-        #expect(try rows().contains("old"))
-        try checkCount()
-        native.activateLabel()
-        native.number.string = "-1"
-        native.finishEditing()
-        #expect(model.taskHistoryFilters[wave.wave.id]?.days == 30)
-        try checkCount()
-        _ = try view.inspect().find(text: "Enter a whole number of 0 or more. Previous range kept.")
-        native.activateLabel()
-        native.number.string = "0"
-        native.finishEditing()
-        #expect(try rows().contains("unknown"))
-        try checkCount()
-        _ = try view.inspect().find(text: "Completed · date unavailable")
-        #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
-        // A hidden Task can still be inspected; Rust's admission decision
+        // Every Task can still be inspected; Rust's admission decision
         // governs Start in its workspace header.
         var work = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])

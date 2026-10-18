@@ -40,7 +40,7 @@ struct WorkCLISubscriptionTests {
         let original = try #require(registry.selectedWork.flatMap(registry.retained))
         original.multiplexer.newShell(command: ["/bin/cat"], location: original.location)
         let originalLayout = original.multiplexer.layout
-        let originalFiles = original.files(taskId: seedID, issue: seedID, cwd: fixture.repo.path, query: query)
+        let originalFiles = original.files(issue: seedID, cwd: fixture.repo.path, query: query)
         let originalDraft = originalFiles.document("notes.txt")
         originalDraft.editor.string = "retain original draft"
 
@@ -48,11 +48,9 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        #expect(rows(model).allSatisfy { $0.task == nil }) // Unstarted backlog stays hidden.
+        #expect(selectedPlanMembers(model).allSatisfy { $0.work.kind != .task }) // Unstarted backlog stays hidden.
         _ = try await fixture.run(["-b", "task", "run", id])
-        try await eventually { rows(model).filter { $0.task?.id == id }.count == 1 }
-        let row = try #require(rows(model).first { $0.task?.id == id })
-        #expect(row.ancestors.map(\.key.work) == [.wave(id: wave.wave.id)])
+        try await eventually { selectedPlanMembers(model).filter { $0.work.id == id }.count == 1 }
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(registry.retained(original.key) === original)
         #expect(original.multiplexer.layout == originalLayout)
@@ -75,7 +73,7 @@ struct WorkCLISubscriptionTests {
         let surface = registry.surfaces.view(for: surfaceID)
         #endif
         workspace.multiplexer.show(.files(taskId: id))
-        let files = workspace.files(taskId: id, issue: task.task.identifier, cwd: checkout.worktree, query: query)
+        let files = workspace.files(issue: task.task.identifier, cwd: checkout.worktree, query: query)
         let draft = files.document("notes.txt")
         draft.editor.string = "unsaved Task draft"
         let layout = workspace.multiplexer.layout
@@ -85,9 +83,7 @@ struct WorkCLISubscriptionTests {
         let state = action == "complete" ? "completed" : "canceled"
         try await eventually { model.task(id: id)?.task.task.state == state }
         #expect(model.selection == .task(id: id))
-        #expect(rows(model).filter { $0.task?.id == id }.count == 1)
-        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-task-\(id)")
+        #expect(selectedPlanMembers(model).isEmpty) // Built-in plans belong to repositories and Waves, not Tasks.
         let terminalTask = try #require(model.task(id: id)?.task)
         let header = TaskWorkflowHeader(model: model, task: terminalTask, work: model.taskWork[id])
         let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
@@ -103,16 +99,16 @@ struct WorkCLISubscriptionTests {
         #expect(draft.editor.string == "unsaved Task draft")
 
         model.select(.wave(id: wave.wave.id))
-        #expect(!rows(model).contains { $0.task?.id == id })
+        #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         // A later subscription reply updates history without restoring the old selection.
         _ = try await fixture.run(["task", "edit", id, "--title", "Updated after navigation"])
         try await eventually { model.task(id: id)?.task.task.name == "Updated after navigation" }
         #expect(model.selection == .wave(id: wave.wave.id))
-        #expect(!rows(model).contains { $0.task?.id == id })
+        #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         #expect(registry.retained(workspace.key) === workspace)
         model.goBack()
         #expect(model.selection == .task(id: id))
-        #expect(rows(model).filter { $0.task?.id == id }.count == 1)
+        #expect(selectedPlanMembers(model).isEmpty)
         let returned = TaskWorkflowHeader(model: model, task: try #require(model.task(id: id)?.task),
                                           work: model.taskWork[id])
         #expect(try returned.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status")
@@ -148,19 +144,25 @@ struct WorkCLISubscriptionTests {
         let machineId = try #require(machine["id"] as? String)
         let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
         model.confirmMachine(machineId)
-        model.bindWorkspaces(registry, repository: "repo")
+        let repository = try await query.repositoryIdentity(cwd: fixture.repo.path)
+        model.bindWorkspaces(registry, repository: repository.id)
         model.select(.task(id: id))
         let key = try #require(registry.selectedWork)
         let workspace = try #require(registry.retained(key))
         let location = try #require(workspace.location)
-        let draft = workspace.files(taskId: id, issue: id, cwd: location.worktree).document("notes.txt")
+        let draft = workspace.files(issue: id, cwd: location.worktree).document("notes.txt")
         draft.editor.string = "Unsent direction"
         let layout = workspace.multiplexer.layout
         _ = try await fixture.run(["wave", "ensure", "product", "--json"])
-        _ = try await fixture.run(["task", "move", id, "--wave", "product"])
+        let before = try #require(model.task(id: id)?.task)
+        await model.moveTask(before, toWave: "product")
+        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
+                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
-        _ = try await fixture.run(["task", "move", id, "--no-wave"])
+        await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
+        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
+                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))
         #expect(registry.selectedWork == key)
@@ -171,9 +173,8 @@ struct WorkCLISubscriptionTests {
         await keeping.value
     }
 
-    private func rows(_ model: WorkModel) -> [WorkOutlineRow] {
-        model.visibleWork.outline(collapsed: [], search: model.navigation.search,
-                                  planningReadable: model.roadmap.errorMessage == nil, selection: model.selection)
+    private func selectedPlanMembers(_ model: WorkModel) -> [ViewMember] {
+        model.selectionPlans.value?.first { $0.owner.reference == model.selection }?.members ?? []
     }
 
     private func eventually(_ condition: @MainActor () -> Bool) async throws {
@@ -209,6 +210,9 @@ private struct WorkCLIFixture: Sendable {
                      ["config", "user.email", "fixture@example.invalid"], ["add", "."], ["commit", "-m", "Fixture"]] {
             _ = try await run(args, executable: "/usr/bin/git")
         }
+        let remote = root.appendingPathComponent("planning.git").path
+        _ = try await run(["init", "--bare", remote], executable: "/usr/bin/git")
+        _ = try await run(["remote", "add", "origin", remote], executable: "/usr/bin/git")
     }
 
     func process(_ args: [String], executable: String? = nil) -> Process {

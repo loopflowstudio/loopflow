@@ -1,0 +1,140 @@
+# LOO-489 — Built-in multitask views
+
+## Accepted scope — October 17, 2026
+
+Jack Heart resolved the circular LOO-489/497 dependency: bring LOO-497's query
+system into this diff so repository and Wave selections render multiple Sessions
+in the center. Jack explicitly excluded editable Dashboards and the `lf desktop`
+API. This is the current implementation scope, superseding broader integration
+requirements in older notes. Design is approved: 01 A Breadcrumbs, 02 B Attention
+first, 03 A At the end, Available, and cross-repository ⌘K Find Work. Edit view is
+separate and excluded. Opening work in another repo uses that repo's own window.
+
+Use built-in repo/Wave selections, not custom editable expressions. Repos include
+started unfinished Tasks and Waves; Waves include their started unfinished Tasks
+and, where supported by the existing model, descendants/child Waves. Paused/idle
+started Tasks remain. Attention changes only reorder/resize automatic layouts;
+after arranging, surviving positions and proportions remain and arrivals append.
+Task selection shows its full retained workspace. Returning to its container
+preserves layout, pane, Session, file draft and unsent input identity.
+
+## Source and handoff
+
+Renderer foundation commit: `8fcda67e3305a001d19aa5c9205eff11e8202ed0`.
+It extracts `WorkspacePanesView` from `SessionsView`, supplies explicit workspace
+and caller-owned focus, and resolves tile face through `TaskPaneProjection`:
+explicit zoom or unique nonclosed primary, never ordinary focused pane.
+Five focused tests passed; native continuity is still unproved.
+
+LOO-497's shared selection/default-resolution and observer sources are preserved
+verbatim under `scratch/history/query-source-2026-10-17/` with `.txt` suffixes and
+SHA-256 manifest. The destination is the working reference; source checkout stays
+unchanged. That snapshot includes its larger implemented Dashboard/pane record
+system for context, not permission to import the entire feature. Adopt only the
+cohesive query/read machinery needed for built-in views. Source reading errors
+and incomplete data remain explicit; missing data must not remove known members.
+The older plan is archived at `history/2026-10-17-before-native-grid.txt`.
+
+LOO-497 owns editable Dashboard/editor, schema/persistence and desktop API delivery.
+LOO-489 owns this native grid/navigation integration and its required read contract.
+No circular wait remains. LOO-497 received this ownership split in its existing
+Session. Shell/Files tab semantics and LOO-416 transport are separate committed or
+in-progress handoffs; do not import them merely to render built-in session grids.
+Do not add/reintroduce shell-per-pane features. Existing tools keep their owner.
+
+## Implementation status — October 17
+
+The bounded native integration is implemented. `work::selection::default_plans`
+reads Started/terminal/attention facts in the Work reader's pinned snapshot and
+emits the `selections` part. Swift consumes its typed plans without evaluating
+membership. Container Work retains geometry in the existing SessionsWorkspace;
+Task leaves reference the sole retained workspace. Resizing freezes survivor
+ratios and appends arrivals. Failed readings keep known membership with an error.
+Passive matching creates no Task pane, checkout, provider or attachment. Missing
+primary content remains explicit. Title-bar hierarchy, scoped sidebar and
+cross-repository palette/window routing consume those same identities.
+
+Remaining acceptance belongs to gate and native demo: affected suites, real
+mounted terminal continuity, geometry/focus and the selected visual treatment.
+No native live-input or cross-launch restoration claim follows from headless tests.
+
+## Delete — do not maintain
+
+Removed `TaskProjection.inWorkingSet`, `WorkProjection.outline`,
+`WorkOutlineSubject/Row`, `WorkAttentionItem`, `WorkNavigatorProjection`,
+`navigatorSelection` and the Swift attention evaluator;
+retired their exclusive tests. Shared plans now own membership and attention.
+Removed the leftover `WorkNavigation.search`/`listScrollOffset` state and the
+`incompletePlanningRetainsWork` test of planning-derived sidebar membership.
+`WorkSelectionTests.renderAndReturn` exercises the surviving sidebar and center
+from shared plans without planning data; Wave-detail recovery coverage remains.
+Removed automatic repository-entry acquisition (`repositoryEntryReady` and the
+SessionsContentView lifecycle callback), the persistent sidebar search and its
+Wave-only root list. Existing WorkLayoutView now renders both container and outer
+geometry; no second renderer or layout store. Preserve exact Session menu opening,
+Task/Workflow actions, metadata links, Files ownership, repo windows and native
+terminal identities. New coverage exercises shared plans through WorkModel,
+registry and actual center/sidebar rendering, including failed reads and drafts.
+
+Layout departures now collapse in one tree traversal through `WorkLayout.filter`,
+also used by single-workspace removal. Surviving splits retain their proportions;
+empty containers can accept arrivals without discarding retained workspaces.
+Optional membership distinguishes unread from read-empty without a parallel flag.
+The navigator uses its synthesized initializer; README search guidance now matches
+the palette instead of the removed sidebar filter. Removed the merged dropdown,
+`navigationBar`, `expandedWaves` and `pinNavigator`; contextual Task actions now
+live in the toolbar. Keep the upstream companion panes, theme handling, sizing
+constraints and intercepted keyboard shortcuts.
+
+Review findings fixed: passive empty Task allocation could preempt alias
+canonicalization; matching now keeps references. Wave navigation markers cannot
+suppress an actual Wave Session mount. Metadata links remain outside the row
+button. Selection errors are independent of planning failures in the Work stream.
+Post-merge review found that unopened shared members were rejected without
+planning data. Selection validation and titles now accept the shared reading;
+explicit conversation opening resolves the Task and reports lookup failures.
+Sidebar labels distinguish Available, quiet Tasks and Waves. The Rust membership
+test now compares membership independently of random IDs across equal ranks.
+
+## Delivery and acceptance
+
+This coherent diff delivers built-in multi-Session center views; editable
+Dashboards and the lf desktop API stay out. Broader durable/cross-machine
+restoration and transport remain separately owned, not prerequisites for this
+bounded rendering change. Preserve all local prototype evidence and historical
+briefs. Publish for demo review through the Task's pursue edge; no merge or Task
+completion before native review. Do not replay the earlier foundation work.
+
+Check: `scripts/test_desktop.sh --filter 'WorkSelectionTests|WorkNavigationTests|WorkDestinationTests' -Xswiftc -gnone` PASS (92 tests, `/tmp/loo-489-selection-tests.log`); focused pane/metadata, theme, DTO and subscription suites PASS in preceding runs; `cargo test -p loopflow --lib work::selection::tests`, `--lib lf::commands::work_watch::tests`, `--test integration dto_fixtures::work_frame`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Gate owns broader suites; native demo owns mounted continuity and visual judgment.
+
+
+## Concept review — October 17 (proposed, not accepted)
+
+Jack Heart requested concept-review after narrowing the diff to built-in
+repo/Wave views. Existing accepted A/B/A, cross-repo Find Work and scope exclusions
+remain. The consequential mismatch is visibility versus execution: the current
+implementation leaves a running Task's primary Session as a placeholder unless
+its workspace/surface has already been opened here. A new window full of running
+Tasks can therefore look empty, defeating the see-several-Sessions experience.
+
+Proposed usage: “Open a Wave to see its existing primary Sessions immediately.
+Enter a Task to use its full workspace; return to the same grid. Viewing work
+never starts an agent. If a Session cannot be viewed, its tile explains why and
+offers recovery without changing other tiles. A Task with no Session shows its
+brief.” This proposes passive viewing of existing Sessions, not creating or
+resuming execution or taking another client's input ownership.
+
+Layer consequence: shared queries own membership; retained Task workspaces own
+panes and drafts; lifecycle owns passive attachment and exact terminal identity.
+Selecting a Wave requests views of existing Sessions; entering a Task changes
+presentation. Starting/resuming remains an explicit execution action. No desktop
+CLI API or Dashboard editor is implied. Lost viewing connection retains the tile,
+arrangement and drafts; recovery reconnects to the same Session without relaunch.
+
+Unresolved product choice: should a newly opened Wave display all existing primary
+Sessions, or only Sessions already opened in this window? Counterexample to the
+former: another client owns exclusive input and the transport cannot observe;
+the grid must explain that state, never steal the client. Next proof: a fresh
+window with several already-running Tasks, an unavailable/remote Session and one
+Task with no Session, followed by enter/return and viewer disconnect/reconnect.
+No implementation change or execution restart is authorized by this proposal.

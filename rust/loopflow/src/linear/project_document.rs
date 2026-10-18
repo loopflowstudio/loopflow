@@ -6,7 +6,7 @@ use crate::work::wave::metrics::MetricTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectField {
-    Workflow,
+    HistoricalWorkflow,
     Krs,
     Targets,
 }
@@ -15,7 +15,6 @@ pub(crate) enum ProjectField {
 #[derive(Debug)]
 pub(crate) struct ProjectDocument<'a> {
     pub metric_targets: Vec<MetricTarget>,
-    pub workflow: String,
     pub krs: Vec<ProjectKR>,
     source: &'a str,
     fields: Vec<(std::ops::Range<usize>, ProjectField)>,
@@ -62,8 +61,7 @@ impl ProjectDocument<'_> {
             result.push_str(&self.source[range.clone()]);
         }
         let parsed = parse_project_document(&result)?;
-        if parsed.workflow != self.workflow
-            || parsed.krs != self.krs
+        if parsed.krs != self.krs
             || parsed.metric_targets != self.metric_targets
             || parsed.description().trim() != description.trim()
         {
@@ -98,15 +96,13 @@ impl ProjectDocument<'_> {
 }
 
 pub(crate) fn parse_project_document(source: &str) -> LinearResult<ProjectDocument<'_>> {
-    use ProjectField::{Krs, Targets, Workflow};
+    use ProjectField::{HistoricalWorkflow, Krs, Targets};
     let mut section = None;
     let mut fields = Vec::new();
     let mut fence: Option<(char, usize, bool)> = None;
     let mut fenced_targets = false;
     let mut targets = Vec::new();
     let mut raw_targets = Vec::new();
-    let mut workflow = String::new();
-    let mut authored_as_flow = String::new();
     let mut krs = Vec::new();
     let mut current_kr: Option<ProjectKR> = None;
     let mut offset = 0;
@@ -144,14 +140,10 @@ pub(crate) fn parse_project_document(source: &str) -> LinearResult<ProjectDocume
                 continue;
             }
         }
-        if let Some(value) = trimmed.strip_prefix("workflow:") {
-            workflow = value.trim().to_string();
-            fields.push((range, Workflow));
-            continue;
-        }
-        if let Some(value) = trimmed.strip_prefix("flow:") {
-            authored_as_flow = value.trim().to_string();
-            fields.push((range, Workflow));
+        // Retain released declarations byte-for-byte when editing other fields;
+        // they no longer select a Workflow or need value/precedence parsing.
+        if trimmed.starts_with("workflow:") || trimmed.starts_with("flow:") {
+            fields.push((range, HistoricalWorkflow));
             continue;
         }
         if trimmed.starts_with('#') {
@@ -229,30 +221,18 @@ pub(crate) fn parse_project_document(source: &str) -> LinearResult<ProjectDocume
             LinearError::Message(format!("invalid Project metric targets: {error}"))
         })?
     };
-    if workflow.is_empty() {
-        workflow = authored_as_flow;
-    }
     crate::work::project::validate_metric_targets(&metric_targets).map_err(LinearError::Message)?;
     fields.sort_unstable_by_key(|(range, _)| range.start);
     Ok(ProjectDocument {
         metric_targets,
-        workflow,
         krs,
         source,
         fields,
     })
 }
 
-pub(crate) fn render_project_content(
-    workflow: &str,
-    krs: &[ProjectKR],
-    metric_targets: &[MetricTarget],
-) -> String {
+pub(crate) fn render_project_content(krs: &[ProjectKR], metric_targets: &[MetricTarget]) -> String {
     let mut content = render_metric_targets(metric_targets);
-    let workflow = workflow.trim();
-    if !workflow.is_empty() {
-        content.push_str(&format!("\n\nworkflow: {workflow}"));
-    }
     content.push_str("\n\n");
     content.push_str(&render_krs(krs));
     content.push('\n');
@@ -284,27 +264,21 @@ mod tests {
     #[test]
     fn project_content_without_workflow_preserves_krs() {
         let content = parse_project_document("## KRs\n- [ ] Keep this proof\n").unwrap();
-        assert!(content.workflow.is_empty());
         assert_eq!(content.krs[0].text, "Keep this proof");
-        let rendered =
-            render_project_content(&content.workflow, &content.krs, &content.metric_targets);
+        let rendered = render_project_content(&content.krs, &content.metric_targets);
         assert!(!rendered.contains("flow:"));
         let reparsed = parse_project_document(&rendered).unwrap();
-        assert_eq!(reparsed.workflow, content.workflow);
         assert_eq!(reparsed.krs, content.krs);
         assert_eq!(reparsed.metric_targets, content.metric_targets);
     }
 
     #[test]
-    fn a_project_written_with_a_flow_line_names_that_workflow_until_rewritten() {
-        let earlier = parse_project_document("flow: research\n\n## KRs\n").unwrap();
-        assert_eq!(earlier.workflow, "research");
-        assert!(
-            render_project_content(&earlier.workflow, &earlier.krs, &earlier.metric_targets)
-                .contains("\n\nworkflow: research\n")
-        );
-        let both = parse_project_document("flow: research\nworkflow: code\n").unwrap();
-        assert_eq!(both.workflow, "code");
+    fn released_workflow_content_is_readable_but_never_republished() {
+        let source = "flow: research\nworkflow: code\n\n## KRs\n";
+        let document = parse_project_document(source).unwrap();
+        assert!(!render_project_content(&document.krs, &document.metric_targets).contains("flow:"));
+        let edited = document.replace_description("New prose").unwrap();
+        assert!(edited.contains("flow: research\nworkflow: code\n"));
     }
 
     #[test]
@@ -323,16 +297,14 @@ mod tests {
                 holds: false,
             },
         ];
-        let rendered = render_project_content("feature", &krs, &targets);
+        let rendered = render_project_content(&krs, &targets);
         let parsed = parse_project_document(&rendered).unwrap();
-        assert_eq!(parsed.workflow, "feature");
         assert_eq!(parsed.krs, krs);
         assert_eq!(parsed.metric_targets, targets);
 
         let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
         let parsed = parse_project_document(local).unwrap();
         assert!(parsed.metric_targets.is_empty());
-        assert!(parsed.workflow.is_empty());
         assert_eq!(
             parsed.krs,
             vec![ProjectKR {

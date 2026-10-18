@@ -26,7 +26,10 @@ impl Fixture {
         );
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
-            fs::write(&script, r#"#!/usr/bin/python3
+            let source = if harness == "opencode" {
+                include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+            } else {
+                r#"#!/usr/bin/python3
 import json, os, sys, runpy
 args = sys.argv[1:]
 if '--version' in args:
@@ -53,9 +56,9 @@ if stream:
 elif os.path.basename(sys.argv[0]) == 'codex':
     sys.path.insert(0, SUPPORT_DIRECTORY)
     runpy.run_path(SUPPORT_DIRECTORY+'/native_codex.py', run_name='__main__')
-elif os.path.basename(sys.argv[0]) == 'opencode':
-    print('timestamp=2026-10-09T00:00:00Z level=INFO run=tui message=created id=ses_fixture directory='+os.getcwd(), file=sys.stderr)
-"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())).unwrap();
+"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())
+            };
+            fs::write(&script, source).unwrap();
             fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
         }
         fixture
@@ -182,7 +185,7 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
         "opencode" => {
             let config: Value = serde_json::from_str(value["opencode"].as_str().unwrap()).unwrap();
             assert_eq!(
-                config["permission"]["*"].as_str() == Some("allow"),
+                config["permissions"][0]["effect"].as_str() == Some("allow"),
                 enabled,
                 "{value}"
             );
@@ -196,21 +199,16 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        r#"#!/usr/bin/python3
-import os, subprocess, sys
-if '--version' in sys.argv:
-    print('fixture'); sys.exit(0)
-if '--session' not in sys.argv:
-    os.write(2, b'level=INFO message=created id=ses_diagnostics\n')
-else:
-    assert sys.argv[sys.argv.index('--session') + 1] == 'ses_diagnostics'
-mode = 'resume' if '--session' in sys.argv else 'launch'
-os.write(1, b'native composer\n')
-for attempt in range(3):
-    os.write(2, f'level=ERROR message="stream error" mode={mode} attempt={attempt} error="Model access is disabled"\n'.encode())
-subprocess.run(['/bin/sh', '-c', 'printf "background diagnostic\\n" >&2'], check=True)
-os.write(2, b'non-UTF8: \xff\x1b[2Junterminated')
-"#,
+        include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+            .replace("    _record_launch()\n    if False:", r#"    _record_launch()
+    mode = 'resume' if (HOME / 'opened').exists() else 'launch'
+    (HOME / 'opened').touch()
+    os.write(1, b'native composer\n')
+    for attempt in range(3):
+        os.write(2, f'level=ERROR message="stream error" mode={mode} attempt={attempt} error="Model access is disabled"\n'.encode())
+    subprocess.run(['/bin/sh', '-c', 'printf "background diagnostic\\n" >&2'], check=True)
+    os.write(2, b'non-UTF8: \xff\x1b[2Junterminated')
+    if False:"#),
     )
     .unwrap();
 
@@ -270,7 +268,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("OpenCode did not report a resumable session"),
+        stderr.contains("startup failure without a session"),
         "{stderr}"
     );
     let path = stderr
@@ -281,6 +279,49 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         fs::read(path).unwrap(),
         b"startup failure without a session\n"
     );
+}
+
+#[test]
+fn opencode_terminal_setup_failure_stops_the_private_server() {
+    let fixture = Fixture::new("opencode");
+    let source = include_str!("support/opencode_server.py")
+        .replace("__WAIT__", "False")
+        .replace(
+            "        if self.path == \"/api/event\":",
+            r#"        if self.path == "/api/event":
+            (HOME / 'server-port').write_text(str(self.server.server_port))
+            for path in Path(os.environ['LF_HOME']).glob('runs/*/*/opencode.stderr.log'):
+                path.unlink()
+                path.mkdir()"#,
+        );
+    fs::write(fixture.home.path().join("bin/opencode"), source).unwrap();
+    let mut child = fixture
+        .command()
+        .args(["-i", ":", "launch"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("terminal setup failure left the server worker waiting");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("open OpenCode diagnostics"),
+        "{output:?}"
+    );
+    let port: u16 = fs::read_to_string(fixture.home.path().join("server-port"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
 }
 
 #[test]
@@ -313,7 +354,12 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             let a = args(&first);
             a[a.iter().position(|a| *a == "--session-id").unwrap() + 1].to_string()
         } else if provider == "opencode" {
-            "ses_fixture".into()
+            args(&first)[args(&first)
+                .iter()
+                .position(|arg| *arg == "--session")
+                .unwrap()
+                + 1]
+            .to_owned()
         } else {
             first["token"].as_str().unwrap().to_string()
         };
@@ -333,6 +379,8 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert_eq!(resumed["params"]["model"], "current-model");
             assert_eq!(resumed["turns"].as_array().unwrap().len(), 2);
             assert!(!resumed["turns"][1].to_string().contains("--- keep spaces"));
+        } else if provider == "opencode" {
+            assert!(!args(&resumed).contains(&"--model"));
         } else {
             pair(&resumed, "--model", "current-model");
         }
@@ -878,13 +926,19 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
     fixture.create_wave();
     let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
         "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
-        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[2], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
+        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
     );
     fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
     fixture.settings("opencode:opencode/first-model", true, false);
     let first = fixture.run(&["-b", "--wave", "fixture", ":", "first turn"]);
-    assert_eq!(first["request"]["model"]["modelID"], "first-model");
-    assert_eq!(first["config"]["permission"]["*"], "allow");
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        )
+        .unwrap()["id"],
+        "first-model"
+    );
+    assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
     let session = fixture.session();
     fixture.settings("opencode:opencode/current-model", false, false);
     let resumed = fixture.run(&[
@@ -896,14 +950,18 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
         "next turn",
     ]);
     assert_eq!(resumed["session"], first["session"]);
-    assert_eq!(resumed["request"]["model"]["modelID"], "current-model");
-    assert!(resumed["config"]["permission"].is_null());
-    assert!(!resumed["request"]["parts"]
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        )
+        .unwrap()["id"],
+        "current-model"
+    );
+    assert!(resumed["config"]["permissions"].is_null());
+    assert!(!resumed["request"]["text"]
         .to_string()
         .contains("first turn"));
-    assert!(resumed["request"]["parts"]
-        .to_string()
-        .contains("next turn"));
+    assert!(resumed["request"]["text"].to_string().contains("next turn"));
 }
 
 #[test]
@@ -947,13 +1005,13 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
             .unwrap();
     let wave = store.list_waves(None).unwrap().into_iter().next().unwrap();
     let wave_id = wave.id().as_str();
-    let missing = fixture
+    let alias = fixture
         .command()
         .current_dir(other.path())
         .args(["resume", "--wave", wave_id, "--prepare"])
         .output()
         .unwrap();
-    assert!(!missing.status.success());
+    success(&alias);
     let first = fixture
         .command()
         .current_dir(other.path())
@@ -964,6 +1022,20 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     let prepared: Value = serde_json::from_slice(&first.stdout).unwrap();
     let id = prepared["id"].as_str().unwrap();
     let saved = store.session(id).unwrap().unwrap();
+    fs::create_dir(saved.cwd.join("nested")).unwrap();
+    for verb in ["connect", "resume"] {
+        let contextual = fixture
+            .command()
+            .current_dir(saved.cwd.join("nested"))
+            .args([verb, "--prepare", "--json"])
+            .output()
+            .unwrap();
+        success(&contextual);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&contextual.stdout).unwrap()["id"],
+            id
+        );
+    }
     let again = fixture
         .command()
         .args(["--wave", wave_id, "session", "connect", "--prepare"])
@@ -1044,7 +1116,14 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         .any(|arg| arg == "--takeover"));
     let next = fixture
         .command()
-        .args(["session", "new", id, "--json"])
+        .args([
+            "connect",
+            "--wave",
+            wave_id,
+            "--fresh",
+            "--prepare",
+            "--json",
+        ])
         .output()
         .unwrap();
     success(&next);
@@ -1062,114 +1141,126 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
 }
 
 #[test]
-fn contextual_resume_uses_repository_recency_but_unowned_worktrees_stay_local() {
+fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
     let fixture = Fixture::new("claude:sonnet");
+    fixture.repo.create_file(
+        ".lf/skills/repo/session.md",
+        "Repository conversation override\n",
+    );
     fixture.repo.stage_all();
     fixture.repo.commit("provider settings");
-    let linked = fixture.home.path().join("linked");
-    success(
-        &Command::new("git")
-            .args(["worktree", "add", "-b", "linked"])
-            .arg(&linked)
-            .current_dir(fixture.repo.path())
+    let linked = fixture.repo.create_named_worktree("unassociated");
+    let prepare = |cwd: &Path, args: &[&str]| -> Value {
+        let output = fixture
+            .command()
+            .current_dir(cwd)
+            .args(args)
+            .args(["--prepare", "--json"])
             .output()
-            .unwrap(),
+            .unwrap();
+        success(&output);
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let first = prepare(fixture.repo.path(), &["connect"]);
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
+            .unwrap();
+    assert_eq!(
+        store
+            .session(first["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap()
+            .skill
+            .as_deref(),
+        Some("repo/session")
     );
-    fixture.run(&["-i", ":", "main conversation"]);
-    let main_id = fixture.session();
+    let id = first["id"].as_str().unwrap();
+    let saved = Path::new(first["cwd"].as_str().unwrap());
+    assert_ne!(saved, fixture.repo.path());
+    fs::create_dir(saved.join("nested")).unwrap();
+    let alias = fixture.home.path().join("alias");
+    std::os::unix::fs::symlink(saved.join("nested"), &alias).unwrap();
+    for cwd in [fixture.repo.path(), saved, &saved.join("nested"), &alias] {
+        for command in [vec!["connect"], vec!["resume"], vec!["session", "resume"]] {
+            assert_eq!(prepare(cwd, &command)["id"], id);
+        }
+    }
+    // An ordinary conversation is not a primary claim for an unassociated checkout.
     success(
         &fixture
             .command()
             .current_dir(&linked)
-            .args(["-i", ":", "linked conversation"])
+            .args(["-i", ":", "local conversation"])
             .output()
             .unwrap(),
     );
     let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
-    let linked_id: String = db
-        .query_row(
-            "SELECT id FROM agent_sessions WHERE id != ?1",
-            [&main_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    // Native human recency wins over newer assistant activity and repository primaries.
-    let native = args(&fixture.received())
-        .windows(2)
-        .find(|pair| pair[0] == "--session-id")
-        .unwrap()[1]
-        .to_owned();
-    let history = fixture
-        .home
-        .path()
-        .join(format!(".claude/projects/fixture/{native}.jsonl"));
-    fs::create_dir_all(history.parent().unwrap()).unwrap();
-    fs::write(
-        &history,
-        serde_json::json!({"type":"user", "userType":"external", "sessionId": native, "timestamp":"2099-01-01T00:00:00.000Z", "message":{"content":"continue"}}).to_string() + "\n",
+    let count = || {
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap()
+    };
+    // A same-name repository under the configured lookup root must not steal
+    // the recovery command printed for this unrelated linked checkout.
+    let other = TestRepo::new();
+    let lookup_root = fixture.home.path().join("src");
+    fs::create_dir_all(&lookup_root).unwrap();
+    std::os::unix::fs::symlink(
+        other.path(),
+        lookup_root.join(fixture.repo.path().file_name().unwrap()),
     )
     .unwrap();
-    // Repository primary is a candidate, never the main-checkout default.
-    success(
-        &fixture
+    let before = count();
+    for verb in ["connect", "resume"] {
+        let output = fixture
             .command()
-            .args(["session", "ensure", "--json"])
+            .current_dir(&linked)
+            .args([verb, "--prepare"])
             .output()
-            .unwrap(),
-    );
-    let selected = fixture
+            .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("This worktree has no associated work conversation"));
+        assert_eq!(count(), before);
+        let recovery = error
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with("lf --repo "))
+            .unwrap()
+            .split("  ")
+            .next()
+            .unwrap();
+        let argv = shlex::split(recovery).unwrap();
+        let args: Vec<&str> = argv.iter().skip(1).map(String::as_str).collect();
+        assert_eq!(prepare(&linked, &args)["id"], id);
+        assert_eq!(prepare(&linked, &[verb, id])["id"], id);
+    }
+    let explanation = fixture
         .command()
-        .args(["resume", "--prepare", "--json"])
+        .args(["--explain", "--json", "connect", "--fresh"])
         .output()
         .unwrap();
-    success(&selected);
+    success(&explanation);
+    let explanation: Value = serde_json::from_slice(&explanation.stdout).unwrap();
+    assert_eq!(explanation["action"]["intent"], "start");
+    assert_eq!(explanation["resolution"]["checkout"]["value"], first["cwd"]);
+    assert_eq!(count(), before);
+    let fresh = prepare(saved, &["resume", "--fresh", "--takeover"]);
+    assert_ne!(fresh["id"], id);
+    assert_eq!(fresh["cwd"], first["cwd"]);
     assert_eq!(
-        serde_json::from_slice::<Value>(&selected.stdout).unwrap()["id"],
-        linked_id
+        prepare(fixture.repo.path(), &["connect"])["id"],
+        fresh["id"]
     );
-    db.execute(
-        "UPDATE agent_sessions SET created_at=99999999999 WHERE id=?1",
-        [&main_id],
-    )
-    .unwrap();
-    let selected = fixture
-        .command()
-        .current_dir(&linked)
-        .args(["session", "resume", "--prepare", "--json"])
-        .output()
-        .unwrap();
-    success(&selected);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&selected.stdout).unwrap()["id"],
-        linked_id
-    );
-    db.execute(
-        "UPDATE agent_sessions SET created_at=1 WHERE id=?1",
-        [&main_id],
-    )
-    .unwrap();
-    // Selection in main launches with the linked checkout's current policy.
-    fs::write(
-        linked.join(".lf/config.yaml"),
-        "agent: claude:haiku\nyolo: true\npaste: false\ndiff: false\ndiff_files: false\n",
-    )
-    .unwrap();
-    let resumed = fixture.run(&["resume"]);
-    pair(&resumed, "--resume", &native);
-    pair(&resumed, "--model", "haiku");
-    bypass(&resumed, "claude", true);
-    assert_eq!(
-        Path::new(resumed["cwd"].as_str().unwrap())
-            .canonicalize()
-            .unwrap(),
-        linked.canonicalize().unwrap()
-    );
+    assert_eq!(prepare(&linked, &["connect", id])["id"], id);
+    let another = prepare(saved, &["connect", "--fresh"]);
+    assert_ne!(another["id"], fresh["id"]);
+    assert_eq!(count(), before + 2);
     for argv in [
-        vec!["resume", &linked_id],
-        vec!["connect", &linked_id, "--wave", "fixture"],
-        vec!["--task", "missing", "connect", &linked_id],
-        vec!["session", "replace", &linked_id],
-        vec!["connect", &linked_id, "--replace"],
+        vec!["connect", id, "--fresh"],
+        vec!["resume", id, "--wave", "fixture"],
+        vec!["--task", "missing", "connect", id],
     ] {
         assert!(!fixture
             .command()
@@ -1178,6 +1269,7 @@ fn contextual_resume_uses_repository_recency_but_unowned_worktrees_stay_local() 
             .unwrap()
             .status
             .success());
+        assert_eq!(count(), before + 2);
     }
 }
 
@@ -1206,7 +1298,7 @@ exit 3
 "#,
     )
     .unwrap();
-    for argv in [vec!["resume"], vec!["connect", &id]] {
+    for argv in [["resume", &id], ["connect", &id]] {
         let result = fixture.command().args(argv).output().unwrap();
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("Native history is missing"));

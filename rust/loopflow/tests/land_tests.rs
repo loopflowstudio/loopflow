@@ -2155,6 +2155,20 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
 
 #[test]
 fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
+    waited_task_landing("review", false);
+}
+
+#[test]
+fn waited_task_landing_completes_at_workflow_end_without_another_command() {
+    waited_task_landing("end", false);
+}
+
+#[test]
+fn waited_task_landing_reports_repair_exit_before_reservation_handoff() {
+    waited_task_landing("review", true);
+}
+
+fn waited_task_landing(destination: &str, failed_startup: bool) {
     use std::time::{Duration, Instant};
 
     let repo = TestRepo::new();
@@ -2184,10 +2198,15 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
+    let workflow = if destination == "end" {
+        "nodes: {}\nedges:\n  - {from: start, to: end, flow: delivery-proof}\n"
+    } else {
+        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"
+    };
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
         (".lf/config.yaml", "agent: codex\nlinear:\n  team: team-task-pr-tests\n"),
-        (".lf/workflows/delivery-proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"),
+        (".lf/workflows/delivery-proof.yaml", workflow),
         (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
     ] {
         let path = worktree.join(path);
@@ -2211,13 +2230,35 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false, false)
         .replace("merge-head", "$head")
         .replace("watched-land", "waited-repair");
+    let repair = r#"read -r turn_start
+export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
+echo repair >> "$LF_TEST_REPAIR_LAUNCHES"
+sleep 12
+printf 'repaired feature\n' > feature.txt
+git add feature.txt && git commit -m 'Repair CI failure' >/dev/null || exit 1
+"$LF_TEST_BIN" arm --strict --title waited-repair --body Repair-without-Desktop >/dev/null 2>&1 || exit 1
+git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
+"#;
     let codex = codex_app_server_script(
-        r#"{"status":"published","summary":"The fixture check now passes."}"#, "",
-    ).replace("read -r turn_start\n", "read -r turn_start\necho repair >> \"$LF_TEST_REPAIR_LAUNCHES\"\ngit rev-parse HEAD > \"$LF_TEST_REPAIR_PROOF\"\n");
-    let _env = EnvGuard::with_lf_home(&[
-        ("gh", &gh), ("codex", &codex), ("open", noop_open_script()),
-        ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\n"),
-    ], home.path());
+        r#"{"status":"published","summary":"Published and armed the repaired head."}"#,
+        "",
+    )
+    .replace("read -r turn_start\n", repair);
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", &gh), ("codex", &codex), ("open", noop_open_script())],
+        home.path(),
+    );
+    let launcher = home.path().join("lf-delayed-repair");
+    fs::write(
+        &launcher,
+        if failed_startup {
+            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+        } else {
+            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then sleep 12; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+        },
+    )
+    .unwrap();
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let unrelated = loopflow::id::LfProcessId::new();
@@ -2232,6 +2273,8 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
         }
         cmd.current_dir(&worktree)
             .env("LF_HOME", home.path())
+            .env("LF_BIN", &launcher)
+            .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
             .env("LF_TEST_REPAIR_PROOF", &proof)
             .env("LF_TEST_REPAIR_LAUNCHES", &launches);
         cmd
@@ -2245,7 +2288,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
             .stderr(fs::File::create(&err).unwrap())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(45);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
@@ -2297,21 +2340,77 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
         [time::OffsetDateTime::now_utc().unix_timestamp() + 60],
     )
     .unwrap();
+    let original_head = repo.head_sha();
     let (status, output, error) = run();
+    if failed_startup {
+        assert_eq!(status.code(), Some(3), "{output}\n{error}");
+        assert!(
+            error.contains("repair owner exited before claiming its reservation"),
+            "{error}"
+        );
+        assert!(!launches.exists());
+        assert_eq!(repo.head_sha(), original_head);
+        let retained: (String, String, Option<String>) = db
+            .query_row(
+                "SELECT state,requested_head_sha,merge_commit FROM pr_landings",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, ("blocked".into(), original_head, None));
+        return;
+    }
     assert!(status.success(), "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
+    let repaired_head = fs::read_to_string(&proof).unwrap();
+    assert_ne!(repaired_head.trim(), original_head);
+    let published = Command::new("git")
+        .args(["rev-parse", "refs/heads/waited-repair"])
+        .current_dir(repo.bare_path())
+        .output()
+        .unwrap();
+    assert!(published.status.success());
+    assert_eq!(
+        String::from_utf8(published.stdout).unwrap().trim(),
+        repaired_head.trim()
+    );
+    let retained: (String, String) = db
+        .query_row(
+            "SELECT requested_head_sha,observed_head_sha FROM pr_landings",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        retained,
+        (repaired_head.trim().into(), repaired_head.trim().into())
+    );
     assert!(
         output.contains("Pull request merged; Task completion can proceed"),
         "{output}"
     );
-    let workflow: (String, String) = db
+    let node: String = db
         .query_row(
-            "SELECT node,graph FROM task_workflows WHERE task_id=?1",
+            "SELECT node FROM task_workflows WHERE task_id=?1",
             [fixture.task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(workflow.0, "review");
+    assert_eq!(node, destination);
+    let expected_state = if destination == "end" {
+        "done"
+    } else {
+        "active"
+    };
+    let state = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(fixture.store.task_state(&fixture.task.id))
+        .unwrap();
+    assert_eq!(
+        state == loopflow::durable::TaskState::Done,
+        destination == "end",
+        "the Flow must settle completion before returning, without a status command"
+    );
     let status = command()
         .args(["task", "status", "INF-123", "--json"])
         .output()
@@ -2323,8 +2422,8 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
     );
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        status["execution"]["status"], "active",
-        "merge observation alone must not complete a Task"
+        status["execution"]["status"], expected_state,
+        "only an edge reaching end authorizes Task completion"
     );
     assert_eq!(support::recorded_flows(home.path()).len(), 2);
 }
@@ -2333,7 +2432,7 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
 fn waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge() {
     use std::time::{Duration, Instant};
 
-    // Reap the waiting CLI even if an assertion fails; never leave a 30-minute waiter.
+    // Reap the waiting CLI even if an assertion fails; never leave an unbounded waiter.
     struct Waiter(std::process::Child);
     impl Drop for Waiter {
         fn drop(&mut self) {

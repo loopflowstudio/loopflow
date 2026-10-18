@@ -298,9 +298,10 @@ mod tests {
             let project = store.ensure_wave_project(repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
+                    repository_id: store.ensure_repository(repo).unwrap(),
                     due_date: None,
                     id: id.clone(),
-                    project_id: project.id,
+                    project_id: Some(project.id),
                     title: repo.into(),
                     description: String::new(),
                 })

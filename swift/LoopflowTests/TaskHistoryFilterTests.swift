@@ -36,6 +36,7 @@ struct TaskHistoryFilterTests {
         evidence["items"] = rows
         waves[0]["tasks"] = evidence
         root["waves"] = [waves[0]]
+        root["tasks"] = evidence
         return root
     }
 
@@ -321,7 +322,7 @@ struct TaskHistoryFilterTests {
         let unstarted = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work))
         for id in ["LOO-318", "recent", "LOO-309"] {
             let task = try #require(model.task(id: id)?.task)
-            let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(unstarted))
+            let header = TaskWorkflowHeader(model: model, task: task, work: .available(unstarted))
             let start = try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
             #expect(start.isDisabled() == (id != "LOO-309"))
         }

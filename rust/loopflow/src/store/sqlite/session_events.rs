@@ -481,7 +481,8 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES(?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, false)
@@ -521,6 +522,26 @@ mod tests {
         assert_eq!(late.wave_id, None);
         assert_eq!(new.task_id.as_deref(), Some(task.as_str()));
         assert_eq!(new.wave_id.as_deref(), Some(wave.as_str()));
+        store.move_task(&task, Some(&project), None).unwrap();
+        let detached = store.session_turn_origin(&session.id, &attachment).unwrap();
+        store
+            .record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after)
+            .unwrap();
+        store
+            .record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let before_move = history
+            .iter()
+            .find(|event| event.provider_turn.as_deref() == Some("dispatched-before-move"))
+            .unwrap();
+        let after_move = history
+            .iter()
+            .find(|event| event.provider_turn.as_deref() == Some("dispatched-after-move"))
+            .unwrap();
+        assert_eq!(before_move.wave_id.as_deref(), Some(wave.as_str()));
+        assert_eq!(after_move.wave_id, None);
+        assert_eq!(after_move.task_id.as_deref(), Some(task.as_str()));
     }
 
     #[test]
@@ -1188,8 +1209,9 @@ mod tests {
                 "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
                 rusqlite::params![project.as_str(), wave],
             ).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute(
-                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at) VALUES(?1,?2,'issue-proof','PROOF-1',1)",
+                "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue-proof','PROOF-1',1)",
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }

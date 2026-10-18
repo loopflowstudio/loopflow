@@ -206,7 +206,7 @@ impl Workflow {
             ));
         }
         lines.push(format!(
-            "`lf task move {issue} <node>` puts the Task at a node without running anything: to go back, skip ahead, or record work that finished elsewhere."
+            "`lf task workflow move {issue} <node>` puts the Task at a node without running anything: to go back, skip ahead, or record work that finished elsewhere."
         ));
         lines.join("\n")
     }
@@ -234,7 +234,7 @@ mod tests {
         let guidance = waiting.guidance("INF-1");
         assert!(guidance.contains("with the demo skill"), "{guidance}");
         assert!(guidance.contains("`lf -b task run INF-1 ship` moves the Task to end"));
-        assert!(guidance.contains("`lf task move INF-1 <node>`"));
+        assert!(guidance.contains("`lf task workflow move INF-1 <node>`"));
 
         // On a running edge there is nothing to choose, only that the Flow runs.
         let on_edge = |running| {

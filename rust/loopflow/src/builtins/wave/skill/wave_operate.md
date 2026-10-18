@@ -172,9 +172,9 @@ worktrees, placement and execution history.
 - Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `.lf/wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
-  with `metric_targets`, required nonempty `workflow` and `krs`; for example
-  `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
-  one In Progress Linear Project. Preserve the authored workflow and other plan fields.
+  with `metric_targets` and `krs`; for example
+  `{"metric_targets":[],"krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve the plan fields and the Wave’s workflow default.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
   process signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.

@@ -687,7 +687,9 @@ fn print_task_snapshot(
                 process.outcome.as_deref().unwrap_or("unknown")
             );
         }
-        println!("  project: {}", snapshot.project_id);
+        if let Some(project) = &snapshot.project_id {
+            println!("  project: {project}");
+        }
         if let Some(pr) = &snapshot.pr {
             println!("{}", format_task_pr_line(pr));
         }
@@ -789,36 +791,32 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                             }
                         }
                     }
-                    WaveWorkflowCommand::Source { target, name } => {
+                    WaveWorkflowCommand::Source { wave, name } => {
                         print!(
                             "{}",
-                            project::workflow_source(repo, target.as_plan_target(), name).await?
+                            project::workflow_source(repo, wave.as_deref(), name).await?
                         );
                     }
-                    WaveWorkflowCommand::Show { target, json } => {
-                        let selected = project::workflow(repo, target.as_plan_target()).await?;
+                    WaveWorkflowCommand::Show { wave, json } => {
+                        let selected = project::workflow(repo, wave.as_deref()).await?;
                         if *json {
-                            println!(
-                                "{}",
-                                serde_json::to_string_pretty(
-                                    &serde_json::json!({"project":selected.0,"sync":selected.1})
-                                )?
-                            );
+                            println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
-                            println!("{} · Workflow {}", selected.0.name, selected.0.workflow);
-                            print_planning_sync(&selected.1);
+                            println!(
+                                "{} · {}",
+                                selected.wave,
+                                selected
+                                    .workflow
+                                    .as_deref()
+                                    .unwrap_or("No workflow selected")
+                            );
                         }
                     }
-                    WaveWorkflowCommand::Set { target, name, file } => {
-                        let saved = project::set_workflow(
-                            repo,
-                            target.as_plan_target(),
-                            name,
-                            file.as_deref(),
-                        )
-                        .await?;
-                        println!("{}: Workflow {name}", saved.0.name);
-                        print_planning_sync(&saved.1);
+                    WaveWorkflowCommand::Set { wave, name, file } => {
+                        let saved =
+                            project::set_workflow(repo, wave.as_deref(), name, file.as_deref())
+                                .await?;
+                        println!("{}: Workflow {name}", saved.wave);
                     }
                 }
                 Ok(())
@@ -884,7 +882,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
-                workflow: String,
                 krs: Vec<loopflow::work::project::ProjectKR>,
                 metric_targets: Vec<loopflow::work::wave::metrics::MetricTarget>,
             }
@@ -892,7 +889,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
-                &input.workflow,
                 &input.krs,
                 &input.metric_targets,
             ))?;
@@ -981,6 +977,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Workflow { cmd } => match cmd {
+            loopflow::lf::TaskWorkflowCommand::Move {
+                issue,
+                node,
+                reason,
+            } => {
+                println!(
+                    "{}",
+                    loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
+                );
+                Ok(())
+            }
             loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
                 let workflow = loopflow::ops::task::workflow_show(issue)?;
                 println!("{}", serde_json::to_string_pretty(&workflow)?);
@@ -1005,18 +1012,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
-        TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Move {
-            issue,
-            node,
-            reason,
-        } => {
-            println!(
-                "{}",
-                loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
-            );
-            Ok(())
+        TaskCommand::List { wave, json } => {
+            loopflow::lf::commands::waves::list_tasks(repo, wave.as_deref(), *json)
         }
+        TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
             let paused = matches!(command, TaskCommand::Pause { .. });
             loopflow::ops::task::task_pause(issue, paused)?;
@@ -1037,6 +1036,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Create {
+            no_wave,
             wave,
             title,
             notes,
@@ -1046,8 +1046,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Some(notes) => Some(notes.clone()),
                 None => piped_task_report()?,
             };
-            let issue =
-                loopflow::ops::task::task_create(repo, wave.as_deref(), title.clone(), report)?;
+            let issue = loopflow::ops::task::task_create(
+                repo,
+                if *no_wave { None } else { wave.as_deref() },
+                title.clone(),
+                report,
+            )?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
@@ -1281,13 +1285,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 wave.as_deref(),
                 task_edit_update(title, notes, *rank, assignee, *unassign),
             )?;
-            println!("{}: updated task {}", result.wave, result.id);
+            println!("{}: updated", result.id);
             print_planning_sync(&result.sync);
             Ok(())
         }
-        TaskCommand::Refile { issue, wave } => {
-            let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
-            println!("{wave}: filed task {}", result.id);
+        TaskCommand::Move { issue, wave, .. } => {
+            let result = loopflow::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
+            println!("{}: membership saved", result.id);
+            print_planning_sync(&result.sync);
             Ok(())
         }
         TaskCommand::Comment {
@@ -1529,6 +1534,21 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         return loopflow::data_clone::run(cmd);
     }
+    // Installation owns its promotion/recovery authority. In particular,
+    // read-only candidate preflight must work before a first install settles.
+    let bypasses_installation_startup_gate = matches!(
+        &cli.command,
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. }
+                | loopflow::lf::SelfCommand::Doctor {
+                    planning: false,
+                    ..
+                }
+        })
+    );
+    if !bypasses_installation_startup_gate {
+        loopflow::installation::dispatch_default_cli()?;
+    }
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
     let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
@@ -1705,21 +1725,6 @@ fn run() -> anyhow::Result<()> {
             return finish_command(result);
         }
     }
-    // Installation owns its promotion/recovery authority. In particular,
-    // read-only candidate preflight must work before a first install settles.
-    let bypasses_installation_startup_gate = matches!(
-        &cli.command,
-        Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::Install { .. }
-                | loopflow::lf::SelfCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-        })
-    );
-    if !bypasses_installation_startup_gate {
-        loopflow::installation::dispatch_default_cli()?;
-    }
     if let Some(Commands::SessionTitle { provider }) = &cli.command {
         // Prompt callbacks must not enter ordinary admission or wait for its
         // durable-write budget. Keep only bounded, noninitializing observation.
@@ -1821,7 +1826,7 @@ fn run() -> anyhow::Result<()> {
     }
 }
 
-/// Preview stops before process admission, installation dispatch, Work preparation,
+/// Preview stops before process admission, Work preparation,
 /// automatic routing or provider discovery. Unsupported shapes never fall through.
 fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let invocation = definition_invocation(cli)?;
@@ -1949,9 +1954,14 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let file_draft;
     let planning = match &cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Create {
-                title, notes, wave, ..
-            },
+            cmd:
+                TaskCommand::Create {
+                    title,
+                    notes,
+                    wave,
+                    no_wave,
+                    ..
+                },
         }) => {
             piped_notes = if notes.is_none() {
                 piped_task_report()?
@@ -1959,7 +1969,11 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 None
             };
             Some((
-                wave.as_deref().or(cli.wave.as_deref()),
+                if *no_wave {
+                    None
+                } else {
+                    wave.as_deref().or(cli.wave.as_deref())
+                },
                 loopflow::ops::task::TaskPlanningRequest::Create {
                     title: title.as_deref(),
                     notes: notes.as_deref().or(piped_notes.as_deref()),
@@ -1999,10 +2013,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             },
         )),
         Some(Commands::Task {
-            cmd: TaskCommand::Refile { wave, .. },
+            cmd: TaskCommand::Move { wave, .. },
         }) => Some((
             cli.wave.as_deref(),
-            loopflow::ops::task::TaskPlanningRequest::Refile { wave },
+            loopflow::ops::task::TaskPlanningRequest::Move {
+                wave: wave.as_deref(),
+            },
         )),
         Some(Commands::Task {
             cmd: TaskCommand::Save { path, revision, .. },
@@ -2031,10 +2047,13 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     let movement = match &cli.command {
         Some(Commands::Task {
             cmd:
-                TaskCommand::Move {
-                    issue,
-                    node,
-                    reason,
+                TaskCommand::Workflow {
+                    cmd:
+                        loopflow::lf::TaskWorkflowCommand::Move {
+                            issue,
+                            node,
+                            reason,
+                        },
                 },
         }) => Some((issue.as_str(), node.as_str(), reason.as_deref())),
         Some(Commands::Task {
@@ -2059,34 +2078,22 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let connection = match &cli.command {
-        Some(Commands::Session {
-            cmd:
-                loopflow::lf::SessionCommand::Connect {
-                    id,
-                    connection,
-                    takeover,
-                    try_open,
-                },
-        }) => Some((
+    if let Some(Commands::Session {
+        cmd:
+            loopflow::lf::SessionCommand::Connect {
+                id,
+                connection,
+                takeover,
+                try_open,
+            },
+    }) = &cli.command
+    {
+        let report = loopflow::lf::commands::context::explain_session_connect(
             connection.target(cli, id.as_deref())?,
             *takeover,
             *try_open,
             connection.prepare,
-        )),
-        Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::Resume(connection),
-        }) => Some((
-            connection.target(cli, None)?,
-            false,
-            false,
-            connection.prepare,
-        )),
-        _ => None,
-    };
-    if let Some((target, takeover, try_open, prepare)) = connection {
-        let report = loopflow::lf::commands::context::explain_session_connect(
-            target, takeover, try_open, prepare,
+            connection.fresh,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2367,16 +2374,15 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         }
         if let Some(binding) = &direct_binding {
             anyhow::ensure!(
-                wave.id() == &binding.wave_id,
-                "--wave {} does not own Task {} (Wave {})",
+                Some(wave.id()) == binding.wave_id.as_ref(),
+                "--wave {} does not own Task {}",
                 wave.slug(),
-                binding.work.id(),
-                binding.wave_name
+                binding.work.id()
             );
         }
         cli.wave = Some(wave.slug().to_string());
     } else if let Some(binding) = &direct_binding {
-        cli.wave = Some(binding.wave_name.clone());
+        cli.wave = binding.wave_name.clone();
     }
     let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
         EnvGuard::set(

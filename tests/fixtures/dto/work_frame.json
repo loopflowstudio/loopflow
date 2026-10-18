@@ -15,7 +15,12 @@
     "body": {
       "roadmap": {
         "generated_at": "2026-10-05T00:00:00Z",
-        "waves": []
+        "waves": [],
+        "tasks": {
+          "state": "ok",
+          "items": [],
+          "truncated": false
+        }
       },
       "waves": []
     }

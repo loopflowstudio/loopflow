@@ -451,7 +451,8 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
         WorkValue::TaskTitle(value) => Ok(json!({"title": value})),
         WorkValue::TaskDescription(value) => Ok(json!({"description": value})),
         WorkValue::TaskAssignee(value) => Ok(json!({"assigneeId": value})),
-        WorkValue::TaskProject(value) => {
+        WorkValue::TaskProject(None) => Ok(json!({"projectId": null})),
+        WorkValue::TaskProject(Some(value)) => {
             let id = crate::durable::ProjectId::parse(value).map_err(message)?;
             let project = store
                 .sqlite
@@ -476,6 +477,13 @@ pub(super) async fn ingest_task(
     project: Option<&crate::linear::LinearProject>,
     observed_at: i64,
 ) -> OpsResult<()> {
+    let team = super::linear::repository_team_id(repo)?;
+    if issue.team_id.as_deref() != Some(team.as_str()) {
+        return Err(message(format!(
+            "Task {} must belong to repository Team {team}",
+            issue.identifier
+        )));
+    }
     let mut confirmed = None;
     if let Some(project) = project {
         if let Some(local) = store

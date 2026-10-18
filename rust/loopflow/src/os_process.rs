@@ -2,9 +2,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 
@@ -206,6 +206,8 @@ pub(crate) fn terminate_process_group(_pgid: u32) -> bool {
     false
 }
 
+#[cfg(test)]
+mod installation_tests;
 mod lifeline;
 pub(crate) use lifeline::{
     agent_process_lifeline_path, hold_agent_process_lifeline, release_agent_lifeline,
@@ -218,98 +220,53 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
-pub(crate) fn resolve_lf_binary() -> PathBuf {
-    if let Some(path) = std::env::var_os("LF_BIN").filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-    if crate::store::custom_home_selected() {
-        if let Some(path) = std::env::var_os("CARGO_BIN_EXE_lf") {
-            return PathBuf::from(path);
-        }
-    } else if let Ok(Some(cli)) =
-        crate::installation::root().and_then(|root| crate::installation::installed_cli(&root))
-    {
-        return cli.path;
-    }
-    if let Ok(current) = std::env::current_exe() {
-        if current.file_name().is_some_and(|name| name == "lf") {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lf");
-            if sibling.is_file() {
-                return sibling;
-            }
-        }
-    }
-    which_on_path(Path::new("lf")).unwrap_or_else(|| PathBuf::from("lf"))
-}
-
-/// Resolve the `lf` a Work launch will use: an absolute path that exists.
-///
-/// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
-/// against a child shell's PATH — a third binary, chosen by
-/// neither the Work nor its launcher. Work that cannot name its own
-/// executable is not created.
-pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
-    if !crate::store::custom_home_selected()
-        && std::env::var_os("LF_BIN")
+/// Resolve a stable installed entry, or an explicit private-Home executable.
+/// Keep symlinks intact so later launches pick up installation changes.
+pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
+    let candidate = if crate::store::custom_home_selected() {
+        std::env::var_os("LF_BIN")
             .filter(|value| !value.is_empty())
-            .is_none()
-    {
-        if let Some(cli) = crate::installation::installed_cli(&crate::installation::root()?)? {
-            // One read resolves this for every Task; hash unchanged bytes once.
-            static VERIFIED: Mutex<Option<(PathBuf, String, u64, SystemTime)>> = Mutex::new(None);
-            let metadata = std::fs::metadata(&cli.path)?;
-            let observed = Some((
-                cli.path.clone(),
-                cli.sha256.clone(),
-                metadata.len(),
-                metadata.modified()?,
-            ));
-            let mut verified = VERIFIED.lock().expect("verified CLI mutex poisoned");
-            if *verified != observed {
-                cli.verify()?;
-                *verified = observed;
+            .or_else(|| std::env::var_os("CARGO_BIN_EXE_lf"))
+            .map(PathBuf::from)
+    } else {
+        // The gate selects and verifies the installed artifact when executed.
+        let gate = crate::installation::entry_gate_path(
+            &crate::installation::root()?,
+            &crate::installation::ArtifactRole::Cli,
+        )?;
+        let installed = crate::installation::account_home()?.join(".local/bin/lf");
+        [gate, installed].into_iter().find(|path| path.is_file())
+    };
+    let candidate = candidate
+        .or_else(|| {
+            let current = std::env::current_exe().ok()?;
+            if current.file_name().is_some_and(|name| name == "lf") {
+                return Some(current);
             }
-            return Ok(cli.path);
-        }
-    }
-    let candidate = resolve_lf_binary();
+            let sibling = current.parent()?.join("lf");
+            sibling.is_file().then_some(sibling)
+        })
+        .unwrap_or_else(|| PathBuf::from("lf"));
     if candidate.is_absolute() {
-        return if candidate.exists() {
-            Ok(candidate)
-        } else {
-            Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the lf this Work should run",
-                candidate.display()
-            ))
-        };
+        anyhow::ensure!(
+            candidate.is_file(),
+            "lf binary {} does not exist",
+            candidate.display()
+        );
+        return Ok(candidate);
     }
     which_on_path(&candidate).ok_or_else(|| {
         anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Work should run",
+            "cannot resolve an executable path for `{}`",
             candidate.display()
         )
     })
 }
 
-/// Pin one process generation to immutable executable bytes.
-///
-/// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
-/// may repoint it while a body is running, so the body carries the
-/// canonical target in `LF_BIN`. A later body launch deliberately
-/// resolves the current Machine again and picks up the promoted binary.
-pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
-    std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
-}
-
 /// Capture the resolved CLI and Machine for a provider child.
 pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
-    crate::store::database_path_from_env()
-        .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
     Ok(crate::child::ChildExecutionContext {
-        lf_bin: resolve_pinned_lf_binary()?,
+        lf_bin: resolve_lf_binary()?,
         lf_home: crate::store::lf_home_dir(),
     })
 }
@@ -348,7 +305,7 @@ pub(crate) fn start_lf_session(
     argv: &[String],
     env: &[(&str, &str)],
     inherit: &dyn Fn(&mut std::process::Command),
-) -> Result<()> {
+) -> Result<crate::id::LfProcessId> {
     let context = execution_context()?;
     let environment = session_environment(env, &context);
     let environment = environment
@@ -356,8 +313,7 @@ pub(crate) fn start_lf_session(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect::<Vec<_>>();
     let shell = lf_session_shell_command(cwd, argv, &environment);
-    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)?;
-    Ok(())
+    crate::transport::start(&["/bin/sh".into(), "-c".into(), shell], false, cwd, inherit)
 }
 
 fn session_environment(
@@ -371,35 +327,17 @@ fn session_environment(
         crate::lf::WORK_DECLARATION_ENV,
     ]
     .into_iter()
-    .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
     .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
-    .collect::<Vec<_>>();
-    let mut child_env = env
-        .iter()
-        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-        .collect::<Vec<_>>();
-    child_env.extend(
-        inherited_context
-            .iter()
-            .map(|(key, value)| ((*key).to_string(), value.clone())),
-    );
-    extend_session_control_context(&mut child_env, context);
-    child_env
-}
-
-fn extend_session_control_context(
-    child_env: &mut Vec<(String, String)>,
-    context: &crate::child::ChildExecutionContext,
-) {
-    let pinned = [
+    .chain([
         ("LF_BIN", context.lf_bin.to_string_lossy().to_string()),
         ("LF_HOME", context.lf_home.to_string_lossy().to_string()),
-    ];
-    for (key, value) in pinned {
-        if !child_env.iter().any(|(existing, _)| existing == key) {
-            child_env.push((key.to_string(), value));
-        }
-    }
+    ])
+    .filter(|(key, _)| !env.iter().any(|(explicit, _)| explicit == key))
+    .map(|(key, value)| (key.to_string(), value));
+    env.iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .chain(inherited_context)
+        .collect()
 }
 
 pub(crate) fn lf_session_shell_command(
@@ -481,21 +419,19 @@ mod tests {
     use std::process::Command;
     use std::time::Duration;
 
-    use super::{lf_session_shell_command, pin_control_binary, terminate_process_group};
+    use super::{lf_session_shell_command, terminate_process_group};
 
     #[test]
-    fn explicit_binary_selection_applies_to_the_main_machine() {
+    fn private_home_keeps_explicit_binary_selection() {
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
         let binary = std::env::current_exe().unwrap();
         std::env::set_var("LF_BIN", &binary);
-        assert_eq!(super::resolve_lf_binary(), binary);
-        assert_eq!(super::resolve_pinned_lf_binary().unwrap(), binary);
-        // Dispatch must stay in this executable, not fall through to an
-        // installed CLI and replace the test process.
+        assert_eq!(super::resolve_lf_binary().unwrap(), binary);
         crate::installation::dispatch_default_cli().unwrap();
         std::env::set_var("LF_BIN", "/missing/selected/lf");
-        assert!(super::resolve_pinned_lf_binary().is_err());
-        assert!(crate::installation::dispatch_default_cli().is_err());
+        assert!(super::resolve_lf_binary().is_err());
     }
 
     #[test]
@@ -540,28 +476,6 @@ mod tests {
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         assert!(!output.stderr.is_empty());
-    }
-
-    #[test]
-    fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
-        let dir = tempfile::tempdir().unwrap();
-        let old = dir.path().join("lf-old");
-        let new = dir.path().join("lf-new");
-        let installed = dir.path().join("lf");
-        std::fs::write(&old, b"old").unwrap();
-        std::fs::write(&new, b"new").unwrap();
-        std::os::unix::fs::symlink(&old, &installed).unwrap();
-
-        let pinned = pin_control_binary(&installed);
-        assert_eq!(pinned, std::fs::canonicalize(&old).unwrap());
-        std::fs::remove_file(&installed).unwrap();
-        std::os::unix::fs::symlink(&new, &installed).unwrap();
-
-        assert_eq!(std::fs::read(&pinned).unwrap(), b"old");
-        assert_eq!(
-            std::fs::read(std::fs::canonicalize(&installed).unwrap()).unwrap(),
-            b"new"
-        );
     }
 
     #[test]

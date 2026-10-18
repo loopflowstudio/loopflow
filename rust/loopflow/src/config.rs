@@ -260,6 +260,8 @@ pub struct CronDef {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Default Workflow for Tasks without an explicit or Wave selection.
+    pub workflow: Option<String>,
     #[serde(default)]
     pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
@@ -362,21 +364,18 @@ fn default_summary_tokens() -> usize {
 #[serde(default)]
 pub struct AutomationConfig {
     pub retries: u32,
-    pub timeout_reruns: u32,
 }
 
 impl Default for AutomationConfig {
     fn default() -> Self {
-        Self {
-            retries: 1,
-            timeout_reruns: 1,
-        }
+        Self { retries: 1 }
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            workflow: None,
             planning: None,
             crons: None,
             context_budgets: Default::default(),

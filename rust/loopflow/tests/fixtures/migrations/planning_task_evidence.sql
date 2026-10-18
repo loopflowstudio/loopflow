@@ -11,5 +11,5 @@ INSERT INTO pm_projects(repo,provider,id,observed_at,body)
 VALUES('/repo','linear','project',31,'{"team_ids":["team"],"initiative_ids":["initiative"]}'),
       ('/repo','linear','unmapped',29,'{"team_ids":["foreign"]}');
 INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body)
-VALUES('/repo','linear','issue','TEAM-1','project',42,'{"team_id":"team"}'),
+VALUES('/repo','linear','issue','TEAM-1','project',42,'{"team_id":"team","project_id":"project"}'),
       ('/repo','linear','foreign','OTHER-2','unmapped',19,'{"team_id":"foreign"}');

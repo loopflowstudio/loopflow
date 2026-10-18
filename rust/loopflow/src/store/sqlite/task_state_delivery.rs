@@ -52,7 +52,7 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
          SELECT ?2,t.id,(SELECT max(seq) FROM task_workflow_moves WHERE task_id=t.id),?3,
              i.revision,i.state
-         FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
          LEFT JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
          WHERE t.id=?1",
         params![task.as_str(), uuid::Uuid::new_v4().to_string(), target],
@@ -136,7 +136,7 @@ impl SqliteStore {
         repo: &str,
     ) -> StoreResult<Vec<crate::work::task::Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+        let mut query = conn.prepare("SELECT t.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND (EXISTS(
                 SELECT 1 FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
                 AND d.conflict_json IS NULL

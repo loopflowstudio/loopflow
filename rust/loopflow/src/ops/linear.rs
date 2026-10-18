@@ -655,12 +655,11 @@ pub(crate) struct PrLinkageOutcome {
 /// outcome even when a later step fails.
 pub(crate) async fn link_pr_async(
     repo: &Path,
-    wave: &str,
     request: &PrLinkRequest,
     prior: &PrLinkageIds,
 ) -> PrLinkageOutcome {
-    let (ctx, _) = match resolve_context(repo, wave).await {
-        Ok(ctx) => ctx,
+    let client = match linear_client(repo).await {
+        Ok(client) => client,
         Err(error) => {
             return PrLinkageOutcome {
                 ids: prior.clone(),
@@ -668,36 +667,13 @@ pub(crate) async fn link_pr_async(
             }
         }
     };
-    let ownership = async {
-        let task = acquire_task(repo, &request.issue_id, LinearRefresh::Force).await?;
-        let owner = planning_store()
-            .await?
-            .get_wave(&task.wave_id)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-        Ok::<_, OpsError>(owner.slug().to_owned())
+    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Force).await {
+        return PrLinkageOutcome {
+            ids: prior.clone(),
+            error: Some(error.to_string()),
+        };
     }
-    .await;
-    match ownership {
-        Ok(owning_wave) if owning_wave == wave => {}
-        Ok(owning_wave) => {
-            return PrLinkageOutcome {
-                ids: prior.clone(),
-                error: Some(format!(
-                    "Linear issue {} belongs to wave/{owning_wave}, not wave/{wave}",
-                    request.issue_id
-                )),
-            }
-        }
-        Err(error) => {
-            return PrLinkageOutcome {
-                ids: prior.clone(),
-                error: Some(error.to_string()),
-            }
-        }
-    }
-    link_pr_with_client(&ctx.client, request, prior).await
+    link_pr_with_client(&client, request, prior).await
 }
 
 async fn link_pr_with_client(
@@ -929,18 +905,23 @@ pub(crate) async fn acquire_task(
             )
         })));
     }
-    let [initiative] = evidence.initiative_ids.as_slice() else {
-        return Err(OpsError::Message(format!(
-            "task {issue} has no Project with an unambiguous Initiative; planning can be inspected but managed work requires ownership"
-        )));
-    };
-    wave_for_initiative(repo, initiative)?;
     let team = repository_team_id(repo)?;
-    if evidence.project_team_ids.as_slice() != [team.as_str()]
-        || evidence.team_id.as_deref() != Some(team.as_str())
-    {
+    if let Some(project) = &evidence.project_id {
+        let [initiative] = evidence.initiative_ids.as_slice() else {
+            return Err(OpsError::Message(format!(
+                "Project {project} has no unambiguous Initiative"
+            )));
+        };
+        wave_for_initiative(repo, initiative)?;
+        if evidence.project_team_ids.as_slice() != [team.as_str()] {
+            return Err(OpsError::Message(format!(
+                "Project {project} must belong to repository Team {team}"
+            )));
+        }
+    }
+    if evidence.team_id.as_deref() != Some(team.as_str()) {
         return Err(OpsError::Message(format!(
-            "task {issue} and its Project must belong to repository Team {team}"
+            "Task {issue} must belong to repository Team {team}"
         )));
     }
     let store = planning_store().await?;
@@ -2144,13 +2125,16 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
 pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) -> OpsResult<Task> {
     let resolved = acquire_task(repo, issue, LinearRefresh::Force).await?;
     let store = planning_store().await?;
+    let Some(wave_id) = &resolved.wave_id else {
+        return Ok(resolved);
+    };
     let wave = store
-        .get_wave(&resolved.wave_id)
+        .get_wave(wave_id)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
     let chapter = super::project::current_project(&store, &wave)?;
-    if chapter.id == resolved.project_id
+    if Some(&chapter.id) == resolved.project_id.as_ref()
         || resolved.completed
         || matches!(
             resolved.state.as_deref(),
@@ -2934,7 +2918,6 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            workflow: "feature".into(),
             status: crate::work::project::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],

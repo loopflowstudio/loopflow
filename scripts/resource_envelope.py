@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import IO, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
+POLICY_PATH = REPO_ROOT / "scripts" / "performance-budgets.json"
 BUILD_RELATIVE_PATHS = (
     Path("target"),
     Path(".build"),

@@ -7,6 +7,9 @@ import time
 from pathlib import Path
 
 PROOFS = {
+    "running_provider_uses_updated_install_for_commands_hooks_and_flow": (
+        "os_process::installation_tests"
+    ),
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_flow_history": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
@@ -17,7 +20,7 @@ PROOFS = {
 }
 
 
-LIB_PROOFS = {"task_adoption_tests", "flow_tests"}
+LIB_PROOFS = {"task_adoption_tests", "flow_tests", "os_process::installation_tests"}
 
 
 def _prepare_image(image: str) -> None:

@@ -90,10 +90,8 @@ pub(crate) async fn repository_tasks(
 ) -> OpsResult<Vec<Task>> {
     let mut tasks = Vec::new();
     for task in store.list_tasks(None).await.map_err(error)? {
-        let Some(wave) = store.get_wave(&task.wave_id).await.map_err(error)? else {
-            continue;
-        };
-        if crate::repository::RepoId::discover(Path::new(wave.repo()))
+        let task_repo = super::task::repository_for_task(store, &task)?;
+        if crate::repository::RepoId::discover(&task_repo)
             .ok()
             .as_ref()
             == Some(repo)

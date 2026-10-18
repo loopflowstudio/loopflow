@@ -55,17 +55,13 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     let Some(issue) = &task.linear_id else {
         return Ok(());
     };
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-    if !connected(wave.repo()) {
+    let repository = super::task::repository_for_task(store, &task)?;
+    if !connected(&repository.to_string_lossy()) {
         return Ok(());
     }
     let client = super::linear::issue_client()
         .await?
-        .for_repository(std::path::Path::new(wave.repo()));
+        .for_repository(repository.as_path());
     let observation = client
         .observe_issue(issue.as_str())
         .await
@@ -114,21 +110,23 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
                 == Some(&team)
         })
         .collect();
-    for wave in &waves {
-        for task in store.list_tasks(Some(wave.id())).await.map_err(message)? {
-            let Some(issue) = task.linear_id else {
-                continue;
-            };
-            if store
-                .task_state(&task.id)
-                .await
-                .map_err(message)?
-                .is_terminal()
-            {
-                finished.push(issue.as_str().to_owned());
-            } else {
-                live.push(issue.as_str().to_owned());
-            }
+    for task in store.list_tasks(None).await.map_err(message)? {
+        let task_repo = super::task::repository_for_task(store, &task)?;
+        if super::linear::repository_team_id(&task_repo).ok().as_ref() != Some(&team) {
+            continue;
+        }
+        let Some(issue) = task.linear_id else {
+            continue;
+        };
+        if store
+            .task_state(&task.id)
+            .await
+            .map_err(message)?
+            .is_terminal()
+        {
+            finished.push(issue.as_str().to_owned());
+        } else {
+            live.push(issue.as_str().to_owned());
         }
     }
     if live.is_empty() {
@@ -176,11 +174,11 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
             }
         }
         let owner = if let Some(task) = &existing {
-            store
-                .get_wave(&task.wave_id)
-                .await
-                .map_err(message)?
-                .map(|wave| wave.repo().to_owned())
+            Some(
+                super::task::repository_for_task(store, task)?
+                    .display()
+                    .to_string(),
+            )
         } else {
             // Ingestion resolves the returned Project against authored Wave mappings.
             waves
@@ -303,28 +301,34 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
         let Some(issue) = &task.linear_id else {
             return Ok(());
         };
-        let project = store
-            .get_project(&task.project_id)
-            .await
-            .map_err(message)?
-            .ok_or_else(|| OpsError::Message("Task Project is missing".into()))?;
-        let wave = store
-            .get_wave(&task.wave_id)
-            .await
-            .map_err(message)?
-            .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-        if !connected(wave.repo()) {
+        let project = match &task.project_id {
+            Some(id) => Some(
+                store
+                    .get_project(id)
+                    .await
+                    .map_err(message)?
+                    .ok_or_else(|| message("Task Project is missing"))?,
+            ),
+            None => None,
+        };
+        let repository = super::task::repository_for_task(store, &task)?;
+        if !connected(&repository.to_string_lossy()) {
             return Ok(());
         }
         let client = super::linear::issue_client()
             .await?
-            .for_repository(std::path::Path::new(wave.repo()));
+            .for_repository(repository.as_path());
         let (observed, _) = client
             .issue_ownership(issue.as_str())
             .await
             .map_err(message)?
             .ok_or_else(|| OpsError::Message("Linked Linear issue is unavailable".into()))?;
-        if observed.project_id.as_deref() != project.linear_id.as_ref().map(|id| id.as_str()) {
+        if observed.project_id.as_deref()
+            != project
+                .as_ref()
+                .and_then(|p| p.linear_id.as_ref())
+                .map(|id| id.as_str())
+        {
             return Err(OpsError::Message(
                 "Task membership changed in Linear; retained local decision".into(),
             ));
@@ -408,17 +412,13 @@ pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<
     if comments.is_empty() {
         return Ok(());
     }
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-    if !connected(wave.repo()) {
+    let repository = super::task::repository_for_task(store, &task)?;
+    if !connected(&repository.to_string_lossy()) {
         return Ok(());
     }
     let client = super::linear::issue_client()
         .await?
-        .for_repository(std::path::Path::new(wave.repo()));
+        .for_repository(repository.as_path());
     for comment in comments {
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),

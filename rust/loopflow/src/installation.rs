@@ -755,7 +755,7 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Honor an explicitly selected CLI, otherwise use the installed CLI.
+/// Use the installed CLI for the main Machine; private Homes keep their caller.
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
@@ -763,11 +763,8 @@ pub fn dispatch_default_cli() -> Result<()> {
         return Ok(());
     }
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    let destination = if let Some(path) =
-        std::env::var_os("LF_BIN").filter(|value| !value.is_empty())
-    {
-        fs::canonicalize(path).context("resolve selected LF_BIN")?
-    } else if let Some(cli) = installed_cli(&root()?)? {
+    std::env::remove_var("LF_BIN");
+    let destination = if let Some(cli) = installed_cli(&root()?)? {
         cli.verify()?;
         cli.path
     } else {
@@ -788,8 +785,7 @@ pub fn dispatch_default_cli() -> Result<()> {
     let mut command = Command::new(&destination);
     command
         .args(std::env::args_os().skip(1))
-        .env("LF_HOME", &main_home)
-        .env("LF_BIN", &destination);
+        .env("LF_HOME", &main_home);
     #[cfg(unix)]
     {
         Err(command.exec()).context("run installed lf")

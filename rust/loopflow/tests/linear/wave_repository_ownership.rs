@@ -67,7 +67,6 @@ fn project(wave: &Wave) -> Project {
         id: ProjectId::new(),
 
         summary: String::new(),
-        workflow: "feature".into(),
         status: loopflow::work::project::ProjectStatus::Started,
         linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
         slug: "architecture".to_string(),
@@ -84,10 +83,16 @@ fn project(wave: &Wave) -> Project {
     }
 }
 
-fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
+fn task(
+    store: &loopflow::store::Store,
+    wave: &Wave,
+    project: &Project,
+    repo: &Path,
+) -> (Task, TaskPr) {
     let now = OffsetDateTime::now_utc();
     let id = TaskId::new();
     let task = Task {
+        repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
         id: id.clone(),
 
         revision: 0,
@@ -98,8 +103,8 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         pm_writeback: LinearWritebackState::Current,
-        wave_id: wave.id().clone(),
-        project_id: project.id.clone(),
+        wave_id: Some(wave.id().clone()),
+        project_id: Some(project.id.clone()),
         worktree: Some(repo.join("task-worktree")),
         workspace_slug: "repository-owned-waves".to_string(),
         branch: "jack/repository-owned-waves".to_string(),
@@ -397,7 +402,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             rusqlite::params![project.wave_id, project.id.as_str()],
         )
         .unwrap();
-    let (task, task_pr) = task(&alpha, &project, &repo_a);
+    let (task, task_pr) = task(&store, &alpha, &project, &repo_a);
     planning::seed_unplaced_task(&database, &task);
     store
         .place_task(
@@ -604,8 +609,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         alpha.id().clone()
     );
     let preserved_task = store.get_task(&task.id).await.unwrap().unwrap();
-    assert_eq!(preserved_task.wave_id, alpha.id().clone());
-    assert_eq!(preserved_task.project_id, project.id);
+    assert_eq!(preserved_task.wave_id, Some(alpha.id().clone()));
+    assert_eq!(preserved_task.project_id, Some(project.id));
 
     let status = lf(&home, &repo_d, &["wave", "status", "platform", "--json"]);
     assert_eq!(status["wave"]["id"], alpha.id().as_str());
@@ -820,7 +825,7 @@ async fn relocation_refuses_meaningful_destination_history() {
             rusqlite::params![owned_project.wave_id, owned_project.id.as_str()],
         )
         .unwrap();
-    let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
+    let (owned_task, owned_pr) = task(&store, &project_shadow, &owned_project, &target);
     planning::seed_unplaced_task(&database, &owned_task);
     store
         .place_task(

@@ -55,7 +55,7 @@ pub(crate) fn add_opencode_context(
     context: &ContextDelivery,
     instructions: &str,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary(), "delivery":context, "instructions":instructions});
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -69,12 +69,17 @@ pub(crate) fn add_opencode_context(
         include_str!("context_opencode.js")
     );
     let path = write_prompt_log(&context.repo, &source, "opencode-plugin", None)?;
-    let plugin = path.with_extension("mjs");
-    std::fs::rename(path, &plugin)?;
+    let plugin = path.with_extension("plugin");
+    std::fs::create_dir(&plugin)?;
+    std::fs::rename(path, plugin.join("index.js"))?;
+    std::fs::write(
+        plugin.join("package.json"),
+        r#"{"name":"loopflow-context","type":"module","exports":{"./server":"./index.js"}}"#,
+    )?;
     config
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("OpenCode configuration must be an object"))?
-        .entry("plugin")
+        .entry("plugins")
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(|| anyhow::anyhow!("OpenCode plugin config must be an array"))?
@@ -96,8 +101,11 @@ mod tests {
 
     #[test]
     fn hook_identity_is_shared_across_tasks_and_sessions_without_granting_trust() {
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let repos = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
         let contexts: Vec<_> = repos
             .iter()
@@ -143,7 +151,11 @@ mod tests {
 
     #[test]
     fn opencode_context_preserves_settings_and_existing_plugins() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", repo.path().join("machine"));
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let context = ContextDelivery {
             repository: None,
             repo: repo.path().to_owned(),
@@ -153,15 +165,15 @@ mod tests {
             references: Vec::new(),
         };
         let original = serde_json::json!({
-            "plugin": ["existing-plugin"],
-            "permission": {"edit": "deny"},
+            "plugins": ["existing-plugin"],
+            "permissions": [{"action":"edit","resource":"*","effect":"deny"}],
             "model": "fixture/model"
         });
         let mut config = original.clone();
         add_opencode_context(&mut config, &context, "Fixed instructions").unwrap();
-        assert_eq!(config["permission"], original["permission"]);
+        assert_eq!(config["permissions"], original["permissions"]);
         assert_eq!(config["model"], original["model"]);
-        let plugins = config["plugin"].as_array().unwrap();
+        let plugins = config["plugins"].as_array().unwrap();
         assert_eq!(plugins.len(), 2);
         assert_eq!(plugins[0], "existing-plugin");
         let path = plugins[1]
@@ -169,8 +181,10 @@ mod tests {
             .unwrap()
             .strip_prefix("file://")
             .unwrap();
-        assert!(std::fs::read_to_string(path)
-            .unwrap()
-            .contains("Fixed instructions"));
+        assert!(
+            std::fs::read_to_string(std::path::Path::new(path).join("index.js"))
+                .unwrap()
+                .contains("Fixed instructions")
+        );
     }
 }

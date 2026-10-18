@@ -1,9 +1,8 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::agent::missing_agent_message;
@@ -400,6 +399,16 @@ fn run_native_session(
             attachment,
         );
     }
+    if command.program == "opencode" {
+        return run_opencode_native(
+            command,
+            environment,
+            agent_session,
+            launch_lock,
+            progress,
+            attachment,
+        );
+    }
     let provider = match command.program.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -428,27 +437,6 @@ fn run_native_session(
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
-    let opencode_capture = capture_dir
-        .as_ref()
-        .filter(|_| command.program == "opencode")
-        .map(|dir| {
-            let path = dir.join("opencode.stderr.log");
-            let mut options = OpenOptions::new();
-            options.create(true).append(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let file = options
-                .open(&path)
-                .with_context(|| format!("open OpenCode diagnostics at {}", path.display()))?;
-            eprintln!("OpenCode diagnostics: {}", path.display());
-            process.args(["--print-logs", "--log-level", "INFO"]);
-            process.stderr(Stdio::piped());
-            Ok::<_, anyhow::Error>((dir.clone(), file))
-        })
-        .transpose()?;
     process.current_dir(&command.cwd);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
     let mut activation = None;
@@ -522,22 +510,6 @@ fn run_native_session(
     }
     // The process record now owns the launch identity.
     drop(launch_lock);
-    let observer = opencode_capture.map(|(capture_dir, diagnostics)| {
-        let stderr = child
-            .stderr
-            .take()
-            .expect("piped OpenCode stderr is available");
-        let discover_session = agent_session.is_none();
-        std::thread::spawn(move || {
-            observe_opencode_session(&capture_dir, stderr, diagnostics, discover_session)
-                .with_context(|| {
-                    format!(
-                        "OpenCode diagnostics: {}",
-                        capture_dir.join("opencode.stderr.log").display()
-                    )
-                })
-        })
-    });
     let status = if let Some(title) = &mut title {
         crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
     } else {
@@ -558,11 +530,6 @@ fn run_native_session(
     } else {
         false
     };
-    if let Some(observer) = observer {
-        observer
-            .join()
-            .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
-    }
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
         if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
@@ -577,7 +544,7 @@ fn run_native_session(
     })
 }
 
-pub(crate) fn run_native_codex_agent(
+pub(crate) fn run_native_agent(
     launch: &crate::agent::AgentConfig,
 ) -> Result<crate::agent::AgentProcessResult> {
     let command = build_session_command(
@@ -620,6 +587,134 @@ pub(crate) fn run_native_codex_agent(
     })
 }
 
+fn run_opencode_native(
+    command: &SessionCommand,
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+    launch_lock: Option<File>,
+    progress: &mut crate::startup::Startup,
+    owner: crate::harness::agent_process::AttachmentOwner,
+) -> Result<SessionCommandOutcome> {
+    use crate::harness::Harness;
+    let mut launch = command
+        .launch
+        .as_ref()
+        .expect("native OpenCode command carries its launch configuration")
+        .clone();
+    let original_config = launch.env.get("OPENCODE_CONFIG_CONTENT").cloned();
+    launch.env = environment.clone();
+    launch.env.remove("OPENCODE_CONFIG_CONTENT");
+    if let Some(config) = original_config {
+        launch.env.insert("OPENCODE_CONFIG_CONTENT".into(), config);
+    }
+    launch.session_attachment = Some((owner.1.clone(), owner.2.clone()));
+    launch.conversation_context = command.context.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+    let prompt = launch.task_prompt.clone();
+    let thread = agent_session.cloned();
+    let diagnostics = environment
+        .get(crate::session_record::CAPTURE_KEY_ENV)
+        .map(|key| crate::session_record::capture_dir(key))
+        .transpose()?
+        .map(|directory| directory.join("opencode.stderr.log"));
+    let observer_diagnostics = &diagnostics;
+    progress.stage("Starting OpenCode");
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(move || -> Result<()> {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+            runtime.block_on(async move {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let mut harness = crate::harness::opencode::OpenCodeHarness::new(tx, crate::harness::ApprovalPolicy::AutoApprove);
+                harness.prepare_terminal();
+                harness.set_agent_session(thread);
+                harness.start(&launch).await?;
+                let (endpoint, password) = harness.terminal_connection()?;
+                let id = harness.agent_session().expect("server confirmed native identity");
+                let _ = ready_tx.send((endpoint.to_owned(), password.to_owned(), id));
+                // The native renderer owns output. Rust still records history and
+                // attention, and drains errors without writing over its screen.
+                tokio::pin!(closed_rx);
+                loop {
+                    tokio::select! {
+                        _ = &mut closed_rx => break,
+                        event = rx.recv() => {
+                            if let Some(crate::chat::types::ConversationEvent::Error { message, .. }) = event {
+                                if let Some(path) = observer_diagnostics {
+                                    use std::io::Write;
+                                    if let Ok(mut log) = OpenOptions::new().append(true).open(path) {
+                                        let _ = writeln!(log, "OpenCode native observer: {message}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                harness.stop().await
+            })
+        });
+        let result =
+            (|| -> Result<SessionCommandOutcome> {
+                let (endpoint, password, id) = ready_rx
+                    .recv()
+                    .map_err(|_| anyhow!("OpenCode private server failed to start"))?;
+                if let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) {
+                    crate::session_record::write_provider_session(
+                        &crate::session_record::capture_dir(input)?,
+                        &id,
+                        None,
+                    )?;
+                }
+                let mut process = Command::new("opencode");
+                process
+                    .current_dir(&command.cwd)
+                    .envs(environment)
+                    .env("OPENCODE_PASSWORD", password)
+                    .args(["--server", &endpoint, "--session", id.as_str()]);
+                if !prompt.is_empty() {
+                    process.args(["--prompt", &prompt]);
+                }
+                crate::provider_auth::apply_provider_env_to_command("opencode", &mut process);
+                let mut title = crate::terminal_title::TerminalTitle::prepare(
+                    environment,
+                    "opencode",
+                    &mut process,
+                );
+                let mut options = OpenOptions::new();
+                options.create(true).append(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                if let Some(path) = &diagnostics {
+                    process.stderr(options.open(path).with_context(|| {
+                        format!("open OpenCode diagnostics at {}", path.display())
+                    })?);
+                }
+                progress.finish();
+                drop(launch_lock);
+                let mut child = process.spawn()?;
+                record_interactive_opened(environment)?;
+                let status = if let Some(title) = &mut title {
+                    crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
+                } else {
+                    child.wait()?
+                };
+                Ok(SessionCommandOutcome {
+                    status,
+                    interrupted: false,
+                })
+            })();
+        // Release the worker on every terminal setup/exit path before joining it.
+        let _ = closed_tx.send(());
+        worker
+            .join()
+            .map_err(|_| anyhow!("OpenCode server worker panicked"))??;
+        result
+    })
+}
+
 fn run_codex_native(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -631,7 +726,7 @@ fn run_codex_native(
 ) -> Result<SessionCommandOutcome> {
     progress.stage("Starting Codex");
     let mut launch = command
-        .codex
+        .launch
         .as_ref()
         .expect("native Codex command carries its launch configuration")
         .clone();
@@ -783,59 +878,6 @@ async fn serve_codex_native(
     Ok(())
 }
 
-fn observe_opencode_session(
-    capture_dir: &Path,
-    stderr: impl Read,
-    mut diagnostics: File,
-    discover_session: bool,
-) -> std::io::Result<()> {
-    let mut write_error = None;
-    let mut observed = !discover_session;
-    let mut reader = BufReader::new(stderr);
-    let mut line = Vec::new();
-    while reader.read_until(b'\n', &mut line)? != 0 {
-        // Never write behind the native renderer. Drain even after a disk error
-        // so diagnostic failure cannot block the provider or discard its input.
-        if let Err(error) = diagnostics.write_all(&line) {
-            write_error.get_or_insert(error);
-        }
-        if !observed {
-            if let Some(agent_session) = parse_opencode_session_id(&String::from_utf8_lossy(&line))
-            {
-                observed = true;
-                if let Err(error) = crate::session_record::write_provider_session(
-                    capture_dir,
-                    &agent_session.into(),
-                    None,
-                ) {
-                    write_error.get_or_insert(error);
-                }
-            }
-        }
-        line.clear();
-    }
-    match write_error {
-        Some(error) => Err(error),
-        None if observed => Ok(()),
-        None => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "OpenCode did not report a resumable session",
-        )),
-    }
-}
-
-fn parse_opencode_session_id(line: &str) -> Option<&str> {
-    if !line
-        .split_whitespace()
-        .any(|field| field == "message=created")
-    {
-        return None;
-    }
-    line.split_whitespace()
-        .find_map(|field| field.strip_prefix("id="))
-        .filter(|id| id.starts_with("ses_") && id.len() > 4)
-}
-
 pub(crate) fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
@@ -913,7 +955,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
-            codex: None,
+            launch: None,
             input: None,
             context: None,
             attachment: None,
@@ -949,7 +991,7 @@ mod tests {
             )
             .unwrap();
             assert!(command.input.is_none());
-            if let Some(launch) = command.codex {
+            if let Some(launch) = command.launch {
                 assert_eq!(
                     launch.resume_token.as_ref().map(AgentSessionId::as_str),
                     Some("recorded-session")
@@ -981,7 +1023,7 @@ mod tests {
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_USER_NAME");
         let provider = fake_provider(&temp, "printf '%s\\0' \"$LF_USER_NAME\" \"$@\" > received");
-        std::fs::rename(provider, temp.path().join("opencode")).unwrap();
+        std::fs::rename(provider, temp.path().join("claude")).unwrap();
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
             "PATH",
@@ -993,7 +1035,7 @@ mod tests {
         let capture = crate::session_record::CaptureHandle::begin_at(
             temp.path(),
             crate::session_record::SessionCaptureSpec {
-                harness: "opencode".into(),
+                harness: "claude".into(),
                 model: None,
                 surface: "tui".into(),
                 cwd: temp.path().to_path_buf(),
@@ -1090,89 +1132,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_startup_log_identifies_only_a_created_session() {
-        let line = "timestamp=2026-08-28T18:56:34Z level=INFO run=tui message=created id=ses_012345 directory=/tmp/repo";
-
-        assert_eq!(parse_opencode_session_id(line), Some("ses_012345"));
-        assert_eq!(
-            parse_opencode_session_id(
-                "timestamp=2026-08-28T18:56:34Z level=INFO message=loaded id=ses_other"
-            ),
-            None
-        );
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[tokio::test]
-    async fn opencode_tui_records_its_native_session_without_wrapping_stdout() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let temp = tempfile::tempdir().unwrap();
-        ledger.set_db_path(temp.path().join("loopflow.db"));
-        let _home = EnvRestore::capture(&["LF_HOME"]);
-        std::env::set_var("LF_HOME", temp.path());
-        let _restore = EnvRestore::capture(&["PATH"]);
-        let bin = temp.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let opencode = bin.join("opencode");
-        std::fs::write(
-            &opencode,
-            "#!/bin/sh\nprintf '%s\\n' 'timestamp=2026-08-28T18:56:34Z level=INFO run=tui message=created id=ses_native directory=/tmp/repo' >&2\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = std::fs::metadata(&opencode).unwrap().permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(&opencode, permissions).unwrap();
-        }
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        let capture = crate::session_record::CaptureHandle::begin_at(
-            temp.path(),
-            crate::session_record::SessionCaptureSpec {
-                harness: "opencode".to_string(),
-                model: None,
-                surface: "tui".to_string(),
-                cwd: temp.path().to_path_buf(),
-                repo: None,
-                worktree: None,
-                skill: None,
-                subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
-                work: None,
-            },
-        )
-        .unwrap();
-        let command = SessionCommand {
-            codex: None,
-            input: None,
-            context: None,
-            attachment: None,
-            remote: None,
-            program: "opencode".to_string(),
-            args: vec![temp.path().display().to_string()],
-            cwd: temp.path().to_path_buf(),
-        };
-
-        let outcome =
-            session_command_status_with_env(&command, &capture.environment(), None, None, None)
-                .unwrap();
-
-        assert!(outcome.status.success());
-        assert_eq!(
-            crate::session_record::read_provider_session(&capture.artifact_dir())
-                .unwrap()
-                .map(|session| session.agent_session),
-            Some("ses_native".into())
-        );
-    }
-
-    #[test]
     fn recorded_native_move_returns_cleanly_without_stop_receipts() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -1200,7 +1159,7 @@ mod tests {
             }
         });
         let command = SessionCommand {
-            codex: None,
+            launch: None,
             input: None,
             context: None,
             program: "/bin/sleep".into(),
@@ -1221,7 +1180,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
-            codex: None,
+            launch: None,
             input: None,
             program: "/bin/sh".into(),
             args: vec!["-c".into(), "printf '%s' \"$$\" > pid".into()],
@@ -1317,7 +1276,7 @@ mod tests {
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
-                codex: None,
+                launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
                 args: vec![],
@@ -1402,7 +1361,7 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
-                codex: None,
+                launch: None,
                 input: None,
                 context: None,
                 attachment: capture.session_attachment(),
@@ -1527,6 +1486,7 @@ mod tests {
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("CODEX_HOME", temp.path().join("codex-home"));
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
         std::env::remove_var("CODEX_ACCESS_TOKEN");
@@ -1536,7 +1496,7 @@ mod tests {
         let opencode = bin.join("opencode");
         std::fs::write(
             &opencode,
-            "#!/bin/sh\nprintf '%s' \"$OPENCODE_API_KEY\" > \"$LF_TEST_SESSION_ENV\"\nprintf '%s\\n' 'timestamp=2026-10-09T00:00:00Z level=INFO run=tui message=created id=ses_native directory=/tmp/repo' >&2\n",
+            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
         )
         .unwrap();
         #[cfg(unix)]

@@ -1227,17 +1227,28 @@ Use a native Codex binary supporting app-server and `--remote`. The headless PTY
 fixture uses disposable provider and Loopflow homes, a loopback model endpoint, and an
 independently authored wrapper supplying trust plus SessionStart/Stop hooks.
 It explicitly trusts the fixture's Loopflow hooks, verifies context reaches the
-model, and checks successful startup, prompt, tool and stop callback receipts.
+model, and checks immediate skill startup, prompt, tool and stop callback receipts.
 It deletes the native context binding before reconnect to prove restoration from
 the saved Session, then checks fresh scratch context, two retained completed
 turns, provider cleanup, and preserved user settings. Provider output alone is
 not hook evidence: untrusted hooks do not run.
-It uses no account or login. This proves protocol
-launch composition; actual cmux tab tracking remains a separate acceptance check.
+Add `--context-repo /path/to/loopflow-checkout` to run the built-in `demo` with
+copied agent instructions, scratch and Infrastructure Wave context. Wave context
+is supplied as scratch in the isolated store, without a planning provider binding.
+Add `--cmux-wrapper /path/to/cmux-codex-wrapper` to exercise the cmux entry
+script with an isolated home, a nonexistent socket and computer-use attachment
+disabled. It cannot report into existing panes.
+The rollout must contain exactly one conversation, two turns and two tool calls.
+It uses no account or login. This proves protocol launch composition; live account
+configuration and actual cmux tab tracking remain separate acceptance checks.
 On reconnect, the fixture types a Unicode draft, fails a stand-in cmux title
 refresh, resizes the PTY, edits and submits the draft. It checks the native model
 request and retained diagnostic file, and rejects raw Loopflow warnings in the
-terminal. `session_launch_contract` covers the same output boundary with
+terminal. Add `--transport-failure` for a separate case: a disposable Unix socket
+proxy disconnects the renderer without a WebSocket close handshake while the
+draft is visible. The same PTY reconnects, accepts another edit, and submits the
+exact Unicode draft once. Native history must retain one conversation, two turns
+and two tools. `session_launch_contract` covers the warning output boundary with
 deterministic Claude, Codex and OpenCode stand-ins.
 
 ### Released capture-history preservation

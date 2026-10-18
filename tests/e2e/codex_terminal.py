@@ -10,10 +10,13 @@ import os
 import pty
 import select
 import shlex
+import shutil
 import signal
+import socket
 import sqlite3
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import threading
@@ -80,12 +83,68 @@ class Model(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
 
 
+def _transport_proxy(arguments: list[str]) -> int:
+    """Drop only the disposable renderer's socket, retaining its live PTY."""
+    if "--remote" not in arguments:
+        os.execv(arguments[0], arguments)
+    index = arguments.index("--remote") + 1
+    endpoint = arguments[index].removeprefix("unix://")
+    directory = tempfile.TemporaryDirectory(prefix="lf-pty-", dir="/tmp")
+    proxy_path = Path(directory.name) / "ui.sock"
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(proxy_path))
+    listener.listen()
+    listener.settimeout(0.1)
+    arguments[index] = f"unix://{proxy_path}"
+    stop = threading.Event()
+
+    def _forward() -> None:
+        while not stop.is_set():
+            try:
+                client, _ = listener.accept()
+            except TimeoutError:
+                continue
+            with client, socket.socket(socket.AF_UNIX) as upstream:
+                upstream.connect(endpoint)
+                if Path("transport-dropped").exists():
+                    Path("transport-reconnected").touch()
+                while not stop.is_set():
+                    if Path("drop-transport").exists():
+                        Path("drop-transport").unlink()
+                        # No WebSocket close handshake: exercise actual EOF/reset.
+                        client.shutdown(socket.SHUT_RDWR)
+                        upstream.shutdown(socket.SHUT_RDWR)
+                        Path("transport-dropped").touch()
+                        break
+                    readable, _, _ = select.select([client, upstream], [], [], 0.05)
+                    closed = False
+                    for source in readable:
+                        data = source.recv(65536)
+                        if not data:
+                            closed = True
+                            break
+                        (upstream if source is client else client).sendall(data)
+                    if closed:
+                        break
+
+    worker = threading.Thread(target=_forward)
+    worker.start()
+    try:
+        return subprocess.call(arguments)
+    finally:
+        stop.set()
+        worker.join(timeout=2)
+        listener.close()
+        directory.cleanup()
+
+
 def _terminal(
     args: list[str],
     env: dict[str, str],
     cwd: Path,
     transcript: Path,
     follow_up: bool = False,
+    transport_failure: bool = False,
 ) -> int:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -105,6 +164,8 @@ def _terminal(
     exit_at = None
     pending_follow_up = follow_up
     waiting_for_diagnostic = False
+    waiting_for_transport = False
+    transport_edit_at = None
     expected = b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE"
     try:
         while time.monotonic() < deadline:
@@ -119,9 +180,18 @@ def _terminal(
                 ):
                     assert b"cmux title update failed" not in output
                     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 100, 0, 0))
-                    os.write(master, b"\x7f ready")
+                    os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
                     submit_at = time.monotonic() + 0.3
                     waiting_for_diagnostic = False
+            if (
+                transport_edit_at is not None
+                and time.monotonic() >= transport_edit_at
+                and (cwd / "transport-dropped").exists()
+                and (cwd / "transport-reconnected").exists()
+            ):
+                os.write(master, b"\x1b[200~ after failure\x1b[201~")
+                submit_at = time.monotonic() + 0.3
+                transport_edit_at = None
             if exit_at is not None and time.monotonic() >= exit_at:
                 os.write(master, b"/exit")
                 submit_at = time.monotonic() + 0.3
@@ -137,20 +207,32 @@ def _terminal(
                 output.extend(chunk)
                 if b"\x1b[6n" in chunk:
                     os.write(master, b"\x1b[1;1R")
+                if waiting_for_transport and b"ready" in chunk:
+                    (cwd / "drop-transport").touch()
+                    transport_edit_at = time.monotonic() + 1
+                    waiting_for_transport = False
                 if pending_follow_up and b"FIXTURE_DONE" in output:
-                    os.write(master, "typed reconnect follow-up café 雪 🦀x".encode())
-                    (cwd / "fail-title").touch()
-                    with sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db") as database:
-                        session = database.execute(
-                            "SELECT id FROM agent_sessions LIMIT 1"
-                        ).fetchone()[0]
-                        # Completed Sessions reject CLI rename. Change only this
-                        # fixture's title to exercise the active reconnect reader.
-                        database.execute(
-                            "UPDATE agent_sessions SET title='Warning during draft' WHERE id=?",
-                            (session,),
-                        )
-                    waiting_for_diagnostic = True
+                    # Explicit paste boundaries avoid native burst detection
+                    # treating the subsequent Enter as more pasted draft text.
+                    os.write(
+                        master, "\x1b[200~typed reconnect follow-up café 雪 🦀x\x1b[201~".encode()
+                    )
+                    if transport_failure:
+                        os.write(master, b"\x7f\x1b[200~ ready\x1b[201~")
+                        waiting_for_transport = True
+                    else:
+                        (cwd / "fail-title").touch()
+                        with sqlite3.connect(Path(env["LF_HOME"]) / "loopflow.db") as database:
+                            session = database.execute(
+                                "SELECT id FROM agent_sessions LIMIT 1"
+                            ).fetchone()[0]
+                            # Completed Sessions reject CLI rename. Change only this
+                            # fixture's title to exercise the active reconnect reader.
+                            database.execute(
+                                "UPDATE agent_sessions SET title='Warning during draft' WHERE id=?",
+                                (session,),
+                            )
+                        waiting_for_diagnostic = True
                     pending_follow_up = False
                 if not exiting and expected in output:
                     exit_at = time.monotonic() + 1
@@ -159,7 +241,10 @@ def _terminal(
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
         assert expected in output, "terminal never displayed the completed turn"
-        if follow_up:
+        if follow_up and transport_failure:
+            assert (cwd / "transport-dropped").exists(), "transport was never interrupted"
+            assert (cwd / "transport-reconnected").exists(), "renderer never reconnected"
+        elif follow_up:
             assert not waiting_for_diagnostic, "background failure never reached diagnostics"
             assert b"cmux title update failed" not in output
             assert b"Loopflow recorded diagnostics:" in output
@@ -184,11 +269,35 @@ def _terminal(
         os.close(master)
 
 
-def _case(root: Path, lf: Path, codex: Path, port: int, wrapped: bool) -> None:
+def _case(
+    root: Path,
+    lf: Path,
+    codex: Path,
+    port: int,
+    wrapped: bool,
+    context_repo: Path | None = None,
+    cmux_wrapper: Path | None = None,
+    transport_failure: bool = False,
+) -> None:
     root.mkdir()
     Model.requests.clear()
-    (root / "scratch").mkdir()
-    (root / "scratch/context.md").write_text("NATIVE_CONTEXT_BEFORE_RESUME")
+    scratch = root / "scratch"
+    scratch.mkdir()
+    if context_repo:
+        if (context_repo / "AGENTS.md").is_file():
+            shutil.copyfile(context_repo / "AGENTS.md", root / "AGENTS.md")
+        if (context_repo / "scratch").is_dir():
+            shutil.copytree(context_repo / "scratch", scratch, dirs_exist_ok=True)
+        wave = context_repo / ".lf/wave/infrastructure"
+        for name in ["GOAL.md", "MEMORY.md"]:
+            source = wave / name
+            if source.exists():
+                shutil.copyfile(source, scratch / f"native-{name}")
+    else:
+        skill = root / ".lf/skills/native-probe.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("NATIVE_SKILL_STARTUP: inspect the workspace with a tool, then answer.\n")
+    (scratch / "context.md").write_text("NATIVE_CONTEXT_BEFORE_RESUME")
     home, native, bin_dir = root / "home", root / "codex", root / "bin"
     for directory in [home, native, bin_dir]:
         directory.mkdir()
@@ -258,8 +367,16 @@ trust_level="trusted"
     # Keep the same hook identities across resume.
     hooks.append("state={" + ",".join(states) + "}")
     host_args = ["-c", "hooks={" + ",".join(hooks if wrapped else [hooks[-1]]) + "}"]
+    executable = [str(cmux_wrapper or codex)]
+    if transport_failure:
+        executable = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--transport-proxy",
+            *executable,
+        ]
     wrapper = (
-        "#!/bin/sh\nexec " + shlex.join([str(codex), "--no-alt-screen", *host_args]) + ' "$@"\n'
+        "#!/bin/sh\nexec " + shlex.join([*executable, "--no-alt-screen", *host_args]) + ' "$@"\n'
     )
     (bin_dir / "codex").write_text(wrapper)
     (bin_dir / "codex").chmod(0o755)
@@ -276,7 +393,17 @@ trust_level="trusted"
         "CMUX_WORKSPACE_ID": "fixture",
         "CMUX_SURFACE_ID": "fixture",
     }
-    args = [str(lf), "--diff", "none", "-a", "codex", ":", "hello"]
+    if cmux_wrapper:
+        env.update(
+            {
+                "CMUX_CUSTOM_CODEX_PATH": str(codex),
+                "CMUX_SURFACE_ID": "00000000-0000-0000-0000-000000000512",
+                "CMUX_SOCKET_PATH": str(root / "unconnected-cmux.sock"),
+                "CMUX_COMPUTER_USE_MCP_DISABLED": "1",
+            }
+        )
+    skill_name = "demo" if context_repo else "native-probe"
+    args = [str(lf), "--diff", "none", "-a", "codex", skill_name]
     status = _terminal(args, env, root, root / "launch.txt")
     assert status == 0, (status, root / "launch.txt")
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
@@ -305,19 +432,24 @@ trust_level="trusted"
         assert saved[key] == value, key
     assert not (native / "hooks.json").exists()
     assert any(b"NATIVE_CONTEXT_BEFORE_RESUME" in request for request in Model.requests)
+    skill_marker = b"Demonstrate the changed behavior" if context_repo else b"NATIVE_SKILL_STARTUP"
+    assert any(skill_marker in request for request in Model.requests)
     binding.unlink()  # Reconnect must restore this Session's context, not another's.
     (root / "scratch/context.md").write_text("NATIVE_CONTEXT_AFTER_RESUME")
     status = _terminal(
-        [str(lf), "session", "connect", session_id], env, root, root / "resume.txt", follow_up=True
+        [str(lf), "session", "connect", session_id],
+        env,
+        root,
+        root / "resume.txt",
+        follow_up=True,
+        transport_failure=transport_failure,
     )
     assert status == 0, (status, root / "resume.txt")
     assert binding.exists(), "resume did not restore its context binding"
     assert any(b"NATIVE_CONTEXT_AFTER_RESUME" in request for request in Model.requests)
-    assert any(
-        "typed reconnect follow-up café 雪 🦀 ready"
-        in json.dumps(json.loads(request), ensure_ascii=False)
-        for request in Model.requests
-    ), "Unicode draft did not survive warning, resize and editing"
+    expected_draft = "typed reconnect follow-up café 雪 🦀 ready"
+    if transport_failure:
+        expected_draft += " after failure"
     (root / "model-requests.json").write_text(
         json.dumps([json.loads(request) for request in Model.requests])
     )
@@ -346,6 +478,32 @@ trust_level="trusted"
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed
     assert live == 0, live
+    rollouts = list(native.glob("sessions/*/*/*/rollout-*.jsonl"))
+    assert len(rollouts) == 1, rollouts
+    events = [json.loads(line) for line in rollouts[0].read_text().splitlines()]
+    prompts = [
+        item["text"]
+        for event in events
+        if event["type"] == "response_item" and event["payload"].get("role") == "user"
+        for item in event["payload"]["content"]
+        if item.get("type") == "input_text" and "typed reconnect follow-up" in item["text"]
+    ]
+    assert prompts == [expected_draft], f"Edited draft changed or replayed: {prompts}"
+    tools = [
+        event["payload"]["call_id"]
+        for event in events
+        if event["type"] == "response_item"
+        and event["payload"].get("type") == "function_call"
+        and event["payload"].get("name") == "exec_command"
+    ]
+    assert tools == ["tool-initial", "tool-followup"], tools
+    assert (
+        sum(
+            event["type"] == "event_msg" and event["payload"].get("type") == "task_started"
+            for event in events
+        )
+        == 2
+    )
     print(
         f"{'wrapped' if wrapped else 'plain'}: captured two turns in {native_id}, "
         f"reconnected {session_id}, zero live providers",
@@ -354,10 +512,21 @@ trust_level="trusted"
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["--transport-proxy"]:
+        raise SystemExit(_transport_proxy(sys.argv[2:]))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lf", type=Path, required=True)
     parser.add_argument("--codex", type=Path, required=True)
+    parser.add_argument("--context-repo", type=Path)
+    parser.add_argument("--cmux-wrapper", type=Path)
+    parser.add_argument(
+        "--transport-failure",
+        action="store_true",
+        help="Drop the renderer socket during draft entry instead of failing a title refresh",
+    )
     options = parser.parse_args()
+    if options.context_repo and not options.context_repo.is_dir():
+        parser.error("--context-repo must name an existing checkout")
     root = Path(tempfile.mkdtemp(prefix="lf-codex-terminal-")).resolve()
     print(f"Evidence: {root}", flush=True)
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Model)
@@ -370,6 +539,9 @@ def main() -> None:
                 options.codex.resolve(),
                 server.server_port,
                 wrapped,
+                options.context_repo,
+                options.cmux_wrapper,
+                options.transport_failure,
             )
     finally:
         server.shutdown()

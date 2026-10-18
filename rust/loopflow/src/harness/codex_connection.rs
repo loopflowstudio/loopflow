@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{
@@ -138,7 +139,76 @@ pub(crate) struct NativeInput {
     pub context: Option<crate::context_block::ContextDelivery>,
 }
 
+/// Receipts belong to the immutable captured input, alongside its saved prompt.
+/// A dispatch receipt precedes the write: interruption can never authorize replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum NativeSubmission {
+    ThreadDispatched,
+    ThreadRejected,
+    InputDispatched,
+    InputRejected,
+    InputAccepted,
+}
+
 impl CodexConnection {
+    pub(crate) fn ensure_thread_resolved(&self) -> Result<()> {
+        if self.submission()? == Some(NativeSubmission::ThreadDispatched)
+            && self.store.session_thread(&self.session_id)?.is_none()
+        {
+            return Err(anyhow!("Codex thread creation outcome is unknown; saved input is retained; inspect provider history before starting another conversation"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn submission(&self) -> Result<Option<NativeSubmission>> {
+        let session = self
+            .store
+            .session(&self.session_id)?
+            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
+        self.store
+            .session_history(&self.session_id, 0, 0)?
+            .iter()
+            .rev()
+            .find(|event| {
+                event.payload["input_id"] == session.artifact_key
+                    && event.payload["source"] == "codex_submission"
+            })
+            .map(|event| {
+                serde_json::from_value(event.payload["evidence"].clone()).map_err(Into::into)
+            })
+            .transpose()
+    }
+
+    pub(crate) fn recover_input(&self, prompt: &str) -> Result<Option<String>> {
+        let retry = match self.submission()? {
+            Some(NativeSubmission::InputDispatched | NativeSubmission::InputAccepted) => false,
+            Some(_) => true,
+            None => self
+                .store
+                .session_thread(&self.session_id)?
+                .or_else(|| self.thread_id.clone())
+                .is_none(),
+        };
+        Ok((retry && !prompt.is_empty()).then(|| prompt.to_owned()))
+    }
+
+    fn record_submission(&self, input: &str, state: NativeSubmission) -> StoreResult<()> {
+        let session = self.store.session(&self.session_id)?.ok_or_else(|| {
+            StoreError::InvalidData("Session disappeared during native startup".into())
+        })?;
+        let observation = crate::session::SessionObservation {
+            artifact_key: input.to_owned(),
+            source: format!("codex_submission:{}", uuid::Uuid::new_v4()),
+            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            task_id: session.task_id.clone(),
+            wave_id: session.wave_id.clone(),
+            payload: json!({"input_id":input,"source":"codex_submission","evidence":state}),
+        };
+        self.store
+            .retain_session_observation(&session, &observation)
+    }
+
     /// Read all native turn pages before displaying the conversation. This
     /// connection never subscribes, answers approvals, or acquires an attachment.
     pub async fn recover_history(&self, endpoint: &Path) -> Result<()> {
@@ -215,21 +285,53 @@ impl CodexConnection {
         let mut client = accept_async(client).await?;
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
+        let input_key = self
+            .store
+            .session(&self.session_id)?
+            .ok_or_else(|| anyhow!("Session disappeared during native startup"))?
+            .artifact_key;
         let mut history = super::codex_history::History::default();
-        let mut resume_request = None;
-        let mut bind_thread = false;
+        let mut startup_request = None;
         let mut initial_request = None;
-        let mut thread = self.thread_id.clone();
+        let mut client_open = true;
+        let mut subscribed = false;
+        let disconnected_deadline = tokio::time::sleep(Duration::from_secs(15));
+        tokio::pin!(disconnected_deadline);
+        let mut thread = self
+            .store
+            .session_thread(&self.session_id)?
+            .or_else(|| self.thread_id.clone());
         loop {
+            // A disconnected renderer cannot cancel work already dispatched.
+            // Drain only outstanding startup replies, saving their native identity.
+            if !client_open && startup_request.is_none() && initial_request.is_none() {
+                break;
+            }
             tokio::select! {
-                incoming = client.next() => {
-                    let Some(incoming) = incoming else { break };
-                    let text = match client_result(incoming)? {
+                _ = &mut disconnected_deadline, if !client_open => {
+                    return Err(anyhow!("Codex startup response was lost; submission outcome is unknown; reconnect to inspect the saved conversation"));
+                }
+                incoming = client.next(), if client_open => {
+                    let message = incoming.map(client_result).transpose()?.flatten();
+                    let text = match message {
                         Some(Message::Text(text)) => text,
-                        None | Some(Message::Close(_)) => break,
+                        None | Some(Message::Close(_)) => {
+                            client_open = false;
+                            disconnected_deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(15));
+                            continue;
+                        }
                         _ => continue,
                     };
                     let mut rpc: Value = serde_json::from_str(&text)?;
+                    // A reconnecting fresh TUI still asks to start. Its Session
+                    // may already have received the original start response.
+                    if rpc["method"] == "thread/start" && !subscribed {
+                        thread = self.store.session_thread(&self.session_id)?.or(thread);
+                        if let Some(thread) = &thread {
+                            rpc["method"] = json!("thread/resume");
+                            rpc["params"]["threadId"] = json!(thread);
+                        }
+                    }
                     let method = rpc.get("method").and_then(Value::as_str).unwrap_or_default();
                     let target = rpc.pointer("/params/threadId").and_then(Value::as_str);
                     let wrong_thread = target.is_some_and(|id| Some(id) != thread.as_ref().map(AgentSessionId::as_str));
@@ -250,8 +352,8 @@ impl CodexConnection {
                                 reject(&mut client, &rpc, "Conversation startup was already submitted").await?;
                                 continue;
                             }
+                            startup_request = rpc.get("id").cloned().map(|id| (id, params.clone()));
                             let passive = params.is_none();
-                            bind_thread = !passive;
                             // Keep native tools and explicitly selected UI settings;
                             // prepared instructions and launch configuration win.
                             // A passive or stale UI can only subscribe.
@@ -259,7 +361,6 @@ impl CodexConnection {
                                 Some(params) => native_start_params(&rpc["params"], params),
                                 None => json!({"threadId":thread}),
                             };
-                            resume_request = rpc.get("id").cloned();
                             passive
                         }
                         _ => false,
@@ -277,7 +378,8 @@ impl CodexConnection {
                         upstream.send(message).await?;
                     } else {
                         let outcome;
-                        (upstream, outcome) = self.send(upstream, message).await?;
+                        (upstream, outcome) = self.send(upstream, message,
+                            starting.then_some((input_key.as_str(), NativeSubmission::ThreadDispatched))).await?;
                         match outcome {
                             Ok(()) => {},
                             Err(StoreError::InvalidAuthority(reason)) => {
@@ -288,37 +390,58 @@ impl CodexConnection {
                     }
                 }
                 outgoing = upstream.next() => {
-                    let Some(outgoing) = outgoing else { break };
-                    match outgoing? {
-                        Message::Close(_) => break,
+                    let outgoing = outgoing.ok_or_else(|| anyhow!("Codex provider connection closed; resume saved history before retrying input"))??;
+                    let resumed = match &outgoing {
+                        Message::Close(_) => return Err(anyhow!("Codex provider closed the connection; resume saved history before retrying input")),
                         Message::Text(text) => {
-                            let rpc: Value = serde_json::from_str(&text)?;
-                            let resumed = resume_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id))
-                                && rpc.get("result").is_some();
-                            if resumed {
-                                let selected = rpc.pointer("/result/thread/id").and_then(Value::as_str)
-                                    .ok_or_else(|| anyhow!("Codex returned no native conversation ID"))?;
-                                if thread.as_ref().is_some_and(|thread| thread.as_str() != selected) {
-                                    return Err(anyhow!("Codex resumed another conversation"));
-                                }
-                                thread = Some(selected.into());
-                                if let (Some(initial), Some(attachment)) = (&initial, &self.attachment) {
-                                    let mut initial = initial.lock().await;
-                                    if let Some(context) = &initial.context {
-                                        // Hooks run on the app-server, which never inherits the
-                                        // terminal's launch file. Bind before the UI can send a turn.
-                                        self.store.with_session_attachment(&self.session_id, attachment, || {
-                                            Ok(context.bind_codex_session(selected))
-                                        })??;
-                                        initial.context = None;
+                            let rpc: Value = serde_json::from_str(text)?;
+                            let bind_thread = startup_request.as_ref().is_some_and(|(_, params)| params.is_some());
+                            let startup_reply = startup_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id));
+                            if startup_reply {
+                                let (_, params) = startup_request.take().expect("matched startup request");
+                                if rpc.get("error").is_some() && thread.is_none() {
+                                    self.record_submission(&input_key, NativeSubmission::ThreadRejected)?;
+                                    if let Some(initial) = &initial {
+                                        initial.lock().await.params = params;
                                     }
                                 }
+                            }
+                            let resumed = startup_reply && rpc.get("result").is_some();
+                            // Reply-first and notification-first creation share one identity
+                            // check and receipt, even after the renderer disappears.
+                            let selected = if resumed {
+                                Some(rpc.pointer("/result/thread/id").and_then(Value::as_str)
+                                    .ok_or_else(|| anyhow!("Codex returned no native conversation ID"))?)
+                            } else if bind_thread && rpc["method"] == "thread/started" {
+                                rpc.pointer("/params/thread/id").and_then(Value::as_str)
+                            } else {
+                                None
+                            };
+                            if let Some(selected) = selected {
+                                if thread.as_ref().is_some_and(|thread| thread.as_str() != selected) {
+                                    return Err(anyhow!("Codex selected another conversation"));
+                                }
+                                let selected_thread = AgentSessionId::from(selected);
                                 if bind_thread {
                                     if let Some(attachment) = &self.attachment {
                                         self.store.record_session_connection(&self.session_id, attachment,
-                                            &endpoint.to_string_lossy(), thread.as_ref().expect("selected thread"))?;
+                                            &endpoint.to_string_lossy(), &selected_thread)?;
                                     }
-                                    bind_thread = false;
+                                }
+                                thread = Some(selected_thread);
+                                if resumed {
+                                    subscribed = true;
+                                    if let (Some(initial), Some(attachment)) = (&initial, &self.attachment) {
+                                        let mut initial = initial.lock().await;
+                                        if let Some(context) = &initial.context {
+                                            // Hooks run on the app-server, which never inherits the
+                                            // terminal's launch file. Bind before the UI can send a turn.
+                                            self.store.with_session_attachment(&self.session_id, attachment, || {
+                                                Ok(context.bind_codex_session(selected))
+                                            })??;
+                                            initial.context = None;
+                                        }
+                                    }
                                 }
                             }
                             if rpc["method"] == "turn/started" && initial.is_some() {
@@ -333,37 +456,49 @@ impl CodexConnection {
                                 history.record(&self.store, &self.session_id,
                                     self.attachment.as_ref(), thread.as_ref(), &rpc)
                             })?;
-                            if initial_request.as_ref().is_some_and(|id| rpc.get("id") == Some(id)) {
-                                initial_request = None;
+                            if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
+                                let (_, text) = initial_request.take().expect("matched initial request");
                                 if let Some(error) = rpc.get("error") {
-                                    return Err(anyhow!("Codex rejected the initial request: {error}"));
+                                    self.record_submission(&input_key, NativeSubmission::InputRejected)?;
+                                    if let Some(initial) = &initial {
+                                        initial.lock().await.text = Some(text);
+                                    }
+                                    return Err(anyhow!("Codex rejected the initial request: {error}; saved input is available on reconnect"));
                                 }
+                                self.record_submission(&input_key, NativeSubmission::InputAccepted)?;
                                 continue;
                             }
-                            if client_result(client.send(Message::Text(text)).await)?.is_none() { break; }
-                            if resumed {
-                                resume_request = None;
-                                if let Some(initial) = &initial {
-                                    let mut initial = initial.lock().await;
-                                    let turns = rpc.pointer("/result/thread/turns").and_then(Value::as_array)
-                                        .ok_or_else(|| anyhow!("Codex returned no native turn history"))?;
-                                    if !turns.is_empty() { initial.text = None; }
-                                    if let Some(text) = initial.text.take() {
-                                        let id = json!(format!("lf-initial-{}", uuid::Uuid::new_v4()));
-                                        let request = json!({"id":id,"method":"turn/start","params":{
-                                            "threadId":thread,"input":[{"type":"text","text":text}]
-                                        }});
-                                        history.request(&request, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
-                                        let outcome;
-                                        (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into())).await?;
-                                        outcome?;
-                                        initial_request = Some(id);
-                                    }
-                                }
+                            resumed.then_some(rpc)
+                        }
+                        _ => None,
+                    };
+                    if !client_open { continue; }
+                    if client_result(client.send(outgoing).await)?.is_none() {
+                        client_open = false;
+                        disconnected_deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(15));
+                        continue;
+                    }
+                    if let (Some(rpc), Some(initial)) = (resumed, &initial) {
+                        let mut initial = initial.lock().await;
+                        let turns = rpc.pointer("/result/thread/turns").and_then(Value::as_array)
+                            .ok_or_else(|| anyhow!("Codex returned no native turn history"))?;
+                        if !turns.is_empty() {
+                            initial.text = None;
+                            if self.submission()? == Some(NativeSubmission::InputDispatched) {
+                                self.record_submission(&input_key, NativeSubmission::InputAccepted)?;
                             }
                         }
-                        message => {
-                            if client_result(client.send(message).await)?.is_none() { break; }
+                        if let Some(text) = initial.text.take() {
+                            let id = json!(format!("lf-initial-{}", uuid::Uuid::new_v4()));
+                            let request = json!({"id":id,"method":"turn/start","params":{
+                                "threadId":thread,"input":[{"type":"text","text":&text}]
+                            }});
+                            history.request(&request, self.attachment.as_ref().map(|attachment| (&self.store,self.session_id.as_str(),attachment)))?;
+                            let outcome;
+                            (upstream, outcome) = self.send(upstream, Message::Text(request.to_string().into()),
+                                Some((input_key.as_str(), NativeSubmission::InputDispatched))).await?;
+                            outcome?;
+                            initial_request = Some((id, text));
                         }
                     }
                 }
@@ -376,6 +511,7 @@ impl CodexConnection {
         &self,
         mut upstream: WebSocketStream<UnixStream>,
         message: Message,
+        submission: Option<(&str, NativeSubmission)>,
     ) -> Result<(WebSocketStream<UnixStream>, StoreResult<()>)> {
         let Some(attachment) = self.attachment.clone() else {
             return Ok((
@@ -385,15 +521,23 @@ impl CodexConnection {
                 )),
             ));
         };
-        let store = self.store.clone();
-        let session = self.session_id.clone();
+        let connection = self.clone();
+        let submission = submission.map(|(input, state)| (input.to_owned(), state));
         // A second connection can transfer the attachment in another process.
         // Keep the attachment comparison and bounded socket dispatch under the
         // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
-            let outcome = store.with_session_dispatch(&session, &attachment, || {
-                super::dispatch::send_fenced(&mut upstream, message)
-            });
+            let outcome =
+                connection
+                    .store
+                    .with_session_dispatch(&connection.session_id, &attachment, || {
+                        // The admitted write and its durable uncertainty receipt share
+                        // the attachment fence. A rejected stale writer records no dispatch.
+                        if let Some((input, state)) = submission {
+                            connection.record_submission(&input, state)?;
+                        }
+                        super::dispatch::send_fenced(&mut upstream, message)
+                    });
             (upstream, outcome)
         })
         .await
@@ -511,10 +655,8 @@ mod tests {
     use tokio::net::{UnixListener, UnixStream};
     use tokio_tungstenite::{accept_async, client_async, tungstenite::Message};
 
-    #[tokio::test]
-    async fn native_start_and_reconnect_restore_context_before_client_receives_thread() {
-        let home = tempfile::tempdir_in("/tmp").unwrap();
-        let database = home.path().join("store.db");
+    fn attached_connection(home: &std::path::Path) -> CodexConnection {
+        let database = home.join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
         let process = LfProcessId::new();
@@ -528,6 +670,19 @@ mod tests {
         let attachment = store
             .claim_session_attachment("conversation", None, &process, true)
             .unwrap();
+        CodexConnection {
+            store,
+            session_id: "conversation".into(),
+            thread_id: None,
+            attachment: Some(attachment),
+            account_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn native_start_and_reconnect_restore_context_before_client_receives_thread() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
         let context = ContextDelivery {
             repository: None,
             repo: home.path().to_owned(),
@@ -545,27 +700,19 @@ mod tests {
             let provider = tokio::spawn(async move {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut socket = accept_async(stream).await.unwrap();
-                let request = socket.next().await.unwrap().unwrap();
-                let request: serde_json::Value =
-                    serde_json::from_str(request.to_text().unwrap()).unwrap();
-                socket
-                    .send(Message::Text(
-                        json!({"id":request["id"],"result":{
-                            "thread":{"id":"native-thread","turns":[]}
-                        }})
-                        .to_string()
-                        .into(),
-                    ))
-                    .await
-                    .unwrap();
+                let request = fixture_rpc(&mut socket).await;
+                fixture_send(
+                    &mut socket,
+                    json!({"id":request["id"],"result":{
+                        "thread":{"id":"native-thread","turns":[]}
+                    }}),
+                )
+                .await;
                 let _ = socket.next().await;
             });
             let connection = CodexConnection {
-                store: store.clone(),
-                session_id: "conversation".into(),
                 thread_id: resume.then(|| "native-thread".into()),
-                attachment: Some(attachment.clone()),
-                account_id: None,
+                ..connection.clone()
             };
             let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
                 params: (!resume).then(|| json!({})),
@@ -579,17 +726,14 @@ mod tests {
                     .await
             });
             let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
-            terminal
-                .send(Message::Text(
-                    json!({"id":1,
-                        "method":if resume {"thread/resume"} else {"thread/start"},
-                        "params":if resume {json!({"threadId":"native-thread"})} else {json!({})}
-                    })
-                    .to_string()
-                    .into(),
-                ))
-                .await
-                .unwrap();
+            fixture_send(
+                &mut terminal,
+                json!({"id":1,
+                    "method":if resume {"thread/resume"} else {"thread/start"},
+                    "params":if resume {json!({"threadId":"native-thread"})} else {json!({})}
+                }),
+            )
+            .await;
             let response = tokio::time::timeout(std::time::Duration::from_secs(2), terminal.next())
                 .await
                 .unwrap()
@@ -608,6 +752,642 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn lost_start_response_reconnects_to_same_thread_and_submits_input_once() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+            params: Some(json!({})),
+            text: Some("saved skill".into()),
+            context: None,
+        }));
+        for reconnect in [false, true] {
+            let endpoint = home.path().join(if reconnect {
+                "resume.sock"
+            } else {
+                "start.sock"
+            });
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let (received, ready) = tokio::sync::oneshot::channel();
+            let (release, wait) = tokio::sync::oneshot::channel();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let request = fixture_rpc(&mut socket).await;
+                assert_eq!(
+                    request["method"],
+                    if reconnect {
+                        "thread/resume"
+                    } else {
+                        "thread/start"
+                    }
+                );
+                if reconnect {
+                    assert_eq!(request["params"]["threadId"], "native-thread");
+                }
+                received.send(()).unwrap();
+                wait.await.unwrap();
+                fixture_send(
+                    &mut socket,
+                    json!({"method":"thread/started",
+                        "params":{"thread":{"id":"native-thread"}}
+                    }),
+                )
+                .await;
+                fixture_send(
+                    &mut socket,
+                    json!({"id":request["id"],"result":{
+                        "thread":{"id":"native-thread","turns":[]}
+                    }}),
+                )
+                .await;
+                if reconnect {
+                    let turn = fixture_rpc(&mut socket).await;
+                    assert_eq!(turn["method"], "turn/start");
+                    assert_eq!(turn["params"]["input"][0]["text"], "saved skill");
+                    fixture_send(
+                        &mut socket,
+                        json!({"id":turn["id"],"result":{
+                            "turn":{"id":"one-turn"}
+                        }}),
+                    )
+                    .await;
+                    fixture_send(&mut socket, json!({"method":"item/agentMessage/delta",
+                        "params":{"threadId":"native-thread","turnId":"one-turn","delta":"visible output"}
+                    })).await;
+                }
+                let _ = socket.next().await;
+            });
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay_connection = connection.clone();
+            let input = input.clone();
+            let relay = tokio::spawn(async move {
+                relay_connection
+                    .serve_with_input(relay, &endpoint, Some(input))
+                    .await
+            });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            fixture_send(
+                &mut terminal,
+                json!({"id":1,"method":"thread/start","params":{}}),
+            )
+            .await;
+            ready.await.unwrap();
+            if reconnect {
+                release.send(()).unwrap();
+                let notification = terminal.next().await.unwrap().unwrap();
+                assert!(notification.to_text().unwrap().contains("thread/started"));
+                let response = terminal.next().await.unwrap().unwrap();
+                assert!(response.to_text().unwrap().contains("native-thread"));
+                let output = terminal.next().await.unwrap().unwrap();
+                assert!(output.to_text().unwrap().contains("visible output"));
+                fixture_send(
+                    &mut terminal,
+                    json!({"id":9,"method":"thread/start","params":{}}),
+                )
+                .await;
+                let rejected = terminal.next().await.unwrap().unwrap();
+                let rejected: serde_json::Value =
+                    serde_json::from_str(rejected.to_text().unwrap()).unwrap();
+                assert_eq!(rejected["id"], 9);
+                assert_eq!(rejected["error"]["code"], -32001);
+                terminal.close(None).await.unwrap();
+                drop(terminal);
+            } else {
+                drop(terminal);
+                release.send(()).unwrap();
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(2), relay)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            provider.await.unwrap();
+            assert_eq!(
+                connection
+                    .store
+                    .session_thread("conversation")
+                    .unwrap()
+                    .unwrap()
+                    .as_str(),
+                "native-thread"
+            );
+        }
+        assert!(input.lock().await.text.is_none());
+    }
+
+    async fn fixture_rpc(
+        socket: &mut tokio_tungstenite::WebSocketStream<UnixStream>,
+    ) -> serde_json::Value {
+        let message = socket.next().await.unwrap().unwrap();
+        serde_json::from_str(message.to_text().unwrap()).unwrap()
+    }
+
+    async fn fixture_send(
+        socket: &mut tokio_tungstenite::WebSocketStream<UnixStream>,
+        rpc: serde_json::Value,
+    ) {
+        socket
+            .send(Message::Text(rpc.to_string().into()))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn provider_loss_retains_creation_uncertainty_or_notification_identity() {
+        for outcome in ["lost-before-creation", "lost-after-creation", "rejected"] {
+            let created = outcome == "lost-after-creation";
+            let home = tempfile::tempdir_in("/tmp").unwrap();
+            let connection = attached_connection(home.path());
+            let endpoint = home.path().join("provider.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let start = fixture_rpc(&mut socket).await;
+                assert_eq!(start["method"], "thread/start");
+                if outcome == "rejected" {
+                    fixture_send(
+                        &mut socket,
+                        json!({"id":start["id"],"error":{
+                        "code":-32000,"message":"startup rejected"}}),
+                    )
+                    .await;
+                }
+                if created {
+                    fixture_send(
+                        &mut socket,
+                        json!({"method":"thread/started",
+                        "params":{"thread":{"id":"saved-thread"}}}),
+                    )
+                    .await;
+                }
+                socket.close(None).await.unwrap();
+            });
+            let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+                params: Some(json!({})),
+                text: Some("retained draft".into()),
+                context: None,
+            }));
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay_connection = connection.clone();
+            let relay_input = input.clone();
+            let relay = tokio::spawn(async move {
+                relay_connection
+                    .serve_with_input(relay, &endpoint, Some(relay_input))
+                    .await
+            });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            fixture_send(
+                &mut terminal,
+                json!({"id":1,"method":"thread/start","params":{}}),
+            )
+            .await;
+            let error = relay.await.unwrap().unwrap_err().to_string();
+            assert!(error.contains("provider closed"), "{error}");
+            provider.await.unwrap();
+            let reopened = CodexConnection {
+                store: SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap(),
+                ..connection
+            };
+            assert_eq!(
+                reopened.submission().unwrap(),
+                Some(if outcome == "rejected" {
+                    super::NativeSubmission::ThreadRejected
+                } else {
+                    super::NativeSubmission::ThreadDispatched
+                })
+            );
+            assert_eq!(
+                reopened
+                    .store
+                    .session_thread("conversation")
+                    .unwrap()
+                    .map(|id| id.to_string()),
+                created.then(|| "saved-thread".to_owned())
+            );
+            assert_eq!(input.lock().await.text.as_deref(), Some("retained draft"));
+            assert_eq!(input.lock().await.params.is_some(), outcome == "rejected");
+            assert_eq!(
+                reopened.recover_input("retained draft").unwrap().as_deref(),
+                Some("retained draft")
+            );
+            assert_eq!(
+                reopened.ensure_thread_resolved().is_err(),
+                outcome == "lost-before-creation"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_and_unacknowledged_initial_input_keep_distinct_durable_receipts() {
+        for outcome in [
+            "rejected",
+            "lost-before-acceptance",
+            "lost-after-acceptance",
+            "accepted",
+        ] {
+            let home = tempfile::tempdir_in("/tmp").unwrap();
+            let connection = attached_connection(home.path());
+            let endpoint = home.path().join("provider.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let start = fixture_rpc(&mut socket).await;
+                // Reply-first ordering is valid; no thread/started is required.
+                fixture_send(
+                    &mut socket,
+                    json!({"id":start["id"],"result":{
+                    "thread":{"id":"saved-thread","turns":[]}}}),
+                )
+                .await;
+                let turn = fixture_rpc(&mut socket).await;
+                assert_eq!(turn["method"], "turn/start");
+                assert_eq!(turn["params"]["input"][0]["text"], "retained draft");
+                match outcome {
+                    "rejected" => {
+                        fixture_send(
+                            &mut socket,
+                            json!({"id":turn["id"],
+                        "error":{"code":-32000,"message":"not accepted"}}),
+                        )
+                        .await
+                    }
+                    "accepted" => {
+                        fixture_send(
+                            &mut socket,
+                            json!({"id":turn["id"],
+                        "result":{"turn":{"id":"only-turn"}}}),
+                        )
+                        .await
+                    }
+                    // A provider may accept the turn yet lose both acknowledgement
+                    // and notifications. Neither transport loss authorizes replay.
+                    _ => {}
+                }
+                socket.close(None).await.unwrap();
+            });
+            let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+                params: Some(json!({})),
+                text: Some("retained draft".into()),
+                context: None,
+            }));
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay_connection = connection.clone();
+            let relay_input = input.clone();
+            let relay = tokio::spawn(async move {
+                relay_connection
+                    .serve_with_input(relay, &endpoint, Some(relay_input))
+                    .await
+            });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            fixture_send(
+                &mut terminal,
+                json!({"id":1,"method":"thread/start","params":{}}),
+            )
+            .await;
+            assert_eq!(
+                fixture_rpc(&mut terminal).await["result"]["thread"]["id"],
+                "saved-thread"
+            );
+            let error = relay.await.unwrap().unwrap_err().to_string();
+            assert!(
+                error.contains(if outcome == "rejected" {
+                    "rejected"
+                } else {
+                    "provider closed"
+                }),
+                "{error}"
+            );
+            provider.await.unwrap();
+            let reopened = CodexConnection {
+                store: SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap(),
+                ..connection
+            };
+            let expected = match outcome {
+                "rejected" => super::NativeSubmission::InputRejected,
+                "accepted" => super::NativeSubmission::InputAccepted,
+                _ => super::NativeSubmission::InputDispatched,
+            };
+            assert_eq!(reopened.submission().unwrap(), Some(expected));
+            assert_eq!(
+                input.lock().await.text.as_deref(),
+                (outcome == "rejected").then_some("retained draft")
+            );
+            assert_eq!(
+                reopened
+                    .store
+                    .session_thread("conversation")
+                    .unwrap()
+                    .unwrap()
+                    .as_str(),
+                "saved-thread"
+            );
+            let recovered = reopened.recover_input("retained draft").unwrap();
+            assert_eq!(
+                recovered.as_deref(),
+                (outcome == "rejected").then_some("retained draft")
+            );
+            let endpoint = home.path().join("resume.sock");
+            let listener = UnixListener::bind(&endpoint).unwrap();
+            let provider = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let start = fixture_rpc(&mut socket).await;
+                assert_eq!(start["method"], "thread/resume");
+                assert_eq!(start["params"]["threadId"], "saved-thread");
+                let turns = if matches!(outcome, "lost-after-acceptance" | "accepted") {
+                    json!([{"id":"only-turn","status":"completed","items":[{
+                        "type":"agentMessage","text":"retained answer"}]}])
+                } else {
+                    json!([])
+                };
+                fixture_send(
+                    &mut socket,
+                    json!({"id":start["id"],"result":{
+                    "thread":{"id":"saved-thread","turns":turns}}}),
+                )
+                .await;
+                if outcome == "rejected" {
+                    let turn = fixture_rpc(&mut socket).await;
+                    assert_eq!(turn["params"]["input"][0]["text"], "retained draft");
+                    fixture_send(
+                        &mut socket,
+                        json!({"id":turn["id"],"result":{
+                        "turn":{"id":"only-turn"}}}),
+                    )
+                    .await;
+                }
+                // A barrier after the possible turn proves there was no replay.
+                let barrier = fixture_rpc(&mut socket).await;
+                assert_eq!(barrier["method"], "initialize");
+                fixture_send(&mut socket, json!({"id":barrier["id"],"result":{}})).await;
+                let _ = socket.next().await;
+            });
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let relay_connection = reopened.clone();
+            let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+                params: Some(json!({"threadId":"saved-thread"})),
+                text: recovered,
+                context: None,
+            }));
+            let relay = tokio::spawn(async move {
+                relay_connection
+                    .serve_with_input(relay, &endpoint, Some(input))
+                    .await
+            });
+            let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            fixture_send(
+                &mut terminal,
+                json!({"id":2,"method":"thread/start","params":{}}),
+            )
+            .await;
+            assert_eq!(
+                fixture_rpc(&mut terminal).await["result"]["thread"]["id"],
+                "saved-thread"
+            );
+            fixture_send(
+                &mut terminal,
+                json!({"id":3,"method":"initialize","params":{}}),
+            )
+            .await;
+            assert_eq!(fixture_rpc(&mut terminal).await["id"], 3);
+            terminal.close(None).await.unwrap();
+            drop(terminal);
+            relay.await.unwrap().unwrap();
+            provider.await.unwrap();
+            if outcome == "lost-after-acceptance" {
+                assert_eq!(
+                    reopened.submission().unwrap(),
+                    Some(super::NativeSubmission::InputAccepted)
+                );
+                assert!(reopened
+                    .store
+                    .session_history("conversation", 0, 0)
+                    .unwrap()
+                    .iter()
+                    .any(|event| event.payload["text"] == "retained answer"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn renderer_loss_during_initial_turn_retains_acknowledgement_without_replay() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let (dispatched, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let start = fixture_rpc(&mut socket).await;
+            fixture_send(
+                &mut socket,
+                json!({"id":start["id"],"result":{
+                    "thread":{"id":"saved-thread","turns":[]}}}),
+            )
+            .await;
+            let turn = fixture_rpc(&mut socket).await;
+            assert_eq!(turn["method"], "turn/start");
+            assert_eq!(turn["params"]["input"][0]["text"], "saved skill");
+            dispatched.send(()).unwrap();
+            wait.await.unwrap();
+            fixture_send(
+                &mut socket,
+                json!({"id":turn["id"],"result":{"turn":{"id":"only-turn"}}}),
+            )
+            .await;
+            // The vanished renderer cannot cause another submission.
+            assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+        });
+        let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+            params: Some(json!({})),
+            text: Some("saved skill".into()),
+            context: None,
+        }));
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let relay_connection = connection.clone();
+        let relay = tokio::spawn(async move {
+            relay_connection
+                .serve_with_input(relay, &endpoint, Some(input))
+                .await
+        });
+        let (mut terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+        fixture_send(
+            &mut terminal,
+            json!({"id":1,"method":"thread/start","params":{}}),
+        )
+        .await;
+        assert_eq!(
+            fixture_rpc(&mut terminal).await["result"]["thread"]["id"],
+            "saved-thread"
+        );
+        ready.await.unwrap();
+        drop(terminal);
+        release.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), relay)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        provider.await.unwrap();
+        let reopened = CodexConnection {
+            store: SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap(),
+            ..connection
+        };
+        assert_eq!(
+            reopened.submission().unwrap(),
+            Some(super::NativeSubmission::InputAccepted)
+        );
+        assert_eq!(reopened.recover_input("saved skill").unwrap(), None);
+        assert_eq!(
+            reopened
+                .store
+                .session_thread("conversation")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "saved-thread"
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_reconnect_waits_for_original_identity_without_second_creation() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut first = accept_async(stream).await.unwrap();
+            let start = fixture_rpc(&mut first).await;
+            assert_eq!(start["method"], "thread/start");
+            started.send(()).unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut second = accept_async(stream).await.unwrap();
+            wait.await.unwrap();
+            fixture_send(
+                &mut first,
+                json!({"id":start["id"],"result":{
+                "thread":{"id":"only-thread","turns":[]}}}),
+            )
+            .await;
+            let resume = fixture_rpc(&mut second).await;
+            assert_eq!(resume["method"], "thread/resume");
+            fixture_send(
+                &mut second,
+                json!({"id":resume["id"],"result":{
+                "thread":{"id":"only-thread","turns":[]}}}),
+            )
+            .await;
+            assert_eq!(fixture_rpc(&mut second).await["method"], "turn/start");
+            // No first turn was sent to the vanished renderer's connection.
+            let _ = first.next().await;
+        });
+        let input = Arc::new(tokio::sync::Mutex::new(NativeInput {
+            params: Some(json!({})),
+            text: Some("once".into()),
+            context: None,
+        }));
+        let mut relays = Vec::new();
+        let mut terminals = Vec::new();
+        for _ in 0..2 {
+            let (terminal, relay) = UnixStream::pair().unwrap();
+            let connection = connection.clone();
+            let endpoint = endpoint.clone();
+            let input = input.clone();
+            relays.push(tokio::spawn(async move {
+                connection
+                    .serve_with_input(relay, &endpoint, Some(input))
+                    .await
+            }));
+            let (terminal, _) = client_async("ws://localhost", terminal).await.unwrap();
+            terminals.push(terminal);
+        }
+        fixture_send(
+            &mut terminals[0],
+            json!({"id":1,"method":"thread/start","params":{}}),
+        )
+        .await;
+        ready.await.unwrap();
+        fixture_send(
+            &mut terminals[1],
+            json!({"id":2,"method":"thread/start","params":{}}),
+        )
+        .await;
+        assert_eq!(
+            fixture_rpc(&mut terminals[1]).await["error"]["code"],
+            -32001
+        );
+        let second = terminals.pop().unwrap();
+        drop(terminals); // Original reply is still outstanding.
+        release.send(()).unwrap();
+        relays.remove(0).await.unwrap().unwrap();
+        let mut second = second;
+        fixture_send(
+            &mut second,
+            json!({"id":3,"method":"thread/start","params":{}}),
+        )
+        .await;
+        assert_eq!(
+            fixture_rpc(&mut second).await["result"]["thread"]["id"],
+            "only-thread"
+        );
+        // Provider exit after receiving the one input is an uncertain acknowledgement.
+        assert!(relays.remove(0).await.unwrap().is_err());
+        provider.await.unwrap();
+        assert!(input.lock().await.text.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_attachment_cannot_record_a_dispatch_or_send_initial_input() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let connection = attached_connection(home.path());
+        let attachment = connection.attachment.as_ref().unwrap();
+        connection
+            .store
+            .claim_session_attachment(
+                "conversation",
+                Some(attachment),
+                attachment.lf_process_id.as_ref().unwrap(),
+                false,
+            )
+            .unwrap();
+        let (client, server) = UnixStream::pair().unwrap();
+        let provider = tokio::spawn(async move {
+            let mut socket = accept_async(server).await.unwrap();
+            // Closing an unused transport must be the only provider observation.
+            assert!(!matches!(socket.next().await, Some(Ok(Message::Text(_)))));
+        });
+        let (upstream, _) = client_async("ws://localhost", client).await.unwrap();
+        let input = connection
+            .store
+            .session("conversation")
+            .unwrap()
+            .unwrap()
+            .artifact_key;
+        let (upstream, result) = connection
+            .send(
+                upstream,
+                Message::Text(json!({"id":1,"method":"turn/start"}).to_string().into()),
+                Some((&input, super::NativeSubmission::InputDispatched)),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            Err(crate::store::StoreError::InvalidAuthority(_))
+        ));
+        assert_eq!(connection.submission().unwrap(), None);
+        drop(upstream);
+        provider.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn native_client_exit_with_or_without_close_handshake_ends_its_channel_cleanly() {
         for handshake in [false, true] {
             let home = tempfile::tempdir_in("/tmp").unwrap();
@@ -621,7 +1401,7 @@ mod tests {
                 let _ = socket.next().await;
             });
             let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-            store.test_session("conversation", "input");
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
             let connection = CodexConnection {
                 store,
                 session_id: "conversation".into(),

@@ -163,6 +163,23 @@ failure: the machine-wide planning frame is too large/slow, the reader times out
 the sidebar keeps the saved snapshot. Open: why the first frame is machine-wide rather
 than repository-scoped, and where the leaked test Waves came from.
 
+Jack: “Ok, this needs a performance test” / “and needs to be optimized”.
+Done (local, not pushed):
+- `planning_runs_git_per_repository_not_per_wave` (`tests/linear/work_watch.rs`): a `git`
+  shim counts the commands one planning reading runs; adding 8 Waves on deleted
+  repositories and 8 on an existing one must not add any. Failed before (7 → 38).
+- `e0837d87b8`: missing paths fail without spawning git; the current checkout is found
+  once per reading; the frame's Waves come from the roadmap instead of a second pass.
+  On a VACUUM copy of Jack's lfdb (main + this fix, debug build, load avg ~45):
+  git commands 340 → 137 per reading, identical 8.2 MB output; 6–15 s → 4–9 s.
+- `fd8c98a873`: this branch's Dashboard plans carried a read-time `observed_at`, so every
+  planning reading republished the whole frame after any Process write (pre-existing
+  failure of `transcript_lines_do_not_publish_changes_or_delay_a_task`; now passes).
+Remaining, measured: per-Task Flow membership (`flows_of_task`) scans all 4,246 Sessions
+once per Task — 2.3 s for 622 Tasks; 3 git commands per live Task worktree (137 total);
+every Task is serialized twice in the frame (roadmap.tasks and each Wave's tasks);
+30 of 38 Wave repositories are leaked test temp dirs; Desktop gives the first frame 10 s.
+
 Open design tension (4), not resolved: an unstarted Task opened as a workspace has no
 Session view. Options Jack named and disliked: Sessions for unstarted Tasks; auto-start.
 Jack's leaning: queries exclude unstarted Tasks — but completed Tasks share the

@@ -976,9 +976,9 @@ fn _run_with_transient_retries(
             None
         };
         result.failure = failure;
-        // OpenCode's native execution cannot be resumed without adding a new
+        // Pi and OpenCode cannot be resumed without adding a new
         // model-visible input. Preserve failure; only explicit input starts more work.
-        if parse_agent(launch.agent()).0 == "opencode" {
+        if matches!(parse_agent(launch.agent()).0.as_str(), "opencode" | "pi") {
             return Ok(result);
         }
         let Some(failure) = failure else {
@@ -2020,6 +2020,32 @@ trust_level = "trusted"
             stderr: message.to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
+        let launch = AgentConfig {
+            agent: Some("pi:fixture/model".into()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let result = _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                Ok(managed_attempt(AgentProcessResult {
+                    agent_session: Some("/fixture/pi.jsonl".into()),
+                    ..failed_result("connection reset")
+                }))
+            },
+            |_| panic!("Pi owns retries"),
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_ne!(result.exit_code, 0);
+        assert_eq!(result.agent_session, Some("/fixture/pi.jsonl".into()));
     }
 
     #[test]

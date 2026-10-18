@@ -144,13 +144,17 @@ fn observe_native(
         }
         let settled = value["type"] == "agent_settled";
         let mut yielded = turn.is_none() && value["type"] == "ui_prompt_end";
-        if settled {
+        if settled || (value["type"] == "message_end" && value["message"]["role"] == "assistant") {
             let mut state = super::pi_mapping::Turn::new(require_turn()?.into());
+            let mut final_events = Vec::new();
             for event in value["events"].as_array().into_iter().flatten() {
-                // Replay assistant messages; only settlement persists final output and usage.
-                state.event(event);
+                // The extension supplies cumulative evidence; retain only the latest
+                // checkpoint. Existing receipt keys make repeated observations idempotent.
+                final_events = state.event(event);
             }
-            let final_events = state.event(value);
+            if settled {
+                final_events = state.event(value);
+            }
             yielded = final_events.iter().any(|event| {
                 matches!(
                     event,

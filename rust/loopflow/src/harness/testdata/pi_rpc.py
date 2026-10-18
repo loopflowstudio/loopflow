@@ -34,9 +34,12 @@ def _record(text):
         record['system'] = Path(args[args.index('--append-system-prompt')+1]).read_text()
     if os.environ.get('LF_CONTEXT_DELIVERY'):
         output = subprocess.run([os.environ['LF_BIN'],'__context-block','--moment','start'],
-            input=json.dumps({'session_id':str(file),'hook_event_name':'PiBeforeAgentStart','adapter_invocation_id':'fixture'}),
+            input=json.dumps({'session_id':str(file),'hook_event_name':'PiContext','adapter_invocation_id':'fixture'}),
             text=True,capture_output=True,check=True)
         record['context'] = json.loads(output.stdout)['hookSpecificOutput']['additionalContext']
+    if os.environ.get('PI_FIXTURE_NESTED'):
+        nested = subprocess.run([os.environ['LF_BIN'], 'context'], text=True, capture_output=True, check=True)
+        record['nested_context'] = nested.stdout
     Path(os.environ['PI_FIXTURE_RECORD']).write_text(json.dumps(record))
 
 
@@ -49,7 +52,14 @@ if '--mode' not in args:
     _callback({'type':'ui_prompt_end', 'turn':None})
     _record(args[-1] if '--' in args else '')
     _callback({'type':'agent_start'})
-    _callback({'type':'agent_settled','aborted':False,'events':[_message('Checking'), _message('native answer')]})
+    events = [_message('Checking')]
+    _callback(events[-1] | {'events':events})
+    _callback(events[-1] | {'events':events})  # repeated observation is idempotent
+    if os.environ.get('PI_FIXTURE_CRASH'):
+        sys.exit(9)
+    events.append(_message('native answer'))
+    _callback(events[-1] | {'events':events})
+    _callback({'type':'agent_settled','aborted':False,'events':events})
     sys.exit(0)
 
 
@@ -59,6 +69,19 @@ for line in sys.stdin:
     response = {'type':'response','command':command,'id':request.get('id'),'success':True}
     if command == 'get_state':
         response['data'] = {'sessionFile':str(file), 'sessionId':'fixture'}
+    elif command == 'steer':
+        text = request['message']
+        if text == 'reject':
+            response.update(success=False, error='Steer rejected')
+        elif text == 'malformed':
+            del response['success']
+            response['data'] = {'disposition':'queued'}
+        elif text == 'disconnect':
+            sys.exit(9)
+        else:
+            if text == 'late':
+                _emit({'type':'agent_settled','aborted':True})
+            response['data'] = {'disposition':'handled' if text == 'handled' else 'queued'}
     elif command == 'prompt':
         text = request['message']
         _record(text)
@@ -67,6 +90,9 @@ for line in sys.stdin:
         else:
             response['data'] = {'disposition':'started'}
     _emit(response)
+    if command == 'steer' and text == 'finish':
+        _emit(_message('steering incorporated'))
+        _emit({'type':'agent_settled','aborted':False})
     if command == 'abort':
         _emit({'type':'agent_settled','aborted':True})
     if command != 'prompt' or not response['success']:
@@ -97,6 +123,7 @@ for line in sys.stdin:
     with file.open('a') as saved:
         saved.write(json.dumps({'prompt':text})+'\n')
     count = len(file.read_text().splitlines()) - 1
-    _emit(_message(f'answer {count}: {text}'))
+    answer = '{"path":"alpha"}' if 'PI_ROUTE_SENTINEL' in text else f'answer {count}: {text}'
+    _emit(_message(answer))
     _emit({'type':'agent_end','messages':[],'willRetry':False})
     _emit({'type':'agent_settled','aborted':False})

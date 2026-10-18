@@ -11,6 +11,7 @@ pub(super) struct Turn {
     usage: TurnUsage,
     messages: usize,
     failed: bool,
+    answered: bool,
     final_text: String,
     streamed_text: bool,
     tools: BTreeMap<String, ConversationItem>,
@@ -60,6 +61,10 @@ impl Turn {
         }
     }
 
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     pub fn event(&mut self, event: &Value) -> Vec<ConversationEvent> {
         let mut out = Vec::new();
         match event["type"].as_str() {
@@ -85,6 +90,8 @@ impl Turn {
             Some("message_end") if event["message"]["role"] == "assistant" => {
                 let message = &event["message"];
                 self.final_text = text_content(&message["content"]);
+                self.answered =
+                    message["stopReason"] == "stop" && !self.final_text.trim().is_empty();
                 if !self.streamed_text && !self.final_text.is_empty() {
                     out.push(ConversationEvent::TextDelta {
                         turn_id: self.id.clone(),
@@ -185,16 +192,16 @@ impl Turn {
                 }
             }
             Some("agent_settled") => {
-                if self.messages == 0 && event["aborted"] != true {
+                if !self.answered && !self.failed && event["aborted"] != true {
                     out.push(ConversationEvent::Error {
                         code: "pi_empty_turn".into(),
-                        message: "Pi settled without an assistant response".into(),
+                        message: "Pi settled without a nonempty final answer".into(),
                         evidence: None,
                     });
                 }
                 let status = if event["aborted"] == true {
                     Lifecycle::Interrupted
-                } else if self.failed || self.messages == 0 {
+                } else if self.failed || !self.answered {
                     Lifecycle::Failed
                 } else {
                     Lifecycle::Completed

@@ -10,22 +10,29 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use super::agent_process::AttachmentOwner;
 use super::pi_mapping::Turn;
-use super::{Harness, HarnessError, RawProviderEvent};
+use super::{Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
 
+#[derive(Debug)]
+struct Response {
+    value: Value,
+    // Snapshot in stream order: a later settlement cannot change the receipt.
+    turn: Option<String>,
+}
+
 #[derive(Debug, Default)]
 struct State {
     turn: Option<Turn>,
-    responses: HashMap<String, oneshot::Sender<Value>>,
+    responses: HashMap<String, oneshot::Sender<Response>>,
     dead: bool,
 }
 
@@ -116,7 +123,7 @@ impl PiHarness {
         Ok(())
     }
 
-    async fn request(&mut self, mut value: Value) -> Result<Value> {
+    async fn request_observed(&mut self, mut value: Value) -> Result<Response> {
         let id = uuid::Uuid::new_v4().to_string();
         value["id"] = json!(id);
         let (tx, rx) = oneshot::channel();
@@ -127,17 +134,10 @@ impl PiHarness {
             .insert(id.clone(), tx);
         let result = async {
             self.write(&value).await?;
-            let response = tokio::time::timeout(Duration::from_secs(15), rx)
+            tokio::time::timeout(Duration::from_secs(15), rx)
                 .await
                 .context("Pi RPC response timed out (requires Pi 1.3 or later)")?
-                .context("Pi exited before responding")?;
-            anyhow::ensure!(
-                response["success"] == true,
-                "Pi {}: {}",
-                value["type"].as_str().unwrap_or("command"),
-                response["error"].as_str().unwrap_or("command failed")
-            );
-            Ok(response["data"].clone())
+                .context("Pi exited before responding")
         }
         .await;
         self.state
@@ -146,6 +146,18 @@ impl PiHarness {
             .responses
             .remove(&id);
         result
+    }
+
+    async fn request(&mut self, value: Value) -> Result<Value> {
+        let command = value["type"].as_str().unwrap_or("command").to_owned();
+        let response = self.request_observed(value).await?.value;
+        anyhow::ensure!(
+            response["success"] == true,
+            "Pi {}: {}",
+            command,
+            response["error"].as_str().unwrap_or("command failed")
+        );
+        Ok(response["data"].clone())
     }
 
     async fn start_process(&mut self, config: &AgentConfig) -> Result<()> {
@@ -186,10 +198,33 @@ impl PiHarness {
             .take()
             .map(|stderr| super::common::spawn_stderr_logger(stderr, "pi"));
         self.child = Some(child);
+        self.reader = Some(self.spawn_reader(stdout, owner));
+        let info = self.request(json!({"type":"get_state"})).await?;
+        let file = info["sessionFile"]
+            .as_str()
+            .filter(|f| Path::new(f).is_absolute())
+            .ok_or_else(|| anyhow!("Pi did not report a persistent conversation file"))?;
+        if let Some(expected) = self.session.as_ref().or(config.resume_token.as_ref()) {
+            anyhow::ensure!(
+                file == expected.as_str(),
+                "Pi opened a different conversation than requested"
+            );
+        }
+        self.session = Some(file.into());
+        let (store, session, attachment) = self.owner()?;
+        store.record_session_agent_session(
+            &session,
+            &attachment,
+            self.session.as_ref().expect("Pi session was observed"),
+        )?;
+        Ok(())
+    }
+
+    fn spawn_reader(&self, stdout: ChildStdout, owner: AttachmentOwner) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
         let raw = self.raw.clone();
-        self.reader = Some(tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             let mut attention = super::attention::Attention::default();
             let outcome: Result<()> = async {
@@ -204,7 +239,7 @@ impl PiHarness {
                     let mut state = state.lock().expect("Pi state lock poisoned");
                     if value["type"] == "response" {
                         if let Some(tx) = value["id"].as_str().and_then(|id| state.responses.remove(id)) {
-                            let _ = tx.send(value);
+                            let _ = tx.send(Response { value, turn: state.turn.as_ref().map(|turn| turn.id().to_owned()) });
                         }
                         continue;
                     }
@@ -271,26 +306,7 @@ impl PiHarness {
                     .to_string(),
                 evidence: None,
             });
-        }));
-        let info = self.request(json!({"type":"get_state"})).await?;
-        let file = info["sessionFile"]
-            .as_str()
-            .filter(|f| Path::new(f).is_absolute())
-            .ok_or_else(|| anyhow!("Pi did not report a persistent conversation file"))?;
-        if let Some(expected) = self.session.as_ref().or(config.resume_token.as_ref()) {
-            anyhow::ensure!(
-                file == expected.as_str(),
-                "Pi opened a different conversation than requested"
-            );
-        }
-        self.session = Some(file.into());
-        let (store, session, attachment) = self.owner()?;
-        store.record_session_agent_session(
-            &session,
-            &attachment,
-            self.session.as_ref().expect("Pi session was observed"),
-        )?;
-        Ok(())
+        })
     }
 }
 
@@ -387,6 +403,62 @@ impl Harness for PiHarness {
             return Err(error);
         }
         Ok(())
+    }
+
+    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
+        if content.trim().is_empty() {
+            return SendCurrentOutcome::Failed {
+                error: "steer input is empty".into(),
+            };
+        }
+        let turn = self
+            .state
+            .lock()
+            .expect("Pi state lock poisoned")
+            .turn
+            .as_ref()
+            .map(|turn| turn.id().to_owned());
+        let Some(turn) = turn else {
+            return SendCurrentOutcome::NotSteerable;
+        };
+        if let Err(error) = self.owner() {
+            return SendCurrentOutcome::Failed {
+                error: error.to_string(),
+            };
+        }
+        // Pi owns the queue. An acknowledgment proves acceptance, not incorporation.
+        // Missing responses and a settlement racing the acknowledgment are uncertain.
+        match self
+            .request_observed(json!({"type":"steer", "message":content}))
+            .await
+        {
+            Ok(response) if response.value["success"] == false => SendCurrentOutcome::Failed {
+                error: response.value["error"]
+                    .as_str()
+                    .unwrap_or("Pi rejected steering")
+                    .into(),
+            },
+            Ok(response)
+                if response.value["success"] == true
+                    && response.value["data"]["disposition"] == "queued"
+                    && response.turn.as_deref() == Some(&turn) =>
+            {
+                SendCurrentOutcome::Sent {
+                    provider_turn_id: turn,
+                }
+            }
+            Ok(response) => SendCurrentOutcome::Unknown {
+                provider_turn_id: Some(turn),
+                error: format!(
+                    "Pi steer did not confirm queuing during the active turn (disposition: {})",
+                    response.value["data"]["disposition"]
+                ),
+            },
+            Err(error) => SendCurrentOutcome::Unknown {
+                provider_turn_id: Some(turn),
+                error: error.to_string(),
+            },
+        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {

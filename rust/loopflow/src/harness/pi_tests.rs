@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use super::pi::PiHarness;
 use super::pi_mapping::Turn;
-use super::Harness;
+use super::{Harness, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
@@ -345,4 +345,139 @@ async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
         .unwrap()
         .completed_at
         .is_none());
+}
+
+#[test]
+fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover() {
+    for (text, stop) in [
+        ("", "stop"),
+        ("  ", "stop"),
+        ("\n", "stop"),
+        ("Checking", "toolUse"),
+    ] {
+        let mut turn = Turn::new("empty".into());
+        turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"intermediate"}],"stopReason":"toolUse"}}));
+        turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":text}],"stopReason":stop}}));
+        let events = turn.event(&json!({"type":"agent_settled","aborted":false}));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ConversationEvent::Error {code, ..} if code == "pi_empty_turn")));
+        assert!(matches!(
+            events.last(),
+            Some(ConversationEvent::TurnCompleted {
+                status: Lifecycle::Failed,
+                ..
+            })
+        ));
+    }
+    let mut turn = Turn::new("recovered".into());
+    for message in [
+        json!({"role":"assistant","content":[],"stopReason":"error","errorMessage":"connection reset"}),
+        json!({"role":"assistant","content":[{"type":"toolCall","id":"tool"}],"stopReason":"toolUse"}),
+        json!({"role":"assistant","content":[{"type":"text","text":"done"}],"stopReason":"stop"}),
+    ] {
+        assert!(!turn
+            .event(&json!({"type":"message_end","message":message}))
+            .iter()
+            .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. })));
+    }
+    assert!(matches!(
+        turn.event(&json!({"type":"agent_settled","aborted":false}))
+            .last(),
+        Some(ConversationEvent::TurnCompleted {
+            status: Lifecycle::Completed,
+            ..
+        })
+    ));
+}
+
+#[tokio::test]
+async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
+    let mut config = AgentConfig::default();
+    let (_ledger, _env) = fixture(&mut config);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut pi = PiHarness::new(tx);
+    pi.start(&config).await.unwrap();
+    assert_eq!(
+        pi.send_current("idle").await,
+        SendCurrentOutcome::NotSteerable
+    );
+    pi.send_input("wait").await.unwrap();
+    let ConversationEvent::TurnStarted { turn_id } = rx.recv().await.unwrap() else {
+        panic!("turn starts");
+    };
+    let (store, session, _) =
+        super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
+    let thread = pi.agent_session().unwrap();
+    let origin = store.session_history(&session, 0, 0).unwrap();
+    assert!(matches!(
+        pi.send_current("reject").await,
+        SendCurrentOutcome::Failed { .. }
+    ));
+    assert!(matches!(
+        pi.send_current("handled").await,
+        SendCurrentOutcome::Unknown { .. }
+    ));
+    assert!(matches!(
+        pi.send_current("malformed").await,
+        SendCurrentOutcome::Unknown { .. }
+    ));
+    assert_eq!(
+        pi.send_current("direction 雪").await,
+        SendCurrentOutcome::Sent {
+            provider_turn_id: turn_id.clone()
+        }
+    );
+    assert_eq!(
+        pi.send_current("finish").await,
+        SendCurrentOutcome::Sent {
+            provider_turn_id: turn_id.clone()
+        }
+    );
+    let events = completed(&mut rx).await;
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, ConversationEvent::TurnStarted { .. })));
+    assert!(
+        matches!(events.last(), Some(ConversationEvent::TurnCompleted {turn_id: id, status: Lifecycle::Completed}) if id == &turn_id)
+    );
+    assert_eq!(pi.agent_session().unwrap(), thread);
+    let start = origin
+        .iter()
+        .find(|e| e.kind == crate::session::SessionEventKind::Started)
+        .unwrap();
+    let done = store
+        .session_history(&session, 0, 0)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == crate::session::SessionEventKind::Completed)
+        .unwrap();
+    assert_eq!(done.lf_process_id, start.lf_process_id);
+    assert_eq!(done.agent_process_id, start.agent_process_id);
+    assert_eq!(done.task_id, start.task_id);
+    assert_eq!(done.provider_turn, start.provider_turn);
+    let history = store.session_history(&session, 0, 0).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
+            .count(),
+        origin
+            .iter()
+            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
+            .count()
+    );
+    pi.send_input("wait").await.unwrap();
+    assert!(matches!(
+        pi.send_current("late").await,
+        SendCurrentOutcome::Unknown { .. }
+    ));
+    completed(&mut rx).await;
+    pi.send_input("wait").await.unwrap();
+    assert!(matches!(
+        pi.send_current("disconnect").await,
+        SendCurrentOutcome::Unknown { .. }
+    ));
+    completed(&mut rx).await;
+    pi.stop().await.unwrap();
 }

@@ -2315,3 +2315,96 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
         "Retain unpublished edits"
     );
 }
+
+#[test]
+fn pi_managed_flow_routes_one_branch_and_nested_lf_retains_task_and_checkout() {
+    let fixture = Fixture::new(false);
+    let task = support::register_task_without_pr(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "main",
+        &fixture.repo.head_sha(),
+    );
+    let provider = fixture.home.path().join("bin/pi");
+    std::fs::write(
+        &provider,
+        format!(
+            "#!/usr/bin/python3 -I\n{}",
+            include_str!("../src/harness/testdata/pi_rpc.py")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fixture.repo.create_file(
+        ".lf/config.yaml",
+        "agent: pi:fixture/model\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    fixture
+        .repo
+        .create_file(".lf/skills/route-proof.md", "PI_ROUTE_SENTINEL");
+    fixture
+        .repo
+        .create_file(".lf/skills/work-proof.md", "SELECTED_START 雪 SELECTED_END");
+    fixture
+        .repo
+        .create_file(".lf/skills/review-proof.md", "UNSELECTED_PATH");
+    fixture.repo.create_file(".lf/flows/choose.yaml", "- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Select work\n        skill: work-proof\n      zeta:\n        description: Skip work\n        skill: review-proof\n");
+    let received = fixture.home.path().join("pi-received.json");
+    let output = fixture
+        .command(&[
+            "--task",
+            task.task.id.as_str(),
+            "--agent",
+            "pi:fixture/model",
+            "flow",
+            "choose",
+            "--batch",
+        ])
+        .env("PI_FIXTURE_RECORD", &received)
+        .env("PI_FIXTURE_NESTED", "1")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let received: Value = serde_json::from_slice(&std::fs::read(received).unwrap()).unwrap();
+    assert!(received["input"]
+        .as_str()
+        .unwrap()
+        .contains("SELECTED_START 雪 SELECTED_END"));
+    assert_eq!(
+        received["cwd"],
+        fixture
+            .repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    assert!(received["nested_context"]
+        .as_str()
+        .unwrap()
+        .contains(task.task.id.as_str()));
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+    let labels: Vec<_> = flows[0]
+        .1
+        .iter()
+        .map(|step| step["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["route-proof", "work-proof"]);
+    let wrong_owners: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT count(*) FROM agent_sessions WHERE task_id IS NULL OR task_id!=?1",
+            [task.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(wrong_owners, 0);
+}

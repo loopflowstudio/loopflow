@@ -1,0 +1,421 @@
+"""Exercise an installed Pi against a local model with disposable state."""
+
+import argparse
+import fcntl
+import http.server
+import json
+import os
+import pty
+import select
+import signal
+import sqlite3
+import struct
+import subprocess
+import tempfile
+import termios
+import threading
+import time
+from pathlib import Path
+
+
+class Model(http.server.ThreadingHTTPServer):
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), Handler)
+        self.requests: list[dict] = []
+        self.reply = "Pi protocol proof"
+        self.error: str | None = None
+        self.context_file: Path | None = None
+        self.hold = False
+        self.arrived = threading.Event()
+        self.release = threading.Event()
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_args: object) -> None:
+        pass
+
+    def do_POST(self) -> None:
+        model = self.server
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        model.requests.append(request)
+        if model.hold and len(model.requests) == 1:
+            model.arrived.set()
+            assert model.release.wait(35), "steer probe did not release the model"
+        if model.error:
+            error, model.error = model.error, None
+            if model.context_file:
+                model.context_file.write_text("AFTER_COMPACT 雪")
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps({"error": {"message": error, "type": "invalid_request_error"}}).encode()
+            )
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        for chunk in [
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": model.reply},
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 21, "completion_tokens": 4, "total_tokens": 25},
+            },
+        ]:
+            self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+
+class Fixture:
+    def __init__(self, root: Path, binary: Path, pi: Path, model: Model) -> None:
+        self.root, self.binary, self.model = root, binary, model
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.repo)], check=True)
+        (self.repo / ".lf").mkdir()
+        (self.repo / "scratch").mkdir()
+        (self.repo / ".lf/config.yaml").write_text(
+            "diff: false\ndiff_files: false\npaste: false\nagent: pi:fixture/proof\n"
+        )
+        self.context = self.repo / "scratch/proof.md"
+        self.context.write_text("BEFORE_COMPACT 雪")
+        subprocess.run(["git", "-C", str(self.repo), "add", "."], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "-c",
+                "user.name=Pi Fixture",
+                "-c",
+                "user.email=pi@example.test",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        agent = root / "pi-agent"
+        agent.mkdir()
+        (agent / "models.json").write_text(
+            json.dumps(
+                {
+                    "providers": {
+                        "fixture": {
+                            "baseUrl": f"http://127.0.0.1:{model.server_port}/v1",
+                            "api": "openai-completions",
+                            "apiKey": "fixture-not-a-secret",
+                            "models": [{"id": "proof", "contextWindow": 200000}],
+                        }
+                    }
+                }
+            )
+        )
+        # Failures must escape Pi's own retry policy before testing Loopflow's policy.
+        (agent / "settings.json").write_text(
+            json.dumps(
+                {
+                    "retry": {"enabled": False},
+                    "compaction": {"reserveTokens": 1000, "keepRecentTokens": 1},
+                }
+            )
+        )
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "pi").symlink_to(pi)
+        self.env = {
+            "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+            "HOME": str(root),
+            "LF_BIN": str(binary),
+            "LF_HOME": str(root / "machine"),
+            "PI_CODING_AGENT_DIR": str(agent),
+            "PI_OFFLINE": "1",
+            "LF_USER_NAME": "Pi Fixture",
+        }
+
+    def run(
+        self, args: list[str], *, success: bool = True, input_text: str | None = None
+    ) -> subprocess.CompletedProcess:
+        result = subprocess.run(
+            [str(self.binary), *args],
+            cwd=self.repo,
+            env=self.env,
+            input=input_text or "",
+            text=True,
+            capture_output=True,
+            timeout=90,
+        )
+        if (result.returncode == 0) != success:
+            evidence = []
+            for path in (self.root / "machine/runs").rglob("*"):
+                if path.is_file() and path.suffix in (".jsonl", ".log"):
+                    lines = path.read_text(errors="replace").splitlines()
+                    evidence.extend(
+                        line[:1500]
+                        for line in lines
+                        if any(
+                            key in line
+                            for key in ("errorMessage", "compaction_end", "extension_error")
+                        )
+                    )
+            raise AssertionError(
+                (args, result.returncode, result.stdout[-2000:], result.stderr[-2000:], evidence)
+            )
+        return result
+
+    def identity(self) -> tuple[str, str]:
+        with sqlite3.connect(self.root / "machine/loopflow.db") as db:
+            row = db.execute(
+                "SELECT s.id,json_extract(e.payload,'$.evidence.provider_session_id') "
+                "FROM agent_sessions s JOIN session_events e ON e.session_id=s.id "
+                "WHERE s.provider='pi' "
+                "AND json_extract(e.payload,'$.evidence.provider_session_id') IS NOT NULL "
+                "ORDER BY e.seq DESC LIMIT 1"
+            ).fetchone()
+            assert row, db.execute("SELECT kind,payload FROM session_events").fetchall()
+            return row
+
+
+def _scenario(fixture: Fixture, mode: str) -> dict:
+    model = fixture.model
+    if mode == "empty":
+        model.reply = ""
+    if mode == "retry":
+        model.error = "connection reset"
+    native = mode == "native"
+    first = (
+        ["-i", ":", "FIRST_INPUT 雪"]
+        if native
+        else ["-b", "connect", "--fresh", "--message", "FIRST_INPUT 雪"]
+    )
+    if mode == "overflow":
+        first[-1] += " prior context 雪" * 2000
+    fixture.run(first, success=mode not in ("empty", "retry"))
+    session, token = fixture.identity()
+    with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
+        fixture.repo = Path(
+            db.execute("SELECT cwd FROM agent_sessions WHERE id=?", (session,)).fetchone()[0]
+        )
+    fixture.context = fixture.repo / "scratch/proof.md"
+    assert Path(token).is_file()
+    assert "BEFORE_COMPACT" in json.dumps(model.requests[0])
+    assert len(model.requests) == 1, "Loopflow must not synthesize retries"
+    if mode == "overflow":
+        model.error = "maximum context length is 200000 tokens"
+        model.context_file = fixture.context
+    if mode == "retry":
+        model.reply = "Explicit recovery"
+    second = (
+        ["-i", "resume", session]
+        if native
+        else ["-b", "resume", session, "--message", "EXPLICIT_SECOND_INPUT 雪"]
+    )
+    fixture.run(
+        second,
+        success=mode != "empty",
+        input_text="EXPLICIT_SECOND_INPUT 雪\n" if native else None,
+    )
+    assert fixture.identity() == (session, token)
+    if mode == "overflow":
+        entries = [json.loads(line) for line in Path(token).read_text().splitlines()]
+        assert any(e["type"] == "compaction" for e in entries), (
+            "overflow must compact real Pi history"
+        )
+        assert "AFTER_COMPACT" in json.dumps(model.requests[-1]), (
+            "first post-compaction request must refresh context"
+        )
+    else:
+        assert len(model.requests) == 2
+        assert "FIRST_INPUT" in json.dumps(model.requests[-1])
+    with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
+        usage = db.execute(
+            "SELECT count(*) FROM session_events WHERE kind='usage' "
+            "AND json_extract(payload,'$.provider')='pi'"
+        ).fetchone()[0]
+        assert usage > 0
+    return {
+        "scenario": mode,
+        "model_requests": len(model.requests),
+        "exact_resume": True,
+        "usage_receipts": usage,
+    }
+
+
+def _steer_scenario(fixture: Fixture) -> dict:
+    model = fixture.model
+    binary = fixture.binary
+    model.hold = True
+    process = subprocess.Popen(
+        [str(binary), "-b", "connect", "--fresh", "--message", "FIRST_INPUT"],
+        cwd=fixture.repo,
+        env=fixture.env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert model.arrived.wait(20), "model request never arrived"
+        session, token = fixture.identity()
+        fixture.run(["session", "steer", session, "LIVE_STEER 雪"])
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            receipts = json.loads(fixture.run(["session", "steers", session, "--json"]).stdout)
+            if receipts["items"] and receipts["items"][0]["evidence"].startswith("emitted"):
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError(receipts)
+        assert len(model.requests) == 1, "delivery receipt is independent of model incorporation"
+        model.release.set()
+        stdout, stderr = process.communicate(timeout=30)
+        assert process.returncode == 0, stderr
+        assert len(model.requests) == 2
+        assert "LIVE_STEER" in json.dumps(model.requests[-1]), (
+            "steer must reach the same run's next model call"
+        )
+        history = json.loads(fixture.run(["session", "history", session, "--json"]).stdout)
+
+        def ownership(event: dict) -> tuple:
+            return event["provider_turn"], event["lf_process_id"], event["task_id"]
+
+        starts = [ownership(e) for e in history if e["kind"] == "started"]
+        ends = [ownership(e) for e in history if e["kind"] == "completed" and e["provider_turn"]]
+        assert len(starts) == 1 and ends == starts, (starts, ends)
+        assert fixture.identity() == (session, token)
+        return {
+            "scenario": "steer",
+            "model_requests": 2,
+            "same_turn_and_process": True,
+            "receipt": receipts["items"][0]["evidence"],
+        }
+    finally:
+        model.release.set()
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+
+
+def _pty_scenario(fixture: Fixture) -> dict:
+    model = fixture.model
+    binary = fixture.binary
+    fixture.env.update(TERM="xterm-256color", COLORTERM="truecolor")
+    identities = []
+    for args, draft, expected, request_count in [
+        (["-i", ":", "FIRST_INPUT 雪"], "SECOND_DRAFT 雪x", "SECOND_DRAFT 雪 edited", 2),
+        (None, "RESUMED 雪x", "RESUMED 雪 edited", 3),
+    ]:
+        if args is None:
+            args = ["-i", "resume", identities[0][0]]
+        master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 28, 100, 0, 0))
+        process = subprocess.Popen(
+            [str(binary), *args],
+            cwd=fixture.repo,
+            env=fixture.env,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            start_new_session=True,
+        )
+        os.close(slave)
+        output = bytearray()
+
+        def drain_until(predicate) -> None:
+            deadline = time.monotonic() + 35
+            while time.monotonic() < deadline:
+                if predicate():
+                    return
+                assert process.poll() is None, bytes(output[-3000:])
+                if select.select([master], [], [], 0.1)[0]:
+                    output.extend(os.read(master, 65536))
+            raise AssertionError(bytes(output[-3000:]))
+
+        try:
+            drain_until(
+                lambda: b"Pi protocol proof" in output if request_count == 2 else b"Pi" in output
+            )
+            os.write(master, draft.encode())
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 80, 0, 0))
+            os.kill(process.pid, signal.SIGWINCH)
+            # Backspace removes the ASCII suffix while preserving the Unicode draft.
+            os.write(master, b"\x7f edited\r")
+            drain_until(
+                lambda: (
+                    len(model.requests) == request_count
+                    and expected in json.dumps(model.requests[-1], ensure_ascii=False)
+                )
+            )
+            drain_until(lambda: b"Pi protocol proof" in output)
+            identities.append(fixture.identity())
+            os.write(master, b"\x04")
+            deadline = time.monotonic() + 10
+            while process.poll() is None and time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        output.extend(os.read(master, 65536))
+                    except OSError:
+                        break
+            assert process.wait(timeout=5) == 0
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            os.close(master)
+    assert identities[0] == identities[1]
+    return {
+        "scenario": "pty",
+        "model_requests": len(model.requests),
+        "unicode_edit_resize": True,
+        "exact_resume": True,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lf", type=Path, default=Path("target/debug/lf"))
+    parser.add_argument("--pi", type=Path, required=True)
+    parser.add_argument(
+        "--scenario",
+        choices=["all", "retry", "empty", "overflow", "native", "pty", "steer"],
+        default="all",
+    )
+    args = parser.parse_args()
+    modes = (
+        ["retry", "empty", "overflow", "native", "pty", "steer"]
+        if args.scenario == "all"
+        else [args.scenario]
+    )
+    for mode in modes:
+        model = Model()
+        threading.Thread(target=model.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory(prefix=f"pi-{mode}-") as directory:
+                fixture = Fixture(
+                    Path(directory).resolve(), args.lf.resolve(), args.pi.resolve(), model
+                )
+                if mode == "pty":
+                    result = _pty_scenario(fixture)
+                elif mode == "steer":
+                    result = _steer_scenario(fixture)
+                else:
+                    result = _scenario(fixture, mode)
+                print(json.dumps(result), flush=True)
+        finally:
+            model.shutdown()
+            model.server_close()
+
+
+if __name__ == "__main__":
+    main()

@@ -782,6 +782,14 @@ fn recover_native_usage(
             continue;
         }
         if provider == "pi" {
+            // Both transports report cumulative usage for the complete adapter turn.
+            let stream = matching
+                .first()
+                .map(|r| r.0.clone())
+                .unwrap_or_else(|| format!("native:{thread}:{turn}"));
+            let last_observation = matching.iter().map(|r| r.1).max().unwrap_or(0);
+            let start_known = native.iter().any(|e| e.kind == SessionEventKind::Started);
+            let mut seq = events.iter().map(|e| e.seq).max().map_or(0, |s| s + 1);
             for receipt in receipts {
                 let Ok(usage) =
                     serde_json::from_value::<TurnUsage>(receipt.payload["usage"].clone())
@@ -794,29 +802,24 @@ fn recover_native_usage(
                     gaps += 1;
                     continue;
                 };
-                // Both transports report cumulative usage for the complete adapter turn.
-                let stream = matching
-                    .first()
-                    .map(|r| r.0.clone())
-                    .unwrap_or_else(|| format!("native:{thread}:{turn}"));
-                let seq = matching.iter().map(|r| r.1).max().unwrap_or(0) + receipt.seq as u64;
                 events.push(EventEnvelope {
                     schema_version: SCHEMA_VERSION,
-                    seq: events.iter().map(|e| e.seq).max().map_or(0, |s| s + 1),
+                    seq,
                     observed_at,
                     event: CaptureEvent::Usage {
-                        usage_stream_id: stream,
+                        usage_stream_id: stream.clone(),
                         provider: provider.into(),
                         model: usage.model.clone(),
                         attempt_key: String::new(),
                         turn_key: turn.into(),
-                        observation_seq: seq,
+                        observation_seq: last_observation + receipt.seq as u64,
                         counter_kind: "cumulative".into(),
-                        start_known: native.iter().any(|e| e.kind == SessionEventKind::Started),
+                        start_known,
                         final_receipt: receipt.payload["final"] == true,
                         usage: Box::new(usage),
                     },
                 });
+                seq += 1;
             }
             continue;
         }

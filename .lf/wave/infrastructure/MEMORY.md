@@ -13,9 +13,18 @@ retry; `agent_settled` ends the Loopflow turn. Cumulative usage must retain unkn
 fields and rejoin its capture counter on recovery. Shared attachment fences and
 stable CLI dispatch own control and callbacks.
 
-Real Pi RPC/native non-TTY probes with a local model fixture retained context,
-identity and usage, not authenticated or rendered acceptance. Release's entry-point
-lesson applies: composed Task/Flow, nested invocation and compaction remain unproved.
+Pi owns internal retries; final failure requires explicit subsequent input. Only a
+nonblank terminal answer completes headless work. Automatic compaction can skip
+before_agent_start, so context projects at the model-request boundary. Native
+assistant checkpoints retain partial usage without completing the turn. Public
+steers use shared callback receipts; queued or emitted is not model incorporation.
+
+Six real-Pi/local-model probes cover failure, empty answers, overflow refresh,
+native resume, Unicode PTY input and public steering. Managed Task/Flow fixtures
+cover JSON routing and nested Work/cwd. These prove neither authenticated Loopflow
+execution nor visual acceptance. Direct Pi account access passed separately;
+account preference grants no product restriction. Remaining gate/demo boundaries
+stay in the Task plan. Release's entry-point lesson still applies.
 
 ## Opening work conversations (LOO-499, 2026-10-17)
 

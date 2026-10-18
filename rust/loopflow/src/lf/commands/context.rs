@@ -361,7 +361,7 @@ fn emit_context(
             thread,
             matches!(
                 event,
-                "SessionStart" | "OpenCodeMessagesTransform" | "PiBeforeAgentStart"
+                "SessionStart" | "OpenCodeMessagesTransform" | "PiContext"
             ),
             || {
                 let invocation = input["tool_use_id"]

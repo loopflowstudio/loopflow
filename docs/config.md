@@ -411,7 +411,17 @@ changes the conversation outside Loopflow's recorded identity; start another
 Loopflow Session to select a new conversation.
 
 Text, tool events and reported token/cost usage enter capture/history. Pi's final
-`agent_settled` event ends a turn, including retries. Missing usage stays unknown.
+`agent_settled` event ends a turn, including Pi's internal retries and queued
+steering. Loopflow preserves a final failure; it does not send an automatic
+continuation prompt. Resume with explicit input to continue. A blank terminal
+answer fails headless execution. Native usage checkpoints survive a crash before
+settlement; missing usage stays unknown.
+
+`lf session steer <session-id> "direction"` queues guidance during an active Pi
+run through the same saved-steer receipts used by other harnesses. An emitted
+receipt means local delivery, not proof the model incorporated it. Idle Sessions
+stay idle. Direct RPC steering reports queued, rejected or uncertain delivery
+independently of the initiating turn's result.
 Managed account switching, subscription limits, native response schemas,
 turn limits and transferring Pi history to another harness are unavailable.
 Headless extension dialogs fail with an instruction

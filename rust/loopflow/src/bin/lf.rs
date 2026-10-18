@@ -2169,13 +2169,16 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Desktop { cmd }) = &cli.command {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
-    if let Some(Commands::Open(args)) = &cli.command {
+    if let Some(Commands::Open(open)) = &cli.command {
+        // Bounded observation records this Process and the calling
+        // conversation, which tells a link to the caller's own Work apart.
+        journal::observe_process(args);
         let _cwd = cli
             .wt
             .as_deref()
             .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
             .transpose()?;
-        return loopflow::lf::commands::open::run(&cli, args);
+        return loopflow::lf::commands::open::run(&cli, open);
     }
 
     let _worktree_cwd = cli

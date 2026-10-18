@@ -9,6 +9,16 @@ use support::{register_task_without_pr, EnvGuard};
 
 /// The built CLI with no inherited Loopflow or host context, and `bin` first on PATH.
 fn lf(home: &Path, cwd: &Path, bin: Option<&Path>, args: &[&str]) -> Output {
+    lf_with(home, cwd, bin, &[], args)
+}
+
+fn lf_with(
+    home: &Path,
+    cwd: &Path,
+    bin: Option<&Path>,
+    env: &[(&str, &str)],
+    args: &[&str],
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
@@ -26,6 +36,7 @@ fn lf(home: &Path, cwd: &Path, bin: Option<&Path>, args: &[&str]) -> Output {
         );
     }
     command
+        .envs(env.iter().copied())
         .env("LF_HOME", home)
         .current_dir(cwd)
         .args(args)
@@ -607,4 +618,94 @@ fn concurrent_and_repeated_openings_create_one_destination() {
         "one conversation destination: {calls}"
     );
     assert_eq!(calls.matches("workspace select workspace:7").count(), 2);
+}
+
+#[test]
+fn links_tell_the_current_conversation_from_another_on_the_same_task() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let provider = Child(Command::new("/bin/sleep").arg("3600").spawn().unwrap());
+    let started = time::OffsetDateTime::now_utc().unix_timestamp();
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let primary = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Design",
+        0,
+        1,
+    );
+    let step = live_conversation(
+        home.path(),
+        &provider.0,
+        started,
+        repo.path(),
+        "Flow step",
+        1,
+        0,
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
+        rusqlite::params![
+            step,
+            registered.task.id.as_str(),
+            registered.task.wave_id.as_ref().unwrap().as_str()
+        ],
+    )
+    .unwrap();
+    let origin: String = db
+        .query_row(
+            "SELECT id FROM processes WHERE trace_id='fixture' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+    let caller = |session: &str| {
+        serde_json::json!({"session_id": session, "agent_process_id": null, "origin_exec_id": origin})
+            .to_string()
+    };
+    let relation = |session: &str| {
+        let caller = caller(session);
+        json(&lf_with(
+            home.path(),
+            repo.path(),
+            None,
+            &[("LF_AGENT_CALLER", &caller)],
+            &["open", &url, "--link", "--json"],
+        ))[0]["conversation"]
+            .clone()
+    };
+    assert_eq!(relation(&primary), "current_conversation");
+    assert_eq!(
+        relation(&step),
+        "other_conversation",
+        "sharing a Task does not make a Flow step the Task's conversation"
+    );
+
+    let own = caller(&primary);
+    let output = lf_with(
+        home.path(),
+        repo.path(),
+        None,
+        &[("LF_AGENT_CALLER", &own)],
+        &["open", &url],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("is this conversation; continue here"));
 }

@@ -195,6 +195,41 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
 }
 
 #[test]
+fn loopflow_warnings_preserve_native_drafts_across_providers() {
+    let editor = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/native_diagnostics.py"
+    );
+    for provider in ["claude", "codex", "opencode"] {
+        let fixture = Fixture::new(provider);
+        let path = fixture.home.path().join("bin").join(provider);
+        let source = fs::read_to_string(&path).unwrap();
+        let run_editor = format!(
+            "import runpy; runpy.run_path({})['_editor']()",
+            serde_json::to_string(editor).unwrap()
+        );
+        // The protocol stand-in completes its normal startup first. Only its
+        // native client then owns a real PTY editor, never the private server.
+        let source = if provider == "opencode" {
+            source.replace(
+                "    _record_launch()",
+                &format!("    _record_launch()\n    {run_editor}"),
+            )
+        } else {
+            format!("{source}\n{run_editor}\n")
+        };
+        fs::write(path, source).unwrap();
+        let output = Command::new("/usr/bin/python3")
+            .args([editor, env!("CARGO_BIN_EXE_lf"), provider])
+            .arg(fixture.home.path())
+            .arg(fixture.repo.path())
+            .output()
+            .unwrap();
+        success(&output);
+    }
+}
+
+#[test]
 fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(

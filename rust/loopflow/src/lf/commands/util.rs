@@ -480,6 +480,8 @@ fn run_native_session(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
     );
+    let output = crate::terminal_output::TerminalOutput::enter()?;
+    output.configure_child(&mut process)?;
     let spawned = match owned {
         Some(owner) => crate::harness::agent_process::spawn_native(process, owner),
         None => {
@@ -511,9 +513,17 @@ fn run_native_session(
     // The process record now owns the launch identity.
     drop(launch_lock);
     let status = if let Some(title) = &mut title {
-        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
+        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())
+            .map(|result| result.0)
     } else {
-        child.wait()?
+        child.wait()
+    };
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            crate::harness::agent_process::stop_native(&mut child, owned)?;
+            return Err(error.into());
+        }
     };
     let interrupted = if let Some((store, session, attachment)) = owned {
         match store.with_session_attachment(session, attachment, || {
@@ -680,6 +690,9 @@ fn run_opencode_native(
                     "opencode",
                     &mut process,
                 );
+                progress.finish();
+                let output = crate::terminal_output::TerminalOutput::enter()?;
+                output.configure_child(&mut process)?;
                 let mut options = OpenOptions::new();
                 options.create(true).append(true);
                 #[cfg(unix)]
@@ -692,14 +705,22 @@ fn run_opencode_native(
                         format!("open OpenCode diagnostics at {}", path.display())
                     })?);
                 }
-                progress.finish();
                 drop(launch_lock);
                 let mut child = process.spawn()?;
-                record_interactive_opened(environment)?;
-                let status = if let Some(title) = &mut title {
-                    crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
-                } else {
-                    child.wait()?
+                let status = (|| -> Result<_> {
+                    record_interactive_opened(environment)?;
+                    Ok(if let Some(title) = &mut title {
+                        crate::os_process::wait_for_exit(&mut child, None, || title.refresh())?.0
+                    } else {
+                        child.wait()?
+                    })
+                })();
+                let status = match status {
+                    Ok(status) => status,
+                    Err(error) => {
+                        crate::harness::agent_process::stop_native(&mut child, None)?;
+                        return Err(error);
+                    }
                 };
                 Ok(SessionCommandOutcome {
                     status,
@@ -748,7 +769,11 @@ fn run_codex_native(
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?;
-            runtime.block_on(serve_codex_native(launch, owner, ready_tx, closed_rx))
+            let result = runtime.block_on(serve_codex_native(launch, owner, ready_tx, closed_rx));
+            if let Err(error) = &result {
+                tracing::error!(error = %format!("{error:#}"), "Codex native worker stopped");
+            }
+            result
         });
         let prepared = ready_rx.recv();
         let result = match prepared {

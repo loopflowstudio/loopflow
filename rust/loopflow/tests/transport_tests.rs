@@ -558,6 +558,7 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let bin = fixture.home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     support::install_native_codex(&bin);
+    let path = format!("{}:/usr/bin:/bin", bin.display());
     std::fs::write(fixture.home.path().join("wait-approval"), "").unwrap();
     // The ordinary interactive CLI is the creator/viewer. Give it a real tty,
     // then kill it only after the original protocol request is pending.
@@ -582,14 +583,7 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let terminal_input = unsafe { std::fs::File::from_raw_fd(slave) };
     let mut creator = fixture
         .command(&["-i", "--agent", "codex", ":", "Original input"])
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
+        .env("PATH", &path)
         .stdin(terminal_input.try_clone().unwrap())
         .stdout(terminal_input.try_clone().unwrap())
         .stderr(terminal_input)
@@ -624,7 +618,8 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     assert_eq!(retained, identity, "viewers transferred provider ownership");
     drop(replacement);
     let mut resumed = fixture
-        .command(&["resume"])
+        .command(&["resume", &session])
+        .env("PATH", &path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

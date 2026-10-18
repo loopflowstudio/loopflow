@@ -160,6 +160,7 @@ pub fn explain_session_connect(
     takeover: bool,
     try_open: bool,
     prepare_only: bool,
+    fresh: bool,
 ) -> Result<SessionConnectExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -172,6 +173,7 @@ pub fn explain_session_connect(
                     target,
                     OpenMode::from_flags(takeover, try_open),
                     prepare_only,
+                    fresh,
                 )
                 .await
             }

@@ -122,7 +122,7 @@ struct WorkNavigationTests {
         let primaryJSON = String(decoding: try data("primary"), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args == ["wave", "list", "--json"] { return "[]" }
-            if args == ["session", "ensure", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
+            if args == ["--repo", repo, "session", "connect", "--prepare", "--json"] || args == ["session", "connect", primary.id, "--json"] { return primaryJSON }
             throw RegistryQueryError("Unexpected operation: \(args)")
         }
         let model = WorkModel(query: query, repoPath: repo)
@@ -199,7 +199,7 @@ struct WorkNavigationTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            if args.contains("ensure") { await gate.wait() }
+            if args.contains("--prepare") { await gate.wait() }
             return json
         })
         let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }

@@ -1,1 +1,0 @@
-- gate 2026-10-18: cargo fmt --check, cargo clippy --all-targets -D warnings, cargo test --test integration sync_tests:: (39 pass); new test fails on origin/main with the reported os error 2

@@ -367,7 +367,7 @@ fn codex_rpc_error_response_maps_to_error_event() {
     ));
 }
 
-// Synthetic native message shapes follow the isolated OpenCode 1.18.33 proof.
+// Synthetic native message shapes follow the isolated OpenCode 2.0.32 proof.
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
 fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
@@ -394,61 +394,58 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let mut history = History::new(Some((store.clone(), session.clone(), attachment)));
         let request = history.request().unwrap();
         let agent_session = AgentSessionId::from(session.as_str());
-        let mut display =
-            opencode_mapping::ReaderState::new(agent_session.clone(), None, "opencode");
-        let mut message = json!({
-            "info":{"id":"assistant","sessionID":session,"role":"assistant","parentID":request,"time":{"created":1}},
-            "parts":[{"id":"tool","sessionID":session,"messageID":"assistant","type":"tool","tool":"bash",
-                "state":{"status":"running","input":{"command":"echo ok"}}}]
-        });
-        let started = history
-            .observe(&agent_session, std::slice::from_ref(&message))
-            .unwrap();
+        let mut display = opencode_mapping::ReaderState::new(agent_session.clone(), None);
+        let user = json!({"id":request,"type":"user","text":"request","time":{"created":0}});
+        let mut message = json!({"id":"assistant","type":"assistant","time":{"created":1},
+            "content":[{"id":"tool","type":"tool","name":"shell",
+                "state":{"status":"running","input":{"command":"echo ok"}}}]});
+        let messages = [user.clone(), message.clone()];
+        let observed = history.observe(&agent_session, &messages).unwrap();
+        let started = observed.events;
         assert!(
             matches!(&started[..], [ConversationEvent::TurnStarted { turn_id }] if turn_id == &request)
         );
-        let tools = display.observe_messages(std::slice::from_ref(&message));
+        let tools = display.observe_messages(&observed.messages);
         assert!(
             matches!(&tools[..], [ConversationEvent::ItemStarted {turn_id, item: ConversationItem::Command {status: Lifecycle::Running, ..}}] if turn_id == &request)
         );
 
-        // Even a status carrying old-shaped usage cannot manufacture a receipt.
-        for event in [
-            json!({"type":"session.status","properties":{"sessionID":session,"status":{"type":"idle"},"usage":{"input_tokens":999}}}),
-            json!({"type":"session.error","properties":{"sessionID":session,"code":"command_failed","message":"Bash exited 1"}}),
-        ] {
-            let events = opencode_mapping::map_event(&event, &mut display).events;
-            assert!(events
-                .iter()
-                .all(|event| matches!(event, ConversationEvent::Error { .. })));
-        }
         assert!(store
             .session_history(&session, 0, 0)
             .unwrap()
             .iter()
             .all(|row| row.kind != crate::session::SessionEventKind::Completed));
 
-        message["parts"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"output":"ok","metadata":{"exit":0},"time":{"start":1,"end":2}});
-        message["parts"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
-        message["info"]["finish"] = json!("stop");
-        message["info"]["time"]["completed"] = json!(3);
+        message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
+        message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
+        message["finish"] = json!("stop");
+        message["time"]["completed"] = json!(3);
         if let Some(input) = measured {
-            message["info"]["tokens"] =
+            message["tokens"] =
                 json!({"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}});
-            message["info"]["cost"] = json!(0.5);
+            message["cost"] = json!(0.5);
         }
-        let output = display.observe_messages(std::slice::from_ref(&message));
+        let messages = [user.clone(), message.clone()];
+        let observed = history.observe(&agent_session, &messages).unwrap();
+        let output = display.observe_messages(&observed.messages);
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::ItemCompleted {turn_id,item:ConversationItem::Command {output:Some(text),exit_code:Some(0),..}} if turn_id == &request && text == "ok")));
         assert!(output.iter().any(|event| matches!(event, ConversationEvent::TextDelta {turn_id,content} if turn_id == &request && content == "Final answer")));
+        assert!(display.observe_messages(&observed.messages).is_empty());
+        let idle = json!({"id":"idle","type":"idle","outcome":"succeeded","time":{"created":4}});
         let completion = history
-            .observe(&agent_session, std::slice::from_ref(&message))
-            .unwrap();
+            .observe(
+                &agent_session,
+                &[user.clone(), message.clone(), idle.clone()],
+            )
+            .unwrap()
+            .events;
         assert!(
             matches!(&completion[..], [ConversationEvent::TurnCompleted {turn_id,status:Lifecycle::Completed}] if turn_id == &request)
         );
         assert!(history
-            .observe(&agent_session, &[message])
+            .observe(&agent_session, &[user, message, idle])
             .unwrap()
+            .events
             .is_empty());
         let usage = store.input_history(input.as_str()).unwrap().usage;
         assert_eq!(usage.input_tokens, measured);
@@ -461,16 +458,23 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
 fn opencode_native_error_completes_only_its_request() {
     let mut history = History::default();
     let request = history.request().unwrap();
-    let message = json!({"info":{"id":"assistant","parentID":request,"role":"assistant","sessionID":"session",
-        "time":{"created":1,"completed":2},"error":{"name":"APIError","data":{"message":"provider rejected request"}}},"parts":[]});
+    let user = json!({"id":request,"type":"user","text":"request"});
+    let message = json!({"id":"assistant","type":"assistant","time":{"created":1,"completed":2},
+        "error":{"message":"provider rejected request"},"content":[]});
+    let idle = json!({"id":"idle","type":"idle","outcome":"failed","time":{"created":3},"error":{"message":"provider rejected request"}});
     let events = history
-        .observe(&"session".into(), std::slice::from_ref(&message))
-        .unwrap();
+        .observe(
+            &"session".into(),
+            &[user.clone(), message.clone(), idle.clone()],
+        )
+        .unwrap()
+        .events;
     assert!(
         matches!(&events[..], [ConversationEvent::TurnStarted {turn_id}, ConversationEvent::Error {message,..}, ConversationEvent::TurnCompleted {turn_id:completed,status:Lifecycle::Failed}] if turn_id == &request && completed == &request && message == "provider rejected request")
     );
     assert!(history
-        .observe(&"session".into(), &[message])
+        .observe(&"session".into(), &[user, message, idle])
         .unwrap()
+        .events
         .is_empty());
 }

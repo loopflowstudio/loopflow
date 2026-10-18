@@ -31,7 +31,7 @@ const STANDBY: Duration = Duration::from_secs(15);
 const RATE_FLOOR: u32 = 500;
 const REQUIRED_TTL: Duration = Duration::from_secs(3600);
 /// A landing with no failed check is still checked this often: a conflicting
-/// or stale head and a CI timeout need repair without any check failing.
+/// or stale head needs repair without any check failing.
 const LANDING_CHECK: Duration = Duration::from_secs(300);
 const REPAIRS_KEPT: usize = 20;
 
@@ -729,7 +729,7 @@ impl Watcher {
             Ok(_) if running(store) => {
                 let reason = failure
                     .map(|(names, _)| names.join(", "))
-                    .unwrap_or_else(|| "required integration or CI timeout".to_string());
+                    .unwrap_or_else(|| "required integration".to_string());
                 self.state.repairs.insert(
                     0,
                     WatchRepair {

@@ -36,13 +36,14 @@ const BRANCH_TASK_IDS: &str = "SELECT id FROM tasks WHERE branch=?1
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
-        "SELECT project_id,title,description,due_date FROM task_creation_intents WHERE task_id=?1",
+        "SELECT project_id,title,description,due_date,repository_id FROM task_creation_intents WHERE task_id=?1",
         [task.as_str()],
         |row| {
             Ok(NewTask {
                 due_date: row.get(3)?,
                 id: task.clone(),
-                project_id: ProjectId::from_raw(row.get::<_, String>(0)?),
+                project_id: row.get::<_, Option<String>>(0)?.map(ProjectId::from_raw),
+                repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(4)?).map_err(|error| invalid_column(4, error))?,
                 title: row.get(1)?,
                 description: row.get(2)?,
             })
@@ -70,16 +71,18 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     if input.title.trim().is_empty() {
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
-    let wave_id: WaveId = conn.query_row(
-        "SELECT wave_id FROM projects WHERE id=?1",
-        [input.project_id.as_str()],
-        |row| row.get(0),
-    )?;
-
+    let project = input.project_id.as_ref().map(ProjectId::as_str);
+    let wave_id: Option<WaveId> = match project {
+        Some(project) => conn.query_row(
+            "SELECT wave_id FROM projects WHERE id=?1",
+            [project],
+            |row| row.get(0),
+        )?,
+        None => None,
+    };
     let rank: u32 = conn.query_row(
-        "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE project_id=?1",
-        [input.project_id.as_str()],
-        |row| row.get(0),
+        "SELECT COALESCE(max(planning_rank)+1,0) FROM tasks WHERE repository_id=?1 AND project_id IS ?2",
+        params![input.repository_id.as_str(), project], |row| row.get(0),
     )?;
     let now = OffsetDateTime::now_utc();
     let task = Task {
@@ -94,6 +97,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
 
         pm_writeback: LinearWritebackState::Current,
         wave_id,
+        repository_id: input.repository_id.clone(),
         project_id: input.project_id.clone(),
         worktree: None,
         workspace_slug: String::new(),
@@ -115,8 +119,8 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
     let repo: String = conn.query_row(
-        "SELECT repo FROM waves WHERE id=?1",
-        [&task.wave_id],
+        "SELECT repo FROM repository_plans WHERE id=?1",
+        [task.repository_id.as_str()],
         |row| row.get(0),
     )?;
     let authority = crate::durable::TaskAdmissionAuthority {
@@ -131,14 +135,15 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         ),
     )?;
     conn.execute(
-        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
-         VALUES(?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             input.id.as_str(),
-            input.project_id.as_str(),
+            input.project_id.as_ref().map(ProjectId::as_str),
             input.title,
             input.description,
-            input.due_date
+            input.due_date,
+            input.repository_id.as_str()
         ],
     )?;
     super::sessions::admit_work_conversation_in(
@@ -179,7 +184,9 @@ impl SqliteStore {
                 "terminal Task cannot allocate a checkout".into(),
             ));
         }
-        super::durable::require_selected_project(&tx, &task.project_id)?;
+        if let Some(project) = &task.project_id {
+            super::durable::require_selected_project(&tx, project)?;
+        }
         require_task_planning(&tx, &task)?;
         super::task_admission::require_admission_in(&tx, &task.id)?;
         let local = super::durable::map_local_machine(&tx)?.id;
@@ -230,7 +237,9 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if task_creation_in(&tx, &input.id)?.is_none() {
-            super::durable::require_selected_project(&tx, &input.project_id)?;
+            if let Some(project) = &input.project_id {
+                super::durable::require_selected_project(&tx, project)?;
+            }
         }
         let task = create_task_in(&tx, input)?;
         tx.commit()?;
@@ -568,10 +577,8 @@ impl SqliteStore {
             ));
         }
         let same_repo: bool = tx.query_row(
-            "SELECT cw.repo=pw.repo FROM tasks c
-             JOIN projects cp ON cp.id=c.project_id JOIN waves cw ON cw.id=cp.wave_id
+            "SELECT c.repository_id=p.repository_id FROM tasks c
              JOIN tasks p ON p.id=?2
-             JOIN projects pp ON pp.id=p.project_id JOIN waves pw ON pw.id=pp.wave_id
              WHERE c.id=?1",
             params![child.id.as_str(), parent.task_id.as_str()],
             |row| row.get(0),
@@ -942,7 +949,6 @@ impl SqliteStore {
                     Edit::ProjectSummary(project.summary.clone()),
                     Edit::ProjectDescription(Some(project.description.clone())),
                     Edit::ProjectStatus(project.status),
-                    Edit::Workflow(project.workflow.clone()),
                     Edit::Krs(project.krs.clone()),
                     Edit::MetricTargets(project.metric_targets.clone()),
                 ],
@@ -1193,8 +1199,8 @@ fn task_acquisition_in(
                  SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field='task_project'
                  AND c.acknowledged=0 AND c.conflict_json IS NULL
                  AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field))))
-             OR (i.project_id_observed AND i.claimed_project_id IS NOT i.project_id)
-             OR CASE WHEN i.team_id IS NOT NULL THEN
+             OR NOT i.project_id_observed OR i.claimed_project_id IS NOT i.project_id
+             OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
                     NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
                 ELSE 0 END
              OR CASE WHEN observed.id IS NULL THEN 0
@@ -1208,7 +1214,7 @@ fn task_acquisition_in(
                    WHERE dw.repo=w.repo AND d.issue_id=t.external_issue_id)
          OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
-         FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
          LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider='linear' AND i.id=t.external_issue_id
          LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider='linear'
                                      AND parent.id=p.external_project_id
@@ -1241,7 +1247,7 @@ fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
          OR EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?2 AND issue_id=?3)",
         params![
             task.id.as_str(),
-            task.wave_id.as_str(),
+            task.wave_id.as_ref().map(WaveId::as_str),
             task.linear_id.as_ref().map(|id| id.as_str())
         ],
         |row| row.get(0),
@@ -1249,13 +1255,18 @@ fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
 }
 
 fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
+    let repo: String = conn.query_row(
+        "SELECT repo FROM repository_plans WHERE id=?1",
+        [task.repository_id.as_str()],
+        |row| row.get(0),
+    )?;
     planning_write::create(
         conn,
-        "",
+        &repo,
         &crate::work::edit::WorkEdit::for_target(
             task.id.as_str(),
             &[
-                Edit::TaskProject(task.project_id.to_string()),
+                Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
                 Edit::TaskLinearId(task.linear_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
@@ -1293,23 +1304,17 @@ fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<(
 }
 
 fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let owner = conn
-        .query_row(
-            "SELECT wave_id FROM projects WHERE id=?1",
-            params![task.project_id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    let Some(wave_id) = owner else {
-        return Err(StoreError::InvalidData(format!(
-            "Task {} requires Project {}",
-            task.id, task.project_id
-        )));
+    let wave: Option<WaveId> = match &task.project_id {
+        Some(project) => conn.query_row(
+            "SELECT p.wave_id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2",
+            params![project.as_str(), task.repository_id.as_str()], |row| row.get(0),
+        )?,
+        None => None,
     };
-    if wave_id != task.wave_id.as_str() {
+    if wave != task.wave_id {
         return Err(StoreError::InvalidData(format!(
-            "Project {} does not belong to Task {}'s Wave {}",
-            task.project_id, task.id, task.wave_id
+            "Task {} has inconsistent Project/Wave membership",
+            task.id
         )));
     }
     Ok(())
@@ -1397,8 +1402,8 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at
-    FROM tasks t JOIN projects p ON p.id=t.project_id";
+    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at,t.repository_id
+    FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
@@ -1616,8 +1621,8 @@ pub(super) fn resolve_task_id_in(
     .then(|| prefix.to_ascii_lowercase());
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
-         LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
-         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+         JOIN repository_plans w ON w.id=t.repository_id
+         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1 COLLATE NOCASE
             OR substr(lower(t.id), 6, length(?2))=?2
             OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
                 AND json_extract(c.export_json,'$.id')=?1))
@@ -1842,7 +1847,9 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
         pm_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
-        project_id: ProjectId::from_raw(row.get::<_, String>(11)?),
+        project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
+        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(25)?)
+            .map_err(|error| invalid_column(25, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
         branch: row.get(16)?,
@@ -2019,12 +2026,12 @@ pub(super) fn task_events_after_in(
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, workflow, status, project_summary, krs, metric_targets
+    created_at, updated_at, status, project_summary, krs, metric_targets
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, workflow, status, project_summary, krs, metric_targets
+    created_at, updated_at, status, project_summary, krs, metric_targets
     FROM projects WHERE id=?1";
 pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
     conn.query_row(PROJECT_SELECT, [id.as_str()], map_project_row)
@@ -2044,21 +2051,20 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
 
-        summary: row.get(13)?,
+        summary: row.get(12)?,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearProjectId::from_raw),
         slug: row.get(2)?,
         name: row.get(3)?,
         description: row.get(4)?,
-        krs: serde_json::from_str(&row.get::<_, String>(14)?)
+        krs: serde_json::from_str(&row.get::<_, String>(13)?)
+            .map_err(|error| invalid_column(13, error))?,
+        metric_targets: serde_json::from_str(&row.get::<_, String>(14)?)
             .map_err(|error| invalid_column(14, error))?,
-        metric_targets: serde_json::from_str(&row.get::<_, String>(15)?)
-            .map_err(|error| invalid_column(15, error))?,
         pm_snapshot_synced_at: row.get(6)?,
-        workflow: row.get(11)?,
-        status: serde_json::from_value(serde_json::Value::String(row.get(12)?))
-            .map_err(|error| invalid_column(12, error))?,
+        status: serde_json::from_value(serde_json::Value::String(row.get(11)?))
+            .map_err(|error| invalid_column(11, error))?,
 
         wave_id: row.get(5)?,
         abandon_intent,
@@ -2201,18 +2207,23 @@ mod local_planning_tests {
     use rusqlite::params;
     use rusqlite::OptionalExtension;
 
-    use crate::durable::{ProjectId, TaskId};
+    use crate::durable::{ProjectId, RepositoryId, TaskId};
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
 
-    fn local_project(store: &SqliteStore) -> ProjectId {
+    fn local_repository(store: &SqliteStore) -> RepositoryId {
         let repo = store.home_dir().unwrap();
-        // Fence Git discovery when the fixture runs inside a source checkout.
+        // Fence Git discovery before registering the fixture repository.
         std::fs::create_dir_all(repo.join(".git")).unwrap();
+        store.ensure_repository(repo.to_str().unwrap()).unwrap()
+    }
+
+    fn local_project(store: &SqliteStore) -> ProjectId {
+        local_repository(store);
         store
-            .ensure_wave_project(repo.to_str().unwrap(), "inbox")
+            .ensure_wave_project(store.home_dir().unwrap().to_str().unwrap(), "inbox")
             .unwrap()
             .id
     }
@@ -2240,8 +2251,11 @@ mod local_planning_tests {
             let task = TaskId::new();
             first.get_or_insert_with(|| task.to_string());
             let branch = format!("retired-{n}");
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,branch,workspace_slug,base_commit)
-                VALUES(?1,?2,?3,1,?3,?3,'base')", params![task.as_str(),project.as_str(),branch]).unwrap();
+            conn.execute(
+                include_str!("../../../tests/fixtures/migrations/retired_work_lookup_task.sql"),
+                params![task.as_str(), project.as_str(), branch],
+            )
+            .unwrap();
             conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
                 VALUES(?1,?2,1,?3,?3,'base',1,1)", params![format!("pr-{n}"),task.as_str(),branch]).unwrap();
         }
@@ -2285,8 +2299,9 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
-                project_id: local_project(&store),
+                project_id: Some(local_project(&store)),
                 title: "Fix login".into(),
                 description: String::new(),
                 due_date: None,
@@ -2303,7 +2318,7 @@ mod local_planning_tests {
             session.artifact_key = Some(crate::session_record::new_artifact_key());
             session.captured = None;
             session.task_id = Some(task.id.clone());
-            session.wave_id = Some(task.wave_id.clone());
+            session.wave_id = Some(task.wave_id.clone().unwrap());
             session.work_source = Some(WorkSource::Declared);
             session.title = title.into();
             session.title_source = source;
@@ -2404,7 +2419,7 @@ mod local_planning_tests {
             "ENG-123 Review login"
         );
         let history = store
-            .conversation_history(None, None, Some("ENG-123"), None, 0, true)
+            .conversation_history(None, None, Some("eng-123"), None, 0, true)
             .unwrap();
         assert_eq!(history.len(), 2);
         assert!(history
@@ -2424,8 +2439,9 @@ mod local_planning_tests {
         for id in [&first, &second] {
             store
                 .create_task(&NewTask {
+                    repository_id: local_repository(&store),
                     id: id.clone(),
-                    project_id: project.clone(),
+                    project_id: Some(project.clone()),
                     title: "Fix login".into(),
                     description: String::new(),
                     due_date: None,
@@ -2455,9 +2471,10 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::new(),
-                project_id: local_project(&store),
+                project_id: Some(local_project(&store)),
                 title: "Locate files".into(),
                 description: String::new(),
             })
@@ -2509,8 +2526,9 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let task = store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 id: TaskId::new(),
-                project_id: local_project(&store),
+                project_id: Some(local_project(&store)),
                 title: "Shared Task".into(),
                 description: "Keep the local execution".into(),
                 due_date: Some("2026-10-15".into()),
@@ -2553,7 +2571,10 @@ mod local_planning_tests {
         let peer = SqliteStore::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
         let destination =
             PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/test").unwrap();
-        let wave = store.get_wave(&saved.wave_id).unwrap().unwrap();
+        let wave = store
+            .get_wave(saved.wave_id.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
         let repo = wave.repo();
         let target_path = target.path().canonicalize().unwrap();
         let target_repo = target_path.to_str().unwrap();
@@ -2631,9 +2652,10 @@ mod local_planning_tests {
         let path = directory.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = NewTask {
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
-            project_id: local_project(&store),
+            project_id: Some(local_project(&store)),
             title: "Fix parser".into(),
             description: "Keep the original input".into(),
         };
@@ -2672,6 +2694,7 @@ mod local_planning_tests {
         assert_eq!(retried, edited);
         let second = store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::new(),
                 ..input.clone()
@@ -2679,10 +2702,17 @@ mod local_planning_tests {
             .unwrap();
         assert_ne!(second.id, task.id);
         assert_eq!(store.list_tasks(None).unwrap().len(), 2);
-        assert_eq!(store.list_tasks(Some(&task.wave_id)).unwrap().len(), 2);
+        assert_eq!(
+            store
+                .list_tasks(Some(task.wave_id.as_ref().unwrap()))
+                .unwrap()
+                .len(),
+            2
+        );
         assert!(store.list_tasks(Some(&WaveId::new())).unwrap().is_empty());
         assert!(store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 due_date: None,
                 title: "Different request".into(),
                 ..input
@@ -2705,9 +2735,10 @@ mod local_planning_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
-            project_id: local_project(&store),
+            project_id: Some(local_project(&store)),
             title: "Keep identity".into(),
             description: String::new(),
         };
@@ -2721,6 +2752,11 @@ mod local_planning_tests {
         ).unwrap();
         let mapped = store.task_by_issue("TEAM-9").unwrap().unwrap();
         assert_eq!(mapped.id, local.id);
+        for selector in ["team-9", "Team-9", "tEaM-9"] {
+            let resolved = store.task_by_issue(selector).unwrap().unwrap();
+            assert_eq!(resolved.id, local.id);
+            assert_eq!(resolved.identifier, "TEAM-9");
+        }
         assert_eq!(
             store.task_by_issue(&local.identifier).unwrap().unwrap().id,
             local.id
@@ -2756,9 +2792,10 @@ mod local_planning_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::parse("task_0123456789ab40008000000000000001").unwrap(),
-            project_id: local_project(&store),
+            project_id: Some(local_project(&store)),
             title: "One".into(),
             description: String::new(),
         };
@@ -2783,6 +2820,7 @@ mod local_planning_tests {
         );
         let second = store
             .create_task(&NewTask {
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::parse("task_0123456789ab40008000000000000002").unwrap(),
                 ..input
@@ -2810,7 +2848,9 @@ mod local_planning_tests {
     }
     #[test]
     fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{
+            apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+        };
         use std::sync::{Arc, Mutex};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -2821,13 +2861,19 @@ mod local_planning_tests {
         let task = TaskId::new();
         conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'shared','/repo',1),(?2,'recovery','/repo',1)", params![wave,orphan_wave]).unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',1,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
-        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,issue_title,issue_description,pm_snapshot_synced_at,worktree,workspace_slug,updated_at) VALUES(?1,?2,'linear-task','LOO-1',1,'Retain title','Retain brief',7,'/repo/task','task',7)",params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute(
+            include_str!("../../../tests/fixtures/migrations/local_planning_retained_task.sql"),
+            params![task.as_str(), project.as_str()],
+        )
+        .unwrap();
         conn.execute("INSERT INTO task_issue_identities(wave_id,issue_id,identifier) VALUES(?1,'orphan-issue','LOO-2')",[&orphan_wave]).unwrap();
         let payload: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
-        let project_body = payload["projects"][0].to_string();
+        let mut historical_project = payload["projects"][0].clone();
+        historical_project["workflow"] = serde_json::json!("");
+        let project_body = historical_project.to_string();
         let item_body = payload["items"][0].to_string();
         conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',7,?1)",[&project_body]).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',7,?1)",[&item_body]).unwrap();
@@ -2903,11 +2949,7 @@ mod local_planning_tests {
         for ((table, sql), expected) in tables.iter().zip(&queries).zip(before) {
             assert_eq!(rows(&conn, sql), expected, "{table}");
         }
-        conn.execute_batch(&current_draft_sql("optional_task_pr"))
-            .unwrap();
-        let peers = current_draft_sql("planning_peers");
-        conn.execute_batch(&peers).unwrap();
-        crate::store::migrations::seed_peer_planning(&conn, &peers).unwrap();
+        upgrade_from_draft(&conn, "optional_task_pr");
         let order: String = conn
             .query_row(
                 "SELECT task_order_json FROM pm_projects WHERE id='current'",
@@ -2915,15 +2957,6 @@ mod local_planning_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        // Exercise current readers only after the complete candidate schema.
-        for draft in [
-            "agent_process",
-            "lf_process_ids",
-            "process_terminal",
-            "task_checkout_machine",
-        ] {
-            conn.execute_batch(&current_draft_sql(draft)).unwrap();
-        }
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -2947,7 +2980,7 @@ mod local_planning_tests {
             serde_json::from_str::<serde_json::Value>(&order).unwrap(),
             serde_json::json!([imported.id.as_str()])
         );
-        assert_eq!(imported.project_id, imported_project);
+        assert_eq!(imported.project_id, Some(imported_project));
         assert!(imported.worktree.is_none());
         assert!(store.task_prs(&imported.id).unwrap().is_empty());
         assert_eq!(imported.pm_snapshot_synced_at, Some(7));
@@ -2974,7 +3007,7 @@ mod local_planning_tests {
         assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
         let retained = store.task(&task).unwrap().unwrap();
         assert_eq!(retained.id, task);
-        assert_eq!(retained.project_id, project);
+        assert_eq!(retained.project_id, Some(project.clone()));
         assert_eq!(retained.linear_id.unwrap().as_str(), "linear-task");
         assert_eq!(retained.identifier, "LOO-1");
         assert_eq!(retained.worktree.unwrap().to_str(), Some("/repo/task"));

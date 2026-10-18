@@ -122,7 +122,7 @@ fn wave_detail_preserves_flow_and_machine() {
     let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
         panic!("missing Projects")
     };
-    assert_eq!(items[0].workflow, "task-design");
+
     assert!(items[0].current);
     assert_eq!(
         items[0].status,
@@ -173,9 +173,10 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
             .as_deref(),
         Some("build-server")
     );
-    assert_eq!(
-        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["workflow"],
-        "feature"
+    assert!(
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
+            .get("workflow")
+            .is_none()
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,
@@ -382,7 +383,7 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     let task = status.task.as_ref().unwrap();
     let project = status.project.as_ref().unwrap();
     assert_eq!(task.title, "Route incoming mail");
-    assert_eq!(task.project_id, project.id);
+    assert_eq!(task.project_id, Some(project.id.clone()));
     assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
     assert_eq!(project.description, "Retained authored prose.");
     assert_eq!(status.observed_at, Some(1790683200));
@@ -1032,8 +1033,8 @@ fn task_planning_explanations_preserve_intent_and_effects() {
         })
     ));
     assert!(
-        matches!(&reports[5].action, Some(TaskPlanningAction::Refile { wave, project, previous_project })
-        if wave == "destination-wave" && project == "destination-project" && previous_project == "source-project")
+        matches!(&reports[5].action, Some(TaskPlanningAction::Move { wave, project, previous_project })
+        if wave.as_deref() == Some("destination-wave") && project.as_deref() == Some("destination-project") && previous_project.as_deref() == Some("source-project"))
     );
     assert!(
         matches!(&reports[6].action, Some(TaskPlanningAction::Save { path, revision, draft_bytes: 42 })

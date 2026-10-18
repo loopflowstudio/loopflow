@@ -70,7 +70,7 @@ pub(crate) fn normalize_user_name(name: &str) -> Option<String> {
 }
 
 /// Agents Loopflow can drive, in the order it prefers them.
-const KNOWN_AGENTS: [&str; 3] = ["codex", "claude", "opencode"];
+const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
 
 /// An explicit invocation-wide choice; definitions and defaults never set it.
 pub const YOLO_OVERRIDE_ENV: &str = "LF_YOLO_OVERRIDE";
@@ -260,6 +260,8 @@ pub struct CronDef {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Default Workflow for Tasks without an explicit or Wave selection.
+    pub workflow: Option<String>,
     #[serde(default)]
     pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
@@ -362,21 +364,18 @@ fn default_summary_tokens() -> usize {
 #[serde(default)]
 pub struct AutomationConfig {
     pub retries: u32,
-    pub timeout_reruns: u32,
 }
 
 impl Default for AutomationConfig {
     fn default() -> Self {
-        Self {
-            retries: 1,
-            timeout_reruns: 1,
-        }
+        Self { retries: 1 }
     }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            workflow: None,
             planning: None,
             crons: None,
             context_budgets: Default::default(),
@@ -633,7 +632,7 @@ mod tests {
 
     #[test]
     fn bare_harnesses_defer_model_selection_to_the_provider() {
-        for harness in ["claude", "codex", "opencode"] {
+        for harness in ["claude", "codex", "opencode", "pi"] {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
     }

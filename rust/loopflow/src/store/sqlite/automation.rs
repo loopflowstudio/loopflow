@@ -135,22 +135,4 @@ impl SqliteStore {
             .optional()?
             .flatten())
     }
-
-    pub(crate) fn ci_timeout(
-        &self,
-        landing: &str,
-        head: &str,
-        attempt: Option<&str>,
-        now: i64,
-        allowance: u32,
-    ) -> StoreResult<Option<bool>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("UPDATE pr_landings SET ci_pending_head=?2,ci_pending_attempt=?4,ci_pending_since=?3 WHERE id=?1 AND (ci_pending_head IS NULL OR ci_pending_head!=?2 OR ci_pending_attempt IS NOT ?4)",params![landing,head,now,attempt])?;
-        Ok(conn.query_row("SELECT CASE WHEN ci_pending_since<=?2-1800 THEN ci_timeout_reruns<?3 ELSE NULL END FROM pr_landings WHERE id=?1",params![landing,now,allowance],|row| row.get(0))?)
-    }
-
-    pub(crate) fn consume_timeout_rerun(&self, landing: &str, now: i64) -> StoreResult<()> {
-        self.conn.lock().expect("store mutex poisoned").execute("UPDATE pr_landings SET ci_timeout_reruns=ci_timeout_reruns+1,ci_pending_since=?2 WHERE id=?1",params![landing,now])?;
-        Ok(())
-    }
 }

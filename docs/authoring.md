@@ -268,7 +268,7 @@ lf task run DES-123            # start: the only edge, task-design
 lf task run DES-123 pursue     # at design: build it
 lf task run DES-123 ship       # at demo: land it
 lf task status DES-123         # node, or the edge it is on
-lf task move DES-123 design    # go back without running anything
+lf task workflow move DES-123 design    # go back without running anything
 ```
 
 `start` and `end` are implicit. A node may say what you do there:
@@ -279,13 +279,13 @@ without one, the skill's first line stands in. An edge names a Flow or skill; Ta
 like builtin `research`. An edge is named by what it runs, so two edges
 leaving one node run different things.
 
-A Task takes up a workflow on its first `lf task run` when its Project's
-default names one, or when you name one. It keeps the graph as it was then.
+On its first `lf task run`, a Task selects the Workflow you name, then its Wave
+default, then repository `workflow:`. It keeps the graph as it was then.
 The Task's position is stored. Choosing an edge puts the Task on it; the
 process that ran the edge puts the Task at its target when the Flow succeeds.
 A Flow that stops or fails leaves the Task on the edge, shown as stopped:
 choose that edge again, choose another one leaving the same node, or
-`lf task move ISSUE NODE`. `task move` puts the Task at any node and runs
+`lf task workflow move ISSUE NODE`. `task workflow move` puts the Task at any node and runs
 nothing: go back for another round, skip ahead, or record a landing that
 settled after its Flow stopped. An edge cannot be chosen while another is
 running. `lf task status ISSUE --json` carries the position, the edges that

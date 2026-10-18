@@ -39,7 +39,7 @@ impl SqliteStore {
         if changed {
             tx.execute("INSERT INTO task_changes(id,task_id,value_json,base_json)
                 SELECT ?1,t.id,'true',CASE WHEN o.id IS NOT NULL THEN json_object('revision',o.revision,'value',json('false')) END
-                FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
                 LEFT JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
                 WHERE t.id=?2", rusqlite::params![uuid::Uuid::new_v4().to_string(),id.as_str()])?;
         }
@@ -52,33 +52,36 @@ impl SqliteStore {
         PlanningChanges::Task(task).pending(&conn)
     }
 
-    /// Refile only unallocated work; membership and its pending effect commit together.
-    pub(crate) fn refile_unplaced_task(
+    /// Membership and its pending effect commit together without transferring execution.
+    pub(crate) fn move_task(
         &self,
         id: &TaskId,
-        expected_project: &ProjectId,
-        destination: &ProjectId,
+        expected_project: Option<&ProjectId>,
+        destination: Option<&ProjectId>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_refile(&tx, id, expected_project, destination)?;
-        if current.project_id == *destination {
+        let current = validate_move(&tx, id, expected_project, destination)?;
+        if current.project_id.as_ref() == destination {
             return Ok(());
         }
-        PlanningChanges::Task(id).save(&tx, &[Edit::TaskProject(destination.to_string())])?;
+        PlanningChanges::Task(id).save(
+            &tx,
+            &[Edit::TaskProject(destination.map(ToString::to_string))],
+        )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub(crate) fn validate_task_refile(
+    pub(crate) fn validate_task_move(
         &self,
         id: &TaskId,
-        expected_project: &ProjectId,
-        destination: &ProjectId,
+        expected_project: Option<&ProjectId>,
+        destination: Option<&ProjectId>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.transaction()?;
-        validate_refile(&snapshot, id, expected_project, destination).map(|_| ())
+        let snapshot = conn.savepoint()?;
+        validate_move(&snapshot, id, expected_project, destination).map(|_| ())
     }
 
     pub(crate) fn validate_task_edit(
@@ -118,7 +121,7 @@ impl SqliteStore {
         }
         PlanningChanges::Task(id).save(&tx, &edits)?;
         if let Some(rank) = patch.rank {
-            super::planning_order::reorder_in(&tx, &task.project_id, id, rank)?;
+            super::planning_order::reorder_in(&tx, &task, rank)?;
         }
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -149,39 +152,212 @@ fn validate_edit(
     Ok(task)
 }
 
-fn validate_refile(
+fn validate_move(
     conn: &rusqlite::Connection,
     id: &TaskId,
-    expected_project: &ProjectId,
-    destination: &ProjectId,
+    expected_project: Option<&ProjectId>,
+    destination: Option<&ProjectId>,
 ) -> StoreResult<Task> {
     let current = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
     super::children::require_task_not_deleted(conn, &current)?;
-    if current.project_id == *destination {
+    if current.project_id.as_ref() == destination {
         return Ok(current);
     }
-    if current.project_id != *expected_project {
+    if current.project_id.as_ref() != expected_project {
         return Err(StoreError::InvalidAuthority(
-            "Task membership changed before refiling".into(),
+            "Task membership changed before moving".into(),
         ));
     }
-    super::durable::require_selected_project(conn, destination)?;
-    let unallocated: bool = conn.query_row(
-        &format!(
-            "SELECT worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
-         AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
-         AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
-         AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
-         AND NOT EXISTS({}) FROM tasks WHERE id=?1",
-            super::task_work::lf_process_ids(conn, "?1")?
-        ),
-        [id.as_str()],
-        |row| row.get(0),
-    )?;
-    if !unallocated {
-        return Err(StoreError::InvalidAuthority(
-            "a Task with recorded work retains its owning Wave".into(),
-        ));
+    if let Some(destination) = destination {
+        super::durable::require_selected_project(conn, destination)?;
+        let same_repo: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2)",
+            rusqlite::params![destination.as_str(), current.repository_id.as_str()], |row| row.get(0),
+        )?;
+        if !same_repo {
+            return Err(StoreError::InvalidAuthority(
+                "Task moves stay in one repository".into(),
+            ));
+        }
     }
     Ok(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::durable::TaskId;
+    use crate::session_record::new_artifact_key;
+    use crate::store::sqlite::SqliteStore;
+    use crate::work::task::{NewTask, TaskUpdate};
+
+    #[test]
+    fn rank_edits_stay_within_repository_and_project_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().canonicalize().unwrap();
+        let path = path.to_str().unwrap();
+        let repo = store.ensure_repository(path).unwrap();
+        let other_repo = store
+            .ensure_repository(home.path().to_str().unwrap())
+            .unwrap();
+        let project = store.ensure_wave_project(path, "product").unwrap();
+        let groups: Vec<Vec<_>> = [
+            (repo.clone(), None),
+            (repo, Some(project.id)),
+            (other_repo, None),
+        ]
+        .into_iter()
+        .map(|(repository_id, project_id)| {
+            (0..3)
+                .map(|index| {
+                    store
+                        .create_task(&NewTask {
+                            id: TaskId::new(),
+                            repository_id: repository_id.clone(),
+                            project_id: project_id.clone(),
+                            title: format!("Task {index}"),
+                            description: String::new(),
+                            due_date: None,
+                        })
+                        .unwrap()
+                })
+                .collect()
+        })
+        .collect();
+        for (selected, group) in groups.iter().enumerate() {
+            let task = &group[2];
+            store
+                .edit_task(
+                    &task.id,
+                    task.revision,
+                    &TaskUpdate {
+                        rank: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            for (index, group) in groups.iter().enumerate() {
+                let ranks: Vec<_> = group
+                    .iter()
+                    .map(|task| store.task(&task.id).unwrap().unwrap().rank)
+                    .collect();
+                assert_eq!(
+                    ranks,
+                    if index <= selected {
+                        vec![1, 2, 0]
+                    } else {
+                        vec![0, 1, 2]
+                    }
+                );
+            }
+            let current = store.task(&task.id).unwrap().unwrap();
+            let before = store.revisions().unwrap();
+            store
+                .edit_task(
+                    &task.id,
+                    current.revision,
+                    &TaskUpdate {
+                        rank: Some(0),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert_eq!(store.revisions().unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn membership_moves_preserve_work_and_capture_owners() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let foreign_repo = tempfile::tempdir().unwrap();
+        let canonical = repo.path().canonicalize().unwrap();
+        let path = canonical.to_str().unwrap();
+        let repository = store.ensure_repository(path).unwrap();
+        let product = store.ensure_wave_project(path, "product").unwrap();
+        let other = store.ensure_wave_project(path, "other").unwrap();
+        let foreign = store
+            .ensure_wave_project(foreign_repo.path().to_str().unwrap(), "foreign")
+            .unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id: repository,
+                project_id: None,
+                title: "One Task".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let session = store.test_session("conversation", &new_artifact_key());
+        let bound = store
+            .bind_session(&session.id, session.captured, &task.id)
+            .unwrap();
+        let captured = store
+            .replace_session_input(
+                bound.captured,
+                crate::session::LfSession {
+                    artifact_key: Some(new_artifact_key()),
+                    ..bound
+                },
+            )
+            .unwrap();
+        let before = store.session_history(&session.id, 0, 0).unwrap();
+        {
+            let _snapshot = store.read_snapshot().unwrap();
+            store
+                .validate_task_move(&task.id, None, Some(&product.id))
+                .unwrap();
+            assert!(store.task(&task.id).unwrap().unwrap().project_id.is_none());
+        }
+        store.move_task(&task.id, None, Some(&product.id)).unwrap();
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
+        assert_eq!(
+            store.session(&session.id).unwrap().unwrap().wave_id,
+            Some(product.wave_id.clone())
+        );
+        // A stale attachment's inherited Wave hint cannot rewrite current membership.
+        let next = store
+            .replace_session_input(
+                captured.captured,
+                crate::session::LfSession {
+                    artifact_key: Some(new_artifact_key()),
+                    ..captured
+                },
+            )
+            .unwrap();
+        assert_eq!(next.wave_id, Some(product.wave_id.clone()));
+        assert!(store.move_task(&task.id, None, Some(&other.id)).is_err());
+        assert!(store
+            .move_task(&task.id, Some(&product.id), Some(&foreign.id))
+            .is_err());
+        store
+            .move_task(&task.id, Some(&product.id), Some(&product.id))
+            .unwrap();
+        store.move_task(&task.id, Some(&product.id), None).unwrap();
+        let final_input = store
+            .replace_session_input(
+                next.captured,
+                crate::session::LfSession {
+                    artifact_key: Some(new_artifact_key()),
+                    ..next
+                },
+            )
+            .unwrap();
+        assert!(final_input.wave_id.is_none());
+        let conn = store.conn.lock().unwrap();
+        let owners = conn.prepare("SELECT wave_id FROM session_events WHERE session_id='conversation' AND kind='captured' ORDER BY seq").unwrap()
+            .query_map([], |row| row.get::<_, Option<String>>(0)).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(
+            owners,
+            vec![None, None, Some(product.wave_id.to_string()), None]
+        );
+        drop(conn);
+        let retained = store.task(&task.id).unwrap().unwrap();
+        assert_eq!(retained.repository_id, task.repository_id);
+        assert!(retained.project_id.is_none());
+        assert_eq!(store.bound_sessions().unwrap()[0].session_id, session.id);
+    }
 }

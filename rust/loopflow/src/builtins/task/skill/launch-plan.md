@@ -50,7 +50,7 @@ For each remaining independently shippable outcome, choose one of two actions:
   lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
-  lf task run <issue>   # its workflow's first edge, or its Project's Flow
+  lf task run <issue>   # its workflow's first edge, or its Wave/repository default
   ```
   Stdin files the Task description; `--directive` on `task run` supplies
   direction, not that durable brief. Use `--stack-on <current-task>` when it

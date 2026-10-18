@@ -1,27 +1,36 @@
-//! OpenCode user messages correlate requests; assistant steps remain subordinate.
+//! Native input IDs freeze ownership; ordered execution markers settle initiating turns.
 
-use crate::id::AgentSessionId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::id::AgentSessionId;
 use crate::session::{SessionEventKind, SessionTurnOrigin};
-use crate::store::sqlite::SqliteStore;
 
 #[derive(Debug, Default)]
 pub(super) struct History {
     pub(super) owner: Option<super::agent_process::AttachmentOwner>,
     requests: BTreeMap<String, Request>,
+    baseline: BTreeSet<String>,
+    interactive: bool,
     attention: super::attention::Attention,
 }
 
 #[derive(Debug, Default)]
 struct Request {
     origin: Option<SessionTurnOrigin>,
+    steer: bool,
     started: bool,
     completed: bool,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct Observation<'a> {
+    pub(super) events: Vec<ConversationEvent>,
+    // Display, permission replies and usage share the same initiating-input join.
+    pub(super) messages: Vec<(&'a str, &'a Value)>,
 }
 
 impl History {
@@ -31,14 +40,22 @@ impl History {
             ..Self::default()
         }
     }
-    /// The attachment that fences native writes; absent until the server starts.
+
     pub(super) fn owner(&self) -> Result<super::agent_process::AttachmentOwner> {
         self.owner
             .clone()
             .ok_or_else(|| anyhow::anyhow!("OpenCode server not started"))
     }
 
-    /// One server event of conversation `thread`, read for attention only.
+    pub(super) fn seed(&mut self, messages: &[Value], interactive: bool) {
+        self.baseline.extend(
+            messages
+                .iter()
+                .filter_map(|m| m["id"].as_str().map(str::to_owned)),
+        );
+        self.interactive = interactive;
+    }
+
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
         if let Some((store, session, attachment)) = &self.owner {
             self.attention.record(
@@ -51,194 +68,162 @@ impl History {
     }
 
     pub(super) fn request(&mut self) -> Result<String> {
+        self.register(false)
+    }
+
+    pub(super) fn steer(&mut self) -> Result<String> {
+        self.register(true)
+    }
+
+    fn register(&mut self, steer: bool) -> Result<String> {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
+        self.register_id(&id, steer)?;
+        Ok(id)
+    }
+
+    fn register_id(&mut self, id: &str, steer: bool) -> Result<()> {
         let origin = self
             .owner
             .as_ref()
             .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
             .transpose()?;
         self.requests.insert(
-            id.clone(),
+            id.into(),
             Request {
                 origin,
+                steer,
                 ..Request::default()
             },
         );
-        Ok(id)
+        Ok(())
     }
 
-    pub(super) fn observe(
+    pub(super) fn observe<'a>(
         &mut self,
         thread: &AgentSessionId,
-        messages: &[Value],
-    ) -> Result<Vec<ConversationEvent>> {
-        let mut events = Vec::new();
-        let receipts = native_receipts(thread, messages);
-        for (request, receipt) in receipts {
-            let submitted = self.requests.get_mut(&request);
-            if let Some(submitted) = submitted.as_ref().filter(|submitted| !submitted.started) {
-                if let (Some((store, _, _)), Some(origin)) = (&self.owner, &submitted.origin) {
-                    store.record_session_turn_origin(thread, &request, origin)?;
+        messages: &'a [Value],
+    ) -> Result<Observation<'a>> {
+        let mut observed = Observation::default();
+        let mut active = None;
+        let mut assistants = Vec::new();
+        for message in messages {
+            let id = message["id"].as_str().unwrap_or_default();
+            if self.baseline.contains(id) {
+                continue;
+            }
+            if message["type"] == "user" {
+                if self.interactive && !self.requests.contains_key(id) {
+                    self.register_id(id, active.is_some())?;
                 }
-                events.push(ConversationEvent::TurnStarted {
-                    turn_id: request.clone(),
+                if let Some(request) = self.requests.get_mut(id) {
+                    if !request.started {
+                        if let (Some((store, _, _)), Some(origin)) = (&self.owner, &request.origin)
+                        {
+                            store.record_session_turn_origin(thread, id, origin)?;
+                        }
+                        request.started = true;
+                        if !request.steer {
+                            observed
+                                .events
+                                .push(ConversationEvent::TurnStarted { turn_id: id.into() });
+                        }
+                    }
+                    if !request.steer {
+                        // A subsequent explicit input cannot complete interrupted work.
+                        active = Some(id);
+                        assistants.clear();
+                    }
+                }
+            }
+            let Some(request_id) = active else {
+                continue;
+            };
+            if message["type"] == "assistant" {
+                observed.messages.push((request_id, message));
+                assistants.push(message);
+                if !message["time"]["completed"].is_null() {
+                    if let Some((store, session, _)) = &self.owner {
+                        store.record_session_event(
+                            session,
+                            thread,
+                            request_id,
+                            SessionEventKind::Usage,
+                            &json!({"provider":"opencode","message":message}),
+                        )?;
+                    }
+                }
+            }
+            if message["type"] != "idle" {
+                continue;
+            }
+            let request = self
+                .requests
+                .get_mut(request_id)
+                .expect("active request was admitted");
+            if !request.completed {
+                let output = assistants.last().and_then(|m| {
+                    m["content"].as_array()?.iter().rev().find_map(|part| {
+                        (part["type"] == "text")
+                            .then(|| part["text"].as_str())
+                            .flatten()
+                            .filter(|text| !text.trim().is_empty())
+                            .map(str::to_owned)
+                    })
                 });
-            }
-            if let Some((store, session, _)) = &self.owner {
-                record_receipts(store, session, thread, &request, &receipt)?;
-            }
-            let Some(submitted) = submitted else { continue };
-            submitted.started = true;
-            if !receipt.completion.is_null() && !submitted.completed {
-                submitted.completed = true;
-                let status = match receipt.completion["status"].as_str() {
-                    Some("completed") => Lifecycle::Completed,
+                let status = match message["outcome"].as_str() {
+                    Some("succeeded")
+                        if output.is_some()
+                            && assistants.iter().all(|m| {
+                                m["error"].is_null() && !m["time"]["completed"].is_null()
+                            }) =>
+                    {
+                        Lifecycle::Completed
+                    }
                     Some("interrupted") => Lifecycle::Interrupted,
                     _ => Lifecycle::Failed,
                 };
+                let error = if status == Lifecycle::Completed {
+                    Value::Null
+                } else {
+                    message.get("error").filter(|error| !error.is_null()).cloned().unwrap_or_else(
+                        || json!({"message":"OpenCode execution ended without a successful answer"}))
+                };
+                if let Some((store, session, _)) = &self.owner {
+                    if let Some(text) = &output {
+                        store.record_session_event(
+                            session,
+                            thread,
+                            request_id,
+                            SessionEventKind::Output,
+                            &json!({"text":text}),
+                        )?;
+                    }
+                    store.record_session_event(session, thread, request_id, SessionEventKind::Completed,
+                        &json!({"status": match status { Lifecycle::Completed => "completed", Lifecycle::Interrupted => "interrupted", _ => "failed" },
+                            "error":error, "completed_at":message["time"]["created"],"message_id":id,"provider":"opencode"}))?;
+                }
                 if status != Lifecycle::Completed {
-                    let error = &receipt.completion["error"];
-                    let message = error["data"]["message"]
-                        .as_str()
-                        .or_else(|| error["message"].as_str())
-                        .unwrap_or("OpenCode request did not complete");
-                    events.push(ConversationEvent::Error {
+                    observed.events.push(ConversationEvent::Error {
                         code: "opencode_error".into(),
-                        message: crate::harness::opencode::sanitize_error_message(message),
+                        message: super::opencode::sanitize_error_message(
+                            error["message"]
+                                .as_str()
+                                .unwrap_or("OpenCode execution failed"),
+                        ),
                         evidence: None,
                     });
                 }
-                events.push(ConversationEvent::TurnCompleted {
-                    turn_id: request,
+                observed.events.push(ConversationEvent::TurnCompleted {
+                    turn_id: request_id.into(),
                     status,
                 });
+                request.completed = true;
             }
+            active = None;
+            assistants.clear();
         }
-        Ok(events)
+        Ok(observed)
     }
-
-    pub(super) fn admitted(&self, request: &str) -> bool {
-        self.requests
-            .get(request)
-            .is_some_and(|request| request.started)
-    }
-}
-
-#[derive(Debug, Default)]
-struct Receipt {
-    messages: Vec<Value>,
-    completion: Value,
-    output: Option<Value>,
-}
-
-fn native_receipts(thread: &AgentSessionId, messages: &[Value]) -> BTreeMap<String, Receipt> {
-    let mut receipts = BTreeMap::<String, Receipt>::new();
-    for message in messages {
-        let info = &message["info"];
-        if info["sessionID"] != thread.as_str() || info["role"] != "assistant" {
-            continue;
-        }
-        let Some(parent) = info["parentID"].as_str() else {
-            continue;
-        };
-        receipts
-            .entry(parent.into())
-            .or_default()
-            .messages
-            .push(message.clone());
-    }
-    for receipt in receipts.values_mut() {
-        receipt.messages.sort_by(|a, b| {
-            a["info"]["time"]["created"]
-                .as_i64()
-                .cmp(&b["info"]["time"]["created"].as_i64())
-                .then_with(|| a["info"]["id"].as_str().cmp(&b["info"]["id"].as_str()))
-        });
-        let Some(last) = receipt.messages.last() else {
-            continue;
-        };
-        let info = &last["info"];
-        if info["time"]["completed"].is_null() {
-            continue;
-        }
-        let pending = receipt.messages.iter().any(|message| {
-            message["parts"].as_array().is_some_and(|parts| {
-                parts.iter().any(|part| {
-                    part["type"] == "tool"
-                        && matches!(
-                            part["state"]["status"].as_str(),
-                            Some("pending" | "running")
-                        )
-                })
-            })
-        });
-        if pending {
-            continue;
-        }
-        let status = if !info["error"].is_null() {
-            if info["error"]["name"] == "MessageAbortedError" {
-                "interrupted"
-            } else {
-                "failed"
-            }
-        } else if info["finish"]
-            .as_str()
-            .is_some_and(|finish| !matches!(finish, "" | "tool-calls" | "unknown"))
-        {
-            "completed"
-        } else {
-            continue;
-        };
-        receipt.output = info
-            .get("structured_output")
-            .filter(|value| !value.is_null())
-            .map(|value| json!({"value": value}));
-        if receipt.output.is_none() {
-            receipt.output = last["parts"]
-                .as_array()
-                .and_then(|parts| parts.iter().rev().find(|part| part["type"] == "text"))
-                .and_then(|part| part["text"].as_str())
-                .map(|text| json!({"text": text}));
-        }
-        receipt.completion = json!({"status":status,"error":info["error"],
-            "started_at":receipt.messages[0]["info"]["time"]["created"],
-            "completed_at":info["time"]["completed"],"message_id":info["id"],"provider":"opencode"});
-    }
-    receipts
-}
-
-fn record_receipts(
-    store: &SqliteStore,
-    session: &str,
-    thread: &AgentSessionId,
-    request: &str,
-    receipt: &Receipt,
-) -> Result<()> {
-    for message in &receipt.messages {
-        let info = &message["info"];
-        if !info["time"]["completed"].is_null() {
-            store.record_session_event(
-                session,
-                thread,
-                request,
-                SessionEventKind::Usage,
-                &json!({"provider":"opencode","message":info}),
-            )?;
-        }
-    }
-    if let Some(output) = &receipt.output {
-        store.record_session_event(session, thread, request, SessionEventKind::Output, output)?;
-    }
-    if !receipt.completion.is_null() {
-        store.record_session_event(
-            session,
-            thread,
-            request,
-            SessionEventKind::Completed,
-            &receipt.completion,
-        )?;
-    }
-    Ok(())
 }
 
 pub(super) async fn read_messages(
@@ -246,27 +231,60 @@ pub(super) async fn read_messages(
     endpoint: &str,
     thread: &AgentSessionId,
 ) -> Result<Vec<Value>> {
-    Ok(client
-        .get(format!("{endpoint}/session/{thread}/message"))
+    // Export retains completed history through compaction; context includes live
+    // assistant/tool state omitted from export until settlement.
+    let mut exported: Value = client
+        .get(format!(
+            "{endpoint}/api/experimental/session/{thread}/export"
+        ))
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?
         .error_for_status()?
         .json()
-        .await?)
+        .await?;
+    let mut live: Value = client
+        .get(format!("{endpoint}/api/session/{thread}/context"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let mut messages = std::mem::take(
+        exported
+            .pointer_mut("/data/messages")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| anyhow::anyhow!("OpenCode export has no messages"))?,
+    );
+    for message in live
+        .get_mut("data")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("OpenCode context has no messages"))?
+        .drain(..)
+    {
+        if let Some(existing) = messages.iter_mut().find(|m| m["id"] == message["id"]) {
+            *existing = message;
+        } else {
+            messages.push(message);
+        }
+    }
+    Ok(messages)
 }
 
-// Native submission is bounded and serialized with attachment handoff. An
-// uncertain HTTP result is retained as uncertain; never submit it twice here.
+// Freeze dispatch under the attachment fence. Uncertain requests are never replayed.
 pub(super) async fn post(
-    (store, session, attachment): super::agent_process::AttachmentOwner,
+    owner: super::agent_process::AttachmentOwner,
+    authorization: reqwest::header::HeaderValue,
     url: String,
     payload: Value,
 ) -> Result<()> {
     tokio::task::spawn_blocking(move || {
+        let (store, session, attachment) = owner;
         store.with_session_dispatch(&session, &attachment, || {
             reqwest::blocking::Client::new()
                 .post(url)
+                .header(reqwest::header::AUTHORIZATION, authorization)
                 .timeout(std::time::Duration::from_secs(10))
                 .json(&payload)
                 .send()
@@ -286,130 +304,136 @@ pub(super) async fn post(
 #[cfg(test)]
 mod tests {
     use super::History;
-
+    use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::id::LfProcessId;
-    use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
     #[test]
-    fn native_steps_recover_once_without_reassigning_usage_or_inventing_completion() {
+    fn steers_share_execution_but_keep_the_initiating_capture_after_handoff() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
+        store.test_session("session", &input);
+        let sql = rusqlite::Connection::open(path).unwrap();
         let process = LfProcessId::new();
-        let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [process.as_str()],
+            [&process],
         )
         .unwrap();
-        store.test_session("session", &input);
         let attachment = store
             .claim_session_attachment("session", None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), "session".into(), attachment.clone())));
         let request = history.request().unwrap();
-        let message = |id: &str, input: u64, finish: &str| {
-            json!({
-            "info":{"id":id,"sessionID":"thread","parentID":request,"role":"assistant",
-                "time":{"created":if id=="assistant-a" {1} else {3},"completed":if id=="assistant-a" {2} else {4}},
-                "finish":finish,"tokens":{"input":input,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}},
-            "parts":[]})
-        };
-        let session = store.session("session").unwrap().unwrap();
-        let mut replacement = session.clone();
-        replacement.artifact_key = Some(crate::session_record::new_artifact_key());
+        let steer = history.steer().unwrap();
+        let previous = store.session("session").unwrap().unwrap();
+        let mut next = previous.clone();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
-            .replace_session_input(session.captured, replacement.clone())
+            .replace_session_input(previous.captured, next.clone())
             .unwrap();
-        let second = LfProcessId::new();
+        let replacement = LfProcessId::new();
         sql.execute(
             "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [second.as_str()],
+            [&replacement],
         )
         .unwrap();
         store
-            .claim_session_attachment("session", Some(&attachment), &second, true)
+            .claim_session_attachment("session", Some(&attachment), &replacement, true)
             .unwrap();
-        assert!(!history.admitted(&request));
-        for (index, input) in [20, 40, 30].into_iter().enumerate() {
-            let events = history
-                .observe(
-                    &"thread".into(),
-                    &[message("assistant-a", input, "tool-calls")],
-                )
-                .unwrap();
-            assert_eq!(
-                events
-                    .iter()
-                    .filter(|event| matches!(
-                        event,
-                        crate::chat::types::ConversationEvent::TurnStarted { .. }
-                    ))
-                    .count(),
-                usize::from(index == 0)
-            );
-            assert!(history.admitted(&request));
-            assert!(!events.iter().any(|event| matches!(
-                event,
-                crate::chat::types::ConversationEvent::TurnCompleted { .. }
-            )));
-        }
-        let messages = [
-            message("assistant-a", 30, "tool-calls"),
-            message("assistant-b", 10, "stop"),
+        let messages = vec![
+            json!({"type":"user","id":request}),
+            json!({"type":"assistant","id":"step1","time":{"completed":2},"content":[{"type":"tool","id":"tool","name":"shell","state":{"status":"completed"}}],"tokens":{"input":20,"output":5}}),
+            json!({"type":"user","id":steer}),
+            json!({"type":"assistant","id":"step2","time":{"completed":4},"content":[{"type":"text","text":"Result"}],"tokens":{"input":10,"output":5}}),
+            json!({"type":"idle","id":"idle","outcome":"succeeded","time":{"created":5}}),
         ];
-        for index in 0..2 {
-            let events = history.observe(&"thread".into(), &messages).unwrap();
-            assert_eq!(events.len(), usize::from(index == 0));
-            assert!(events.iter().all(|event| matches!(
-                event,
-                crate::chat::types::ConversationEvent::TurnCompleted { .. }
-            )));
-            assert!(history.admitted(&request));
-        }
-        // A reconnect can recover history without claiming these requests or
-        // emitting a new local turn boundary.
-        let mut reconnected = History::new(history.owner.clone());
-        assert!(reconnected
-            .observe(&"thread".into(), &messages)
-            .unwrap()
-            .is_empty());
-        assert!(!reconnected.admitted(&request));
-        let recovered = store.input_history(input.as_str()).unwrap();
-        assert_eq!(recovered.usage.input_tokens, Some(50));
-        assert_eq!(recovered.usage.output_tokens, Some(10));
+        let observed = history.observe(&"native".into(), &messages).unwrap();
+        let events = observed.events;
         assert!(
-            recovered.usage.gaps > 0,
-            "native decrease retains the existing reducer gap"
+            matches!(&events[..], [ConversationEvent::TurnStarted{turn_id}, ConversationEvent::TurnCompleted{turn_id:done,status:Lifecycle::Completed}] if turn_id == &request && done == &request)
         );
-        assert_eq!(
-            recovered.recorded_outcome, None,
-            "provider completion does not complete its Process"
-        );
+        assert!(history
+            .observe(&"native".into(), &messages)
+            .unwrap()
+            .events
+            .is_empty());
+        let completion: String = sql
+            .query_row(
+                "SELECT payload FROM session_events WHERE kind='completed' AND provider_turn=?1",
+                [&request],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let completion: serde_json::Value = serde_json::from_str(&completion).unwrap();
+        assert_eq!(completion["status"], "completed");
+        assert!(completion["error"].is_null());
+        let usage = store.input_history(input.as_str()).unwrap().usage;
+        assert_eq!(usage.input_tokens, Some(30));
+        assert_eq!(usage.output_tokens, Some(10));
         assert_eq!(
             store
-                .input_history(replacement.input_key().unwrap().as_str())
+                .input_history(next.input_key().unwrap().as_str())
                 .unwrap()
                 .usage
                 .input_tokens,
             None
         );
-        let rows = store.session_history("session", 0, 0).unwrap();
-        assert_eq!(
-            rows.iter()
-                .filter(|row| row.kind == crate::session::SessionEventKind::Completed)
-                .count(),
-            1
-        );
-        assert!(rows
+        assert_eq!(observed.messages.len(), 2);
+        assert!(observed.messages.iter().all(|(id, _)| *id == request));
+    }
+
+    #[test]
+    fn empty_success_is_failure_and_explicit_new_input_cannot_complete_lost_work() {
+        let mut history = History::default();
+        let interrupted = history.request().unwrap();
+        let next = history.request().unwrap();
+        let messages = vec![
+            json!({"type":"user","id":interrupted}),
+            json!({"type":"assistant","id":"partial","content":[{"type":"text","text":"Partial"}]}),
+            json!({"type":"user","id":next}),
+            json!({"type":"idle","id":"empty","outcome":"succeeded"}),
+        ];
+        let events = history.observe(&"thread".into(), &messages).unwrap().events;
+        assert!(events.iter().any(|e| matches!(e, ConversationEvent::TurnCompleted{turn_id,status:Lifecycle::Failed} if turn_id == &next)));
+        assert!(!events.iter().any(
+            |e| matches!(e, ConversationEvent::TurnCompleted{turn_id,..} if turn_id == &interrupted)
+        ));
+    }
+
+    #[test]
+    fn resumed_terminal_displays_only_new_inputs_and_keeps_steers_with_their_turn() {
+        let mut messages = vec![
+            json!({"type":"user","id":"old"}),
+            json!({"type":"assistant","id":"old-answer"}),
+        ];
+        let mut history = History::default();
+        history.seed(&messages, true);
+        messages.extend([
+            json!({"type":"user","id":"first"}),
+            json!({"type":"assistant","id":"first-step"}),
+            json!({"type":"user","id":"steer"}),
+            json!({"type":"assistant","id":"steered-step"}),
+            json!({"type":"idle","id":"boundary","outcome":"interrupted"}),
+            json!({"type":"user","id":"next"}),
+            json!({"type":"assistant","id":"next-step"}),
+        ]);
+        let observed = history.observe(&"thread".into(), &messages).unwrap();
+        let output: Vec<_> = observed
+            .messages
             .iter()
-            .filter(|row| !matches!(
-                row.kind,
-                SessionEventKind::Captured | SessionEventKind::Observed
-            ))
-            .all(|row| row.lf_process_id.as_deref() == Some(process.as_str())));
+            .map(|(turn, message)| (*turn, message["id"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            output,
+            [
+                ("first", "first-step"),
+                ("first", "steered-step"),
+                ("next", "next-step")
+            ]
+        );
     }
 }

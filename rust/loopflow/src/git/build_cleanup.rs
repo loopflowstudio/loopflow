@@ -434,7 +434,8 @@ mod tests {
             params![project.as_str(), wave],
         )
         .unwrap();
-        conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,worktree,created_at,checkout_machine_id,planning_completed) VALUES(?1,?2,'PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'),1)", params![task.as_str(),project.as_str(),checkout.to_str().unwrap()]).unwrap();
+        conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at,checkout_machine_id,planning_completed) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'),1)", params![task.as_str(),project.as_str(),checkout.to_str().unwrap()]).unwrap();
         drop(conn);
         drop(store);
         let lock = worktree_lease_path(repo.path(), &checkout).unwrap();

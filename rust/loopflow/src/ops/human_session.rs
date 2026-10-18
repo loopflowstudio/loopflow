@@ -23,79 +23,10 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
-#[cfg(test)]
-pub(crate) mod action_test;
 pub(crate) mod conversation_log;
 pub(crate) mod primary;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
-
-/// Choose by native human input, falling back to each Session's last opening.
-pub async fn latest_interactive_session(
-    store: &SharedStore,
-    cwd: &Path,
-) -> Result<Option<LfSession>> {
-    fn checkout(path: &Path) -> Option<PathBuf> {
-        let path = fs::canonicalize(path).ok()?;
-        let root = crate::repo::discover_repo_root(&path).ok()?.unwrap_or(path);
-        fs::canonicalize(root).ok()
-    }
-    let Some(current) = checkout(cwd) else {
-        return Ok(None);
-    };
-    let repository_wide = crate::git::worktrees::main_repo_root(&current)
-        .ok()
-        .and_then(|root| fs::canonicalize(root).ok())
-        .as_ref()
-        == Some(&current);
-    let mut roots = BTreeMap::new();
-    let candidates = store
-        .resume_candidates()
-        .await?
-        .into_iter()
-        .filter(|(session, _)| {
-            roots
-                .entry(session.cwd.clone())
-                .or_insert_with(|| {
-                    let root = checkout(&session.cwd)?;
-                    if repository_wide {
-                        fs::canonicalize(crate::git::worktrees::main_repo_root(&root).ok()?).ok()
-                    } else {
-                        Some(root)
-                    }
-                })
-                .as_ref()
-                == Some(&current)
-        })
-        .collect::<Vec<_>>();
-    most_recent(store, candidates).await
-}
-
-/// Rank by native human input, then each conversation's last interactive
-/// opening, then its creation. Assistant output never changes the choice.
-async fn most_recent(
-    store: &SharedStore,
-    candidates: Vec<(LfSession, Option<i64>)>,
-) -> Result<Option<LfSession>> {
-    let human = provider_conversation::human_input_times(
-        store,
-        candidates.iter().map(|(session, _)| session),
-    )
-    .await?;
-    Ok(candidates
-        .into_iter()
-        .max_by_key(|(session, opened)| {
-            (
-                human
-                    .get(&session.id)
-                    .copied()
-                    .or(*opened)
-                    .unwrap_or(session.created_at.saturating_mul(1000)),
-                session.id.clone(),
-            )
-        })
-        .map(|(session, _)| session))
-}
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_PREPARED_CAPTURE";
@@ -137,10 +68,11 @@ impl OpenMode {
     }
 }
 
-/// A Session identity or Work target; contextual discovery never creates a conversation.
+/// An exact conversation or the scope whose primary conversation should open.
 #[derive(Debug, Clone, Copy)]
 pub enum SessionTarget<'a> {
     Context,
+    Repository,
     Session(&'a str),
     Task(&'a str),
     Wave(&'a str),
@@ -162,47 +94,91 @@ impl<'a> SessionTarget<'a> {
     }
 }
 
+/// Resolve physical checkout ownership without admitting a conversation.
+pub(crate) async fn connection_scope(
+    store: &SharedStore,
+    cwd: &Path,
+    target: SessionTarget<'_>,
+) -> Result<crate::session::PrimaryScope> {
+    use crate::session::PrimaryScope;
+    let selection = match target {
+        SessionTarget::Session(_) => bail!("an exact Session has no selected scope"),
+        SessionTarget::Task(task) => Some(crate::ops::WorkSelection {
+            task: Some(task),
+            wave: None,
+        }),
+        SessionTarget::Wave(wave) => Some(crate::ops::WorkSelection {
+            task: None,
+            wave: Some(wave),
+        }),
+        SessionTarget::Context | SessionTarget::Repository => None,
+    };
+    if let Some(selection) = selection {
+        let work = crate::ops::run::select_work(store, cwd, selection)
+            .await?
+            .context("selected Work is unavailable")?;
+        return Ok(match work.task {
+            Some(task) => PrimaryScope::Task(task.id),
+            None => PrimaryScope::Wave(
+                work.wave
+                    .expect("selection without a Task has a Wave")
+                    .id()
+                    .clone(),
+            ),
+        });
+    }
+    let repo = crate::repository::CanonicalRepo::discover(cwd)?;
+    if matches!(target, SessionTarget::Repository) {
+        return Ok(PrimaryScope::Repository(repo));
+    }
+    let root = crate::git::worktree_root(cwd)?;
+    if let Some(task) = crate::ops::task::task_for_checkout(store, &root).await? {
+        return Ok(PrimaryScope::Task(task.id));
+    }
+    if root == repo.as_path() {
+        return Ok(PrimaryScope::Repository(repo));
+    }
+    if crate::git::worktrees::is_persistent_worktree(&root)? {
+        let matches = |scope: &PrimaryScope| -> Result<bool> {
+            let plan = primary::scope_worktree(repo.as_path(), scope)?;
+            Ok(
+                plan.strategy == crate::git::worktrees::PlacementStrategy::UseExistingWorktree
+                    && plan.worktree_path.canonicalize().ok().as_ref() == Some(&root),
+            )
+        };
+        if matches(&PrimaryScope::Repository(repo.clone()))? {
+            return Ok(PrimaryScope::Repository(repo));
+        }
+        for wave in store.list_waves(Some(&repo.to_string())).await? {
+            if matches(&PrimaryScope::Wave(wave.id().clone()))? {
+                return Ok(PrimaryScope::Wave(wave.id().clone()));
+            }
+        }
+    }
+    let path = repo.to_string();
+    let command = shlex::try_join(["lf", "--repo", path.as_str(), "connect"])?;
+    bail!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation")
+}
+
 pub(crate) async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
-    prepare_primary: bool,
+    fresh: bool,
 ) -> Result<String> {
-    use crate::ops::WorkSelection;
-    let selection = match target {
-        SessionTarget::Session(id) => return Ok(id.to_owned()),
-        SessionTarget::Task(task) if prepare_primary => {
-            return Ok(primary::ensure_task(store, cwd, task, None).await?.id)
-        }
-        SessionTarget::Wave(wave) if prepare_primary => {
-            return Ok(primary::ensure(store, cwd, Some(wave)).await?.id)
-        }
-        SessionTarget::Task(task) => WorkSelection {
-            task: Some(task),
-            wave: None,
-        },
-        SessionTarget::Wave(wave) => WorkSelection {
-            task: None,
-            wave: Some(wave),
-        },
-        SessionTarget::Context => WorkSelection::default(),
-    };
-    if let Some(work) = crate::ops::run::select_work(store, cwd, selection).await? {
-        let session = if let Some(task) = work.task {
-            primary::task_conversation(store, &task.id).await?
-        } else {
-            store
-                .sqlite
-                .primary_session(&crate::session::PrimaryScope::Wave(work.wave.id().clone()))?
-        };
-        return session
-            .map(|session| session.id)
-            .context("No interactive Session found for this Work");
+    use crate::session::PrimaryScope;
+    if let SessionTarget::Session(id) = target {
+        return Ok(id.to_owned());
     }
-    latest_interactive_session(store, cwd)
-        .await?
-        .map(|session| session.id)
-        .context("No interactive Session found in this repository or worktree")
+    let scope = connection_scope(store, cwd, target).await?;
+    let session = match scope {
+        PrimaryScope::Repository(repo) => {
+            primary::ensure(store, repo.as_path(), None, fresh).await?
+        }
+        PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str()), fresh).await?,
+        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), fresh).await?,
+    };
+    Ok(session.id)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -584,7 +560,7 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
 
 /// Launch the prepared input of a conversation or of a saved Flow's review.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
-    let lf = crate::os_process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
     let token = session_token(session);
     command
@@ -762,8 +738,8 @@ pub(crate) async fn open(
         crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
     }
     let mut result = surface(store, session).await?;
-    mode.require_action(result.state)?;
     if resume {
+        mode.require_action(result.state)?;
         crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     } else {
         match mode {
@@ -794,6 +770,26 @@ async fn transition_headless_to_native(
         return Ok(());
     };
     if agent.interactive || agent.process.completed_at.is_some() {
+        return Ok(());
+    }
+    // A private server can die before creating a native conversation. Retire
+    // its stale attachment so the prepared input can start normally.
+    if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
+        == crate::journal::ProcessIdentityEvidence::Dead
+    {
+        anyhow::ensure!(
+            store.sqlite.settle_agent_process(&agent, || {
+                if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
+                    != crate::journal::ProcessIdentityEvidence::Dead
+                {
+                    return Err(crate::store::StoreError::InvalidAuthority(
+                        "AgentProcess death changed".into(),
+                    ));
+                }
+                Ok(())
+            })?,
+            "Session attachment changed before observing death"
+        );
         return Ok(());
     }
     let provider = provider.ok_or_else(|| {
@@ -1245,10 +1241,6 @@ pub(crate) fn resume_native_session(
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
 ) -> Result<bool> {
-    #[cfg(test)]
-    if let Some(result) = action_test::resume(artifact_key, launch_lock) {
-        return result;
-    }
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
     };
@@ -1288,8 +1280,7 @@ fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
     crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
-    // Carry the executable and its data together, including when a different
-    // installation becomes current between listing and opening.
+    // Carry its Machine and stable entry so opening picks up the current install.
     Ok(vec![
         "/usr/bin/env".to_string(),
         format!("LF_BIN={}", context.lf_bin.display()),
@@ -1502,7 +1493,17 @@ mod tests {
         std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_BIN", &lf);
         let native = bin.join(&provider_name);
-        std::fs::write(&native, "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n").unwrap();
+        let mut script = "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n".to_owned();
+        if provider_name == "opencode" {
+            std::fs::write(
+                bin.join("opencode-server.py"),
+                include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
+            )
+            .unwrap();
+            std::fs::write(home.join("native-sessions.json"), r#"{"saved-thread":[]}"#).unwrap();
+            script.push_str("exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"\n");
+        }
+        std::fs::write(&native, script).unwrap();
         std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));

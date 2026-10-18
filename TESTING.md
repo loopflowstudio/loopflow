@@ -73,6 +73,17 @@ Git locator enrollment, retained identity, historical paths, unpublished edits
 and promotion retry without external network access during the proof. Native
 provider resume and macOS Desktop installation require separate acceptance.
 
+`uv run python scripts/test_task_installation.py --test running_provider_uses_updated_install_for_commands_hooks_and_flow`
+starts a fixture provider, observes a controlled command failure, switches the
+installed CLI, and retries the same command in the same provider and checkout.
+Saved hooks and later Flow children also use the replacement. The proof preserves
+Session history, pending steers and caller attribution, and checks stale inherited
+`LF_BIN` selections through the real installation gate.
+The initial CLI is a failing script and the replacement is the source build;
+this does not prove released-version migration or configured native-provider
+behavior. The Flow starts after the switch, so it does not prove survival of an
+already-running Flow.
+
 The disposable installation job caches its Cargo target and registry on
 the Linux runner, keyed by image identity, architecture, lockfile, profiles and
 harness. Successful PR runs can seed this cache within their GitHub cache scope;
@@ -115,6 +126,10 @@ credentials. CI's ordinary Rust network isolation covers it. It bounds provider
 and Git launches, SQLite statement/returned-row counts, and time to provider
 handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
 remain a separate opt-in benchmark.
+Run this check when changing transport ownership or process journaling: every
+added CLI process pays connection and schema setup costs, including at exit.
+Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
+to preserve completion and interruption receipts after database contention.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
@@ -158,6 +173,15 @@ Context-hook changes also run `session_cli_tests`: resume callbacks supply the
 native Session identity and event payload, just like startup. Provider fixture
 scripts must fail when a callback fails, rather than report a successful turn
 with missing context evidence.
+OpenCode context-hook changes also run
+`node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` for refreshed
+system context after compaction, preserved user messages and child-session isolation.
+Pi context-hook changes also run
+`node scripts/benchmarks/skill-invocation/test_pi_context.mjs`. The isolated real-Pi
+probe in `scripts/benchmarks/pi/probe.py` takes `--pi /path/to/pi` and covers failed/empty
+results, automatic overflow compaction, native continuation, Unicode PTY input and
+public live steering. It uses a local model and disposable homes; configured-account
+and rendered acceptance remain separate.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when
@@ -181,7 +205,7 @@ lf telemetry-daily                                     # maintainer report
 ```
 
 The opt-in desktop command exercises the native outline and retained Task panes.
-Use it for relevant UI changes; see [performance measurements](performance/README.md)
+Use it for relevant UI changes; see [performance measurements](scripts/benchmarks/desktop-performance/README.md)
 for full sampling, comparison and the explicit capture-versus-presentation boundary.
 
 Escalate from a focused behavior to affected suites when crossing a component
@@ -279,16 +303,6 @@ Fixtures still create their own disposable Homes. Source and materialized schema
 frontiers stay separate; a version/schema mismatch is invalid verification
 evidence, never permission to alter an installed database.
 
-October 13 matched local-planning/startup runs, including preparation, improved
-from 113.05s to 79.72s median (29.5%, three pairs). The isolated verification root
-retained 4.49 GiB in addition to source/control output. Two further fixed-input
-pairs, including a small Rust edit, improved edit/test median from 106.34s to
-70.02s (34.2%). Fresh prepared targets used 3.39 GiB versus fallback's 4.47 GiB;
-existing warm targets retain older variants until eligible cleanup. Cold totals
-favored preparation but varied widely. Unchanged Swift/control warm builds took
-0.36s/0.23s median; no app speedup is claimed. See the
-[measurements and limits](docs/reviews/storage-footprint.md#local-verification-cli--2026-10-13).
-
 Runner/materializer changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.
 
@@ -309,7 +323,7 @@ uv run python scripts/resource_envelope.py --recover
 
 The resource preflight names the owner and budget for every worktree build,
 gate-artifact root, the Machine-local Session artifact store, uv cache, Cargo cache, and
-free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
+free disk. `scripts/performance-budgets.json` sets a 64 GiB cleanup target, a 32 GiB
 emergency disk reserve, and four
 low-priority verification workers. Total build size is measured, not capped.
 Individual root thresholds are cleanup signals, not gates: an oversized sibling names its
@@ -414,7 +428,10 @@ task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.
 
 “Recorded agent attempt → merge” includes earlier and unfinished captured inputs attributed
-to the exact PR. See [metric definitions and coverage limits](performance/README.md).
+to the exact PR. It is a lower bound on implementation time: unrecorded or
+standalone work is outside that cohort. Compare equivalent cohorts before
+attributing changes to an optimization. `scripts/performance-budgets.json`
+owns thresholds; complete samples without a threshold are `UNBUDGETED`.
 
 Desktop's `swift` suite builds the app through the test-target dependency and
 runs model and production-view tests through `scripts/test_desktop.sh`, which
@@ -798,6 +815,9 @@ Run these through the same external-network denial wrapper as other CLI fixtures
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
+Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
+`LF_BIN`, even when they never execute the declared hook. When changing executable
+selection, run these fixtures with installed `lf` directories removed from PATH.
 
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;
@@ -1123,6 +1143,8 @@ local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
 setting, so reconnect executes only on Linux. The Rust harness still compiles on
 macOS; its tests are explicitly ignored there, not reported as behavioral passes.
+Include its Python command calls when renaming Task controls; Rust CLI parsing
+tests alone cannot catch stale commands in the Linux-only fixture.
 Include this fixture when changing Work storage or receipt field names: its SQL
 must read canonical Task fields, not retired provider JSON. To prove pending saves
 across a closed connection, make the peer unavailable during the save; short CLI
@@ -1307,6 +1329,10 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+When a provider launch fixture only resolves `lf` without invoking it, pin
+`LF_BIN` to `std::env::current_exe()`. Verify it with the test executable's PATH
+restricted to system tools (`/usr/bin:/bin`), so an installed `lf` cannot hide
+missing fixture setup; keep Cargo's build PATH unchanged.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
 the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
@@ -1453,6 +1479,9 @@ Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
 Process ancestry assertions follow the recorded chain through transport owners
 rather than assuming a fixed number of launch processes.
+Terminal-status isolation assertions match the escaped OSC sequence, not its
+numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
+fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

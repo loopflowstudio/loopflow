@@ -1,7 +1,7 @@
 //! A native conversation as plain text another provider can read: what people
 //! asked, what the agent said, one line per tool call, and the tail of each
 //! failed call's output. No summarization: Claude and Codex are read from
-//! their transcript files, OpenCode from `opencode export`.
+//! their transcript files, OpenCode from `opencode session export`.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -108,47 +108,46 @@ fn transcript_entries(provider: Provider, transcript: &Path) -> Result<Vec<Entry
 /// OpenCode keeps history in its own store; its CLI exports one session as JSON.
 fn opencode_export(cwd: &Path, thread: &str) -> Result<Value> {
     let output = Command::new("opencode")
-        .args(["export", thread])
+        .args(["session", "export", thread, "--standalone"])
         .current_dir(cwd)
         .output()
-        .context("run opencode export")?;
+        .context("run opencode session export")?;
     if !output.status.success() {
         bail!(
-            "opencode export {thread} failed: {}",
+            "opencode session export {thread} failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    serde_json::from_slice(&output.stdout).context("parse opencode export")
+    serde_json::from_slice(&output.stdout).context("parse opencode session export")
 }
 
-/// Entries of an `opencode export`: messages, each with text and tool parts.
+/// Entries of an `opencode session export`: messages, each with text and tool parts.
 fn opencode_entries(export: &Value) -> Vec<Entry> {
     let mut entries = Vec::new();
     for message in export["messages"].as_array().into_iter().flatten() {
-        let role = message["info"]["role"].as_str();
-        for part in message["parts"].as_array().into_iter().flatten() {
-            if part["synthetic"].as_bool() == Some(true) {
-                continue;
+        if message["type"] == "user" {
+            let text = message["text"].as_str().unwrap_or_default();
+            let request = lf_message(text)
+                .unwrap_or_else(|| text.split("<lf:").next().unwrap_or_default().to_owned());
+            if !request.trim().is_empty() {
+                entries.push(Entry::User(request));
             }
-            let text = part["text"].as_str().unwrap_or_default();
-            match (role, part["type"].as_str()) {
-                (Some("user"), Some("text")) => {
-                    // Loopflow's context rides in the user turn after the person's words.
-                    let request = lf_message(text).unwrap_or_else(|| {
-                        text.split("<lf:").next().unwrap_or_default().to_owned()
-                    });
-                    if !request.trim().is_empty() {
-                        entries.push(Entry::User(request));
+        }
+        if message["type"] != "assistant" {
+            continue;
+        }
+        for part in message["content"].as_array().into_iter().flatten() {
+            match part["type"].as_str() {
+                Some("text") => {
+                    if let Some(text) = part["text"].as_str().filter(|t| !t.trim().is_empty()) {
+                        entries.push(Entry::Assistant(text.into()));
                     }
                 }
-                (Some("assistant"), Some("text")) if !text.trim().is_empty() => {
-                    entries.push(Entry::Assistant(text.to_owned()));
-                }
-                (Some("assistant"), Some("tool")) => {
+                Some("tool") => {
                     let state = &part["state"];
                     let mut entry = tool(
-                        part["callID"].as_str(),
-                        part["tool"].as_str(),
+                        part["id"].as_str(),
+                        part["name"].as_str(),
                         &state["input"].to_string(),
                     );
                     if state["status"] == "error" {
@@ -165,7 +164,6 @@ fn opencode_entries(export: &Value) -> Vec<Entry> {
     entries
 }
 
-/// Plain-text log: user and assistant text, one line per tool call.
 fn render(entries: &[Entry]) -> String {
     let mut markdown = String::new();
     for entry in entries {
@@ -471,16 +469,14 @@ mod tests {
 
     #[test]
     fn opencode_log_keeps_conversation_and_failures_only() {
-        let export = serde_json::json!({"info":{"id":"ses_1"},"messages":[
-            {"info":{"role":"user"},"parts":[
-                {"type":"text","text":"Fix the build\n\n<lf:loopflow>\nrules\n</lf:loopflow>"},
-                {"type":"text","synthetic":true,"text":"injected file"}]},
-            {"info":{"role":"assistant"},"parts":[
-                {"type":"step-start"},
+        let export = serde_json::json!({"messages":[
+            {"type":"user","text":"Fix the build\n\n<lf:loopflow>rules</lf:loopflow>"},
+            {"type":"synthetic","text":"injected file"},
+            {"type":"assistant","content":[
                 {"type":"reasoning","text":"hidden reasoning"},
                 {"type":"text","text":"Checking status."},
-                {"type":"tool","callID":"c1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"listing output"}},
-                {"type":"tool","callID":"c2","tool":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
+                {"type":"tool","id":"c1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"listing output"}]}},
+                {"type":"tool","id":"c2","name":"bash","state":{"status":"error","input":{"command":"git push"},"error":"remote rejected"}}]}
         ]});
         let text = &render(&opencode_entries(&export));
         assert!(text.contains("## user\n\nFix the build"));

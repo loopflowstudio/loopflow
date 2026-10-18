@@ -52,7 +52,8 @@
       0,
       0,
       0
-    ]
+    ],
+    "repository_id": "repo_00000000000040008000000000000001"
   },
   "project": {
     "id": "project_11111111111111111111111111111111",
@@ -67,7 +68,6 @@
       }
     ],
     "metric_targets": [],
-    "workflow": "feature",
     "status": "started",
     "linear_id": "project-gmail",
     "pm_snapshot_synced_at": 1790683200,

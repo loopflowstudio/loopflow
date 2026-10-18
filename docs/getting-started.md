@@ -14,7 +14,7 @@ Default install location is `~/.local/bin`. Override with `LF_INSTALL_DIR=/path`
 | You need | For |
 |---|---|
 | macOS or Linux | Everything |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://github.com/anomalyco/opencode), signed in | Every run. Loopflow uses the one you have; these have their own cost |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://github.com/anomalyco/opencode), or [Pi](https://github.com/earendil-works/pi) (1.3+), signed in | Every run. Loopflow uses the one you have; these have their own cost |
 | `git`, and a project in a git repository | Every run |
 | [GitHub CLI](https://cli.github.com) (`gh`), signed in | Pull requests |
 | A [Linear](https://linear.app) workspace | Optional Linear-backed planning; planning defaults to Git |

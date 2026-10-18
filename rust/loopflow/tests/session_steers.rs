@@ -384,23 +384,18 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         r#"
 import assert from 'node:assert/strict';
 import plugin from './transform.mjs';
-const hooks = await plugin();
-await hooks['chat.message']({sessionID:'handoff-native'});
-const output = {messages:[{info:{role:'user',id:'user-one',sessionID:'handoff-native'},parts:[]}]};
-const transform = hooks['experimental.chat.messages.transform'];
-await transform({},output);
+const hooks = {};
+await plugin.setup({session:{hook:async(name, callback) => { hooks[name] = callback; }},event:{subscribe:async function*(){}}});
+const output = {sessionID:'handoff-native',system:[],messages:[]};
+await hooks.context(output);
 const first = JSON.stringify(output);
 assert(first.includes('NEXT_DIRECTION'));
-assert.equal(JSON.stringify(structuredClone(output)), first); // processor stream retry input
-const afterLostTransform = {messages:[{info:{role:'user',id:'user-one',sessionID:'handoff-native'},parts:[]}]};
-await transform({},afterLostTransform);
-assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION')); // loss is emitted/unconfirmed
-await transform({},output);
-assert(!JSON.stringify(output).includes('NEXT_DIRECTION'));
-assert.equal(output.messages[0].parts.filter(p=>p.id==='lf-context-user-one').length,1);
-const child = {messages:[{info:{role:'user',id:'child',sessionID:'another-native'},parts:[]}]};
-await transform({},child);
-assert.equal(child.messages[0].parts.length,0);
+assert.equal(JSON.stringify(structuredClone(output)), first);
+const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
+await hooks.context(afterLostTransform);
+assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
+assert.equal(output.messages.length,0); // stored/native conversation remains untouched
+
 "#,
     )
     .unwrap();
@@ -488,7 +483,7 @@ fn public_commands_save_steers_without_launching_providers() {
     run(&[
         "wave",
         "comment",
-        task.task.wave_id.as_str(),
+        task.task.wave_id.as_ref().unwrap().as_str(),
         "WAVE_DIRECTION",
         "--steer",
     ]);

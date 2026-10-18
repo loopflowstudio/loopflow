@@ -278,7 +278,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let wrong_wave = task_comment_async(&repo, Some("other"), "FIX-7", None, false)
                 .await.unwrap_err();
-            assert!(wrong_wave.to_string().contains("belongs to product"));
+            assert!(wrong_wave.to_string().contains("requested Wave does not own Task"));
 
             provider.lock().await.thread = Thread::MissingCursor;
             let truncated = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();

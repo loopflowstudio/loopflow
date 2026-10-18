@@ -263,7 +263,7 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
 }
 
 #[tokio::test]
-async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() {
+async fn projectless_task_adopts_repository_ownership() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
@@ -282,11 +282,32 @@ async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() 
                 .unwrap();
             assert!(record.project.is_none());
             assert!(record.item.project_id.is_none());
-            let error = crate::ops::linear::acquire_task(&repo, "FIX-1", LinearRefresh::Never)
+            let task = crate::ops::linear::acquire_task(&repo, "FIX-1", LinearRefresh::Never)
                 .await
-                .unwrap_err();
-            assert!(error.to_string().contains("has no Project"), "{error}");
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+                .unwrap();
+            assert!(task.project_id.is_none());
+            assert!(task.wave_id.is_none());
+            assert_eq!(
+                crate::ops::task::repository_for_task(&fixture.store, &task).unwrap(),
+                repo
+            );
+            assert_eq!(fixture.store.list_tasks(None).await.unwrap().len(), 1);
+            let mut foreign = record.item;
+            foreign.team_id = Some("foreign-team".into());
+            foreign.name = "Foreign update".into();
+            assert!(crate::ops::planning_delivery::ingest_task(
+                &fixture.store,
+                &repo,
+                &foreign,
+                None,
+                now() + 7200,
+            )
+            .await
+            .is_err());
+            assert_eq!(
+                fixture.store.get_task(&task.id).await.unwrap().unwrap(),
+                task
+            );
         })
         .await;
 }
@@ -969,7 +990,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .unwrap();
             let saved_project = fixture
                 .store
-                .get_project(&saved.project_id)
+                .get_project(saved.project_id.as_ref().unwrap())
                 .await
                 .unwrap()
                 .unwrap();
@@ -1409,7 +1430,11 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
                 .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
                 .await
                 .unwrap();
-            let project_before = fixture.store.get_project(&task.project_id).await.unwrap();
+            let project_before = fixture
+                .store
+                .get_project(task.project_id.as_ref().unwrap())
+                .await
+                .unwrap();
             let wave_age = fixture.wave_refresh_at(&wave);
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute(

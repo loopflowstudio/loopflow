@@ -155,7 +155,7 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
     case create(title: String, description: String, project: String?)
     case edit(revision: UInt64, fields: [String])
     case comment(message: String?, steer: Bool, refresh: Bool)
-    case refile(wave: String, project: String, previousProject: String)
+    case move(wave: String?, project: String?, previousProject: String?)
     case save(path: String, revision: String, draftBytes: UInt64)
 
     private enum CodingKeys: String, CodingKey {
@@ -163,7 +163,7 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
         case previousProject = "previous_project"
         case draftBytes = "draft_bytes"
     }
-    private enum Kind: String, Codable { case create, edit, comment, refile, save }
+    private enum Kind: String, Codable { case create, edit, comment, move, save }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -175,10 +175,10 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
         case .edit:
             self = .edit(revision: try values.decode(UInt64.self, forKey: .revision),
                          fields: try values.decode([String].self, forKey: .fields))
-        case .refile:
-            self = .refile(wave: try values.decode(String.self, forKey: .wave),
-                           project: try values.decode(String.self, forKey: .project),
-                           previousProject: try values.decode(String.self, forKey: .previousProject))
+        case .move:
+            self = .move(wave: try values.decodeIfPresent(String.self, forKey: .wave),
+                           project: try values.decodeIfPresent(String.self, forKey: .project),
+                           previousProject: try values.decodeIfPresent(String.self, forKey: .previousProject))
         case .save:
             self = .save(path: try values.decode(String.self, forKey: .path),
                          revision: try values.decode(String.self, forKey: .revision),
@@ -202,8 +202,8 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
             try values.encode(Kind.edit, forKey: .kind)
             try values.encode(revision, forKey: .revision)
             try values.encode(fields, forKey: .fields)
-        case .refile(let wave, let project, let previousProject):
-            try values.encode(Kind.refile, forKey: .kind)
+        case .move(let wave, let project, let previousProject):
+            try values.encode(Kind.move, forKey: .kind)
             try values.encode(wave, forKey: .wave)
             try values.encode(project, forKey: .project)
             try values.encode(previousProject, forKey: .previousProject)

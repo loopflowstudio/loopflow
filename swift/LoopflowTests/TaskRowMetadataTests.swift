@@ -22,7 +22,7 @@ struct TaskRowMetadataTests {
         #expect(!status.help.contains("\u{202E}"))
         // A program result never removes unresolved Task work from the outline.
         let snapshot = try roadmap()
-        let rows = WorkProjection(roadmaps: snapshot.waves, sessions: [reporting])
+        let rows = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [reporting])
             .outline(collapsed: [], search: "", planningReadable: true)
         #expect(rows.contains { $0.task?.id == snapshot.waves[0].tasks.items[1].id })
     }
@@ -191,9 +191,9 @@ struct TaskRowMetadataTests {
         let cleared = try session("cleared", attention: .available, status: .init(seen: true, records: []))
         let closed = try session("closed", state: .closed, attention: .available)
         for records in [[live], [cleared], [closed]] {
-            #expect(WorkProjection(roadmaps: snapshot.waves, sessions: records).attention(unavailable: nil).isEmpty)
+            #expect(WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: records).attention(unavailable: nil).isEmpty)
         }
-        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [live, waiting, blocked])
+        let projection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [live, waiting, blocked])
         let queue = projection.attention(unavailable: nil)
         #expect(queue.count == 1)
         #expect(queue.first?.work == .task(id: "issue-review"))
@@ -206,7 +206,7 @@ struct TaskRowMetadataTests {
         workspace["task_id"] = "ts_review00000000000000000000000000"
         shared["workspace"] = workspace
         let sharedSession = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: shared))
-        let sharedQueue = WorkProjection(roadmaps: snapshot.waves, sessions: [sharedSession]).attention(unavailable: nil)
+        let sharedQueue = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [sharedSession]).attention(unavailable: nil)
         #expect(sharedQueue.count == 1)
         #expect(sharedQueue.first?.work == .task(id: "issue-review"))
         shared["task_ids"] = []
@@ -215,10 +215,10 @@ struct TaskRowMetadataTests {
         shared["workspace"] = workspace
         shared["wave_id"] = "wave-1"
         let waveSession = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: shared))
-        let waveProjection = WorkProjection(roadmaps: snapshot.waves, sessions: [waveSession])
+        let waveProjection = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [waveSession])
         #expect(waveProjection.waves.first?.sessions.contains { $0.id == waveSession.id } == true)
         #expect(waveProjection.attention(unavailable: nil).isEmpty)
-        let before = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let before = WorkProjection(roadmaps: snapshot.waves, inventory: snapshot.tasks.items, sessions: [])
         #expect(projection.waves.map(\.id) == before.waves.map(\.id))
         #expect(projection.waves.flatMap { $0.tasks.map(\.id) } == before.waves.flatMap { $0.tasks.map(\.id) })
     }
@@ -250,6 +250,9 @@ struct TaskRowMetadataTests {
         value["title"] = id
         value["state"] = state.rawValue
         value["task_ids"] = ["ts_review00000000000000000000000000"]
+        var workspace = try #require(value["workspace"] as? [String: Any])
+        workspace["task_id"] = "ts_review00000000000000000000000000"
+        value["workspace"] = workspace
         value["attention"] = attention?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))

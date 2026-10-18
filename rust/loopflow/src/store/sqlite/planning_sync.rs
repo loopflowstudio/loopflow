@@ -11,15 +11,16 @@ impl SqliteStore {
     pub fn task_planning_sync(&self, task: &TaskId) -> StoreResult<PlanningSyncStatus> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let (repo, project): (String, String) = tx.query_row(
-            "SELECT w.repo,p.id FROM tasks t JOIN projects p ON p.id=t.project_id
-             JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",
+        let (repo, project): (String, Option<String>) = tx.query_row(
+            "SELECT w.repo,p.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let connected = crate::ops::linear_observe::connected(&repo);
         let mut changes = fields(&tx, "task", task.as_str(), connected, false)?;
-        changes.extend(fields(&tx, "project", &project, connected, true)?);
+        if let Some(project) = project {
+            changes.extend(fields(&tx, "project", &project, connected, true)?);
+        }
         append(&tx, &mut changes,
             "SELECT d.id,'state',json_quote(d.target),d.attempted,d.error,
                 CASE WHEN d.conflict_json IS NOT NULL THEN json_quote(json_extract(d.conflict_json,'$.state')) END

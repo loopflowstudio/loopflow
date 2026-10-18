@@ -22,8 +22,11 @@ planning, identity, and legal actions without inventing a second authority.
 
 The Wave retains its objective, memory, cadence, budget, chat, and metric
 instruments. Exactly one internal Project owns the current chapter's Tasks, KRs,
-metric targets, and Workflow selection. Present the plan through the Wave; ordinary
-navigation and steering select Waves and Tasks. Historical chapters remain readable.
+and metric targets. The Wave owns its optional default Workflow; repository
+configuration supplies the final default, and Tasks retain captured graphs. Present
+the plan through the Wave; repository Tasks may remain outside any Wave/Project.
+Navigation and steering select existing Work without changing membership. Historical
+chapters remain readable.
 The common local planning writer owns records and APIs; optional Linear sync
 adopts observed Linear conflicts. Portable Git planning exchange excludes execution.
 

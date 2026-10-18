@@ -143,9 +143,9 @@ pub(crate) fn checkout_execution_boundary(
     agent: &str,
 ) -> anyhow::Result<AgentExecutionBoundary> {
     let (harness, _) = parse_agent(agent);
-    if !matches!(harness.as_str(), "codex" | "claude") {
+    if !matches!(harness.as_str(), "codex" | "claude" | "pi") {
         return Err(anyhow::anyhow!(format!(
-            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex or claude"
+            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
         )));
     }
     let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
@@ -976,6 +976,11 @@ fn _run_with_transient_retries(
             None
         };
         result.failure = failure;
+        // Pi and OpenCode cannot be resumed without adding a new
+        // model-visible input. Preserve failure; only explicit input starts more work.
+        if matches!(parse_agent(launch.agent()).0.as_str(), "opencode" | "pi") {
+            return Ok(result);
+        }
         let Some(failure) = failure else {
             return Ok(result);
         };
@@ -1336,7 +1341,9 @@ fn _run_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                if matches!(code.as_str(), "codex_disconnected" | "codex_dispatch_rejected" | "opencode_disconnected" | "provider_rate_limited") {
+                                if crate::harness::is_terminal_harness_error(&code)
+                                    || matches!(code.as_str(), "codex_dispatch_rejected" | "provider_rate_limited")
+                                {
                                     exit_code = Some(1);
                                 }
                             }
@@ -1419,8 +1426,8 @@ fn _run_agent_once(
     if process.auto {
         return _run_harness_once(launch, process, model, retry);
     }
-    if harness == "codex" {
-        let result = crate::lf::commands::util::run_native_codex_agent(launch)
+    if matches!(harness.as_str(), "codex" | "opencode") {
+        let result = crate::lf::commands::util::run_native_agent(launch)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         return Ok(AgentAttempt::Finished {
             result,
@@ -1455,7 +1462,7 @@ fn _run_agent_once(
     if let Some(context) = launch
         .conversation_context
         .as_ref()
-        .filter(|_| matches!(harness.as_str(), "claude" | "codex"))
+        .filter(|_| matches!(harness.as_str(), "claude" | "codex" | "pi"))
     {
         context
             .configure_hooks(&mut cmd)
@@ -1629,6 +1636,7 @@ pub fn missing_agent_message(cli: &str) -> String {
         "codex" => {
             "Install it with `npm install -g @openai/codex`, then sign in with `lf account connect codex`."
         }
+        "pi" => "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
         "opencode" => "Install it with `npm install -g opencode-ai`.",
         _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",
     };
@@ -2012,6 +2020,32 @@ trust_level = "trusted"
             stderr: message.to_string(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
+        let launch = AgentConfig {
+            agent: Some("pi:fixture/model".into()),
+            ..Default::default()
+        };
+        let mut attempts = 0;
+        let result = _run_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                Ok(managed_attempt(AgentProcessResult {
+                    agent_session: Some("/fixture/pi.jsonl".into()),
+                    ..failed_result("connection reset")
+                }))
+            },
+            |_| panic!("Pi owns retries"),
+        )
+        .unwrap();
+        assert_eq!(attempts, 1);
+        assert_ne!(result.exit_code, 0);
+        assert_eq!(result.agent_session, Some("/fixture/pi.jsonl".into()));
     }
 
     #[test]

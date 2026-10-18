@@ -32,7 +32,8 @@ pub struct TaskUpdate {
 pub struct NewTask {
     pub due_date: Option<String>,
     pub id: crate::durable::TaskId,
-    pub project_id: crate::durable::ProjectId,
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<crate::durable::ProjectId>,
     pub title: String,
     pub description: String,
 }
@@ -94,26 +95,6 @@ pub struct CiObservation {
     pub state: CiState,
     pub failing_checks: Vec<CiCheck>,
     pub observed_at: OffsetDateTime,
-}
-
-impl CiObservation {
-    /// The current failing required checks by name, sorted — the content half of
-    /// a [`CiIncident`]'s identity. Empty unless `state` is `Failing`.
-    pub fn failure_set(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .failing_checks
-            .iter()
-            .map(|check| check.name.clone())
-            .collect();
-        names.sort();
-        names.dedup();
-        names
-    }
-
-    /// Failed required checks are actionable; repository job names confer no exemption.
-    pub fn repair_legal(&self) -> bool {
-        self.state == CiState::Failing
-    }
 }
 
 /// One failed CI head carried forward after the PR's current observation moves
@@ -520,11 +501,11 @@ pub struct Task {
     /// Acquisition time of the retained Linear observation, never a write clock.
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: LinearWritebackState,
-    /// Root ownership. Wave name and checkout are resolved from this id.
-    pub wave_id: WaveId,
-    /// Required runtime parent. Every Task reports through one durable Project
-    /// Work; its Wave retains root inspection and override authority.
-    pub project_id: ProjectId,
+    /// Read projection from the Project join, validated against the Project on save.
+    pub wave_id: Option<WaveId>,
+    /// Stable repository identity, independent of planning membership.
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<ProjectId>,
     pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
     pub branch: String,
@@ -743,6 +724,7 @@ mod tests {
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
+            repository_id: crate::durable::RepositoryId::new(),
             id: TaskId::new(),
 
             revision: 0,
@@ -753,8 +735,8 @@ mod tests {
             pm_snapshot_synced_at: Some(1),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: crate::work::project::ProjectId::new(),
+            wave_id: Some(crate::id::WaveId::new()),
+            project_id: Some(crate::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1008,65 +990,6 @@ mod tests {
                 .merge_checks_passed()
         );
         assert!(!open_pr("current", None).merge_checks_passed());
-    }
-
-    fn failing(head: &str, checks: &[&str]) -> super::CiObservation {
-        super::CiObservation {
-            head_sha: head.to_string(),
-            state: super::CiState::Failing,
-            failing_checks: checks
-                .iter()
-                .map(|name| super::CiCheck {
-                    name: name.to_string(),
-                    url: None,
-                })
-                .collect(),
-            observed_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    /// The observation answers whether this head is repairable now. Admission is
-    /// keyed separately by the landing generation and incident identity.
-    #[test]
-    fn ci_repair_legality_follows_only_the_current_reading() {
-        let obs = failing("h1", &["build", "lint"]);
-        assert!(obs.repair_legal());
-
-        // The failing set is order-independent and deduplicated: it is the content
-        // half of the incident identity, so two readings of one failure must hash
-        // the same however GitHub ordered them.
-        assert_eq!(
-            obs.failure_set(),
-            vec!["build".to_string(), "lint".to_string()]
-        );
-        assert_eq!(
-            failing("h1", &["lint", "build"]).failure_set(),
-            obs.failure_set()
-        );
-        assert_eq!(
-            failing("h1", &["build", "build"]).failure_set(),
-            vec!["build".to_string()]
-        );
-
-        // A passing or pending reading is never legal to wake on.
-        let mut green = obs.clone();
-        green.state = super::CiState::Passing;
-        assert!(!green.repair_legal());
-        let mut pending = obs.clone();
-        pending.state = super::CiState::Pending;
-        assert!(!pending.repair_legal());
-    }
-
-    #[test]
-    fn repository_check_names_do_not_suppress_required_failures() {
-        for checks in [vec!["scratch-clear"], vec!["rust-test"], vec![]] {
-            let mut observation = failing("h1", &checks);
-            assert!(observation.repair_legal());
-            observation.state = super::CiState::Passing;
-            assert!(!observation.repair_legal());
-            observation.state = super::CiState::Pending;
-            assert!(!observation.repair_legal());
-        }
     }
 
     #[test]

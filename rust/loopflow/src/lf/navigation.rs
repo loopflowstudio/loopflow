@@ -42,10 +42,7 @@ pub fn resolve_child(
     prefix: &[String],
 ) -> Result<Option<Vec<String>>, clap::Error> {
     // Hidden callbacks are still exact commands; they never become shortcuts.
-    if let Some(child) = command
-        .get_subcommands()
-        .find(|child| child.get_name() == name)
-    {
+    if let Some(child) = command.find_subcommand(name) {
         return Ok(Some(vec![child.get_name().to_string()]));
     }
     let mut matches = Vec::new();
@@ -55,8 +52,11 @@ pub fn resolve_child(
             "comment" => Some("task"),
             _ => None,
         };
-        if let Some(owner) = owner.filter(|owner| command.find_subcommand(owner).is_some()) {
-            return Ok(Some(vec![owner.into(), name.into()]));
+        if let Some(owner) = owner.and_then(|name| command.find_subcommand(name)) {
+            let child = owner
+                .find_subcommand(name)
+                .expect("reserved shortcut exists");
+            return Ok(Some(vec![owner.get_name().into(), child.get_name().into()]));
         }
     }
     descendants(command, name, &[], &mut matches, false);
@@ -155,7 +155,6 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
                 remote.extend_from_slice(tokens);
             }
         } else {
-            remote.push(value.clone());
             if !boundary {
                 if let Some(expansion) = resolve_child(current, value, &path).ok().flatten() {
                     for owner in &expansion {
@@ -163,11 +162,16 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
                             .find_subcommand(owner)
                             .expect("resolved child exists");
                     }
+                    // Local flag routing must see the alias's canonical owner.
+                    remote.extend(expansion.clone());
                     path.extend(expansion);
+                    index += 1;
+                    continue;
                 } else {
                     boundary = true;
                 }
             }
+            remote.push(value.clone());
         }
         index += 1;
     }

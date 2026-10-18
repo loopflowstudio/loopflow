@@ -219,16 +219,13 @@ pub(crate) fn start(
     }
     let mut child = command.spawn()?;
     let output = child.stdout.take().expect("startup pipe configured");
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
-        let mut line = String::new();
-        let result = BufReader::new(output).read_line(&mut line).map(|_| line);
-        let _ = tx.send(result);
         let _ = child.wait();
     });
-    let line = rx
-        .recv_timeout(Duration::from_secs(20))
-        .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")??;
+    let mut line = String::new();
+    BufReader::new(output)
+        .read_line(&mut line)
+        .context("Execution handoff was not acknowledged; delivery is unknown, do not replay")?;
     LfProcessId::parse(line.trim())
         .context("Owner exited before acknowledging execution; inspect transport.log")
 }

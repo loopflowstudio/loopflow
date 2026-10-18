@@ -9,7 +9,6 @@ import SwiftUI
 struct TaskHistoryView: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     private var reading: WorkReading<[SessionHistory]> { model.sessionHistory[task.id] }
@@ -45,8 +44,8 @@ struct TaskHistoryView: View {
     }
 
     private func load() {
-        Task { await model.loadSessionHistory(task: task, wave: wave) }
-        Task { await model.loadTaskContext(task: task, wave: wave) }
+        Task { await model.loadSessionHistory(task: task) }
+        Task { await model.loadTaskContext(task: task) }
     }
 
     @ViewBuilder

@@ -49,7 +49,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
              VALUES('retained-session','retained','generated',1,0,0,?1,?2,?3)",
             params![
                 registered.task.id.as_str(),
-                registered.task.wave_id.as_str(),
+                registered.task.wave_id.as_ref().unwrap().as_str(),
                 repo.path().to_str().unwrap()
             ],
         )

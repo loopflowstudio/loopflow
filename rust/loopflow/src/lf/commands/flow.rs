@@ -126,7 +126,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
     args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
-    let lf = crate::os_process::resolve_pinned_lf_binary()?;
+    let lf = crate::os_process::resolve_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
     let process =
@@ -458,8 +458,7 @@ impl RunningFlow<'_> {
         args: &[String],
     ) -> Result<(StepExit, Option<crate::id::LfProcessId>)> {
         // The absolute selected path becomes argv[0] in the child's Process record.
-        let mut command =
-            tokio::process::Command::new(crate::os_process::resolve_pinned_lf_binary()?);
+        let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(flow_process::FLOW_ID_ENV, self.process.as_str());
         if let Some((id, fd)) = self

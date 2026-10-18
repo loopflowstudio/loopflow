@@ -67,31 +67,43 @@ impl SqliteStore {
         .map_err(StoreError::from)
     }
 
-    pub fn select_project_workflow(
+    pub fn selected_wave_workflow(&self, wave: &WaveId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row("SELECT workflow FROM waves WHERE id=?1", [wave], |row| {
+            row.get(0)
+        })
+        .map_err(Into::into)
+    }
+
+    pub fn select_wave_workflow(
         &self,
-        project: &ProjectId,
+        wave: &WaveId,
         name: &str,
         definition: &str,
     ) -> StoreResult<()> {
-        if name.trim().is_empty() || name.contains([':', '/', '\\']) {
-            return Err(StoreError::InvalidData("invalid Workflow name".into()));
-        }
+        crate::workflow::validate_workflow_name(name).map_err(StoreError::InvalidData)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let repo: String = tx.query_row(
-            "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
-            [project.as_str()],
+            "SELECT repo FROM waves WHERE id=?1",
+            [wave.as_str()],
             |row| row.get(0),
         )?;
         crate::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
             .map_err(StoreError::InvalidData)?;
-        PlanningChanges::Project(project).save(&tx, &[Edit::Workflow(name.into())])?;
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(
+                wave.as_str(),
+                &[Edit::WaveWorkflow(Some(name.into()))],
+            ),
+        )?;
         tx.execute(
             "INSERT INTO wave_workflows(wave_id,name,content)
-                SELECT wave_id,?2,?3 FROM projects WHERE id=?1
+                VALUES(?1,?2,?3)
                 ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content
                 WHERE content IS NOT excluded.content",
-            params![project.as_str(), name, definition],
+            params![wave.as_str(), name, definition],
         )?;
         tx.commit()?;
         Ok(())
@@ -100,7 +112,6 @@ impl SqliteStore {
     pub fn update_project_content(
         &self,
         project: &ProjectId,
-        workflow: &str,
         krs: &[ProjectKR],
         metric_targets: &[MetricTarget],
     ) -> StoreResult<()> {
@@ -109,7 +120,6 @@ impl SqliteStore {
         PlanningChanges::Project(project).save(
             &tx,
             &[
-                Edit::Workflow(workflow.into()),
                 Edit::Krs(krs.to_vec()),
                 Edit::MetricTargets(metric_targets.to_vec()),
             ],
@@ -340,17 +350,9 @@ mod tests {
         assert!(store
             .edit_project(&project, Some("Changed"), Some("New summary"), None)
             .is_err());
-        assert!(store
-            .select_project_workflow(
-                &project,
-                "review",
-                "nodes: {}\nedges: [{from: start, to: end}]\n"
-            )
-            .is_err());
         let read = store.project(&project).unwrap().unwrap();
         assert_eq!(read.name, "Original");
         assert_eq!(read.summary, "");
-        assert_eq!(read.workflow, "");
         assert!(store.pending_project_changes(&project).unwrap().is_empty());
         assert!(store.wave_workflow(wave.id(), "review").unwrap().is_none());
         assert_eq!(store.revisions().unwrap(), before);
@@ -378,16 +380,14 @@ mod tests {
                 )
                 .unwrap();
             store
-                .select_project_workflow(&project, "review", definition)
+                .select_wave_workflow(wave.id(), "review", definition)
                 .unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
             store
-                .select_project_workflow(&project, "review", definition)
+                .select_wave_workflow(wave.id(), "review", definition)
                 .unwrap();
-            store
-                .update_project_content(&project, "review", &[], &[])
-                .unwrap();
+            store.update_project_content(&project, &[], &[]).unwrap();
             store
                 .edit_project(&project, Some(name), Some(""), None)
                 .unwrap();
@@ -397,7 +397,7 @@ mod tests {
         }
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        for (wave, project) in owners {
+        for (wave, _project) in owners {
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(definition)
@@ -406,24 +406,36 @@ mod tests {
                 store.wave_workflows(&wave).unwrap(),
                 vec![("review".into(), definition.into())]
             );
-            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
+            assert_eq!(
+                store.selected_wave_workflow(&wave).unwrap().as_deref(),
+                Some("review")
+            );
             for (name, source) in [("invalid/review", definition), ("review", "changed")] {
-                assert!(store
-                    .select_project_workflow(&project, name, source)
-                    .is_err());
+                assert!(store.select_wave_workflow(&wave, name, source).is_err());
             }
+            assert_eq!(
+                store.selected_wave_workflow(&wave).unwrap().as_deref(),
+                Some("review")
+            );
+            assert_eq!(
+                store.wave_workflow(&wave, "review").unwrap().as_deref(),
+                Some(definition)
+            );
             let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
             store
-                .select_project_workflow(&project, "review", changed)
+                .select_wave_workflow(&wave, "review", changed)
                 .unwrap();
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(changed)
             );
-            assert_eq!(store.project(&project).unwrap().unwrap().workflow, "review");
+            assert_eq!(
+                store.selected_wave_workflow(&wave).unwrap().as_deref(),
+                Some("review")
+            );
         }
         assert!(store
-            .update_project_content(&crate::durable::ProjectId::new(), "review", &[], &[])
+            .update_project_content(&crate::durable::ProjectId::new(), &[], &[])
             .is_err());
     }
 }

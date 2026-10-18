@@ -203,7 +203,7 @@ fn build_bound_prompt(
     binding: &crate::ops::WorkBinding,
 ) -> Result<PromptBuild> {
     let mut launch = cli.process_options();
-    launch.wave = Some(binding.wave_name.clone());
+    launch.wave = binding.wave_name.clone();
     launch.agent = binding.agent.clone().or(launch.agent);
     let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
@@ -215,17 +215,24 @@ fn build_bound_prompt(
     let cli = &launch;
     let mut built = build_bound_prompt_at(skill, &message, arguments, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
-    built.agent_config.env.insert(
-        crate::work::wave::context::WAVE_ID_ENV.to_string(),
-        binding.wave_id.to_string(),
-    );
+    if let Some(wave) = &binding.wave_id {
+        built.agent_config.env.insert(
+            crate::work::wave::context::WAVE_ID_ENV.to_string(),
+            wave.to_string(),
+        );
+    } else {
+        built
+            .agent_config
+            .env
+            .remove(crate::work::wave::context::WAVE_ID_ENV);
+    }
     built.subjects = binding.subjects.clone();
     built.work = Some(crate::session::SessionWork {
         task_id: match &binding.work {
             crate::durable::WorkRef::Task(id) => Some(id.clone()),
             crate::durable::WorkRef::Wave(_) | crate::durable::WorkRef::Project(_) => None,
         },
-        wave_id: Some(binding.wave_id.clone()),
+        wave_id: binding.wave_id.clone(),
         source: binding.source,
     });
 
@@ -402,18 +409,21 @@ fn prepare_task_input(
             .get_task_by_issue(id)
             .await?
             .ok_or_else(|| anyhow!("Task {id} is missing"))?;
-        let wave = store
-            .get_wave(&task.wave_id)
-            .await?
-            .ok_or_else(|| anyhow!("Task Wave is missing"))?;
+        let repo = crate::ops::task::repository_for_task(&store, &task)?;
         if !cli.context {
-            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+            crate::ops::linear_observe::sync_repository(&store, &repo.to_string_lossy()).await;
         }
         let task = store
             .get_task(&task.id)
             .await?
             .ok_or_else(|| anyhow!("Task is missing"))?;
-        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug()).await?;
+        let wave = match &task.wave_id {
+            Some(id) => store.get_wave(id).await?,
+            None => None,
+        };
+        let seed =
+            crate::ops::task_input::read_seed(&store, &task, wave.as_ref().map(|w| w.slug()))
+                .await?;
         Ok(Some((store, seed)))
     })
 }
@@ -472,6 +482,19 @@ fn build_prompt_at(
             .then(crate::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
+    if let Some(skill) = &discovered_skill {
+        match crate::definition::name::portable_name(&skill.name).as_str() {
+            "task-session" => anyhow::ensure!(
+                task_input.is_some(),
+                "Select a Task with `lf connect --task ISSUE`"
+            ),
+            "wave-session" => anyhow::ensure!(
+                wave.is_some(),
+                "Select a Wave with `lf connect --wave NAME`"
+            ),
+            _ => {}
+        }
+    }
     // Ordinary third-party skills need their own instructions, not the Work
     // operating manual. Captured Flows and attributed Work retain that guidance.
     let standalone_native = task_input.is_none()

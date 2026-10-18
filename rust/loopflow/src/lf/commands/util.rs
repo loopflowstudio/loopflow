@@ -1486,6 +1486,7 @@ mod tests {
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("CODEX_HOME", temp.path().join("codex-home"));
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
         std::env::remove_var("CODEX_ACCESS_TOKEN");

@@ -1334,6 +1334,10 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+When a provider launch fixture only resolves `lf` without invoking it, pin
+`LF_BIN` to `std::env::current_exe()`. Verify it with the test executable's PATH
+restricted to system tools (`/usr/bin:/bin`), so an installed `lf` cannot hide
+missing fixture setup; keep Cargo's build PATH unchanged.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
 the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit

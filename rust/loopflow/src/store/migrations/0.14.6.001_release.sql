@@ -1,3 +1,4 @@
+-- draft: optional_task_ancestry
 -- Tasks retain repository identity independently of planning membership.
 
 PRAGMA legacy_alter_table = ON;
@@ -186,3 +187,20 @@ END;
 CREATE TRIGGER project_task_session_membership AFTER UPDATE OF wave_id ON projects BEGIN
     UPDATE agent_sessions SET wave_id=NEW.wave_id WHERE task_id IN (SELECT id FROM tasks WHERE project_id=NEW.id);
 END;
+
+-- draft: remove_landing_timeouts
+ALTER TABLE pr_landings DROP COLUMN ci_pending_head;
+ALTER TABLE pr_landings DROP COLUMN ci_pending_since;
+ALTER TABLE pr_landings DROP COLUMN ci_pending_attempt;
+ALTER TABLE pr_landings DROP COLUMN ci_timeout_reruns;
+
+-- Resume observation of retained intent held only by the retired clock policy.
+UPDATE pr_landings SET state = 'watching', blocked_reason = NULL
+WHERE state = 'blocked' AND blocked_reason IN (
+    'CI timeout rerun allowance exhausted; inspect the pending checks',
+    'ci-fix blocked: repair startup acknowledgement timed out; reservation retained',
+    'ci-fix blocked: landing ci-fix exceeded 10 seconds'
+);
+
+-- draft: session_transport
+ALTER TABLE agent_sessions ADD COLUMN transport_lf_process_id TEXT REFERENCES processes(id);

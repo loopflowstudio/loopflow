@@ -23,10 +23,21 @@ def _save(sessions):
 
 
 def _event(kind, **properties):
-    EVENTS.put({"type": kind, "properties": properties})
+    EVENTS.put({"type": kind, "data": properties})
 
 
 def _record_launch():
+    if evidence := os.environ.get("LF_TEST_SESSION_ENV"):
+        Path(evidence).write_text(os.environ.get("OPENCODE_API_KEY", ""))
+    if evidence := os.environ.get("LF_RESUME_PROOF"):
+        Path(evidence).write_text(os.environ["LF_CAPTURE_KEY"])
+        Path(evidence + ".caller").write_text(os.environ["LF_AGENT_CALLER"])
+        Path(evidence + ".args").write_text("\n".join(sys.argv[1:]))
+    config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
+    if "serve" not in sys.argv:
+        (HOME / "received.json").write_text(json.dumps({"args":sys.argv[1:], "cwd":os.getcwd(),
+        "participant":os.environ.get("LF_USER_NAME"), "opencode":json.dumps(config),
+        "model":json.loads((HOME / "native-model.json").read_text()) if (HOME / "native-model.json").exists() else None}))
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
     with (HOME / "declarations").open("a") as output:
@@ -56,7 +67,7 @@ def _contract(parts):
     return json.JSONDecoder().raw_decode(text[start + len(CONTRACT):])[0]
 
 
-def _launch(session, request, prompt):
+def _launch(session, prompt):
     _record_launch()
     deadline = time.monotonic() + 30
     while (HOME / "hold-turn").exists():
@@ -64,14 +75,14 @@ def _launch(session, request, prompt):
             raise TimeoutError("fixture turn was not released")
         time.sleep(0.01)
     assistant = "msg_" + uuid.uuid4().hex
-    info = {"id": assistant, "sessionID": session, "role": "assistant", "parentID": request,
+    message = {"id": assistant, "type": "assistant",
             "time": {"created": int(time.time() * 1000)},
             "modelID": "fixture", "providerID": "opencode"}
-    message = {"info": info, "parts": []}
+    message["content"] = []
     with LOCK:
         sessions[session].append(message)
         _save(sessions)
-    _event("message.updated", info=info)
+    _event("session.step.started", sessionID=session)
     answer = "Fixture completed."
     # A retried turn carries no contract of its own; the conversation does.
     saved = HOME / f"contract-{session}.json"
@@ -82,18 +93,18 @@ def _launch(session, request, prompt):
     if transient.exists() and "Decide the fixture." in str(prompt):
         transient.unlink()
         answer = json.dumps({"decision": "iterate", "summary": "Failed turn cannot navigate"})
-        info["error"] = {"name": "APIError", "data": {"message": "fixture status 502"}}
+        message["error"] = {"name": "APIError", "data": {"message": "fixture status 502"}}
     elif fail.exists():
         fail.unlink()
-        info["error"] = {"name": "APIError", "data": {"message": "fixture failure"}}
+        message["error"] = {"name": "APIError", "data": {"message": "fixture failure"}}
     elif (HOME / "decide-enabled").exists():
         permission = "per_" + uuid.uuid4().hex
         reply = threading.Event()
         REPLIES[permission] = reply
         _event("permission.asked", sessionID=session, id=permission,
-               tool={"messageID": assistant, "callID": "call_fixture"})
+               source={"messageID": assistant, "id": "call_fixture", "type": "tool"})
         if not reply.wait(15):
-            info["error"] = {
+            message["error"] = {
                 "name": "APIError", "data": {"message": "fixture permission unanswered"}
             }
         else:
@@ -126,15 +137,17 @@ def _launch(session, request, prompt):
                 (HOME / "tool-effect").write_text("completed")
                 EVENTS.put(None)
                 return
-    info.update(finish="stop", tokens={"input": 20, "output": 5, "reasoning": 0,
+    message.update(finish="stop", tokens={"input": 20, "output": 5, "reasoning": 0,
                                       "cache": {"read": 0, "write": 0}}, cost=0)
-    info["time"]["completed"] = int(time.time() * 1000)
-    message["parts"] = [{"id": "part_" + assistant, "sessionID": session,
+    message["time"]["completed"] = int(time.time() * 1000)
+    message["content"] = [{"id": "part_" + assistant, "sessionID": session,
                          "messageID": assistant, "type": "text", "text": answer}]
     with LOCK:
+        sessions[session].append({"id": "msg_" + uuid.uuid4().hex, "type": "idle",
+            "outcome": "failed" if "error" in message else "succeeded", "error": message.get("error"),
+            "time": {"created": int(time.time() * 1000)}})
         _save(sessions)
-    _event("message.updated", info=info)
-    _event("session.status", sessionID=session, status={"type": "idle"})
+    _event("session.execution.failed" if "error" in message else "session.execution.succeeded", sessionID=session)
 
 
 class Server(BaseHTTPRequestHandler):
@@ -150,7 +163,7 @@ class Server(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path == "/event":
+        if self.path == "/api/event":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -162,15 +175,15 @@ class Server(BaseHTTPRequestHandler):
                     return
                 self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                 self.wfile.flush()
-        elif self.path.startswith("/session/"):
-            session = self.path.split("/")[2]
+        elif self.path.startswith("/api/session/") or self.path.startswith("/api/experimental/session/"):
+            session = self.path.split("/")[4 if "/experimental/" in self.path else 3]
             with LOCK:
                 if session not in sessions:
                     self._json({}, 404)
+                elif self.path.endswith("/export"):
+                    self._json({"data": {"messages": sessions[session]}})
                 else:
-                    self._json(
-                        sessions[session] if self.path.endswith("/message") else {"id": session}
-                    )
+                    self._json({"data": sessions[session] if self.path.endswith("/context") else {"id": session}})
         else:
             self._json({})
 
@@ -180,28 +193,42 @@ class Server(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-        if self.path == "/session":
+        if self.path.endswith("/model"):
+            (HOME / "native-model.json").write_text(json.dumps(body["model"]))
+            self._json({})
+        elif self.path == "/api/session":
+            if "model" in body:
+                (HOME / "native-model.json").write_text(json.dumps(body["model"]))
             session = "ses_" + uuid.uuid4().hex
             with LOCK:
                 sessions[session] = []
                 _save(sessions)
-            self._json({"id": session})
-        elif self.path.endswith("/prompt_async"):
+            self._json({"data": {"id": session}})
+        elif self.path.endswith("/prompt"):
             if evidence := os.environ.get("LF_TEST_REPLAY_EVIDENCE"):
                 Path(evidence).write_text(json.dumps({
                     "input": os.environ["LF_CAPTURE_KEY"],
-                    "request": body,
+                    "request": body, "config": json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")),
+                    "instructions": [Path(p).read_text() for p in json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")).get("instructions", [])],
                 }))
-            self._json({})
-            threading.Thread(
-                target=_launch,
-                args=(self.path.split("/")[2], body["messageID"],
-                      [{"text": body.get("system", "")}, *body["parts"]]),
-                daemon=True,
-            ).start()
-        elif self.path.startswith("/permission/"):
+            session = self.path.split("/")[3]
+            request = body["id"]
+            with LOCK:
+                sessions[session].append({"id": request, "type": "user", "text": body["text"]})
+                _save(sessions)
+            self._json({"data": {"id": request}})
+            # The native context hook carries structured response instructions.
+            config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
+            instructions = ""
+            for plugin in config.get("plugins", []):
+                source = (Path(plugin.removeprefix("file://")) / "index.js").read_text()
+                spec = json.JSONDecoder().raw_decode(source.split("const spec = ", 1)[1])[0]
+                instructions += spec.get("instructions", "")
+            threading.Thread(target=_launch, args=(session,
+                [{"text": instructions}, {"text": body["text"]}]), daemon=True).start()
+        elif "/permission/" in self.path:
             assert body == {"reply": "once"}
-            REPLIES[self.path.split("/")[2]].set()
+            REPLIES[self.path.split("/")[5]].set()
             self._json({})
         else:
             self._json({})
@@ -210,12 +237,11 @@ class Server(BaseHTTPRequestHandler):
 if "--version" in sys.argv:
     raise SystemExit(0)
 if "serve" not in sys.argv:
-    print("message=created id=ses_" + os.environ["LF_CAPTURE_KEY"], file=sys.stderr)
     _record_launch()
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
-ThreadingHTTPServer(
-    ("127.0.0.1", int(sys.argv[sys.argv.index("--port") + 1])), Server
-).serve_forever()
+server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
+print(json.dumps({"url": f"http://127.0.0.1:{server.server_port}"}), flush=True)
+server.serve_forever()

@@ -2213,60 +2213,23 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
 }
 
 #[test]
-fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() {
+fn opencode_transient_failure_does_not_invent_a_continuation_or_accept_failed_output() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
     let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    // The failed turn's output decided nothing: each step ran once and succeeded.
+    assert!(!output.status.success());
     let flows = support::recorded_flows(fixture.home.path());
-    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
-    assert_eq!(flows[0].1.len(), 2);
-    assert_eq!(fixture.count("agent_sessions"), 2);
-    assert_eq!(fixture.captures(), 2);
-    let (threads, starts, done): (i64, i64, i64) = fixture
-        .db()
-        .query_row(
-            "SELECT count(DISTINCT provider_thread),sum(kind='started'),sum(kind='completed')
-             FROM session_events WHERE kind!='observed'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!((threads, starts, done), (2, 3, 3));
-    let usage = fixture.json(&["history", "usage", "--json"]);
-    assert_eq!(usage.as_array().unwrap().len(), 2);
-    let launches = fixture.launches();
-    assert_eq!(launches.len(), 3);
+    assert_eq!(flows[0].0.as_deref(), Some("failed"));
     assert_eq!(
-        launches[1], launches[2],
-        "automatic retry retains its admitted input and conversation"
+        fixture.launches().len(),
+        2,
+        "each step admits exactly one input"
     );
-    let retried = usage
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["artifact_key"] == launches[1])
-        .unwrap();
-    assert_eq!(retried["usage"]["input_tokens"], 40);
-    assert_eq!(retried["usage"]["output_tokens"], 10);
-    let answer = fixture.run(&[
-        "history",
-        "show",
-        retried["session_id"].as_str().unwrap(),
-        "--input",
-        &launches[1],
-        "--final",
-    ]);
-    // The answer is the provider's own text; the Flow process read the value in it.
+    assert_eq!(fixture.captures(), 2);
     assert!(
-        String::from_utf8_lossy(&answer.stdout).contains(r#""decision": "advance""#),
-        "{answer:?}"
+        !fixture.home.path().join("decide.log").exists(),
+        "failed answer cannot advance the Flow"
     );
 }
 

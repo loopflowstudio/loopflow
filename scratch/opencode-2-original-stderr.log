@@ -1,0 +1,11 @@
+~effect/cli/CliError/InvalidValue: Invalid value for flag --log-level: "INFO". Expected: "all" | "trace" | "debug" | "info" | "warn" | "warning" | "error" | "fatal" | "none"
+    at <anonymous> (/$bunfs/root/chunk-746qbpsf.js:46:5136)
+    at <anonymous> (/$bunfs/root/chunk-3ce6ywhf.js:18:6047)
+    at runLoop (/$bunfs/root/chunk-3ce6ywhf.js:18:2552)
+    at evaluate (/$bunfs/root/chunk-3ce6ywhf.js:18:1687)
+    at runInAsyncScope (node:async_hooks:207:23)
+    at <anonymous> (/$bunfs/root/chunk-3ce6ywhf.js:18:6869)
+    at <anonymous> (/$bunfs/root/chunk-3ce6ywhf.js:20:14000)
+    at guarded (internal:shared:114:26)
+    at <anonymous> (node:fs:326:13)
+    at processTicksAndRejections (native:7:39)

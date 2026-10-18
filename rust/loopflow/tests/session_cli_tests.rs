@@ -283,14 +283,19 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
+        std::fs::write(
+            home.path().join("native-sessions.json"),
+            r#"{"ses_resume-proof":[]}"#,
+        )
+        .unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         let provider = bin.join("opencode");
         std::fs::write(
-        &provider,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$LF_RESUME_PROOF\"\nprintf '%s' \"$LF_AGENT_CALLER\" > \"$LF_RESUME_PROOF.caller\"\nprintf '%s\\n' 'message=created id=ses_resume-proof' >&2\nread -r input\n",
-    )
-    .unwrap();
+            &provider,
+            include_str!("support/opencode_server.py").replace("__WAIT__", "True"),
+        )
+        .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
         if !resume {
             let rejected = bin.join("rejecting-lf");
@@ -1321,7 +1326,7 @@ fn session_names_survive_capture_replacement() {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$LF_RESUME_PROOF.tmp\"\nmv \"$LF_RESUME_PROOF.tmp\" \"$LF_RESUME_PROOF\"\nprintf '%s\\n' \"$@\" > \"$LF_RESUME_PROOF.args\"\nprintf '%s\\n' 'message=created id=ses_rename-proof' >&2\nread -r input\n",
+        include_str!("support/opencode_server.py").replace("__WAIT__", "True"),
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1483,13 +1488,13 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         std::fs::write(&provider, body).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     };
-    // The terminal exits before publishing native history. OpenCode reports
+    // The private server exits before reporting readiness. OpenCode reports
     // that failure; retry must still reach the provider in the same Session.
     write_provider("#!/bin/sh\nexit 0\n");
     let first = open(&["session", "connect", &id]);
     assert!(!first.status.success());
-    assert!(String::from_utf8_lossy(&first.stderr).contains("did not report a resumable session"));
-    write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
+    assert!(String::from_utf8_lossy(&first.stderr).contains("private server failed to start"));
+    write_provider(&include_str!("support/opencode_server.py").replace("__WAIT__", "False"));
     let retry = open(&["session", "resume", &id]);
     assert!(retry.status.success(), "{retry:?}");
 
@@ -1500,7 +1505,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     ));
     let failed = open(&["session", "connect", &id, "--takeover"]);
     assert!(!failed.status.success());
-    write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
+    write_provider(&include_str!("support/opencode_server.py").replace("__WAIT__", "False"));
     for args in [
         vec!["session", "resume", &id],
         vec!["session", "connect", &id, "--takeover"],
@@ -1539,7 +1544,9 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     assert_eq!(count, 1);
     assert!(history
         .iter()
-        .any(|event| event.payload["evidence"]["provider_session_id"] == "ses_retained"));
+        .any(|event| event.payload["evidence"]["provider_session_id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("ses_"))));
 }
 
 #[cfg(unix)]

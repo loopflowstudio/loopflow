@@ -291,7 +291,7 @@ struct TelemetryDashboardView: View {
     private func healthColor(_ status: String) -> Color {
         switch status {
         case "ok": palette.success
-        case "warn": palette.waiting
+        case "warn": palette.warning
         default: palette.failure
         }
     }
@@ -547,7 +547,7 @@ private struct IcicleNode: View {
     }
 
     private var depthColor: Color {
-        let ramp: [Color] = [palette.emphasisInk, palette.working, palette.success, palette.waiting]
+        let ramp: [Color] = [palette.emphasisInk, palette.working, palette.success, palette.warning]
         return ramp[min(depth, ramp.count - 1)]
     }
 }

@@ -17,7 +17,7 @@ struct SessionActionSheet: View {
                     .disabled(draft.submitting)
                     .onSubmit { Task { await model.commitSessionRename() } }
                     .accessibilityIdentifier("session-rename-field")
-                if let error = draft.error { Text(error).foregroundStyle(palette.waiting) }
+                if let error = draft.error { Text(error).foregroundStyle(palette.warning) }
                 HStack {
                     Button("Cancel") { model.cancelSessionRename() }.keyboardShortcut(.cancelAction)
                     Button("Save") { Task { await model.commitSessionRename() } }.keyboardShortcut(.defaultAction)
@@ -51,7 +51,7 @@ struct SessionActionSheet: View {
                         .accessibilityIdentifier("session-bind-preview")
                 }
                 if let error = draft.error {
-                    Text(error).foregroundStyle(palette.waiting)
+                    Text(error).foregroundStyle(palette.warning)
                         .accessibilityIdentifier("session-bind-error")
                 }
                 Button("Cancel") { model.cancelSessionBinding() }.disabled(draft.submitting)

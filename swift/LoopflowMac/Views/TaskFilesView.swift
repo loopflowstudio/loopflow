@@ -160,7 +160,7 @@ struct TaskFilesView: View {
                     }
                     if store.isRefreshingChanges, store.changes == nil { ProgressView().controlSize(.small) }
                     if let reason = store.changesError {
-                        Text(reason).font(.caption).foregroundStyle(palette.waiting)
+                        Text(reason).font(.caption).foregroundStyle(palette.warning)
                     } else if store.changes != nil, store.scratchPaths.isEmpty, store.changedPaths.isEmpty {
                         Text(store.search.isEmpty ? "No scratch or changed files" : "No matching files")
                             .font(.caption).foregroundStyle(palette.textSecondary)
@@ -226,7 +226,7 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                Text(error).font(.caption).foregroundStyle(palette.waiting).padding(8)
+                Text(error).font(.caption).foregroundStyle(palette.warning).padding(8)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(.caption).padding(8)

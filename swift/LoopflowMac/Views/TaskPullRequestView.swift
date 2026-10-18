@@ -24,7 +24,7 @@ struct TaskPullRequestView: View {
                     }
                 }
                 if let error = store.error {
-                    Text(error).font(.caption).foregroundStyle(palette.waiting)
+                    Text(error).font(.caption).foregroundStyle(palette.warning)
                     if store.pullRequest != nil { Text("Showing the last successful reading").font(.caption) }
                 }
                 if let pr = store.pullRequest {
@@ -149,7 +149,7 @@ struct TaskPullRequestView: View {
         DisclosureGroup(isExpanded: $store.showsFiles) {
             VStack(alignment: .leading, spacing: 10) {
                 if let error = store.filesError {
-                    Text(error).font(.caption).foregroundStyle(palette.waiting)
+                    Text(error).font(.caption).foregroundStyle(palette.warning)
                     Button("Retry diffs") { Task { await refresh(pr.url) } }
                 }
                 if store.loadingFiles { ProgressView().controlSize(.small) }

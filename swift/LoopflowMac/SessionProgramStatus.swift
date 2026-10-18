@@ -96,7 +96,7 @@ enum SessionProgramStatus {
         switch self {
         case .reported(_, let report):
             report.state.workTone
-        case .available: .waiting
+        case .available: .available
         case .unknown, .unavailable: nil
         }
     }

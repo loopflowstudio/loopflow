@@ -32,7 +32,7 @@ struct WorkNavigator: View {
                     .accessibilityIdentifier("work-status")
             }
             if let error = model.selectionPlans.errorMessage {
-                Text(error).font(Typography.body(11)).foregroundStyle(palette.waiting).padding(10)
+                Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
             WorkTaskList(navigation: model.navigation) {
                 VStack(alignment: .leading, spacing: 5) {

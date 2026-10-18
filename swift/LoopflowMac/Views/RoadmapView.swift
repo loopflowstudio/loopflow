@@ -240,7 +240,7 @@ struct RoadmapView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.waiting)
+                .foregroundStyle(palette.warning)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.caption(11).weight(.semibold))
@@ -254,7 +254,7 @@ struct RoadmapView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(palette.waiting.opacity(0.12))
+        .background(palette.warning.opacity(0.12))
     }
 
     @MainActor
@@ -346,7 +346,7 @@ private struct RoadmapWaveCard: View {
             if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
-                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.waiting)
+                Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
@@ -354,10 +354,10 @@ private struct RoadmapWaveCard: View {
                         activeControlId: activeControlId, onSelect: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
-                if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.waiting) }
+                if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
             }
             ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.waiting)
+                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)").foregroundStyle(palette.warning)
             }
         }
         .padding(Spacing.lg)
@@ -611,7 +611,7 @@ extension RoadmapSection {
 
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .waiting: palette.waiting
+        case .waiting: palette.warning
         case .now, .notStarted, .later: palette.textTertiary
         }
     }
@@ -620,7 +620,7 @@ extension RoadmapSection {
 private extension TaskConditionState {
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .blocked, .waiting: palette.waiting
+        case .blocked, .waiting: palette.warning
         case .clear, .unknown: palette.textTertiary
         }
     }

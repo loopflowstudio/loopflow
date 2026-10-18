@@ -101,11 +101,11 @@ struct TaskRowMetadataTests {
         #expect(reported.tone == .failure)
         let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
-        let waiting = SessionProgramStatus(sessions: [try session("waiting", availability: .available)], unavailable: nil)
-        #expect(waiting.tone == .waiting)
-        #expect(waiting.label == "Available · inferred")
+        let available = SessionProgramStatus(sessions: [try session("available", availability: .available)], unavailable: nil)
+        #expect(available.tone == .available)
+        #expect(available.label == "Available · inferred")
         #expect(ProgramStatusState.working.workTone == .running)
-        #expect(ProgramStatusState.blocked.workTone == .waiting)
+        #expect(ProgramStatusState.blocked.workTone == .warning)
         #expect(ProgramStatusState.done.workTone == .done)
     }
 

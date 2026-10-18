@@ -343,7 +343,7 @@ struct SessionPaneView: View {
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.palette.waiting)
+                    .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
             if isFocused && hovering {

@@ -14,7 +14,7 @@ export const initialWork = [
 ];
 
 export const presets = {
-  repo:{name:'Repository',query:'repo:loopflow (kind:wave or state:open)',scope:'repo'},
+  repo:{name:'Repository',query:'state:open or kind:wave',scope:'repo'},
   product:{name:'Product',query:'wave:product state:open',scope:'product'},
   attention:{name:'Needs you',query:'state:available',scope:'repo'},
   overlap:{name:'Product + Needs you',query:'query:product or query:needs-you',scope:'repo'},
@@ -39,7 +39,8 @@ export function parseQuery(source) {
     if(token==='('){const node=or();if(tokens[at++]!==')')throw new Error('Close the parenthesis.');return node;}
     if(!token || token===')' || /^(and|or)$/i.test(token))throw new Error('Expected a filter.');
     const colon=token.indexOf(':');const key=token.slice(0,colon).toLowerCase();const value=token.slice(colon+1).replace(/^"|"$/g,'');
-    if(!['repo','wave','task','query','kind','state'].includes(key))throw new Error(`Unknown filter “${key}”.`);
+    if(key==='repo')throw new Error('Repository is implicit in this window. Use ⌘K to open another repository.');
+    if(!['wave','task','query','kind','state'].includes(key))throw new Error(`Unknown filter “${key}”.`);
     if(!value)throw new Error(`Give ${key}: a value.`);
     if(key==='state'&&!['open','available','running','blocked','paused','idle','backlog','done'].includes(value))throw new Error(`Unknown state “${value}”.`);
     if(key==='kind'&&!['wave','task'].includes(value))throw new Error('Use kind:wave or kind:task.');
@@ -65,7 +66,6 @@ export function resolveQuery(source, work, catalog=savedQueries) {
     if(node.key==='wave'&&!waves.has(node.value))throw new Error(`No Wave named “${node.value}” in the sample Work.`);
     return sorted.filter(w=>{
       switch(node.key){
-        case 'repo':return node.value==='loopflow';
         case 'kind':return w.kind===node.value;
         case 'task':return w.kind==='task'&&w.id.toLowerCase()===node.value.toLowerCase();
         case 'wave':return belongs(w.kind==='task'?w.wave:w.parent,node.value);

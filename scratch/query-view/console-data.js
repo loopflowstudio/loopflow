@@ -1,0 +1,152 @@
+// Sample activity adapted from scratch/redesign-studies/index.html. No live execution.
+const consoleActivity={
+  "LOO-489": {
+    "branch": "loo-489-navigation",
+    "tail": "Three redesigns are ready. Which direction should the native sidebar take?",
+    "work": [
+      [
+        "Read",
+        "scratch/navigation-studies/README.md"
+      ],
+      [
+        "Read",
+        "swift/LoopflowMac/Views/WorkNavigator.swift"
+      ],
+      [
+        "Ran",
+        "node --test model.test.cjs",
+        "5 passed"
+      ]
+    ]
+  },
+  "LOO-499": {
+    "branch": "loo-499-opening",
+    "pr": "#1591",
+    "tail": "Opening a Task now reveals its existing conversation. Approve the fresh-start action?",
+    "work": [
+      [
+        "Read",
+        "rust/loopflow/src/lf/commands/session.rs"
+      ],
+      [
+        "Edit",
+        "swift/LoopflowMac/Views/SessionsView.swift",
+        "+41 \u221218"
+      ],
+      [
+        "Ran",
+        "cargo test session::open",
+        "14 passed"
+      ]
+    ]
+  },
+  "LOO-505": {
+    "branch": "loo-505-waveless",
+    "tail": "Reading rust/loopflow/src/work/mod.rs \u2014 6 call sites still require a Wave",
+    "work": [
+      [
+        "Search",
+        "wave_id.expect",
+        "6 matches"
+      ],
+      [
+        "Read",
+        "rust/loopflow/src/work/mod.rs"
+      ]
+    ]
+  },
+  "LOO-416": {
+    "branch": "loo-416-retain",
+    "pr": "#1588",
+    "tail": "cargo test session::reattach \u2014 12 passed; verifying pane + draft return together",
+    "work": [
+      [
+        "Read",
+        "rust/loopflow/src/session/attach.rs"
+      ],
+      [
+        "Ran",
+        "cargo test session::reattach",
+        "12 passed"
+      ],
+      [
+        "Edit",
+        "swift/Loopflow/Services/WorkObservation.swift",
+        "+12 \u22123"
+      ]
+    ]
+  },
+  "LOO-497": {
+    "branch": "loo-497-dashboards",
+    "tail": "Paused after kickoff. Navigation lands first in LOO-489.",
+    "work": [
+      [
+        "Read",
+        "scratch/dashboard-design.md"
+      ]
+    ]
+  },
+  "LOO-503": {
+    "branch": "loo-503-repair",
+    "pr": "#1586",
+    "tail": "Two retry boundaries possible: after rebase, or after gate. Pick one.",
+    "work": [
+      [
+        "Ran",
+        "lf sync --continue",
+        "merged"
+      ],
+      [
+        "Ran",
+        "cargo test flow::repair",
+        "9 passed"
+      ]
+    ]
+  },
+  "LOO-504": {
+    "branch": "loo-504-opencode",
+    "tail": "smoke: 7/11 provider checks passing",
+    "work": [
+      [
+        "Ran",
+        "lf smoke --provider opencode",
+        "7/11"
+      ]
+    ]
+  },
+  "LOO-330": {
+    "branch": "loo-330-waves",
+    "tail": "Design notes saved.",
+    "work": []
+  },
+  "FN-101": {
+    "branch": "fn-101-offline",
+    "tail": "Two conflicting paragraphs need a decision before sync.",
+    "work": [
+      [
+        "Ran",
+        "npm test sync",
+        "31 passed"
+      ]
+    ]
+  },
+  "FN-102": {
+    "branch": "fn-102-search",
+    "tail": "bench: incremental index 38ms p95 (was 410ms)",
+    "work": [
+      [
+        "Ran",
+        "npm run bench",
+        "running"
+      ]
+    ]
+  },
+  "FN-103": {
+    "branch": "fn-103-export",
+    "tail": "The draft export preserves attachments and relative links.",
+    "work": []
+  }
+};
+
+consoleActivity['LOO-510']={branch:null,tail:'',work:[]};
+consoleActivity['LOO-511']={branch:null,tail:'',work:[]};

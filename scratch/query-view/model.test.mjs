@@ -8,6 +8,8 @@ test('defaults retain paused and idle Tasks, exclude backlog/completed, and incl
   assert.deepEqual(result.filter(m => m.work.kind === 'task').map(m => m.work.id),
     ['LF-101', 'LF-104', 'LF-102', 'LF-103', 'LF-105', 'LF-106']);
   assert.equal(resolveQuery('task:LF-108', initialWork)[0].work.started, false);
+  assert.equal(resolveQuery('state:backlog', initialWork)[0].work.provider, null);
+  assert.throws(() => resolveQuery('repo:loopflow', initialWork), /implicit/);
 });
 
 test('overlap retains membership and hiding the winner promotes the next occurrence', () => {

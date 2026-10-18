@@ -187,6 +187,12 @@ impl Resolved {
         argv
     }
 
+    /// The connect argv as one shell command line, for hosts that type it.
+    fn connect_shell(&self, lf: &str) -> Result<String, RouteError> {
+        shlex::try_join(self.connect_argv(lf).iter().map(String::as_str))
+            .map_err(|error| RouteError::Definite(error.to_string()))
+    }
+
     fn cwd(&self) -> &Path {
         self.session_cwd
             .as_deref()
@@ -274,20 +280,7 @@ pub(crate) fn selected_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
-    let resolution = if cli.task.is_none() && session.is_some() {
-        let selected = work_context(None, None, session)?;
-        if let Some(wave) = cli.wave.as_deref() {
-            let work = super::context::explain(Some(wave), None, None, None)?;
-            anyhow::ensure!(
-                matches!((&work.wave, &selected.wave),
-                (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
-                "Session does not belong to the selected Work. Nothing was opened."
-            );
-        }
-        selected
-    } else {
-        work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?
-    };
+    let resolution = work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?;
     if cli.repo.is_some() || cli.repository.is_some() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
@@ -321,10 +314,21 @@ fn work_context(
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
         return Ok(resolution);
     }
-    let mut resolution = if task.is_none() && wave.is_none() && session.is_some() {
-        super::context::explain(None, None, session, None)?
-    } else {
-        super::context::explain(wave, task, None, None)?
+    // Without a Task, an exact Session selects the Work; a Wave must contain it.
+    let mut resolution = match (task, session) {
+        (None, Some(session)) => {
+            let selected = super::context::explain(None, None, Some(session), None)?;
+            if let Some(wave) = wave {
+                let work = super::context::explain(Some(wave), None, None, None)?;
+                anyhow::ensure!(
+                    matches!((&work.wave, &selected.wave),
+                    (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
+                    "Session does not belong to the selected Work. Nothing was opened."
+                );
+            }
+            selected
+        }
+        _ => super::context::explain(wave, task, None, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = crate::durable::TaskId::parse(value)?;
@@ -456,8 +460,8 @@ fn describe(
         url.session = session.clone();
         url.diff = diff;
     }
-    let primary = store
-        .map(|store| {
+    let primary = match store {
+        Some(store) => {
             let scope = match (&task, &context.wave) {
                 (Some(task), _) => PrimaryScope::Task(task.id.clone()),
                 (None, ContextFact::Bound { value, .. }) => {
@@ -467,15 +471,13 @@ fn describe(
                     &repository_path,
                 )?),
             };
-            anyhow::Ok(
-                store
-                    .sqlite
-                    .primary_session(&scope)?
-                    .map(|session| session.id),
-            )
-        })
-        .transpose()?
-        .flatten();
+            store
+                .sqlite
+                .primary_session(&scope)?
+                .map(|session| session.id)
+        }
+        None => None,
+    };
     let standing = match (store, &task) {
         (Some(store), Some(task)) => crate::terminal_title::standing(
             &store.sqlite,
@@ -1149,8 +1151,7 @@ fn open_desktop(
 }
 
 fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = shlex::try_join(target.connect_argv(lf).iter().map(String::as_str))
-        .map_err(|error| RouteError::Definite(error.to_string()))?;
+    let shell = target.connect_shell(lf)?;
     let mut command = Command::new("cmux");
     command
         .env("CMUX_QUIET", "1")
@@ -1177,6 +1178,7 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
 }
 
 fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
+    let shell = target.connect_shell(lf)?;
     let mut create = Command::new("herdr");
     create
         .args(["workspace", "create", "--cwd"])
@@ -1196,8 +1198,6 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
         .as_str()
         .ok_or_else(|| RouteError::Unknown("Herdr reply named no pane".into()))?;
     // Herdr types the command into the newly allocated shell, never an existing one.
-    let shell = shlex::try_join(target.connect_argv(lf).iter().map(String::as_str))
-        .map_err(|error| RouteError::Unknown(error.to_string()))?;
     let mut run = Command::new("herdr");
     run.args(["pane", "run", pane, &shell]);
     run_host(run, "Herdr").map_err(|error| {
@@ -1237,8 +1237,7 @@ fn open_terminal(
         "cd {} && exec {}",
         shlex::try_quote(&target.cwd().display().to_string())
             .map_err(|error| RouteError::Definite(error.to_string()))?,
-        shlex::try_join(argv.iter().map(String::as_str))
-            .map_err(|error| RouteError::Definite(error.to_string()))?
+        target.connect_shell(lf)?
     );
     if cfg!(target_os = "macos") {
         // Launch Services opens a .command in the default terminal, without

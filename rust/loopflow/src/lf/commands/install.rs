@@ -2707,27 +2707,29 @@ pub fn promote(
 
 /// Keep `loopflow:` links clickable without Desktop; failure leaves `lf open URL`.
 fn install_link_receiver(desktop: Option<&Path>) {
-    let result = crate::installation::account_home().and_then(|home| {
-        let lf = crate::os_process::resolve_lf_binary()?;
-        crate::work::link_receiver::install(&home, &lf, desktop)
-    });
-    match result {
-        Ok(crate::work::link_receiver::Receiver::Installed(path)) => {
+    use crate::work::link_receiver::{self, Receiver};
+    let located = crate::installation::account_home()
+        .and_then(|home| Ok((home, crate::os_process::resolve_lf_binary()?)));
+    let (home, lf) = match located {
+        Ok(located) => located,
+        Err(error) => {
+            eprintln!("warning: link receiver installation failed ({error:#}); `lf open URL` still opens links");
+            return;
+        }
+    };
+    match link_receiver::install(&home, &lf, desktop) {
+        Ok(Receiver::Installed(path)) => {
             println!("loopflow: links open through {}", path.display());
         }
-        Ok(crate::work::link_receiver::Receiver::Desktop) => {}
-        Ok(crate::work::link_receiver::Receiver::Other(handler)) => println!(
+        Ok(Receiver::Desktop) => {}
+        Ok(Receiver::Other(handler)) => println!(
             "loopflow: links stay with {handler}; `lf open URL` opens them from a terminal"
         ),
         Err(error) => eprintln!(
             "warning: link receiver installation failed ({error:#}); `lf open URL` still opens links"
         ),
     }
-    let herdr = crate::installation::account_home().and_then(|home| {
-        let lf = crate::os_process::resolve_lf_binary()?;
-        crate::work::link_receiver::install_herdr(&home, &lf)
-    });
-    if let Err(error) = herdr {
+    if let Err(error) = link_receiver::install_herdr(&home, &lf) {
         eprintln!("warning: Herdr link handler installation failed ({error:#})");
     }
 }

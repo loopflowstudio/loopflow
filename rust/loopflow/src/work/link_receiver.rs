@@ -60,10 +60,10 @@ fn env_dir(name: &str) -> Option<PathBuf> {
 // Herdr
 // ---------------------------------------------------------------------------
 
-/// Link the Herdr handler when Herdr is installed. `None` when it is not.
-pub fn install_herdr(home: &Path, lf: &Path) -> Result<Option<PathBuf>> {
+/// Link the Herdr handler when Herdr is installed.
+pub fn install_herdr(home: &Path, lf: &Path) -> Result<()> {
     if crate::os_process::which_on_path(Path::new("herdr")).is_none() {
-        return Ok(None);
+        return Ok(());
     }
     let plugin = home.join(".lf/integrations/herdr");
     fs::create_dir_all(&plugin).with_context(|| format!("create {}", plugin.display()))?;
@@ -79,7 +79,7 @@ pub fn install_herdr(home: &Path, lf: &Path) -> Result<Option<PathBuf>> {
         "herdr plugin link failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    Ok(Some(plugin))
+    Ok(())
 }
 
 /// Herdr supplies the clicked URL and pane in the action's environment; the

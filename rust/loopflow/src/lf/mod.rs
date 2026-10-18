@@ -460,6 +460,13 @@ pub enum Commands {
     /// Owned Pi native lifecycle callback.
     #[command(name = "__pi-event", hide = true)]
     PiEvent,
+    /// Arm the existing watchdog for an owned detached tool group.
+    #[command(name = "__tool-lifeline", hide = true)]
+    ToolLifeline {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        provider_pid: u32,
+    },
     /// Native provider naming callback.
     #[command(name = "__session-title", hide = true)]
     SessionTitle {

@@ -28,6 +28,7 @@ class Model(http.server.ThreadingHTTPServer):
         self.error_status = 400
         self.input_tokens = 21
         self.tool_command: str | None = None
+        self.tool_timeout: int | None = None
         self.context_file: Path | None = None
         self.hold = False
         self.arrived = threading.Event()
@@ -75,6 +76,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             "arguments": json.dumps(
                                 {
                                     "command": model.tool_command,
+                                    **(
+                                        {"timeout": model.tool_timeout}
+                                        if model.tool_timeout
+                                        else {}
+                                    ),
                                 }
                             ),
                         },
@@ -351,14 +357,44 @@ def _steer_scenario(fixture: Fixture) -> dict:
             process.wait()
 
 
-def _crash_scenario(fixture: Fixture) -> dict:
+def _tools_scenario(fixture: Fixture) -> dict:
+    settings_path = fixture.root / "pi-agent/settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings["shellCommandPrefix"] = "export PI_PROBE_PREFIX=preserved"
+    settings_path.write_text(json.dumps(settings))
+    session = None
+    for command, timeout, expected in [
+        ('printf "prefix=%s\\n" "$PI_PROBE_PREFIX"', None, "prefix=preserved"),
+        ("echo failed-output >&2; exit 7", None, "code 7"),
+        ("echo before-timeout; sleep 60", 1, "timed out"),
+    ]:
+        fixture.model.requests.clear()
+        fixture.model.tool_command = command
+        fixture.model.tool_timeout = timeout
+        args = (
+            ["-b", "resume", session, "--message", "RUN_TOOL"]
+            if session
+            else ["-b", "connect", "--fresh", "--message", "RUN_TOOL"]
+        )
+        fixture.run(args)
+        session, _ = fixture.identity()
+        assert len(fixture.model.requests) == 2
+        results = [m for m in fixture.model.requests[-1]["messages"] if m["role"] == "tool"]
+        assert expected in json.dumps(results), results
+    return {"scenario": "tools", "prefix_output_exit_timeout": True}
+
+
+def _crash_scenario(fixture: Fixture, *, native: bool = False) -> dict:
     ready = fixture.root / "tool-pids"
     fixture.model.tool_command = (
         f"sleep 60 & child=$!; echo $$ $child > {shlex.quote(str(ready))}.tmp; "
         f"mv {shlex.quote(str(ready))}.tmp {shlex.quote(str(ready))}; wait"
     )
+    args = (
+        ["-i", ":", "RUN_TOOL"] if native else ["-b", "connect", "--fresh", "--message", "RUN_TOOL"]
+    )
     process = subprocess.Popen(
-        [str(fixture.binary), "-b", "connect", "--fresh", "--message", "RUN_TOOL"],
+        [str(fixture.binary), *args],
         cwd=fixture.repo,
         env=fixture.env,
         stdin=subprocess.DEVNULL,
@@ -372,7 +408,13 @@ def _crash_scenario(fixture: Fixture) -> dict:
         deadline = time.monotonic() + 25
         while not ready.exists() and time.monotonic() < deadline and process.poll() is None:
             time.sleep(0.1)
-        assert ready.exists(), "Pi never started the real bash tool"
+        if not ready.exists():
+            if process.poll() is None:
+                process.terminate()
+            stdout, stderr = process.communicate(timeout=10)
+            raise AssertionError(
+                ("Pi never started the real bash tool", stdout[-3000:], stderr[-3000:])
+            )
         children = [int(pid) for pid in ready.read_text().split()]
         session, token = fixture.identity()
         with sqlite3.connect(fixture.root / "machine/loopflow.db") as db:
@@ -400,7 +442,21 @@ def _crash_scenario(fixture: Fixture) -> dict:
             line.strip() for line in live.stdout.splitlines() if "Z" not in line.split()[-1]
         ]
         assert not survivors, f"Pi crash left tool processes alive: {survivors}"
-        return {"scenario": "crash", "failed_turn": True, "children_cleaned": True}
+        for _ in range(2):
+            if native:
+                fixture.run(["-i", "resume", session], input_text="EXPLICIT_RECOVERY\n")
+            else:
+                fixture.run(["-b", "resume", session, "--message", "EXPLICIT_RECOVERY"])
+            assert fixture.identity() == (session, token)
+            later = json.loads(fixture.run(["session", "history", session, "--json"]).stdout)
+            assert all(event in later for event in usage), "recovery rewrote prior paid usage"
+            assert sum(e["kind"] == "usage" for e in later) > len(usage)
+        return {
+            "scenario": "crash-native" if native else "crash",
+            "failed_turn": True,
+            "children_cleaned": True,
+            "exact_recovery": True,
+        }
     finally:
         for pid in children:
             try:
@@ -527,6 +583,8 @@ def main() -> None:
             "server-error",
             "invalid-model",
             "crash",
+            "crash-native",
+            "tools",
         ],
         default="all",
     )
@@ -545,6 +603,8 @@ def main() -> None:
             "server-error",
             "invalid-model",
             "crash",
+            "crash-native",
+            "tools",
         ]
         if args.scenario == "all"
         else [args.scenario]
@@ -561,8 +621,10 @@ def main() -> None:
                     result = _pty_scenario(fixture, compact=mode == "manual")
                 elif mode == "steer":
                     result = _steer_scenario(fixture)
-                elif mode == "crash":
-                    result = _crash_scenario(fixture)
+                elif mode == "tools":
+                    result = _tools_scenario(fixture)
+                elif mode in ("crash", "crash-native"):
+                    result = _crash_scenario(fixture, native=mode == "crash-native")
                 else:
                     result = _scenario(fixture, mode)
                 print(json.dumps(result), flush=True)

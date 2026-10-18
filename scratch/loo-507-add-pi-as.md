@@ -98,22 +98,29 @@ retain the original counterexamples by git reference and current acceptance gaps
 
 ## Remaining work
 
-October 18 gate found a shipping blocker in real provider-death acceptance.
-`probe.py --scenario crash` drives Pi 1.3.0's actual bash tool, observes its shell
-and sleep child, then SIGKILLs the recorded Pi AgentProcess. Loopflow exits with
-failure and retains paid usage, but both detached tool processes remain alive.
-The fixture cleans them up. Pi starts bash with `detached: true`; the shared
-lifeline knows the original group, and after Pi dies the children are reparented.
-Safe cleanup needs child lifetime ownership before provider death, through the
-existing process owner or provider contract. Postmortem PID guessing or a second
-Pi-specific process registry is not an acceptable gate patch. This supersedes the
-earlier implementation-complete conclusion; do not land with this acceptance red.
+October 18 gate found that real Pi's detached bash/sleep children survived
+SIGKILL of the provider. The primary Session repaired the demonstrated ownership
+gap after stopping ship before landing. The launch extension wraps only Pi's
+built-in BashOperations, preserving the SDK's renderer, output, cancellation,
+timeout, active tool list and shell settings. Each command holds a FIFO writer in
+Pi; `lf __tool-lifeline` validates its current detached group is the live provider's
+direct child and starts the existing watchdog before user commands. Provider death
+or operation settlement closes the writer. Extension-owned custom tools retain
+ownership. No process registry or postmortem PID inference is introduced.
+
+Real Pi RPC and native crash probes now pass: failed turn, paid usage preserved,
+no running bash/sleep children. Native crash recovery also survives two explicit
+resumptions with exact conversation identity and unchanged prior usage records.
+A new tools scenario proves shell prefix, captured output, nonzero exit and timeout.
+The full 13-scenario sweep passed, plus the added native crash/recovery case and
+extended RPC recovery check. Binary build, focused ownership test, all-target
+Clippy, context JS regression, architecture map, Ruff and formatting passed.
 
 Gate repaired missing `lf __pi-event` / `process:pi` architecture-map entries and
 formatted the Pi Python fixture. The maintained probe now covers real threshold
 and manual compaction plus HTTP 429/503/model-not-found 404. All eleven non-crash
-scenarios passed; the failing crash case remains part of `--scenario all`.
-Real-Pi active viewer handoff and repeated partial-usage recovery still need proof.
+scenarios passed at the first gate; crash and normal-tool cases remain in
+`--scenario all`. Real-Pi active viewer handoff still needs coverage assessment.
 
 The October 18 interactive demo supersedes the implementation-complete conclusion
 for skill discovery: Jack Heart observed extensive Pi warnings for namespaced and
@@ -141,7 +148,7 @@ OpenCode/Gemini 4 Argon route passed with tools disabled; rendered interaction
 remains unreviewed.
 
 Gate owns affected suites and the remaining comparison matrix: active viewer
-handoff, repair of real tool-crash child cleanup, and repeated partial recovery.
+handoff and any remaining shared lifecycle regression coverage.
 Manual/threshold compaction and real Pi HTTP failure handling passed on October 18.
 Demo owns rendered
 judgment and the selected personal account route. Jack Heart
@@ -165,3 +172,15 @@ changed from the verified stash. The configured Loopflow account probe also pass
 Checks: `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --lib pi_` (21), `cargo test -p loopflow --test session_launch_contract pi_` (4), `node scripts/benchmarks/skill-invocation/test_pi_context.mjs`, all six `probe.py --pi /tmp/loo507-pi/node_modules/.bin/pi` scenarios, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `uv run ruff check` / `ruff format --check scripts/benchmarks/pi/probe.py`, and `git diff --check` passed; Rust tests/probes used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Existing managed Task/Flow routing proof remains applicable. `lf context` is within both budgets; remaining affected suites and acceptance belong to gate/demo.
 
 Naming repair checks: `cargo test -p loopflow --lib skills::` under `scripts/test_network.py` passed (26 tests); `cargo fmt --check` and `git diff --check` passed. Binary build and real-catalog Pi discovery passed (59 diagnostics → zero, 27 third-party files unchanged); `cargo clippy --all-targets -- -D warnings` passed.
+
+Crash-repair review: use Pi's public static SDK imports so its loader resolves the
+SDK in generated extensions; a deferred native import failed runtime discovery.
+The retained native tool factory preserves rendering/schema and the native executor
+preserves stream/timeout/abort behavior. The watchdog joins the still-owned group
+before user code, preventing reparenting and PID reuse from granting new authority.
+
+Gate continuation: the first gate's Python (483 passed, 1 skipped), website (75),
+Desktop app build and static checks passed. Its Rust affected run and Desktop
+headless tests were interrupted with the Flow and have no final pass; remaining
+gate work must finish these. The aggregate changed runner failed at shared cache
+inventory, before product checks; use bounded affected entrypoints if it recurs.

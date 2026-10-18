@@ -1,5 +1,44 @@
+import { createBashToolDefinition, createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { closeSync, constants, mkdtempSync, openSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Keep Pi's shell backend, rendering and settings. Only the built-in bash tool
+// is wrapped; extension-provided tools retain their own execution ownership.
+async function guardBashTools(pi, ctx) {
+  const settings = pi.getSettings();
+  const local = createLocalBashOperations({ shellPath: settings.shellPath });
+  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+  const operations = {
+    async exec(command, cwd, options) {
+      const directory = mkdtempSync(join(tmpdir(), "loopflow-pi-tool-"));
+      const path = join(directory, "lifeline");
+      let writer;
+      try {
+        execFileSync("/usr/bin/mkfifo", [path]);
+        // RDWR opens without waiting for the shell's reader. OS exit also
+        // closes this writer, even when Pi cannot run any shutdown handlers.
+        writer = openSync(path, constants.O_RDWR);
+        const guard = `${quote(process.env.LF_BIN)} __tool-lifeline ${quote(path)} --provider-pid ${process.pid}`;
+        return await local.exec(`${guard} || exit $?\n${command}`, cwd, options);
+      } finally {
+        if (writer !== undefined) closeSync(writer);
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  };
+  if (pi.getAllTools().some((tool) => tool.name === "bash" && tool.sourceInfo.source === "builtin")) {
+    const active = pi.getActiveTools();
+    pi.registerTool(createBashToolDefinition(ctx.cwd, {
+      operations, shellPath: settings.shellPath, commandPrefix: settings.shellCommandPrefix,
+    }));
+    pi.setActiveTools(active);
+  }
+  // Pi gives an earlier extension's user_bash handler first refusal.
+  pi.on("user_bash", async () => ({ operations }));
+}
 
 // Launch-local extension: no edits to Pi's resources, settings or trust records.
 export default function (pi) {
@@ -34,6 +73,10 @@ export default function (pi) {
     }
   };
   pi.on("session_start", async (event, ctx) => {
+    try { await guardBashTools(pi, ctx); } catch (error) {
+      shutdown(ctx);
+      throw error;
+    }
     report({ type: "session_start" }, ctx);
     started = true;
   });

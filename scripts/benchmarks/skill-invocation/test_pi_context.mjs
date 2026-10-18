@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const root = mkdtempSync(join(tmpdir(), "pi-context-"));
 const saved = { LF_BIN: process.env.LF_BIN, LF_CONTEXT_DELIVERY: process.env.LF_CONTEXT_DELIVERY };
 try {
+  // SDK tool execution is covered by the real-Pi probes. This context-only
+  // test runs without an installed provider and fails if it reaches tools.
+  const sdk = join(root, "node_modules/@earendil-works/pi-coding-agent");
+  mkdirSync(sdk, { recursive: true });
+  writeFileSync(join(sdk, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+  writeFileSync(join(sdk, "index.js"), `
+    export function createBashToolDefinition() { throw new Error("unexpected tool execution"); }
+    export function createLocalBashOperations() { throw new Error("unexpected tool execution"); }
+  `);
   const sourceFile = join(root, "context");
   const callback = join(root, "callback");
   writeFileSync(callback, `#!/bin/sh\ncat '${sourceFile}'\n`, { mode: 0o700 });

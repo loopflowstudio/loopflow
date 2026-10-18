@@ -23,7 +23,8 @@ case with `--scenario NAME` from the table below.
 | `manual` | Native `/compact` writes a compaction entry; the next request sees changed scratch and exact resume still works. |
 | `steer` | A public Session steer gets an independent emitted receipt while the model is held, reaches the next request, and retains one initiating turn/Process. |
 | `rate-limit`, `server-error`, `invalid-model` | Real Pi receives HTTP 429, 503 or model-not-found 404; Loopflow fails without synthetic input, then explicit continuation recovers. |
-| `crash` | Killing real Pi during its bash tool must fail the turn, retain paid usage and leave no running tool children. Currently fails child cleanup; the fixture kills its surviving children. |
+| `crash`, `crash-native` | Killing real Pi during bash fails the turn, retains paid usage and leaves no running tool children; two explicit resumptions preserve identity and earlier usage. |
+| `tools` | Native bash output, shell prefixes, nonzero exits and timeouts remain intact. |
 
 The overflow fixture keeps one token of recent history so its short conversation
 has something to summarize. It edits scratch in the Session's recorded checkout;
@@ -43,14 +44,17 @@ settings; no subscription credentials were inspected or copied.
 
 October 18 gate: all eleven non-crash scenarios passed, including threshold
 compaction (5 model requests), manual compaction (4), and each HTTP failure (2).
-The `crash` scenario reproduced a release blocker: Pi's detached bash group and
-its `sleep` child survived Pi's SIGKILL and Loopflow exit. The turn failed and paid
-usage survived; the fixture removed both children. `--scenario all` intentionally
-ends with this failing acceptance check until child lifetime ownership is repaired.
-Shared group cleanup cannot reconstruct detached-child ownership after reparenting.
+The original `crash` scenario found detached bash/sleep children surviving Pi's
+SIGKILL. The repair gives each built-in bash command a FIFO writer held by Pi and
+admits Loopflow's existing watchdog before the command. RPC/native crash checks
+now pass, including two native recoveries preserving earlier usage. The `tools`
+check passes for output, shell prefixes, failed exits and timeouts. Custom extension
+tools keep their own ownership; no Pi process registry is introduced. The repaired
+13-scenario sweep passed; added native-crash and extended RPC recovery checks also
+passed independently.
 
-Active viewer handoff and repeated partial-usage recovery remain uncovered by the
-real-Pi probes. Demo owns rendered judgment and the selected personal account route.
+Active viewer handoff remains uncovered by these real-Pi probes. Demo owns
+rendered judgment and the selected personal account route.
 
 ## Shared skill discovery
 

@@ -20,7 +20,7 @@
   shared uv-cache inventory exceeded 15 seconds, despite 60.3 GiB free against a
   32 GiB emergency floor. Run bounded affected commands against existing artifacts;
   do not delete unrelated caches or claim the aggregate runner passed.
-- Real Pi's detached tool children survive abrupt provider death. Keep the failing
-  acceptance probe and block landing; ownership must be captured before reparenting.
-  A new Pi process registry or postmortem PID inference would exceed gate's polish
-  boundary and contradict the accepted single process owner.
+- The gate's real Pi crash counterexample is repaired with a per-command FIFO
+  held by Pi and the existing group watchdog, admitted before bash executes.
+  Native and RPC crash probes pass; no process registry or postmortem PID inference
+  was added. Ship retry requires the remaining checks to pass.

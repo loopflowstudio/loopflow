@@ -666,7 +666,7 @@ struct DTOFixtureTests {
         #expect(product.unavailableTasks[0].status == .ready)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
-        #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
+        #expect(tasks.map(\.section) == [.now, .waiting, .notStarted, .later])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(tasks[0].reference.workspace?.machineLabel == "build-server")
@@ -835,7 +835,7 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .unknown)
-        #expect(session.attention == .available)
+        #expect(session.availability == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open])

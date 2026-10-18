@@ -604,7 +604,7 @@ extension RoadmapSection {
         switch self {
         case .now: "Now"
         case .waiting: "Waiting"
-        case .available: "Available"
+        case .notStarted: "Not started"
         case .later: "Later"
         }
     }
@@ -612,7 +612,7 @@ extension RoadmapSection {
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
         case .waiting: palette.waiting
-        case .now, .available, .later: palette.textTertiary
+        case .now, .notStarted, .later: palette.textTertiary
         }
     }
 }

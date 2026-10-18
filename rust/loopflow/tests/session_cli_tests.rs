@@ -958,8 +958,8 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["attention"], "available");
-    assert!(listed(home.path(), &working)["attention"].is_null());
+    assert_eq!(available[0]["availability"], "available");
+    assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }
 
@@ -1935,7 +1935,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     input.write_all(&blocked.as_bytes()[..17]).unwrap();
     input.write_all(&blocked.as_bytes()[17..]).unwrap();
     let item = wait_for("blocked");
-    assert_eq!(item["attention"], "available");
+    assert_eq!(item["availability"], "available");
     assert_eq!(
         item["program_status"]["records"][0]["msg"],
         "Use **literal** text?"
@@ -1957,7 +1957,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert_eq!(page["entries"][0]["id"], id);
     for state in ["working", "done"] {
         writeln!(input, "{}", records(state)).unwrap();
-        assert!(wait_for(state)["attention"].is_null());
+        assert!(wait_for(state)["availability"].is_null());
     }
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
@@ -1987,7 +1987,7 @@ fn program_status_cli_observes_available_without_completing_work() {
         .unwrap();
     assert_eq!(ended["state"], "closed");
     assert!(ended["program_status"].is_null());
-    assert!(ended["attention"].is_null());
+    assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
     store
         .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
@@ -2013,7 +2013,7 @@ fn program_status_cli_observes_available_without_completing_work() {
         .find(|item| item["id"] == id)
         .unwrap();
     assert!(item["program_status"].is_null());
-    assert!(item["attention"].is_null());
+    assert!(item["availability"].is_null());
 }
 
 #[test]

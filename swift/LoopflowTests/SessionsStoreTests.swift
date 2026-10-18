@@ -376,7 +376,7 @@ struct SessionsStoreTests {
         store.reconcile(try records([session(id: "review", state: "available")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.record.attention == .available)
+        #expect(store.sessions.first?.record.availability == .available)
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
@@ -431,7 +431,7 @@ private func session(id: String, state: String, replacing: Bool = false, primary
       "detail": "review-design",
       "cwd": "/tmp/repo.\(id)",
       "workspace": {"machine_id": "\(fixtureMachineId)", "worktree": "/tmp/repo.\(id)", "task_id": null, "unavailable": null},
-      "state": "\(wire)", "attention": \(state == "available" ? "\"available\"" : "null"),
+      "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),

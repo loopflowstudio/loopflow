@@ -323,7 +323,7 @@ attachment. Compare-and-set issues a fresh opaque token on every claim and relea
 including A → B → A. The token has no independent lifecycle. A continuing
 AgentProcess keeps its identity and origin through handoff and an unattached
 interval. Old clients may retain provider history but cannot start/steer turns or
-change current attachment, connection, process evidence or stream attention.
+change current attachment, connection, process evidence or stream activity.
 History retention grants no native-write or Flow authority. Passive connection
 acquires no claim. Dispatch fences include queued native RPCs and approval replies, not only database claim updates.
 

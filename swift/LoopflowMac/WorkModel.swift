@@ -1579,7 +1579,7 @@ final class WorkModel {
             case .working: return true
             case .available:
                 guard sessions.errorMessage == nil else { return false }
-                return taskSessions(id).contains { $0.attention == .available && $0.state != .closed }
+                return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
             case .running:
                 if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
                 return false

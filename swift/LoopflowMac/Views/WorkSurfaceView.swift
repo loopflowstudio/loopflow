@@ -319,7 +319,7 @@ struct WorkSurfaceView: View {
                     .accessibilityIdentifier("task-debug")
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
-                ForEach((sessions ?? []).filter { $0.attention == .available }) { session in
+                ForEach((sessions ?? []).filter { $0.availability == .available }) { session in
                     Button { onOpenSession(session) } label: {
                         Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }

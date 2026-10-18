@@ -14,7 +14,7 @@ struct TaskRowMetadataTests {
         let report = ProgramStatusReport(state: state, id: "worker", kind: nil, progress: nil,
                                          app: "cargo", title: nil, msg: "**literal**\u{202E}")
         let reporting = try session("reporter", status: ProgramStatusRecords(seen: true, records: [report]))
-        let waiting = try session("waiting", attention: .available)
+        let waiting = try session("waiting", availability: .available)
         let status = SessionProgramStatus(sessions: [waiting, reporting], unavailable: nil)
         #expect(status.label == state.rawValue.capitalized)
         #expect(status.help.contains("reporter"))
@@ -37,18 +37,18 @@ struct TaskRowMetadataTests {
     @Test("Live clients and unknown readings omit activity; shared Available remains visible")
     func inference() throws {
         let active = try session("active")
-        let waiting = try session("waiting", attention: .available)
+        let waiting = try session("waiting", availability: .available)
         #expect(SessionProgramStatus(sessions: [active], unavailable: nil).label == nil)
         #expect(SessionProgramStatus(sessions: [active, waiting], unavailable: nil).label == "Available · inferred")
         let unknown = try session("unknown", state: .unknown)
-        let closed = try session("closed", state: .closed, attention: .available)
+        let closed = try session("closed", state: .closed, availability: .available)
         #expect(SessionProgramStatus(sessions: [unknown, closed], unavailable: nil).label == nil)
         #expect(SessionProgramStatus(sessions: [active], unavailable: "Offline").label == nil)
     }
 
     @Test("Cleared reporter records do not revive inferred activity or Available")
     func clearDoesNotInfer() throws {
-        let cleared = try session("cleared", attention: .available, status: .init(seen: true, records: []))
+        let cleared = try session("cleared", availability: .available, status: .init(seen: true, records: []))
         #expect(SessionProgramStatus(sessions: [cleared], unavailable: nil).label == nil)
     }
 
@@ -56,7 +56,7 @@ struct TaskRowMetadataTests {
     func savedStatusIsUnknown() throws {
         let report = ProgramStatusReport(state: .blocked, id: nil, kind: .question, progress: nil,
                                          app: nil, title: nil, msg: "Proceed?")
-        let record = try session("saved", attention: .available, status: .init(seen: true, records: [report]))
+        let record = try session("saved", availability: .available, status: .init(seen: true, records: [report]))
         let page = SessionPage(entries: [record], next: nil)
         let wire = String(decoding: try JSONEncoder().encode(page), as: UTF8.self)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -101,7 +101,7 @@ struct TaskRowMetadataTests {
         #expect(reported.tone == .failure)
         let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
-        let waiting = SessionProgramStatus(sessions: [try session("waiting", attention: .available)], unavailable: nil)
+        let waiting = SessionProgramStatus(sessions: [try session("waiting", availability: .available)], unavailable: nil)
         #expect(waiting.tone == .waiting)
         #expect(waiting.label == "Available · inferred")
         #expect(ProgramStatusState.working.workTone == .running)
@@ -209,7 +209,7 @@ struct TaskRowMetadataTests {
         return try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
     }
 
-    private func session(_ id: String, state: SessionState = .active, attention: SessionAttention? = nil,
+    private func session(_ id: String, state: SessionState = .active, availability: SessionAvailability? = nil,
                          status: ProgramStatusRecords? = nil) throws -> SessionRecord {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -221,7 +221,7 @@ struct TaskRowMetadataTests {
         var workspace = try #require(value["workspace"] as? [String: Any])
         workspace["task_id"] = "ts_review00000000000000000000000000"
         value["workspace"] = workspace
-        value["attention"] = attention?.rawValue ?? NSNull() as Any
+        value["availability"] = availability?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
     }

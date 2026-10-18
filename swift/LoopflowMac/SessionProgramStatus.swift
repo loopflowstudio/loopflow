@@ -22,7 +22,7 @@ enum SessionProgramStatus {
         }
         // Once a reporter clears its records, do not re-infer its old status.
         if let available = ordered.first(where: {
-            $0.programStatus?.seen != true && $0.state != .closed && $0.attention == .available
+            $0.programStatus?.seen != true && $0.state != .closed && $0.availability == .available
         }) {
             self = .available(available)
         } else { self = .unknown }
@@ -53,7 +53,7 @@ enum SessionProgramStatus {
            !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
            session.agentProcessId != nil {
             let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)
-            let available = session.attention == .available
+            let available = session.availability == .available
             if age >= 0, available || age <= 30 {
                 let safe = ProgramStatusReport.displaySafe(excerpt.text)
                 if !safe.isEmpty {

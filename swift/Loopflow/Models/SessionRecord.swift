@@ -7,7 +7,7 @@ public enum SessionState: String, Codable, Sendable, Hashable {
     case closed
 }
 
-public enum SessionAttention: String, Codable, Sendable, Hashable {
+public enum SessionAvailability: String, Codable, Sendable, Hashable {
     case available
 
     public var label: String {
@@ -169,7 +169,7 @@ public struct SessionPreview: Codable, Hashable, Sendable {
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let preview: SessionPreview?
     public let primaryScope: String?
-    public let attention: SessionAttention?
+    public let availability: SessionAvailability?
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     public let agentProcessId: String?
@@ -198,7 +198,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
-        if state != .closed, let attention { return attention.label }
+        if state != .closed, let availability { return availability.label }
         switch state {
         case .active: return "Active"
         case .closed: return "Closed"
@@ -211,7 +211,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
+        case id, interactive, work, workspace, title, detail, provider, cwd, state, availability
         case preview
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -238,8 +238,8 @@ public struct TaskSessionGroups: Sendable, Equatable {
     public init(_ sessions: [SessionRecord]) {
         let open = sessions.filter { $0.state != .closed }
         let primaryFirst = open.filter(\.taskPrimary) + open.filter { !$0.taskPrimary }
-        available = primaryFirst.filter { $0.attention == .available }
-        working = primaryFirst.filter { $0.attention != .available }
+        available = primaryFirst.filter { $0.availability == .available }
+        working = primaryFirst.filter { $0.availability != .available }
     }
 }
 

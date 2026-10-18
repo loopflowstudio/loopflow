@@ -189,6 +189,7 @@ When editing Rust tests:
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
 - `SqliteStore::open_ephemeral` includes the build's draft migrations; do not replay
   those drafts with `apply_migration_for_test`.
+- Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
 
 # Goals

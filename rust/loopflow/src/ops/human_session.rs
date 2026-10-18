@@ -567,6 +567,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await?);
+    let _output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
     let mut child = spawn_session_process(&mut command, &session.artifact_key).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.

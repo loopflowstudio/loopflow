@@ -42,6 +42,7 @@ struct WaveTaskInventory: View {
                         }
                         if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.waiting) }
                     }
+                    WaveMetricPortfolioView(portfolio: wave.metricPortfolio)
                 } else { Text("Wave planning unavailable") }
             }.padding(16).accessibilityIdentifier("loopflow-detail-wave")
         }.background(palette.background).accessibilityIdentifier("wave-task-inventory")
@@ -93,7 +94,6 @@ struct WaveOverview: View {
     let model: WorkModel
     let roadmap: WaveRoadmap
     @Environment(\.palette) private var palette
-    @State private var showHistory = false
     @State private var showRealignment = false
 
     var body: some View {
@@ -118,14 +118,14 @@ struct WaveOverview: View {
                 VStack(alignment: .leading, spacing: 8) { actions }
             }.font(Typography.caption())
         }
-        .sheet(isPresented: $showHistory) {
-            ProjectHistoryView(wave: roadmap.wave.name, repo: roadmap.wave.repo, sourceReference: nil)
-        }
         .sheet(isPresented: $showRealignment) { ProjectRealignmentView(repo: roadmap.wave.repo) }
     }
 
     @ViewBuilder private var actions: some View {
-        Button("Project history") { showHistory = true }
+        Button("Project history") {
+            model.historyReference = nil
+            model.historyWave = roadmap.wave
+        }
             .accessibilityIdentifier("wave-project-history")
         Button("Realign Projects…") { showRealignment = true }
             .accessibilityIdentifier("wave-realign-projects")
@@ -175,9 +175,6 @@ struct WorkSurfaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(palette.background)
-        .sheet(item: $model.historyWave) { wave in
-            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
-        }
         .sheet(item: $editingTask) { task in
             TaskDirectiveEditor(model: model, task: task)
         }

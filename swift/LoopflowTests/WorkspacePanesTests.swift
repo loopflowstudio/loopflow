@@ -24,6 +24,30 @@ struct WorkspacePanesTests {
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
+    @Test("Hiding both tools keeps conversation entry and restores the retained pane")
+    func collapsedToolsKeepEntry() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let model = WorkModel(query: query, repoPath: location.worktree)
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location, localMachineId: location.machineId)
+        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        try workspace.toggleShell()
+        workspace.toggleFiles()
+        try workspace.toggleShell()
+        workspace.toggleFiles()
+        let store = workspace.multiplexer
+        let layout = store.layout
+        #expect(store.visibleLayout == nil)
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: sessions,
+            model: model, onFocus: { id, _ in store.setFocusedPane(id) })
+        let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+        #expect(try button.labelView().text().string() == "Open conversation")
+        try view.inspect().find(button: "Show pane").tap()
+        #expect(store.visibleLayout?.allPanes == [store.focusedPane])
+        #expect(store.layout == layout)
+        #expect(sessions.sessions.isEmpty)
+    }
+
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")
     func renderRetainedOwner() async throws {
         var reads = 0

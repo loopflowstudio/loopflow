@@ -405,6 +405,7 @@ private struct PaletteSearchField: NSViewRepresentable {
     func makeNSView(context: Context) -> SearchField {
         let field = SearchField()
         field.isBordered = false
+        field.focusRingType = .none
         field.drawsBackground = false
         field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
         field.placeholderString = "Go to a Task, Wave or repository"

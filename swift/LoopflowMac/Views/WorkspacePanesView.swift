@@ -22,8 +22,23 @@ struct WorkspacePanesView: View {
             } else if let layout = store.visibleLayout {
                 panes(layout)
             } else {
-                ContentUnavailableView("Panes collapsed", systemImage: "rectangle.compress.vertical",
-                    description: Text("Open the Task's Session from the outline, or add a shell."))
+                ContentUnavailableView {
+                    Label("Panes collapsed", systemImage: "rectangle.compress.vertical")
+                } description: {
+                    Text("Your panes are retained. Show a pane to continue.")
+                } actions: {
+                    if workspace.key.kind == .task,
+                       !store.layout.allPanes.contains(where: { $0.sessionId != nil }) {
+                        Button("Open conversation") {
+                            Task { await model.openTaskConversation(workspace.key.id) }
+                        }
+                        .accessibilityIdentifier("task-open-conversation")
+                    }
+                    Button("Show pane") {
+                        let pane = store.focusedPane
+                        onFocus(pane.id, pane.sessionId)
+                    }
+                }
             }
         }
         .environment(workspace)
@@ -368,7 +383,7 @@ struct SessionPaneView: View {
     private var paneContentChoices: some View {
         if let session = primarySession {
             Section("Session agent") {
-                ForEach(["claude", "codex", "opencode"], id: \.self) { agent in
+                ForEach(["claude", "codex", "opencode", "pi"], id: \.self) { agent in
                     Button {
                         changeSession(session, agent: agent)
                     } label: {

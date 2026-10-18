@@ -220,7 +220,6 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// One compact control; hover or click reveals the Task's lifecycle actions.
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
 struct TaskHeading: View {
     let task: RoadmapTask
@@ -244,25 +243,7 @@ struct TaskHeading: View {
     }
 }
 
-struct TaskLifecycleActions: View {
-    let model: WorkModel
-    let task: RoadmapTask
-    let wave: WaveSnapshot?
-    var newConversation: (() -> Void)?
-    var openSession: ((SessionRecord) -> Void)?
-
-    var body: some View {
-        Menu {
-            TaskActionItems(model: model, task: task, wave: wave,
-                newConversation: newConversation, openSession: openSession)
-        } label: { Image(systemName: "ellipsis") }
-            .keyboardShortcut("/", modifiers: .command)
-            .help("Task actions (⌘/)").accessibilityLabel("Task actions")
-            .accessibilityIdentifier("task-lifecycle-menu")
-    }
-}
-
-/// One Task action surface for the titlebar and clicked rows; target is captured.
+/// Shared Task actions for keyboard access and sidebar context menus.
 struct TaskActionItems: View {
     let model: WorkModel
     let task: RoadmapTask

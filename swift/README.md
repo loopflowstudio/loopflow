@@ -59,7 +59,7 @@ The Task action menu moves work into a Wave or back to **No Wave** through the s
 Each Work keeps one pane layout and document store. Repository and Wave
 entry shows their retained conversation or an explicit **Open conversation** action.
 Waves pair that conversation with their objective, status, current Project and
-full Task inventory. **Project history**, **Realign Projects…** and **Workflow**
+full Task inventory, followed by their metrics. **Project history**, **Realign Projects…** and **Workflow**
 open the existing planning inspectors. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
@@ -151,7 +151,9 @@ Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
 Task workspaces start with the Session on the left and Files on the right,
-at 61.8/38.2. The titlebar toggles one **Shell** tool and one **Files** tool.
+at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
+If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
+remains available when the Task has no conversation open.
 Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
 recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
 Command-P in the file pane to search **scratch** and files changed from the
@@ -202,7 +204,7 @@ colors however Desktop was opened.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-**+ → Files** in a Task's toolbar opens its checkout as a pane beside the
+**View → Toggle Files** opens a Task's checkout as a pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
@@ -308,8 +310,8 @@ Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
 with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
-The toolbar's **+** changes what the multiplexer shows: **New shell**,
-**Files** or **Flow processes**. The Flow process log lists every Flow process in the
+Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
+Choose **Flow processes** in **⌘K** to open the Flow process log. It lists every Flow process in the
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Flow, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of

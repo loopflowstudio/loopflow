@@ -63,7 +63,8 @@ enum SessionProgramStatus {
                 }
             }
         }
-        let summary = ProgramStatusReport.displaySafe(fallback).split(separator: "\n").first.map(String.init) ?? "No current activity"
+        let summary = fallback.split(separator: "\n").first
+            .map { ProgramStatusReport.displaySafe(String($0)) } ?? "No current activity"
         let detail: String
         if case .unavailable(let reason) = self { detail = "Activity unavailable · \(reason)\nSummary · \(summary)" }
         else { detail = "Summary · \(summary)" }
@@ -113,6 +114,7 @@ struct PaneProgramHeading: Equatable {
         switch provider?.lowercased() {
         case "codex": name = "Codex"; symbol = "terminal"
         case "claude": name = "Claude"; symbol = "sparkle"
+        case "pi": name = "Pi"; symbol = "terminal"
         case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
         case .some(let value) where !value.isEmpty:
             name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"

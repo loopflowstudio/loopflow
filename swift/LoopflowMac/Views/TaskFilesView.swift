@@ -25,22 +25,22 @@ struct TaskFilesView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-              ScrollView(.horizontal) {
-                HStack(spacing: 12) {
-                    if task != nil { Button("Brief") { store.page = .task } }
-                    Button("Changes") { store.page = .files; store.mode = .diff; store.navigator = .pinned }
-                    if prURL != nil { Button("Pull request") { store.page = .pullRequest } }
-                    ForEach(store.tabs) { tab in
-                        HStack(spacing: 4) {
-                            Button(tab.path) { store.page = .files; store.selectFile(tab.path, mode: .file) }
-                                .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
-                            Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
-                                .accessibilityLabel("Close \(tab.path)")
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        if task != nil { Button("Brief") { store.page = .task } }
+                        Button("Changes") { store.page = .files; store.mode = .diff; store.navigator = .pinned }
+                        if prURL != nil { Button("Pull request") { store.page = .pullRequest } }
+                        ForEach(store.tabs) { tab in
+                            HStack(spacing: 4) {
+                                Button(tab.path) { store.page = .files; store.selectFile(tab.path, mode: .file) }
+                                    .fontWeight(store.page == .files && store.selection == tab.path ? .semibold : .regular)
+                                Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
+                                    .accessibilityLabel("Close \(tab.path)")
+                            }
                         }
-                    }
-                }.buttonStyle(.plain).font(.caption).padding(8)
-              }
-              navigationBar
+                    }.buttonStyle(.plain).font(.caption).padding(8)
+                }
+                navigationBar
             }
             Divider()
             if let task, store.page == .task {
@@ -209,12 +209,12 @@ struct TaskFilesView: View {
                 .fixedSize()
             }
             if store.page == .files {
-              Picker("View", selection: $store.mode) {
-                Text("File").tag(TaskFilesStore.Mode.file)
-                Text("Diff").tag(TaskFilesStore.Mode.diff)
-                    .disabled(store.changesError != nil)
-            }.pickerStyle(.menu).labelsHidden()
-                .accessibilityLabel("View").frame(width: 65).fixedSize()
+                Picker("View", selection: $store.mode) {
+                    Text("File").tag(TaskFilesStore.Mode.file)
+                    Text("Diff").tag(TaskFilesStore.Mode.diff)
+                        .disabled(store.changesError != nil)
+                }.pickerStyle(.menu).labelsHidden()
+                    .accessibilityLabel("View").frame(width: 65).fixedSize()
             }
         }
         .font(Typography.caption(11)).padding(.horizontal, 10)

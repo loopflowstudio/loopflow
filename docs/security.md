@@ -61,6 +61,7 @@ Loopflow chooses an automation floor for headless work:
   `never`.
 - Non-interactive Claude runs skip permission prompts.
 - Non-interactive OpenCode receives `permission: allow`.
+- Pi uses its own tool policy and credentials; it provides no built-in sandbox.
 - More-permissive vendor configuration remains more permissive.
 - Less-permissive vendor configuration is raised to this floor with a warning.
 

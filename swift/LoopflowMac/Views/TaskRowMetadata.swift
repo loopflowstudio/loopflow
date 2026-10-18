@@ -51,7 +51,9 @@ struct TaskRowMetadata: View {
                 Text("Machine unknown").accessibilityIdentifier("work-machine-\(task.id)")
             }
             Spacer(minLength: 0)
-            Text(slotHint ?? sourceAge ?? "").font(Typography.code(10)).frame(width: 28, alignment: .trailing)
+            // Reserve the shortcut glyph's height even when only an age (or nothing) is shown.
+            Text("⌘9").hidden().frame(width: 28, alignment: .trailing)
+                .overlay(alignment: .trailing) { Text(slotHint ?? sourceAge ?? "") }
         }
         .font(Typography.code(10))
         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)

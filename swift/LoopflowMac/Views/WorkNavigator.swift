@@ -152,7 +152,7 @@ struct WorkNavigator: View {
             Button { model.select(.task(id: id)) } label: {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(selected ? palette.workSelectedFill : Color.clear)
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.borderActive : .clear))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
                 .accessibilityAddTraits(selected ? .isSelected : [])

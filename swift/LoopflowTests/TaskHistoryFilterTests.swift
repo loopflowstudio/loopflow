@@ -222,6 +222,19 @@ struct TaskHistoryFilterTests {
         }
     }
 
+    @Test("the primary Work Wave detail renders the shared metric portfolio")
+    func loopflowWaveDetailRendersMetricPortfolio() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(snapshot.waves.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
+            repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
+        let metrics = try view.inspect().find(WaveMetricPortfolioView.self).actualView()
+        #expect(metrics.portfolio == wave.metricPortfolio)
+    }
+
     @Test func waveInventoryShowsEveryCurrentTaskAndSelectionDoesNotStartWork() async throws {
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: roadmapWire()), as: UTF8.self)
         let query = RegistryQuery { _, _ in payload }

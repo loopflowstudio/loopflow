@@ -1025,6 +1025,7 @@ struct SessionsContentView: View {
     private let store: SessionsStore
     @State private var launchError: String?
     @State private var launchErrorTitle = "Could not start conversation"
+    @State private var actionTaskID: String?
     @Environment(\.palette) private var palette
 
     private var multiplexer: MultiplexerStore {
@@ -1101,23 +1102,20 @@ struct SessionsContentView: View {
             files: currentKey.kind == .task && !navigation.showsSelection ? { _handle(.toggleFiles) } : nil,
             newTerminal: currentKey.kind == .task && !navigation.showsSelection ? { _handle(.newTerminal) } : nil,
             close: { _handle(.close) }, reopen: multiplexer.canUndoClose ? { _handle(.undoClose) } : nil))
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if currentKey.kind == .task, !navigation.showsSelection {
-                    Button("Shell", systemImage: "terminal") {
-                        do { try workspace.toggleShell() } catch { launchError = error.localizedDescription }
-                    }.labelStyle(.titleAndIcon).fixedSize()
-                        .help("Show or hide Shell (⌃`)")
-                    Button("Files", systemImage: "doc") { workspace.toggleFiles() }
-                        .labelStyle(.titleAndIcon).fixedSize()
-                        .help("Show or hide Files (⇧⌘E)")
-                    if let task = fileTask {
-                        TaskLifecycleActions(model: model, task: task.task, wave: model.breadcrumb?.wave?.roadmap.wave,
-                            newConversation: {
-                                Task { do { try await newTaskSession(task.task.id) } catch { launchError = error.localizedDescription } }
-                            }, openSession: openSession)
-                    }
-                }
+        .background {
+            Button("Task actions") { actionTaskID = fileTask?.task.id }
+                .keyboardShortcut("/", modifiers: .command)
+                .disabled(fileTask == nil)
+                .hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+        }
+        .popover(isPresented: Binding(get: { actionTaskID != nil }, set: { if !$0 { actionTaskID = nil } })) {
+            if let id = actionTaskID, let found = model.task(id: id) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
+                        newConversation: {
+                            Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
+                        }, openSession: openSession)
+                }.padding(12).onExitCommand { actionTaskID = nil }
             }
         }
         .overlay {
@@ -1154,6 +1152,9 @@ struct SessionsContentView: View {
             case nil:
                 EmptyView()
             }
+        }
+        .sheet(item: $model.historyWave) { wave in
+            ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
         }
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },
@@ -1310,7 +1311,7 @@ struct SessionsContentView: View {
         }
     }
 
-    private func navigate(_ destination: WorkDestination) {
+    func navigate(_ destination: WorkDestination) {
         // Refreshes can remove an action while the palette is open.
         guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
         navigation.restorePaletteFocus = false

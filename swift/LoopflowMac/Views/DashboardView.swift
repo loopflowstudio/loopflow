@@ -130,8 +130,9 @@ struct DashboardView: View {
                 }.buttonStyle(.plain)
                 Spacer()
                 if let task = model.task(id: member.work.id) {
-                    TaskLifecycleActions(model: model, task: task.task, wave: task.wave?.wave)
-                        .menuStyle(.button).buttonStyle(.plain).fixedSize()
+                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
+                        label: { Image(systemName: "ellipsis") }
+                        .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
                 }
                 Button { zoom(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")

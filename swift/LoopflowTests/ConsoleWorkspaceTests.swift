@@ -79,6 +79,12 @@ struct ConsoleWorkspaceTests {
         #expect(preview.text == "Summary · brief")
     }
 
+    @Test func summaryUsesFirstLineOfBrief() {
+        let preview = SessionProgramStatus.unknown.preview(now: Date(),
+            fallback: "Keep unfinished input through Task switches.\n\nImplementation instructions follow.")
+        #expect(preview.text == "Summary · Keep unfinished input through Task switches.")
+    }
+
     private func record(age: Int?, available: Bool = false, process: String? = "agent") throws -> SessionRecord {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/sessions.json"))

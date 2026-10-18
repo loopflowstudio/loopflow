@@ -1203,7 +1203,7 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         serde_json::json!(["screen", "scrollback", "selection"])
     );
     assert!(read["definition"]["result_schema"]["$defs"]["DesktopTextResult"].is_object());
-    assert!(describe_command(&["desktop".into(), "splut".into()], false).is_err());
+    assert!(describe_command(&["desktop".into(), "split".into()], false).is_err());
     let all = describe_command(&["desktop".into()], true).unwrap();
     assert!(all["definition"]["commands"]
         .as_array()

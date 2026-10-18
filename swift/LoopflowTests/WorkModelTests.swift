@@ -470,7 +470,6 @@ struct WorkModelStreamTests {
         cache.saveSelection(.task(id: "issue-review"), repo: "/src/loopflow")
         cache.flush()
         let cacheURL = directory.appendingPathComponent("workspace.json")
-        let saved = try Data(contentsOf: cacheURL)
         let feed = WorkFeed()
         let registry = SessionsWorkspaceRegistry()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow", cache: cache)
@@ -485,6 +484,9 @@ struct WorkModelStreamTests {
         model.navigation.renaming = SessionRenameDraft(sessionId: "retained", text: "Unsent name")
         let initial = model.visibleWork.waves.flatMap(\.tasks)
         #expect(initial.contains { $0.id == key })
+        // Explicit opening now persists the working slot before any failed read.
+        cache.flush()
+        let saved = try Data(contentsOf: cacheURL)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         try await feed.opened(1)
@@ -940,11 +942,16 @@ struct WorkModelStreamTests {
         let now = Date(timeIntervalSince1970: 1000)
         let entries = try fixture.sessionEntries()
         let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
+        model.navigation.retainWorkingTask("preview-task")
         var answers = 0
         func sessionFrame(_ sequence: Int, turn: String?, available: Bool = false) throws -> WorkFrame {
             var entry = original
             entry["state"] = "active"
-            entry["program_status"] = NSNull()
+            entry["task_ids"] = ["preview-task"]
+            entry["program_status"] = available ? NSNull() : ["seen": true, "records": [[
+                "state": "working", "id": NSNull(), "kind": NSNull(), "progress": NSNull(),
+                "app": NSNull(), "title": NSNull(), "msg": NSNull()
+            ]]] as Any
             entry["attention"] = available ? "available" : NSNull()
             entry["agent_process_id"] = "retained-agent"
             entry["preview"] = turn.map {
@@ -965,14 +972,23 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.send(try sessionFrame(3, turn: nil))
         try await eventually { preview() == "Summary · brief" }
         await feed.send(try sessionFrame(4, turn: "New turn output"))
         try await eventually { preview() == "New turn output" }
+        model.navigation.sidebarFilter = .running
+        #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.sessions.errorMessage == "reader exited" }
         #expect(model.sessions.value?.first?.preview?.text == "New turn output")
         #expect(preview() == "Summary · brief")
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.navigation.sidebarFilter = .working
+        #expect(model.sidebarTaskIDs == ["preview-task"])
         #expect(model.roadmap.value != nil)
         #expect(!model.roadmap.isLoading)
 

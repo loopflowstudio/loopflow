@@ -1596,9 +1596,10 @@ final class WorkModel {
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
+                guard sessions.errorMessage == nil else { return false }
                 return taskSessions(id).contains { $0.attention == .available && $0.state != .closed }
             case .running:
-                if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: nil) { return report.state == .working }
+                if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
                 return false
             }
         }

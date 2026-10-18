@@ -20,6 +20,9 @@ pub(crate) mod native_titles;
 pub mod opencode;
 pub(crate) mod opencode_history;
 mod opencode_mapping;
+pub mod pi;
+pub mod pi_history;
+mod pi_mapping;
 
 use crate::id::AgentSessionId;
 /// Name a codex rate-limit window by duration — shared with the subscription
@@ -205,7 +208,10 @@ pub fn is_turn_in_progress(err: &anyhow::Error) -> bool {
 /// turn). Claude keeps a process across turns, but a crash fails the active turn
 /// and the next input respawns it with `--resume` instead of ending the harness.
 pub fn is_terminal_harness_error(code: &str) -> bool {
-    matches!(code, "codex_disconnected" | "opencode_disconnected")
+    matches!(
+        code,
+        "codex_disconnected" | "opencode_disconnected" | "pi_disconnected"
+    )
 }
 
 /// What happened when the controller tried to deliver input to the exact
@@ -304,6 +310,7 @@ pub enum HarnessKind {
     Codex,
     Claude,
     OpenCode,
+    Pi,
 }
 
 impl HarnessKind {
@@ -312,6 +319,7 @@ impl HarnessKind {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
+            "pi" => Some(Self::Pi),
             _ => None,
         }
     }
@@ -321,6 +329,7 @@ impl HarnessKind {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
+            Self::Pi => "pi",
         }
     }
 
@@ -335,6 +344,7 @@ impl HarnessKind {
             // AgentConfig, not a runtime channel; no policy to thread.
             Self::Claude => Box::new(claude::ClaudeHarness::new(event_tx)),
             Self::OpenCode => Box::new(opencode::OpenCodeHarness::new(event_tx, approval)),
+            Self::Pi => Box::new(pi::PiHarness::new(event_tx)),
         }
     }
 }
@@ -368,7 +378,7 @@ pub(crate) fn admit_for_test(config: &mut AgentConfig) -> crate::journal::TestLe
     rusqlite::Connection::open(&database)
         .unwrap()
         .execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
             [process.as_str()],
         )
         .unwrap();
@@ -398,7 +408,7 @@ mod tests {
         std::env::set_var("PATH", ledger.home());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let absent = ledger.home().join("absent");
-        for name in ["codex", "claude", "opencode"] {
+        for name in ["codex", "claude", "opencode", "pi"] {
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness =
                 default_create_harness(name, ApprovalPolicy::AutoApprove, tx).unwrap();
@@ -463,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn current_send_is_decided_from_the_active_turn() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        for name in ["codex", "claude", "opencode"] {
+        for name in ["codex", "claude", "opencode", "pi"] {
             let mut harness = default_create_harness(name, ApprovalPolicy::AutoApprove, tx.clone())
                 .expect("known harness");
             assert_eq!(
@@ -474,3 +484,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, unix))]
+mod pi_tests;

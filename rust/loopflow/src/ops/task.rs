@@ -6757,6 +6757,10 @@ mod tests {
             .writable_roots
             .contains(&main.join(".git").canonicalize().unwrap()));
         assert!(boundary.writable_roots.contains(&control));
+        assert_eq!(
+            checkout_execution_boundary(&worktree, "pi:fixture/model").unwrap(),
+            boundary
+        );
     }
 
     #[tokio::test]

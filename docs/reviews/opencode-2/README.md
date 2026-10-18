@@ -105,6 +105,13 @@ transport tests passed after repair, as did formatting and all-target Clippy.
 Nextest reported a leaked handle in `headless_flow_settles_its_original_step_after_creator_teardown`;
 that separate lifecycle warning is retained, not suppressed or claimed fixed.
 
+A subsequent merge-queue run found a real Task-creation race with chapter
+rotation: creation selected the Project before acquiring the Wave planning lock.
+It now acquires that existing lock before reading the selected Project and holds
+it through creation. The concurrent CLI regression retains its original
+assertions; no retry or weaker ownership check was introduced. The materialized
+concurrent-creation test, formatting and all-target Clippy passed after repair.
+
 The independent repository operator used the existing configured account without
 reading credentials: native initial answer, shell tool, normal exit, unchanged
 `connect --prepare` argv, resumed history and remembered token all passed.

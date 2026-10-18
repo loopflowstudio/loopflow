@@ -213,21 +213,31 @@ Original design: `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
-publication and review, later superseded by the landing request below. A machine
-is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
-opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
-Jack chose to discard version-1 Desktop caches. Jack Heart's October 7 LOO-401
-steer supersedes `installation` with `self` for install, doctor and skill export;
-`config user` reads the display name. Root `open` replaces desktop; screenshot
-and its supervisor are removed. The GUI-browser capture prohibition and independent
-Desktop snapshot remain. No aliases; short install/doctor/user commands stay.
-Jack Heart accepted PR #1494 and advancement through shipping. LOO-401 supplies
-LOO-397's command map. Released gates,
-receipts and jobs pin `~/.lf-machine/install` and the promotion lock path; no
-relocation is proved. Recovery uses `install` for retained binaries. Cron reads
-released JSON keys; historical payloads survive.
-Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
+Jack Heart accepted the Machine rename and command-map cutover; October 7
+details:
+`28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
+this heading. A Machine remains one OS user and Loopflow data directory.
+Released cron keys, job labels, paths, route identity and historical payloads
+survive; no relocation is proved. Jack selected discarding version-1 Desktop
+caches. Current commands use `self`, `config user` and root `open`, without aliases.
+The GUI-browser capture prohibition and independent Desktop snapshot remain.
+
+October 17 LOO-506: Jack Heart selected canonical structured storage and
+case-invariant input, including Linear IDs. For `home_`, only casing changes;
+prefixes, punctuation and opaque bytes survive. Released Session fences hash IDs;
+receipt names and Trace directories also depend on spelling. SQLite exclusivity
+cannot preserve these addresses. The draft retains owner locators
+and nonblocking fences through commit/rollback. Unknown affected receipt evidence
+never ages into permission. Conversion remains unfinished. Release's entry-point
+lesson requires upgrade/dispatch/installation proof beyond fixture rewrites.
+Case-colliding traces with distinct locators must fail without selecting history.
+
+LOO-506's October 17 counterexample also shows that an owned ID inside hashed
+evidence is not freely rewriteable. Metric observation digests include Wave
+spelling. Retain original evidence and digest; canonical association belongs on
+the existing owner. Contract-derived readings already separate output identity
+from evidence, but validation/reimport still need proof. This representation
+revision remains draft, not a waiver of Jack's canonical-ID outcome.
 
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report
@@ -778,57 +788,41 @@ Desktop agreement remain unverified. Simulated liveness grants no signal authori
 preserve first PID/birth across missing samples and account for active tools.
 TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
 
-## Data model and performance decisions (reconciled 2026-09-30)
+## Data model and performance decisions (curated 2026-10-17)
 
 Jack Heart selected one SQLite owner per object, direct Processes and compiled
-Flows. September 30's counterexamples, delivery decisions and draft inventory
-remain at `72c58cac5d2f4f1700186379e0645446341b1373:wave/infrastructure/MEMORY.md`.
-Current contracts live in the architecture and CLI references.
+Flows. Current architecture supersedes historical Exec/FlowSession, conversion
+owners and S5 binding. Exact September decisions, migration counterexamples,
+draft inventory and linked proofs remain at
+`d476a8cfb6b7553bda4a52829fb854f128636dcb:.lf/wave/infrastructure/MEMORY.md`,
+this heading; LOO-298's checklist: `ab901f1f1:scratch/remaining-work.md`.
 
-Jack Heart's one-Home cutover and conversion counterexamples remain at
-`0514221be4:wave/infrastructure/MEMORY.md`, this heading; LOO-298's checklist is
-`ab901f1f1:scratch/remaining-work.md`. Manual Task moves prove no conversion.
-Preserve current Work/links, accounts and resumable Sessions; no fleet compatibility
-or historical import is required. Source checks use disposable stores without
-inherited authority; released SQL stays immutable. Before conversion, quiesce
-writers, retain consistent database/filesystem and executable backups, rehearse
-and verify before reopening. Live sidecar reads plus SQLite backup are not atomic.
-Preserve native IDs, reviews and captures; import no old turns or attachment authority.
+Preserve Work/links, accounts, native IDs, reviews, captures and resumable Sessions.
+No fleet compatibility, old-turn import or restored attachment authority is required.
+Use disposable stores without inherited authority; released SQL stays immutable.
+Conversion needs quiescent writers, consistent database/filesystem and executable
+backups, rehearsal and verification before reopening. Live sidecar reads plus
+SQLite backup are not atomic; manual Task moves prove no conversion.
 
-September 29–30 owner/compilation decisions and superseded schema proofs remain at
-`fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`, this heading.
-Current Process/AgentSession/compiled Flow contracts supersede Exec/FlowSession.
-Skill steps use ordinary commands. Process ancestry preserves proven generations
-but grants no Task/Flow authority. Loop passes are positions, not child Flows;
-retry retains the pass. Captured inputs belong to Session history. Deleted RunId
-and intermediate conversion owners stay deleted; older proofs establish no
-final-frontier or configured provider/Desktop continuity.
+Skill steps use ordinary commands. Ancestry preserves proven generations without
+Task/Flow authority. Loop passes are positions, not child Flows; retry retains the
+pass. Captured inputs belong to Session history. Selected successful turns supply
+decisions; Blocked needs a reason. Retired in-turn decision commands stay deleted.
+Bind permits done Tasks, preserves earlier usage and never splits a turn.
+Validate denormalization or delete it. Explicit Project selection supersedes
+status inference and backlog expiry; retain unreviewed work. No Chapter table.
+Event-renaming proposals remain unresolved; deleted owners grant no restoration.
 
-Jack Heart's typed Flow-result, write-once bind, prospective usage and optional
-chapter decisions remain at `0514221be4:wave/infrastructure/MEMORY.md`, this heading.
-Selected successful turns supply decisions; Blocked requires a reason. Retired
-in-turn decision commands stay deleted. Bind permits done Tasks, preserves earlier
-usage and never splits a turn. Validate denormalization or delete it; derive
-models from product objects. Explicit Project selection supersedes status inference
-and backlog expiry; retain unreviewed work until disposition. No Chapter table.
-The `session_events`/`agent_events` and earlier event-renaming proposals remain
-unresolved; deleted event owners are not authority to recreate them.
-
-LOO-298's gate, diff and unaudited real-provider fixture escape:
-`0f1858c647:wave/infrastructure/MEMORY.md`, this heading.
-Full gate, configured continuity and installed conversion remain unproved.
-Preserve Session ID ordering, dedicated PR stacking writes and Work-bound
-checkpoints. Provider stubs must contain conflict-agent launches.
+LOO-298's full gate, configured continuity and installed conversion remain unproved;
+the archive retains its unaudited real-provider fixture escape. Preserve Session
+ID ordering, PR stacking writes and Work-bound checkpoints; stubs must contain
+conflict-agent launches. Earlier proofs establish no final-frontier continuity.
+Current attribution and published-installation policy supersede historical
+source-install directions; discarded attribution needs no importer.
 
 Jack Heart retired numeric targets, soak and deeper optimization October 7.
-LOO-291/300's evidence limits are historical, not open acceptance:
-`07bbd801e:wave/infrastructure/MEMORY.md`, this heading;
-[scripts/benchmarks/desktop-performance](../../../scripts/benchmarks/desktop-performance).
-
-Historical S5 binding and source-install counterexamples:
-`d0a0a1ee3:wave/infrastructure/MEMORY.md`, this heading. Current Session attribution,
-write-once bind (including done Tasks) and published-installation policy supersede
-them; discarded historical attribution needs no importer.
+LOO-291/300's evidence limits are historical, not open acceptance; the archive
+and [benchmarks](../../../scripts/benchmarks/desktop-performance) retain them.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

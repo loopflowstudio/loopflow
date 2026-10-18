@@ -1,12 +1,11 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
-use sha2::{Digest, Sha256};
 
 use crate::id::{AgentSessionId, AttachmentToken, LfProcessId};
 use crate::process::{
@@ -340,6 +339,50 @@ impl SqliteStore {
         }
     }
 
+    pub(crate) fn process_receipt_path(&self, id: &LfProcessId) -> StoreResult<Option<PathBuf>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let locator: Option<String> = conn
+            .query_row(
+                "SELECT receipt_locator FROM processes WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let home = conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .and_then(|path| Path::new(path).parent());
+        Ok(locator
+            .zip(home)
+            .map(|(locator, home)| crate::journal::process_receipt_path(home, &locator)))
+    }
+
+    pub(crate) fn process_for_receipt(&self, locator: &str) -> StoreResult<Option<LfProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!("{PROCESS_SELECT} WHERE e.receipt_locator=?1"),
+                [locator],
+                read_process,
+            )
+            .optional()?)
+    }
+
+    pub(crate) fn journal_trace_locator(
+        &self,
+        trace: &crate::id::TraceId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT journal_trace_locator FROM processes
+                 WHERE trace_id=?1 ORDER BY started_at,id LIMIT 1",
+                [trace],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Read one command without decoding its event history or provider payloads.
     pub fn process(&self, id: &LfProcessId) -> StoreResult<Option<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -657,29 +700,20 @@ impl SqliteStore {
     }
 
     fn session_fence_file(&self, session: &str) -> StoreResult<File> {
-        let database = self
-            .conn
-            .lock()
-            .expect("store mutex poisoned")
-            .path()
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                StoreError::InvalidData("Session dispatch requires a file-backed store".into())
-            })?;
-        let root = Path::new(&database)
-            .canonicalize()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            .with_extension("session-locks");
-        std::fs::create_dir_all(&root)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(root.join(hex::encode(Sha256::digest(session.as_bytes()))))
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        Ok(file)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let database = conn.path().map(str::to_owned).ok_or_else(|| {
+            StoreError::InvalidData("Session dispatch requires a file-backed store".into())
+        })?;
+        let locator: String = conn
+            .query_row(
+                "SELECT fence_locator FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StoreError::NotFound)?;
+        drop(conn);
+        crate::store::canonical_ids::session_fence_file(Path::new(&database), &locator)
     }
 
     pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {

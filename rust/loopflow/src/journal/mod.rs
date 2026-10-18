@@ -192,7 +192,12 @@ pub(crate) struct ProcessReceipt {
 }
 
 impl ProcessReceipt {
-    fn process_evidence(&self) -> ProcessIdentityEvidence {
+    pub(crate) fn matches_process(&self, process: &str, trace: &str) -> bool {
+        self.lf_process_id.eq_ignore_ascii_case(process)
+            && self.trace_id.eq_ignore_ascii_case(trace)
+    }
+
+    pub(crate) fn process_evidence(&self) -> ProcessIdentityEvidence {
         process_identity_evidence(self.pid, self.started_at)
     }
 }
@@ -797,7 +802,10 @@ fn create_process_context(
             })
             .and_then(|root| {
                 ensure_journal_ignored(&root)?;
-                let dir = traces_root(&root).join(trace_id.as_str());
+                let retained = open_ledger()
+                    .and_then(|store| store.journal_trace_locator(&trace_id))
+                    .map_err(std::io::Error::other)?;
+                let dir = traces_root(&root).join(retained.as_deref().unwrap_or(trace_id.as_str()));
                 fs::create_dir_all(&dir)?;
                 Ok(dir)
             }) {
@@ -1023,7 +1031,11 @@ pub(crate) fn process_evidence(
     let receipt = if record.kind == crate::process::ProcessKind::Agent {
         Some(None)
     } else {
-        read_process_receipt_at(&crate::store::lf_home_dir(), process).ok()
+        store
+            .process_receipt_path(process)
+            .ok()
+            .flatten()
+            .and_then(|path| read_process_receipt(&path).ok())
     };
     recorded_process_evidence(
         &record,
@@ -1032,15 +1044,15 @@ pub(crate) fn process_evidence(
     )
 }
 
-fn read_process_receipt_at(
-    lf_home: &Path,
-    process: &LfProcessId,
-) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    // Receipts are atomically published at their Process ID. Attachment checks
-    // need only this identity, regardless of how many other receipts remain.
-    let path = lf_home
+pub(crate) fn process_receipt_path(lf_home: &Path, locator: &str) -> PathBuf {
+    // Retained receipt basenames are opaque. A case-normalized Process keeps
+    // reading the original file, including on case-sensitive filesystems.
+    lf_home
         .join(PROCESS_RECEIPT_ROOT)
-        .join(format!("{process}.json"));
+        .join(format!("{locator}.json"))
+}
+
+pub(crate) fn read_process_receipt(path: &Path) -> Result<Option<ProcessReceipt>, std::io::Error> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1088,9 +1100,10 @@ pub(crate) fn recorded_process_evidence(
     let Some(receipts) = receipts else {
         return ProcessIdentityEvidence::Unknown;
     };
-    if let Some(receipt) = receipts.iter().find(|receipt| {
-        receipt.lf_process_id == record.id.as_str() && receipt.trace_id == record.trace_id.as_str()
-    }) {
+    if let Some(receipt) = receipts
+        .iter()
+        .find(|receipt| receipt.matches_process(record.id.as_str(), record.trace_id.as_str()))
+    {
         return observe(receipt.pid, receipt.started_at);
     }
     // Historical Processes can lack identity evidence. A restart still proves exit.
@@ -1204,13 +1217,7 @@ fn read_process_receipt_files_at(
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        let Ok(content) = fs::read(&path) else {
-            continue;
-        };
-        let Ok(receipt) = serde_json::from_slice::<ProcessReceipt>(&content) else {
-            continue;
-        };
-        if receipt.schema_version == 1 {
+        if let Ok(Some(receipt)) = read_process_receipt(&path) {
             receipts.push((path, receipt));
         }
     }
@@ -1233,12 +1240,15 @@ pub(crate) fn prune_process_receipts_at(
         {
             continue;
         }
-        let Ok(id) = LfProcessId::parse(&receipt.lf_process_id) else {
+        let Some(locator) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
-        let record = store.process(&id).map_err(std::io::Error::other)?;
+        let record = store
+            .process_for_receipt(locator)
+            .map_err(std::io::Error::other)?;
         if !record.is_some_and(|record| {
-            record.trace_id.as_str() == receipt.trace_id && record.completed_at.is_some()
+            receipt.matches_process(record.id.as_str(), record.trace_id.as_str())
+                && record.completed_at.is_some()
         }) {
             continue;
         }
@@ -1256,7 +1266,11 @@ fn write_process_receipt(context: &ProcessContext) -> Result<(), std::io::Error>
     let Some(started_at) = context.process_started_at else {
         return Ok(());
     };
-    let root = crate::store::lf_home_dir().join(PROCESS_RECEIPT_ROOT);
+    let home = context
+        .ledger_path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Process ledger has no parent directory"))?;
+    let root = home.join(PROCESS_RECEIPT_ROOT);
     fs::create_dir_all(&root)?;
     let pid = std::process::id();
     let receipt = ProcessReceipt {
@@ -1267,7 +1281,7 @@ fn write_process_receipt(context: &ProcessContext) -> Result<(), std::io::Error>
         started_at,
     };
     let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
-    let path = root.join(format!("{}.json", context.lf_process_id));
+    let path = process_receipt_path(home, context.lf_process_id.as_str());
     let temporary = root.join(format!(".{}.json.tmp", context.lf_process_id));
     fs::write(&temporary, bytes)?;
     fs::rename(temporary, path)
@@ -1277,9 +1291,7 @@ fn remove_process_receipt(context: &ProcessContext) {
     let Some(home) = context.ledger_path.parent() else {
         return;
     };
-    let path = home
-        .join(PROCESS_RECEIPT_ROOT)
-        .join(format!("{}.json", context.lf_process_id));
+    let path = process_receipt_path(home, context.lf_process_id.as_str());
     if let Err(error) = fs::remove_file(path) {
         if error.kind() != std::io::ErrorKind::NotFound {
             debug!(error = %error, "failed to remove live Process receipt");
@@ -1415,6 +1427,51 @@ mod tests {
         std::env::remove_var(super::LF_TRACE_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
+    }
+
+    #[test]
+    fn canonical_ids_journal_appends_to_retained_trace_directory() {
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        super::open_ledger().unwrap();
+        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        let trace = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?2,1,2)",
+            rusqlite::params![LfProcessId::new(), trace],
+        )
+        .unwrap();
+        conn.execute("UPDATE processes SET trace_id=lower(trace_id)", [])
+            .unwrap();
+        let retained = traces_root(repo.path()).join(trace);
+        std::fs::create_dir_all(&retained).unwrap();
+        std::fs::write(retained.join("retained-evidence"), b"unchanged").unwrap();
+        std::env::set_var(super::LF_TRACE_ID_ENV, trace.to_ascii_lowercase());
+        super::with_runtime(repo.path(), &["lf".into(), "fixture".into()], || {
+            let process = super::current_lf_process_id().unwrap();
+            let store = super::open_ledger().unwrap();
+            assert_eq!(
+                super::process_evidence(&store, &process),
+                ProcessIdentityEvidence::Live
+            );
+            Ok(())
+        })
+        .unwrap();
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
+        let directories: Vec<_> = std::fs::read_dir(traces_root(repo.path()))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(directories, [std::ffi::OsString::from(trace)]);
+        assert_eq!(
+            std::fs::read(retained.join("retained-evidence")).unwrap(),
+            b"unchanged"
+        );
+        let events = read_events(&retained).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events
+            .iter()
+            .all(|event| event.trace_id.as_str() == trace.to_ascii_lowercase()));
     }
 
     #[test]

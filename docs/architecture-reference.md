@@ -331,7 +331,19 @@ lock beside the canonical database path. Attachment validation releases the SQLi
 mutex before provider I/O; history and other Sessions keep using the database.
 Lock acquisition has an OS-clock deadline independent of the provider reactor.
 Lock files retain their inode across process exit; deleting a live lock file
-would let two processes own different locks for the same Session.
+would let two processes own different locks for the same Session. The Session's
+immutable `fence_locator` retains that address independently of its ID spelling.
+Process rows likewise retain receipt basenames and trace journal directory names
+in `receipt_locator` and `journal_trace_locator`; an identity conversion never
+renames those files. New Processes in a retained trace reuse its directory name.
+
+Identity migration tries affected Session fences without blocking and holds them
+through SQLite commit or rollback. Busy dispatch, live affected owners and unknown
+receipt evidence defer the upgrade without changing the ledger. An unreadable,
+malformed, unsupported or mismatched affected receipt remains unknown until it is
+repaired; elapsed time does not grant permission. Old waiting callers re-read
+attachment authority under the same inode, and canonical Session storage guards
+reject recreating an owner with its prior mixed-case spelling.
 
 Connect transfers the attachment while retaining the live conversation. Client
 replacement claims the attachment before stopping the exact old clients; it leaves

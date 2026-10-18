@@ -101,7 +101,6 @@ struct WorkspacePanesTests {
             workspaces: registry, machineId: location.machineId, repository: "repo", query: query)
         model.select(workspace.key.reference)
         workspace.presentation.content = .terminals
-        model.select(other.key.reference, besideFocused: true)
         let sessions = registry.sessionStore(repository: "repo", repoPath: location.worktree, query: query)
         let primary = try session("primary")
         sessions.reconcile([primary])

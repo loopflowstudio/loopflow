@@ -1,5 +1,11 @@
 # Layout editing direction — October 16, 2026
 
+Historical design input. Jack Heart's October 17–18 corrections in `design.md`
+restrict compositions to Dashboards and preserve ordinary Console destinations.
+The default-selection rules below describe shared plans, not native repo/Wave UI.
+The retained-tree and lfdb mechanisms are implemented; their remaining acceptance
+and the unsaved-arrangement assumption live in `design.md`.
+
 Jack Heart proposed representing arrangement as `v-split A, B, percentage` or `h-split A, B, percentage`. Hiding one side collapses the visible split to its sibling; showing the member again should fit this same model. Jack explicitly allowed changing the layout representation and suggested replacing a complete layout map as a viable baseline, while preferring simpler natural edits where useful. This refines the API design, not approval of the unfinished overall implementation plan.
 
 Proposed interpretation for the design: keep a retained binary split tree with member-reference leaves, axis, ordered children and ratio. Hidden member IDs remain selection members; derive the visible tree by pruning hidden leaves and collapsing unary splits. Re-show uses the retained tree, recovering placement and ratio rather than reconstructing ownership. Full-tree replacement can be the complete arrangement operation, preserving the selection member multiset and repository boundary; move/swap/resize are conveniences using that same engine. Decide how omitted hidden members and duplicate projections are represented without creating a second tree authority.

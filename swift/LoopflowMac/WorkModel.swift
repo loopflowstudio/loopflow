@@ -134,7 +134,7 @@ final class WorkModel {
             return old
         })
         reconcileSelectionRepository()
-        if let id = navigation.dashboardID { presentDashboard(id) }
+        if let id = navigation.dashboardID, let plan = dashboard(id) { presentView(plan) }
     }
 
     private func reconcileSelectionRepository() {
@@ -180,7 +180,7 @@ final class WorkModel {
         openSelectedWorkspace()
     }
 
-    func openSelectedWorkspace(besideFocused: Bool = false) {
+    func openSelectedWorkspace() {
         if let plan = selectedViewPlan { presentView(plan); return }
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         let key = workspaceKey(for: selection, repository: repository)
@@ -190,7 +190,7 @@ final class WorkModel {
         } else if key.kind != .task, let machine = registry.localMachineId, let repoPath {
             location = WorkspaceIdentity(machineId: machine, worktree: repoPath)
         } else { location = nil }
-        let workspace = registry.open(key, title: workspaceTitle(key), location: location, besideFocused: besideFocused)
+        let workspace = registry.open(key, title: workspaceTitle(key), location: location)
         workspace.startPersistence(query: query, repoPath: repoPath)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
@@ -475,19 +475,19 @@ final class WorkModel {
     }
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
-    func openSession(_ record: SessionRecord, store: SessionsStore, besideFocused: Bool = false) {
+    func openSession(_ record: SessionRecord, store: SessionsStore) {
         guard let registry = workspaceRegistry, let repository = workspaceRepository else { return }
         if let retained = registry.key(containingSession: record.id) {
-            select(retained.reference, besideFocused: besideFocused)
+            select(retained.reference)
         } else {
             let selectedKey = workspaceKey(for: selection, repository: repository)
             if selection?.kind == .task,
                record.taskIds.contains(selectedKey.id) || record.workspace?.taskId == selectedKey.id {
-                select(selection, besideFocused: besideFocused)
+                select(selection)
             } else if selection?.kind == .wave, record.waveId == selectedKey.id {
-                select(selection, besideFocused: besideFocused)
+                select(selection)
             } else {
-                select(store.taskSubject(for: record) ?? projection.subject(for: record.id), besideFocused: besideFocused)
+                select(store.taskSubject(for: record) ?? projection.subject(for: record.id))
             }
         }
         let key = workspaceKey(for: selection, repository: repository)
@@ -716,7 +716,7 @@ final class WorkModel {
             selectionId: navigation.showsSelection ? navigation.dashboardID : workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout?.inspection, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -1582,8 +1582,8 @@ final class WorkModel {
         }
     }
 
-    func select(_ requested: WorkReference?, besideFocused: Bool = false) {
-        select(requested, preservingOpening: false, besideFocused: besideFocused)
+    func select(_ requested: WorkReference?) {
+        select(requested, preservingOpening: false)
     }
 
     /// Unknown retained Work stays reachable; explicit pause only hides its slot.
@@ -1653,13 +1653,6 @@ final class WorkModel {
         selectDestination(next)
     }
 
-    func hideWorkspace(_ key: WorkWorkspaceKey) {
-        guard let registry = workspaceRegistry else { return }
-        let wasSelected = registry.selectedWork == key
-        registry.hide(key)
-        if wasSelected, let next = registry.selectedWork { select(next.reference) }
-    }
-
     func isSelected(_ reference: WorkReference) -> Bool {
         if selection == reference { return true }
         guard let selection, selection.kind == .task, reference.kind == .task else { return false }
@@ -1667,7 +1660,7 @@ final class WorkModel {
             && task(id: selection.id) != nil
     }
 
-    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
+    private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
@@ -1699,7 +1692,7 @@ final class WorkModel {
         setSelection(selection)
         retainWorkingTask(selection)
         clearSelectionIfOutsideScope()
-        openSelectedWorkspace(besideFocused: besideFocused)
+        openSelectedWorkspace()
     }
 
     private func openHistoricalReference(_ reference: String) async {
@@ -2334,37 +2327,27 @@ final class WorkModel {
 
 extension WorkModel {
     var dashboards: [WorkViewPlan] { selectionPlans.value?.filter { $0.dashboardID != nil } ?? [] }
-    func dashboard(_ id: String) -> WorkViewPlan? { dashboards.first { $0.dashboardID == id } }
+    func dashboard(_ id: String) -> WorkViewPlan? { selectionPlans.value?.first { $0.dashboardID == id } }
 
-    private func selectDestination(_ destination: WorkNavigation.Destination) {
+    private func selectDestination(_ destination: WorkNavigation.Destination, recordingHistory: Bool = false) {
         switch destination {
-        case .work(let work): select(work, preservingOpening: false, recordingHistory: false)
-        case .dashboard(let id): selectDashboard(id, recordingHistory: false)
-        case .view(let plan):
+        case .work(let work): select(work, preservingOpening: false, recordingHistory: recordingHistory)
+        case .dashboard, .view:
+            if recordingHistory, navigation.destination != destination {
+                navigation.backStack.append(navigation.destination)
+                navigation.forwardStack = []
+            }
             dismissTaskLink()
             viewOpening = nil
             selectionOpening = nil
-            navigation.destination = .view(plan)
-            presentView(plan)
+            navigation.destination = destination
+            navigation.palette = nil
+            if let plan = selectedViewPlan { presentView(plan) }
         }
     }
 
-    func selectDashboard(_ id: String, recordingHistory: Bool = true) {
-        if recordingHistory, navigation.destination != .dashboard(id) {
-            navigation.backStack.append(navigation.destination)
-            navigation.forwardStack = []
-        }
-        dismissTaskLink()
-        viewOpening = nil
-        selectionOpening = nil
-        navigation.destination = .dashboard(id)
-        navigation.palette = nil
-        presentDashboard(id)
-    }
-
-    private func presentDashboard(_ id: String) {
-        guard let plan = dashboard(id) else { return }
-        presentView(plan)
+    func selectDashboard(_ id: String) {
+        selectDestination(.dashboard(id), recordingHistory: true)
     }
 
     private func presentView(_ plan: WorkViewPlan) {
@@ -2455,18 +2438,12 @@ extension WorkModel {
         do {
             let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
             guard viewOpening == request, self.repoPath == repoPath else { return }
-            viewOpening = nil
             if let id = plan.dashboardID {
                 var plans = selectionPlans.value ?? []
                 plans.removeAll { $0.dashboardID == id }; plans.append(plan)
                 applySelectionPlans(plans, reason: "")
-                selectDashboard(id)
-            } else {
-                navigation.backStack.append(navigation.destination)
-                navigation.forwardStack = []
-                navigation.destination = .view(plan)
-                presentView(plan)
             }
+            selectDestination(plan.dashboardID.map { .dashboard($0) } ?? .view(plan), recordingHistory: true)
             selectionOpening = DesktopOpening(url: link, status: .usable, reason: nil)
         } catch {
             guard viewOpening == request else { return }

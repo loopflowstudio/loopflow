@@ -160,7 +160,7 @@ struct ThemeWorkflowTests {
         #expect(appearance.effectiveTheme.name == applied.name)
         #expect(appearance.library.yours.isEmpty)
         try exerciseNavigation()
-        model.select(.wave(id: wave.wave.id), besideFocused: true)
+        model.select(.wave(id: wave.wave.id))
         let outerLayout = registry.layout
         try theme.preview(in: appearance)
         let focusBeforeApply = work.multiplexer.focusedPaneId
@@ -168,9 +168,9 @@ struct ThemeWorkflowTests {
         #expect(work.multiplexer.focusedPaneId == focusBeforeApply)
         #expect(registry.layout == outerLayout)
         #expect(registry.selectedWork == waveKey)
-        #expect(registry.openWork == [key, waveKey])
+        #expect(registry.openWork == [waveKey])
         #expect(appearance.effectiveTheme.terminal == candidate.terminal)
-        model.hideWorkspace(waveKey)
+        model.select(key.reference)
         try exerciseNavigation()
         let restored = AppearanceStore(paths: paths, systemDark: false)
         #expect(restored.effectiveTheme.terminal == manager.theme.terminal)

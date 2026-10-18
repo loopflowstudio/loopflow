@@ -1169,7 +1169,7 @@ Restore an exact hidden pane without selecting Work or acquiring a client
 
 ## lf desktop focus
 
-Focus an exact pane in its retained workspace (does not select Work)
+Focus an exact pane, opening its retained workspace when needed
 
 | Argument | What it does |
 |---|---|

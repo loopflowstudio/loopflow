@@ -143,7 +143,7 @@ struct DashboardView: View {
                     ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) }) {
                     WorkspacePanesView(workspace: entry, isFocused: workspaces.selectedWork == member.work, sessions: sessions, model: model,
                         onFocus: { pane, _ in
-                            workspaces.open(entry.key, title: entry.title, location: entry.location)
+                            workspaces.focus(entry.key)
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
                 } else {

@@ -77,8 +77,7 @@ is no query-result cache, native handle or attachment claim.
 The existing Work observer publishes repository defaults, Wave defaults and saved
 plans in its planning frame; `RegistryQuery` decodes the same DTO as one-shot
 plans. Swift has no query evaluator. Desktop's live pane and window layouts still
-belong to their existing native owners; mounting plans, wiring native save/restore
-callers and transporting records across Machines remain integration work.
+belong to their existing native owners.
 
 ```sh
 lf desktop pin attention --revision 2
@@ -115,7 +114,6 @@ and explicit selection. Shell tabs retain recorded locations and optional Proces
 identity; these are not liveness or launch authority. File tabs reference the
 Task/location/path draft owner. Duplicate tools, duplicate documents, missing
 selected tabs and non-Task tools fail before a saved-layout write changes state.
-
 
 Desktop consumes the same plans in native Dashboards and `desktop view --plan`.
 `desktop view EXPRESSION` routes through the repository window; `desktop state`

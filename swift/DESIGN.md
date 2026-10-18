@@ -217,8 +217,10 @@ Wave navigation leaves working positions and the sidebar viewport intact.
 Title-bar breadcrumbs follow hierarchy, Back follows visits, and Cmd+K routes
 cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
 stable eligible slots, independent of the filter. Each Work owns one retained
-workspace. Multi-Session query grids, editable Dashboards and passive viewing of
-unopened Sessions remain deferred.
+workspace. Dashboard queries compose those workspaces side by side; ordinary
+navigation selects one destination. Rust owns query membership and arrangement,
+including hidden occurrences and duplicate suppression. Tiles show the primary
+Session or explicit zoom without acquiring a provider.
 
 ---
 

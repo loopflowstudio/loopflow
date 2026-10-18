@@ -843,8 +843,10 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
-`desktop view EXPRESSION` opens the same shared selection in the Mac app. Save an
-ad hoc view as a Dashboard to name, pin and arrange it. `state --json` includes the
+`desktop view EXPRESSION` opens the shared query results as a Dashboard in the Mac
+app, including unsaved queries. Save the Dashboard to name, pin and arrange it.
+Only Dashboard query results compose Tasks side by side; ordinary navigation
+selects one destination. `state --json` includes the
 selected `view` plan, retained occurrences, hidden members and duplicate winners.
 Repository and Wave navigation still opens their ordinary conversations.
 
@@ -894,12 +896,11 @@ child. Neither token authorizes terminal input.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal.
 The window `layout` places open Work; `workspaces` also includes retained Work
-outside that tree. Hiding outer Work currently drops its split position while
-retaining its inner panes. State reports that distinction.
-Opening Work selects its named tab without starting a conversation or preparing a
-checkout. Closing a tab hides its workspace; reopening restores panes, drafts and
-zoom. Closing the last tab starts nothing. This retention lasts for the window,
-not across app quit. Mutation receipts identify `work` and `pane`, not readiness.
+outside that tree. Hiding a Dashboard occurrence preserves its split position and inner panes;
+restoring it keeps edits made to its visible neighbors. Work navigation starts no
+Session or checkout. Pane layouts, selected tool tabs and file drafts save through
+lfdb; restored shell tabs remain unattached. Mutation receipts identify `work` and
+`pane`, not readiness.
 
 Select Work and use pane IDs from the retained layout:
 
@@ -960,8 +961,9 @@ before input, and do not repeat creation after a lost reply.
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
 share (0.1–0.9). Move, resize, zoom, hide and restore retain drafts and
-selection. Focus selects the addressed pane without changing Work or foregrounding
-a window. Closing a view does not end a Session. Mutations print the affected
+selection. Focus selects the addressed pane, preserving a visible Dashboard or
+opening the pane's workspace when needed, without foregrounding a window.
+Closing a view does not end a Session. Mutations print the affected
 pane ID; `--json` adds its repository, window, Work and observation time.
 Shell receipts identify the tool pane and newly selected tab separately.
 A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; shell creation is not safe to replay.

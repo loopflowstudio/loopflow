@@ -1,5 +1,11 @@
 # Arrange work handoff
 
+Historical October 16 launch context, superseded by Jack Heart's October 17–18
+integration and Dashboard decisions in `design.md` and
+`native-console-integration.md`. The current implementation already supplies the
+grammar, pinned discovery and retained-tree persistence discussed as open below;
+this handoff grants no new launch or sibling-edit authority.
+
 Jack Heart supplied the complete October 16, 2026 brief, requested filing its four Tasks, then explicitly requested launching navigation and session lifecycle in separate workspaces of the current cmux window. Jack subsequently also selected LOO-497 for launch in its own workspace in that window. The condensed brief is in `arrange-navigation-brief.md`; the complete original, including annotated reasoning and its dated survey, is preserved at `refs/loopflow/evidence/loo-497-kickoff:arrange-navigation-brief.md`. Check actual source paths/API names before relying on the survey.
 
 ## Owners

@@ -973,23 +973,22 @@ struct DTOFixtureTests {
         }
     }
 
-    private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {
-        let data = try loadFixtureData(name, sourceFile: sourceFile)
+    private func loadFixture(_ name: String) throws -> [String: Any] {
+        let data = try loadFixtureData(name)
         let json = try JSONSerialization.jsonObject(with: data)
         return try #require(json as? [String: Any])
     }
+}
 
-
-    private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
-        let testFile = URL(fileURLWithPath: sourceFile)
-        let fixtures = testFile
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
-            .appendingPathComponent(name)
-        return try Data(contentsOf: fixtures)
-    }
+func loadFixtureData(_ name: String) throws -> Data {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let fixtures = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto")
+        .appendingPathComponent(name)
+    return try Data(contentsOf: fixtures)
 }
 
 @Test("Session input history retains distinct native results and unknown Process")

@@ -4,7 +4,7 @@ Jack Heart accepted the prototype for implementation, requested integration with
 LOO-489, corrected the invisible query aliases, then said “keep going.” The
 materialized 489 source and current procedure are in native-console-integration.md.
 Earlier decisions/readbacks are preserved in
-history/loo489-console-source-2026-10-17/loo497-prior-questions.txt.
+`8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17/loo497-prior-questions.txt`.
 
 Repository scope is implicit. Cmd K finds Work across repositories; another repo
 opens its own window. Separate Dashboards never replace ordinary repo/Wave views.

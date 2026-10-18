@@ -707,7 +707,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Focus an exact pane in its retained workspace (does not select Work)
+    /// Focus an exact pane, opening its retained workspace when needed
     Focus {
         #[arg(long)]
         pane: Option<String>,

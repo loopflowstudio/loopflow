@@ -377,30 +377,26 @@ final class SessionsWorkspaceRegistry {
 
     func clearPresentation() {
         surfaces.clearFocus()
-        retainedLayout = nil
-        hiddenWork = []
+        layout = nil
         selectedWork = nil
     }
 
     func present(_ plan: WorkViewPlan) {
-        func tree(_ node: WorkArrangementTree) -> WorkLayout {
+        func tree(_ node: WorkArrangementTree) -> DesktopWorkLayoutInspection {
             switch node {
-            case .member(let member): return .workspace(member.work)
+            case .member(let member): return .workspace(work: member.work)
             case .split(let axis, let ratio, let first, let second):
-                return .split(axis, tree(first), tree(second), ratio)
+                return .split(axis: axis, ratio: ratio, first: tree(first), second: tree(second))
             }
         }
-        retainedLayout = plan.projection.visible.map(tree)
-        hiddenWork = []
+        layout = plan.projection.visible.map(tree)
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
             surfaces.clearFocus()
         }
     }
 
-    private var retainedLayout: WorkLayout?
-    private var hiddenWork: Set<WorkWorkspaceKey> = []
-    var layout: WorkLayout? { retainedLayout?.visible(excluding: hiddenWork) }
+    private(set) var layout: DesktopWorkLayoutInspection?
     var openWork: [WorkWorkspaceKey] { layout?.keys ?? [] }
 
     private(set) var selectedWork: WorkWorkspaceKey?
@@ -410,31 +406,17 @@ final class SessionsWorkspaceRegistry {
     func retained(_ key: WorkWorkspaceKey) -> SessionsWorkspace? { workspaces[key] }
 
     @discardableResult
-    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, besideFocused: Bool = false) -> SessionsWorkspace {
+    func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
-        if selectedWork != key { surfaces.clearFocus() }
-        hiddenWork.remove(key)
-        if retainedLayout?.keys.contains(key) != true {
-            if let layout = retainedLayout, let focused = selectedWork, layout.keys.contains(focused), focused.repository == key.repository {
-                self.retainedLayout = layout.replacing(focused, with: besideFocused
-                    ? .split(.vertical, .workspace(focused), .workspace(key), 0.5) : .workspace(key))
-            } else { retainedLayout = .workspace(key) }
-        }
-        selectedWork = key
+        layout = .workspace(work: key)
+        focus(key)
         return workspace
     }
 
-    func hide(_ key: WorkWorkspaceKey) {
-        guard let index = openWork.firstIndex(of: key) else { return }
-        hiddenWork.insert(key)
-        if selectedWork == key {
-            surfaces.clearFocus()
-            selectedWork = openWork.isEmpty ? nil : openWork[max(0, index - 1)]
-        }
-    }
-
-    func resize(between first: WorkWorkspaceKey, and second: WorkWorkspaceKey, ratio: Double) {
-        retainedLayout = retainedLayout?.resizing(between: first, and: second, ratio: ratio)
+    func focus(_ key: WorkWorkspaceKey) {
+        guard openWork.contains(key) else { return }
+        if selectedWork != key { surfaces.clearFocus() }
+        selectedWork = key
     }
 
     func inspect() -> [DesktopWorkspaceInspection] {
@@ -534,8 +516,11 @@ final class SessionsWorkspaceRegistry {
         case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
         case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
         case .focus:
-            open(workspace.key, title: workspace.title, location: workspace.location)
-            model.select(workspace.key.reference)
+            if model.navigation.showsSelection, openWork.contains(workspace.key) {
+                focus(workspace.key)
+            } else {
+                model.select(workspace.key.reference)
+            }
             if let tab = target.tab { store.selectShell(tab) }
             else { store.setFocusedPane(target.pane) }
             if let focused = terminal ?? pane.terminal { surfaces.focus(focused) }
@@ -627,8 +612,7 @@ final class SessionsWorkspaceRegistry {
         guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
         workspace.key = key
         workspaces[key] = workspace
-        retainedLayout = retainedLayout?.replacing(previous, with: .workspace(key))
-        if hiddenWork.remove(previous) != nil { hiddenWork.insert(key) }
+        layout = layout?.replacing(previous, with: key)
         if selectedWork == previous { selectedWork = key }
     }
 
@@ -644,6 +628,25 @@ final class SessionsWorkspaceRegistry {
         return workspace
     }
 
+}
+
+// Window geometry is readback of the selected destination, not another arrangement owner.
+extension DesktopWorkLayoutInspection {
+    fileprivate var keys: [WorkWorkspaceKey] {
+        switch self {
+        case .workspace(let work): [work]
+        case .split(_, _, let first, let second): first.keys + second.keys
+        }
+    }
+
+    fileprivate func replacing(_ previous: WorkWorkspaceKey, with work: WorkWorkspaceKey) -> Self {
+        switch self {
+        case .workspace(let current): .workspace(work: current == previous ? work : current)
+        case .split(let axis, let ratio, let first, let second):
+            .split(axis: axis, ratio: ratio,
+                first: first.replacing(previous, with: work), second: second.replacing(previous, with: work))
+        }
+    }
 }
 
 struct SessionItem: Identifiable, Equatable {
@@ -1071,8 +1074,8 @@ struct SessionsContentView: View {
                 }
                 if navigation.showsSelection {
                     DashboardView(model: model, workspaces: workspaces, sessions: store)
-                } else if let layout = workspaces.layout {
-                    WorkLayoutView(layout: layout, resize: { workspaces.resize(between: $0, and: $1, ratio: $2) }) { key in
+                } else if let key = workspaces.selectedWork {
+                    VStack(spacing: 0) {
                         workspacePanel(key).id(key)
                     }
                     .padding([.horizontal, .bottom], PaneGeometry.windowInset)
@@ -1203,10 +1206,7 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
-            selection: key.reference, sessionId: entry.presentation.selectedSessionId)
         let terminals = key.kind != .task || task?.task.runtime?.started == true || entry.presentation.content == .terminals
-        let context = workspaces.openWork.count > 1
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
@@ -1214,26 +1214,6 @@ struct SessionsContentView: View {
                     Text("Layout not saved: " + error).foregroundStyle(palette.waiting).textSelection(.enabled)
                     Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
                 }.padding(8)
-            }
-            if context {
-                HStack(spacing: 8) {
-                    HStack(spacing: 6) {
-                        if let wave = crumb?.wave {
-                            Text(wave.roadmap.wave.displayName).font(Typography.body(10))
-                                .foregroundStyle(palette.emphasisInk)
-                        }
-                        Text(entry.title).font(Typography.strong(12)).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                    if workspaces.openWork.count > 1 {
-                        Button { model.hideWorkspace(key) } label: { Image(systemName: "xmark") }
-                            .buttonStyle(WorkPlainButtonStyle()).help("Hide workspace; keep its panes and drafts")
-                            .accessibilityIdentifier("work-hide-\(key.id)")
-                    }
-                }
-                .padding(.horizontal, 10).padding(.vertical, 4).contentShape(Rectangle()).onTapGesture { model.select(key.reference) }
-                .background(palette.surfaceMuted)
-                .accessibilityIdentifier("work-context-\(key.id)")
             }
             if terminals, let task, active {
                 missingCheckout
@@ -1284,7 +1264,7 @@ struct SessionsContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius))
         .overlay {
-            if context { RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(active ? palette.borderActive : palette.border, lineWidth: 1).allowsHitTesting(false) }
+            RoundedRectangle(cornerRadius: PaneGeometry.workspaceCornerRadius).strokeBorder(palette.borderActive, lineWidth: 1).allowsHitTesting(false)
         }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
@@ -1365,11 +1345,10 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord) {
-        model.openSession(record, store: store, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.openSession(record, store: store)
     }
 
     private func openTask(_ work: WorkReference) {
-        if NSEvent.modifierFlags.contains(.command) { model.select(work, besideFocused: true) }
         let trace = UUID().uuidString
         Perf.$inputTrace.withValue(trace) {
             Perf.agentInput("task_click", task: work.id)
@@ -1379,7 +1358,7 @@ struct SessionsContentView: View {
 
     private func openRepositoryConversation() {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
-        model.select(nil, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.select(nil)
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(store: store, registry: workspaces) }
@@ -1387,7 +1366,7 @@ struct SessionsContentView: View {
 
     private func openWaveConversation(_ work: WorkReference) {
         guard let wave = model.wave(id: work.id)?.wave else { return }
-        model.select(work, besideFocused: NSEvent.modifierFlags.contains(.command))
+        model.select(work)
         navigation.content = .terminals
         let entry = workspace
         Task { await entry.openPrimaryConversation(wave: wave.name, store: store, registry: workspaces) }
@@ -1477,40 +1456,6 @@ private struct SidebarDivider: View {
                                          availableWidth: availableWidth)
             }
             .accessibilityIdentifier("work-sidebar-divider")
-    }
-}
-
-private struct WorkLayoutView<Content: View>: View {
-    let layout: WorkLayout
-    let resize: (WorkWorkspaceKey, WorkWorkspaceKey, Double) -> Void
-    @ViewBuilder let content: (WorkWorkspaceKey) -> Content
-
-    var body: some View {
-        switch layout {
-        case .workspace(let key): content(key)
-        case .split(let axis, let first, let second, let ratio):
-            GeometryReader { geometry in
-                // Reflow whole workspaces vertically when side-by-side panes would be too narrow.
-                let vertical = axis == .vertical && geometry.size.width >= 720
-                let extent = vertical ? geometry.size.width : geometry.size.height
-                let effectiveAxis: SplitAxis = vertical ? .vertical : .horizontal
-                let sizing = SplitSizing(extent: extent, firstMinimum: vertical ? 360 : 200,
-                                         secondMinimum: vertical ? 360 : 200)
-                let displayedRatio = sizing.constrain(ratio)
-                let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                stack {
-                    WorkLayoutView(layout: first, resize: resize, content: content)
-                        .frame(width: vertical ? max(0, extent * displayedRatio - sizing.divider / 2) : nil,
-                               height: vertical ? nil : max(0, extent * displayedRatio - sizing.divider / 2))
-                    SplitDivider(axis: effectiveAxis, ratio: displayedRatio, sizing: sizing, update: { value in
-                        if let firstKey = first.keys.first, let secondKey = second.keys.first {
-                            resize(firstKey, secondKey, value)
-                        }
-                    })
-                    WorkLayoutView(layout: second, resize: resize, content: content)
-                }
-            }
-        }
     }
 }
 
@@ -1640,7 +1585,7 @@ extension SessionsWorkspace {
         do {
             let selector = key.kind == .repository ? "repository" : key.kind.rawValue + ":" + key.id
             let saved = try await query.paneLayout(work: selector, repoPath: repo)
-            var needsSave = portableLayout() != before || hadLocalTools
+            let needsSave: Bool
             if let saved {
                 guard saved.work == key else { throw RegistryQueryError("Saved layout belongs to different Work; local edits retained.") }
                 let current = portableLayout()
@@ -1663,13 +1608,16 @@ extension SessionsWorkspace {
                         } catch { persistenceError = error.localizedDescription }
                     }
                 }
-                needsSave = needsSave || portableLayout() != saved
+                needsSave = portableLayout() != saved
             } else {
-                needsSave = needsSave || multiplexer.layout.allPanes.contains { $0.content != .empty }
+                needsSave = multiplexer.layout.allPanes.contains { $0.content != .empty }
             }
-            persistenceLoaded = true
+            // Reloads reuse the workspace's existing observation chain.
+            if !persistenceLoaded {
+                persistenceLoaded = true
+                observePaneIntent()
+            }
             isRestoringIntent = false
-            observePaneIntent()
             if needsSave { await savePaneIntent() }
         } catch { persistenceError = error.localizedDescription }
     }
@@ -1679,7 +1627,7 @@ extension SessionsWorkspace {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.observePaneIntent()
-                guard self.persistenceError == nil, !self.persistenceWriting else { return }
+                guard self.persistenceError == nil, !self.persistenceWriting, !self.isRestoringIntent else { return }
                 self.persistenceTask?.cancel()
                 self.persistenceTask = Task { [weak self] in
                     do { try await Task.sleep(for: .milliseconds(300)) } catch { return }

@@ -1,10 +1,10 @@
 # Current LOO-489 Console contract
 
-The full accepted contract, native demo and keyboard map are materialized in
-`history/loo489-console-source-2026-10-17/navigation-implementation.txt`,
+The full accepted contract, native demo and keyboard map are preserved in git at
+`8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17/navigation-implementation.txt`,
 `native-console-demo.txt` and `keyboard-shortcuts.txt` in that same directory.
-Read those before adapting the captured native source. Manifest source/base paths
-and verified hashes are in `MANIFEST.json`. Integration procedure:
+These paths share that commit and directory. The manifest retains source/base paths
+and verified hashes. Integration procedure:
 [native-console-integration.md](native-console-integration.md).
 
 - One titlebar: repository conversation crumb + separate navigation chevron,

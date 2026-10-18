@@ -762,16 +762,15 @@ lf task run LOO-427 --explain --json
 
 Inspection reads the open repository windows through macOS automation without
 launching the app, changing focus or acquiring a Session. Window incarnations,
-Work tabs, pane layouts and hidden panes come from the retained workspace owners.
-Repository, Wave and Task tabs remain distinct even at the same checkout. Closing a
-tab hides its workspace without releasing terminals or file drafts; reopening
-restores focus and zoom. Bare Work navigation starts no Session or checkout.
-The last tab can close without starting a repository conversation. Window close
-and app quit still end embedded clients; this is not draft recovery after quit.
+pane layouts and hidden panes come from the retained workspace owners.
+Repository, Wave and Task workspaces remain distinct even at the same checkout.
+Leaving Work retains its terminals, file drafts, focus and zoom. Bare Work navigation
+starts no Session or checkout. App quit still ends embedded clients. Saved pane
+intent and file drafts recover after relaunch; restored shell tabs remain unattached.
 
 Inspection reports the window's outer `layout` with Work keys, split axes and
 ratios, plus each retained workspace's `work`, title, open state and selection.
-Outer hidden Work remains in `workspaces`; its former split position is not retained.
+Hidden Dashboard occurrences retain their split position while visible neighbors are rearranged.
 Execution locations live on contents, not workspace keys or pane receipts.
 There is no outer checkout-slot layout or checkout-split menu. Flow logs use their
 content location: the matching local Work stream, or an owner-pinned read with
@@ -870,6 +869,11 @@ Use **+** beside Dashboards to name and pin a query such as
 `(wave:product state:open) or state:available`. Cmd-K finds saved Dashboards.
 Edit changes only that Dashboard; repository and Wave conversations keep their
 normal views. Unstarted Tasks show their briefs without opening a Session.
+
+`lf desktop view 'state:available'` opens an unsaved Dashboard. Save it to name,
+pin and arrange it. Tasks appear side by side only in Dashboard query results;
+ordinary navigation, including Command-click, selects one destination and retains
+each Task's panes and drafts for its next visit.
 
 Drag tile headers to swap, resize a divider, or hide an occurrence and restore it
 from Hidden. Rust resolves membership and the first visible occurrence; tiles

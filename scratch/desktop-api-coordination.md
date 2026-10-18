@@ -53,7 +53,7 @@ links join it at the repository receiver and do not acquire a provider.
 Focused production tests cover Dashboard/default navigation retaining the Task,
 shared CLI-plan/native membership, exact tabs, delayed two-shell/two-file restoration
 with newer tabs and drafts, stale-write atomicity, later saves, cold restore without
-launch arguments and hidden placement while other splits change. Final command
+launch arguments and retained Dashboard occurrences while other splits change. Final command
 results live only in design.md.
 
 Gate still owns candidate-CLI/Swift combined acceptance with a disposable registry:
@@ -61,6 +61,15 @@ started running/paused/idle, backlog/finished Tasks, empty/child Waves, repeated
 nested queries, incomplete evidence, duplicate promotion, invalid map atomicity,
 departure versus unavailable retention, pin/rename propagation and Linux planning.
 Use actual shared readers; mock external process/network effects only.
+
+Jack Heart resolved the composition question on October 18: side-by-side Tasks
+appear only as query results, and queries are shown only through Dashboards.
+The original generic open-beside acceptance is superseded. Ordinary navigation
+now selects one destination; Command-click splitting and the independent outer
+hide/resize tree are removed. Saved and ad hoc query links share Dashboard
+presentation without requiring every query to be saved or pinned. Dashboard pane
+focus preserves the shared projection; only ordinary navigation replaces it. The remaining scripting-owner boundaries are in
+`design.md`.
 
 LOO-416 owns Process reattachment. Current native Shell launch does not capture
 an lf_process_id in its tab and cold intent has no transport admission handle.

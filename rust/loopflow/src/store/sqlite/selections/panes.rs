@@ -23,7 +23,7 @@ fn validate_owner(conn: &Connection, work: &WorkWorkspaceKey) -> StoreResult<()>
         WorkWorkspaceKind::Wave =>
             "SELECT EXISTS(SELECT 1 FROM wave_addresses w JOIN repository_plans r ON r.repo=w.repo WHERE r.id=?1 AND w.id=?2 AND w.retired_at IS NULL)".into(),
         WorkWorkspaceKind::Task =>
-            format!("SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id JOIN wave_addresses w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE r.id=?1 AND t.id=?2 AND w.retired_at IS NULL AND {})", super::super::children::TASK_VISIBLE),
+            format!("SELECT EXISTS(SELECT 1 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id WHERE t.repository_id=?1 AND t.id=?2 AND w.retired_at IS NULL AND {})", super::super::children::TASK_VISIBLE),
     };
     let belongs: bool =
         conn.query_row(&sql, params![work.repository, work.id], |row| row.get(0))?;

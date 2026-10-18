@@ -34,7 +34,7 @@ struct DesktopPaneControlTests {
             DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
                 selectionKind: "repository", selectionId: repository, reading: "current", reason: nil,
                 task: nil, session: nil, supportedOperations: ["state"], workspaces: registry.inspect(),
-                layout: registry.layout?.inspection, view: nil, opening: nil)
+                layout: registry.layout, view: nil, opening: nil)
         }, controlPane: { _ in throw RegistryQueryError("No mutation expected") },
         readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
         let window = try #require(router.inspect().windows.first)
@@ -42,31 +42,6 @@ struct DesktopPaneControlTests {
         #expect(window.layout == .workspace(work: key))
         #expect(window.workspaces.first?.work.repository == plan)
         #expect(window.path != window.repository)
-    }
-
-    @Test("State reads outer geometry and retained inner identity without acquiring surfaces")
-    func stateRetainsOuterGeometry() throws {
-        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
-        let first = registry.open(workKey, title: "First", location: identity)
-        first.multiplexer.load(sessionId: "first", location: identity)
-        let secondKey = WorkWorkspaceKey(repository: repository, kind: .task, id: "second")
-        let second = registry.open(secondKey, title: "Second", location: identity, besideFocused: true)
-        second.multiplexer.load(sessionId: "second", location: identity)
-        registry.resize(between: workKey, and: secondKey, ratio: 0.7)
-        let router = WorkLinkRouter(), window = UUID()
-        register(router, window: window, registry: registry)
-        let before = router.inspect()
-        let outer = try #require(before.windows.first?.layout)
-        #expect(outer == .split(axis: .vertical, ratio: 0.7,
-            first: .workspace(work: workKey), second: .workspace(work: secondKey)))
-        let decoded = try JSONDecoder().decode(DesktopInspection.self, from: JSONEncoder().encode(before))
-        #expect(decoded == before)
-        #expect(registry.inspect().allSatisfy { $0.layout.surface == nil })
-        let retained = second.multiplexer.layout
-        registry.hide(secondKey)
-        #expect(router.inspect().windows.first?.layout == .workspace(work: workKey))
-        #expect(second.multiplexer.layout == retained)
-        #expect(registry.inspect().contains { $0.work == secondKey && !$0.isOpen })
     }
 
     @Test("A Task starts with Files at the golden ratio; switching preserves resized and closed panes")
@@ -92,8 +67,12 @@ struct DesktopPaneControlTests {
         #expect(store.layout == retained)
         workspace.closePane(browser.id)
         workspace.prepareTaskPanes()
-        #expect(store.layout.allPanes.count == 2)
+        #expect(store.layout.allPanes.count == 1)
+        #expect(workspace.filesPane == nil)
         #expect(store.layout.pane(for: main.id) == main)
+        workspace.toggleFiles()
+        #expect(store.layout.allPanes.count == 2)
+        #expect(workspace.filesPane?.content == browser.content)
     }
 
     @Test("Companion switches retain the shell and file draft; close retires the hidden shell")
@@ -140,8 +119,8 @@ struct DesktopPaneControlTests {
             inspect: { repository, incarnation in
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
-                    task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "split", "move", "resize", "zoom"],
-                    workspaces: registry.inspect(), layout: registry.layout?.inspection, view: nil, opening: nil)
+                    task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "move", "resize", "zoom"],
+                    workspaces: registry.inspect(), layout: registry.layout, view: nil, opening: nil)
             }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
     }
 

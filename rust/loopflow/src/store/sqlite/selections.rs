@@ -830,7 +830,27 @@ mod tests {
             };
             assert!(store.pane_layout(&layout.work).unwrap().is_none());
             let saved = store.save_pane_layout(&layout).unwrap();
-            assert_eq!(store.pane_layout(&layout.work).unwrap(), Some(saved));
+            assert_eq!(
+                store.pane_layout(&layout.work).unwrap(),
+                Some(saved.clone())
+            );
+            if layout.work.kind == WorkWorkspaceKind::Task {
+                // Leaving a Project changes membership, not the Task's pane owner.
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE tasks SET project_id=NULL WHERE id=?1",
+                        [&layout.work.id],
+                    )
+                    .unwrap();
+                assert_eq!(
+                    store.pane_layout(&layout.work).unwrap(),
+                    Some(saved.clone())
+                );
+                assert_eq!(store.save_pane_layout(&saved).unwrap().revision, 2);
+            }
             let revision = store.revisions().unwrap();
             layout.work.repository = other.to_string();
             assert!(matches!(

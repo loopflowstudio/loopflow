@@ -8,8 +8,7 @@ import Testing
 @MainActor
 struct DashboardWorkspaceTests {
     @Test func dashboardsReuseWorkAndKeepRepositoryNavigation() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let plan = try JSONDecoder().decode(WorkViewPlan.self, from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/view_plan.json")))
+        let plan = try JSONDecoder().decode(WorkViewPlan.self, from: loadFixtureData("view_plan.json"))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Offline") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         model.bindWorkspaces(registry, repository: plan.repository)
@@ -33,8 +32,7 @@ struct DashboardWorkspaceTests {
     }
 
     @Test func refreshedPlansDoNotReplaceOrUnhideRetainedPrimaryPanes() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let fixture = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/view_plan.json"), encoding: .utf8)
+        let fixture = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let bytes = Data(fixture.replacingOccurrences(of: "\"primary_session\": null", with: "\"primary_session\": \"primary\"").utf8)
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Offline") }, repoPath: "/repo")
@@ -52,43 +50,87 @@ struct DashboardWorkspaceTests {
         #expect(work.multiplexer.layout.allPanes.count == 1)
     }
 
-    @Test func hiddenWorkRetainsPlacementWhileVisibleSplitsChange() throws {
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+    @Test func dashboardFocusPreservesQueryGeometryAndRetainedWork() throws {
         let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
-        let c = WorkWorkspaceKey(repository: "repo", kind: .task, id: "c")
-        registry.open(a, title: "A", location: nil)
-        registry.open(b, title: "B", location: nil, besideFocused: true)
-        registry.resize(between: a, and: b, ratio: 0.7)
-        registry.hide(a)
-        registry.open(c, title: "C", location: nil, besideFocused: true)
-        registry.resize(between: b, and: c, ratio: 0.6)
-        registry.open(a, title: "A", location: nil)
-        #expect(registry.layout == .split(.vertical, .workspace(a),
-            .split(.vertical, .workspace(b), .workspace(c), 0.6), 0.7))
+        let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
+        let tree = WorkArrangementTree.split(axis: .vertical, ratio: 0.7,
+            first: .member(members[0]), second: .member(members[1]))
+        let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo",
+            observedAt: 0, selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
+            resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
+            arrangement: WorkArrangement(tree: tree, hidden: [], mode: .touched),
+            projection: WorkArrangementProjection(visible: tree, suppressed: []),
+            contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        model.bindWorkspaces(registry, repository: "repo")
+        model.applySelectionPlans([plan], reason: "")
+        model.selectDashboard("review")
+        let workspace = try #require(registry.retained(b))
+        let pane = workspace.multiplexer.focusedPane
+        let window = UUID()
+        let target = DesktopPaneTarget(repository: "repo", window: window.uuidString, work: b,
+            pane: pane.id, incarnation: pane.incarnation, tab: nil)
+        _ = try registry.controlPane(.init(target: target, action: .focus), model: model)
+        let state = model.inspectDesktop(repository: "repo", window: window, workspaces: registry)
+        #expect(state.selectionKind == "dashboard")
+        #expect(state.view == plan)
+        #expect(registry.selectedWork == b)
+        #expect(state.layout == .split(axis: .vertical, ratio: 0.7,
+            first: .workspace(work: a), second: .workspace(work: b)))
+        #expect(try JSONDecoder().decode(DesktopWindowInspection.self, from: JSONEncoder().encode(state)) == state)
+        #expect(registry.inspect().allSatisfy { $0.layout.surface == nil })
+        model.select(a.reference)
+        #expect(registry.openWork == [a])
+        model.goBack()
+        #expect(registry.openWork == [a, b])
+        #expect(registry.retained(b) === workspace)
+        #expect(workspace.multiplexer.focusedPane == pane)
     }
 
-    @Test func liveViewUsesTheSamePlanWithoutAcquiringWork() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let bytes = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/view_plan.json"))
+    @Test(arguments: [true, false])
+    func liveQueriesUseDashboardsWithoutAcquiringWork(saved: Bool) async throws {
+        let fixture = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
+        let bytes = Data((saved ? fixture : fixture
+            .replacingOccurrences(of: "\"dashboard_id\": \"picked\"", with: "\"dashboard_id\": null")
+            .replacingOccurrences(of: "\"saved_revision\": 3", with: "\"saved_revision\": null")).utf8)
+        let expression = saved ? "query:picked" : "state:backlog or task:LOO-497"
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: bytes)
         let query = RegistryQuery { args, _ in
-            if args == ["desktop", "view", "query:picked", "--plan", "--json"] { return String(decoding: bytes, as: UTF8.self) }
+            if args == ["desktop", "view", expression, "--plan", "--json"] { return String(decoding: bytes, as: UTF8.self) }
             if args.starts(with: ["desktop", "layout"]) { return "null" }
             throw RegistryQueryError("Unexpected execution")
         }
         let model = WorkModel(query: query, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         model.bindWorkspaces(registry, repository: plan.repository)
-        let link = try #require(URL(string: "loopflow://open?repo=/repo&view=query:picked"))
+        model.navigation.palette = .search
+        let encoded = try #require(expression.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed))
+        let link = try #require(URL(string: "loopflow://open?repo=/repo&view=\(encoded)"))
         await model.receiveWorkLink(link)
         let state = model.inspectDesktop(repository: plan.repository, window: UUID(), workspaces: registry)
         #expect(state.selectionKind == "dashboard")
-        #expect(state.selectionId == "picked")
+        #expect(state.selectionId == (saved ? "picked" : nil))
+        #expect(model.navigation.showsSelection)
+        #expect(model.navigation.palette == nil)
         #expect(state.view == plan)
         #expect(state.opening?.status == .usable)
         #expect(registry.openWork.count == 1)
         #expect(registry.inspect().allSatisfy { $0.layout.surface == nil })
+        model.select(nil)
+        #expect(!model.navigation.showsSelection)
+        #expect(registry.openWork.count == 1)
+        #expect(registry.selectedWork?.kind == .repository)
+        model.navigation.palette = .search
+        model.goBack()
+        #expect(model.navigation.showsSelection)
+        #expect(model.navigation.palette == nil)
+        #expect(model.selectedViewPlan == plan)
+        model.goForward()
+        #expect(registry.selectedWork?.kind == .repository)
+        model.goBack()
+        #expect(model.selectedViewPlan == plan)
     }
 
     @Test func delayedRestoreRetainsNewTabsAndDraftsAndStaleSaveDoesNotReplaceThem() async throws {
@@ -155,9 +197,14 @@ struct DashboardWorkspaceTests {
         try await server.release()
         try await eventually { !workspace.isRestoringIntent }
         #expect(workspace.multiplexer.shell(original.id)?.command == nil)
+        let reload = Task { await workspace.loadPaneIntent() }
+        await server.waitForRead()
+        try await server.release()
+        await reload.value
+        #expect(await server.saved.revision == 1)
         workspace.multiplexer.newShell(command: ["new-tab"], location: source.location)
         let added = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
-        await workspace.savePaneIntent()
+        try await eventually { workspace.portableLayout().revision == 2 }
         let durable = await server.saved
         #expect(durable.revision == 2)
         #expect(durable == workspace.portableLayout())

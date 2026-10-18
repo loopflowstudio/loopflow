@@ -4,14 +4,8 @@ import Testing
 
 @Suite("Shared Work selection")
 struct WorkSelectionTests {
-    private func fixture(_ name: String) throws -> Data {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        return try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/\(name).json"))
-    }
-
     @Test func viewPlanRetainsOccurrencesAndMissingPrimaryWithoutExecution() async throws {
-        let text = String(decoding: try fixture("view_plan"), as: UTF8.self)
+        let text = String(decoding: try loadFixtureData("view_plan.json"), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
             guard args == ["desktop", "view", "state:backlog", "--plan", "--json"], cwd == "/repo" else {
                 throw RegistryQueryError("Unexpected command while planning")
@@ -31,7 +25,7 @@ struct WorkSelectionTests {
     }
 
     @Test func queryPlansArriveWithTheSharedPlanningFrame() throws {
-        let frames = try JSONDecoder().decode([WorkFrame].self, from: fixture("work_frame"))
+        let frames = try JSONDecoder().decode([WorkFrame].self, from: loadFixtureData("work_frame.json"))
         guard case .planning(let planning?) = frames[0].content else {
             Issue.record("Missing planning frame"); return
         }
@@ -40,7 +34,7 @@ struct WorkSelectionTests {
     }
 
     @Test func dashboardKeepsIdentitySeparateFromItsQuery() async throws {
-        let bytes = try fixture("dashboard")
+        let bytes = try loadFixtureData("dashboard.json")
         let query = RegistryQuery { _, _ in String(decoding: bytes, as: UTF8.self) }
         let dashboard = try await query.editDashboardQuery(
             id: "picked", expression: "state:backlog", revision: 2, repoPath: "/repo"
@@ -53,7 +47,7 @@ struct WorkSelectionTests {
     }
 
     @Test func portablePaneRecordRetainsDraftAndZoomSeparatelyFromFocus() throws {
-        let bytes = try fixture("pane_layout")
+        let bytes = try loadFixtureData("pane_layout.json")
         let layout = try JSONDecoder().decode(WorkPaneLayout.self, from: bytes)
         #expect(layout.drafts.first?.text == "unsaved edits")
         #expect(layout.drafts.first?.baseContent == "base")

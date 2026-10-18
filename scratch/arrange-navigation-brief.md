@@ -1,5 +1,12 @@
 # Arrange direction — October 16, 2026
 
+> October 18 accepted correction — Jack Heart: side-by-side Tasks appear only as
+> query results, and queries are shown only through Dashboards. The historical
+> generic `open <ref|query>` beside-current-selection requirement below is
+> superseded. Ordinary navigation selects one destination. Current accepted
+> scope and remaining work live in `scratch/design.md`.
+
+
 Jack's supplied design conversation with Claude is the accepted product direction;
 implementation choices and the questions below remain draft. This condensed
 brief is not new approval. The complete original and separate annotated transcript

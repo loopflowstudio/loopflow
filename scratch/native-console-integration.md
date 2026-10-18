@@ -8,14 +8,15 @@ The original integration procedure is preserved at
 
 ## Materialized handoff — October 17
 
-`scratch/history/loo489-console-source-2026-10-17/MANIFEST.json` lists 108 exact
-changed source files from LOO-489 at HEAD
-`ac973064c691581610fe563364ddf1a4f239798c`; a second read verified every hash.
-`source/<path>` contains the final source and `base/<path>` its HEAD version.
-`source_snapshot`/`base_snapshot` name exact paths; Markdown is stored as `.md.txt`
-to avoid ambient injection. Deletions are explicit. The source checkout/index
-were untouched. The navigation contract, demo notes and keyboard map accompany
-the snapshot; `navigation-console-contract.md` records the accepted navigation.
+The complete verified handoff is preserved in git at
+`8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17/`.
+`refs/loopflow/evidence/loo-497-integrated-console` retains that commit.
+Its `MANIFEST.json` lists 108 changed files from LOO-489 at
+`ac973064c691581610fe563364ddf1a4f239798c`, their source/base copies and SHA256
+hashes verified by a second read. The snapshot also retains navigation, demo,
+keyboard and earlier LOO-497 notes. Use `git show COMMIT:PATH` to read them.
+The integrated production owners now replace these working-tree copies;
+`navigation-console-contract.md` retains the accepted navigation contract.
 
 At capture, LOO-489 pursue `72927d43-5e96-48ac-b1a9-134b4836a708` had completed at
 demo, with no live Flow. The snapshot was ahead of committed ancestry. It supplied

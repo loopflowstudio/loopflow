@@ -1,6 +1,6 @@
 # LOO-497 — Dashboards and shared Desktop APIs
 
-## Accepted direction — October 17, 2026
+## Accepted direction — October 18, 2026
 
 Jack Heart accepted the query-view prototype for implementation on October 16.
 On October 17 Jack specified a distinct Dashboard type (name provisional) that
@@ -8,6 +8,13 @@ reuses Task workspaces, and excluded replacing repository/Wave defaults. That
 correction supersedes the earlier Work/default-view binding proposal. Jack also
 accepted one Shell pane and one Files pane per Task, with independent tabs inside
 each tool; the detailed contract below supersedes shell-per-pane creation.
+On October 18 Jack Heart clarified: for now, side-by-side Tasks appear only as
+query results, and queries are shown only through Dashboards. This supersedes the
+original generic `open <ref|query>` beside-current-selection requirement. Ordinary
+navigation selects one destination; do not add an outer split between destinations.
+Ensure live query entry points use Dashboard presentation, including an ad hoc query;
+this decision does not require saving or pinning every query.
+
 Publication is for demo review; merge and Task completion remain separate.
 Complete pre-compression notes are preserved at
 `refs/loopflow/evidence/loo-497-before-intent-compress:scratch/design.md`
@@ -39,7 +46,8 @@ supersede the October 17 correction.
   requires every occurrence exactly once, including hidden members. First visible
   Work occurrence wins in tree order; focus cannot choose the winner. Hide/restore
   retains current edits and promotes duplicates without creating content.
-- Waiting Tasks sort first and receive twice the automatic area. Structural edits
+- Waiting Tasks sort first; the implemented 2:1 automatic area remains a provisional
+  weighting choice. Structural edits
   freeze order/proportions; arrivals append. Incomplete reads preserve existing
   members/geometry; confirmed departures prune. Missing refs are unavailable
   evidence; cycles, invalid IDs and invalid layouts are errors.
@@ -72,7 +80,7 @@ hide/restore. Product watch demonstrates overlapping queries; explicit unstarted
 Tasks show briefs. The study adds no production lifecycle or query evaluator.
 These new Dashboard controls are reviewable proposals, not a completed native demo.
 
-Console source is captured under `scratch/history/loo489-console-source-2026-10-17`.
+The integrated Console source snapshot is preserved at `8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17`.
 The original 497 work is checkpointed at `16c1b19c92`; committed Console ancestry
 is merged at `6e63af826e`. Snapshot changes are reconciled through existing owners.
 
@@ -102,7 +110,7 @@ layout reads rather than repeated observation plans.
 
 `work_pane_layouts` remains keyed solely by Work. Independent Dashboards resolve
 the same pane revision/face and recover the same Task draft record; neither hiding
-nor deleting a Dashboard owns or deletes the Task's content. Swift WorkLayout/MultiplexerStore remain the live owners. Native destinations
+nor deleting a Dashboard owns or deletes the Task's content. Swift SessionsWorkspaceRegistry/MultiplexerStore remain the live owners. Native destinations
 consume the shared plans; navigation and provider lifetime keep their existing owners.
 
 The accepted tab payload now spans Rust `PaneIntent`, Swift `WorkPaneIntent`,
@@ -137,6 +145,44 @@ unavailable locations retain their recovery text. Matching native pane and tab
 objects retain their incarnations. Cold restore carries no shell launch command.
 
 ## Delete — do not maintain
+
+October 18 cut removed `besideFocused` navigation, Command-click outer splitting,
+`SessionsWorkspaceRegistry.hide`/`resize` and its hidden outer tree,
+`WorkModel.hideWorkspace`, `WorkLayoutView`, and `WorkLayout.visible`/`resizing`.
+Their exclusive outer-split tests are removed; Task workspace/draft identity,
+pane controls and chrome remain covered through ordinary navigation and Dashboard plans.
+Dashboard focus preserves the query projection; opening ordinary Work selects
+one workspace. Named and unsaved live query links share Dashboard rendering.
+Ad hoc opening dismisses Find Work and supersedes pending Task links, matching
+saved Dashboard entry. Window geometry is now readback only; Dashboard arrangement
+continues through the shared revisioned writer. Review retained a single-destination
+container so window and workspace accessibility identifiers remain separately
+reachable; corner-clearance checks cover both axes and themes.
+
+Removed the remaining `WorkLayout` mirror and its recursive inspection conversion;
+the registry keeps `DesktopWorkLayoutInspection` directly. Canonical Work identity
+rewrites still preserve visible ordering and focus. Saved and ad hoc Dashboards
+now share `selectDestination` for history, pending-opening cancellation, palette
+dismissal and presentation, including Back/Forward. Separate entry paths had
+already drifted: returning to an ad hoc Dashboard left Find Work open.
+Review also removed stale claims that Dashboards were deferred or that ordinary
+Work had an independent hide tree. The focused suite exposed a stale Files
+assertion: preparation must preserve an explicit close; only the tool toggle
+reopens it. The surviving test now exercises both steps.
+
+Removed the integrated `scratch/history/loo489-console-source-2026-10-17` copies
+from the working diff; their exact commit/path is above. The prototype and
+accepted contract remain. Production code is the surviving implementation.
+
+Pane ownership reads `tasks.repository_id` directly, retaining optional Project/
+Wave visibility checks. Leaving a Project must not orphan a Task's saved panes.
+The native persistence observer starts once after the first successful read;
+explicit reloads no longer add observation chains or force writes merely because
+tools exist. Compare the restored intent with the saved record once. Dashboard lookup
+reads the planning frame directly rather than allocating a filtered catalog and
+passing through a second presentation wrapper. Shared selection and Dashboard
+tests reuse the DTO fixture loader. Review corrected stale docs about hidden
+placement and cold draft recovery; Process reattachment remains separate.
 
 Removed in the Dashboard cut: `SelectionBinding`, `binding_in`, `default_owner`,
 `selection_binding`, `bind_selection`, `DesktopCommand::Bind`, its dispatch/schema,
@@ -181,8 +227,8 @@ runtime checks remain with gate/demo.
 
 Console integration removed the older `ViewPlan`/`ViewMember` and separate
 selections stream; `PlanningPart.selections` owns the full shared plans. The
-leaf-dropping `SessionsWorkspaceRegistry.hide` is replaced with a retained tree
-plus hidden Work. Console working-slot predicates remain: Jack's accepted default
+intermediate outer-workspace hide tree is removed by the October 18 cut; Dashboard
+hiding stays in the shared retained occurrence tree. Console working-slot predicates remain: Jack's accepted default
 navigation intentionally differs from Dashboard membership. Pane hide/focus/move
 commands still operate on exact native panes; Dashboard membership edits use the
 revisioned `arrange` API. These are distinct scopes, not competing authorities.
@@ -201,7 +247,45 @@ occurrences. Opening generations fence late reads. Named plans refresh through
 the planning frame; unsaved queries re-read the shared planner when it changes.
 The CLI result schema includes passive plans and live opening receipts.
 
-## Remaining verification and transport
+## Reconciliation — October 18
+
+The integrated release baseline is `2839e623d9` (v0.14.6), including LOO-505's
+optional Task membership. Saved pane ownership now follows the Task's repository;
+detaching from a Project retains the same record and permits the next revision.
+The preceding compress pass covers that repair. Product memory had lost upstream
+LOO-505 and LOO-503 decisions during integration; those accepted sections and
+Workflow-default corrections are restored without replacing the Dashboard/tab
+decisions. Product has no child memory directories in this checkout.
+
+Source review confirms application persistence and Dashboard navigation are present.
+The earlier missing-caller claim is obsolete; portable recovery still establishes
+neither live Process attachment nor mounted continuity. The anonymous-query
+read-only arrangement choice in `questions.md` remains an implementation assumption:
+the current UI requires saving before hide/swap/resize. Jack's October 18 direction
+permits unsaved query presentation but does not settle whether arrangement must
+also work before saving. That review choice remains open; it is not accepted
+removal of arrangement parity.
+
+This reconciliation follows the current pursue Flow. Product memory now includes
+the October 18 composition decision and removes its stale outer-slot lifecycle
+description. No child memory directories exist in the selected Product scope.
+The current entry/history and pane ownership code supports the plan; this pass
+changes authored context only and reuses the preceding focused results.
+
+## Remaining implementation, verification and transport
+
+The October 18 composition correction is implemented. Saved and ad hoc live query
+links use Dashboard presentation. Ordinary repository/Wave/Task navigation selects
+one destination, including Command-click. Removed the independent outer-split,
+hide and resize path. Dashboard clicks and exact pane focus preserve query geometry;
+entering a Task and returning retains its workspace and draft. Headless `view --plan`
+and the Console's repository conversation/Wave inventory remain unchanged.
+
+Scripting parity also remains bounded by the existing owners: exact text/key/read
+and revisioned full-map edits exist; readiness/event observation and any additional
+wait/run-wait behavior remain with LOO-453. Opening receipts report launch acceptance,
+not provider readiness or Process exit. Those outcomes have not been canceled by
+this integration, and LOO-498 still owns external-host materialization.
 
 Gate owns broader combined native/Linux acceptance; demo owns rendered continuity.
 The concrete LOO-416 dependency is cold Shell attachment: existing native launches
@@ -239,7 +323,7 @@ interpretation; CLI coverage creates through `query:backlog` then reopens it.
 Production application tests now cover delayed restoration after newer Shell/Files
 tabs and draft edits, stale writes preserving live and durable state, cold shells
 without commands, later edits persisting, and Dashboard/default navigation retaining
-one Task owner. Review also repaired hidden outer placement, URL space decoding
+one Task owner. Review also repaired URL space decoding
 and observation refresh revealing a deliberately collapsed primary pane.
 Gate owns the affected suites and combined headless native acceptance described
 in `desktop-api-coordination.md`, including Linux planning. Demo judges rendered
@@ -248,13 +332,13 @@ restart/restore A, preserving geometry and the same Task workspace while the Wav
 still shows its built-in default. Unavailable Work must not appear deleted; failed
 saves stay visible and stale writes preserve newer state.
 
-Check (October 17, implement): `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests|ConsoleWorkspaceTests|ToolTabTests|WorkSelectionTests|DTOFixtureTests/desktop|WorkspacePanesTests' -Xswiftc -gnone` — build and 25 tests pass; `uv run --no-sync python scripts/test_network.py cargo test -p loopflow --lib store::sqlite::selections::tests < /dev/null` — 14 pass; same runner with `--test integration cli_discovery::desktop` / `cli_discovery::structured_help_describes_pane_creation_and_read_results_without_desktop` / `dto_fixtures::desktop` — 4 / 1 / 6 pass; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context` — pass/within limits. Gate owns broader native/Linux acceptance; demo owns rendered continuity.
+Check (October 18, realign): `git diff --check`, `lf context` — pass/within limits; unchanged code reuses compress's `scripts/test_desktop.sh --filter 'DashboardWorkspaceTests|WorktreeWorkspaceTests|DesktopPaneControlTests|WorkNavigationTests/singleDestinationRetainsWorkspaces' -Xswiftc -gnone` (app/test build and 38 headless tests passed), formatting, selection-store 14-test and Clippy passes. Broader native/Linux acceptance stays gate-owned; rendered continuity stays demo-owned.
 
 ## Handoff status
 
 The verified local 489 snapshot and current integration directive replace the
 previous missing-handoff blocker. Full earlier design/readback is retained in
-`history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
+`8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
 LOO-416 attachment and cross-launch behavior still require explicit evidence;
 portable restoration alone cannot prove Process reattachment.
 

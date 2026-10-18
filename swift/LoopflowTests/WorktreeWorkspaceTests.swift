@@ -82,8 +82,9 @@ struct WorktreeWorkspaceTests {
             WorkWorkspaceKey(repository: "repo", kind: .wave, id: "wave"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "one"),
             WorkWorkspaceKey(repository: "repo", kind: .task, id: "two")]
-        for key in keys { registry.open(key, title: key.id, location: location, besideFocused: true) }
-        #expect(registry.openWork == keys)
+        for key in keys { registry.open(key, title: key.id, location: location) }
+        #expect(registry.openWork == [keys[3]])
+        #expect(Set(registry.keys) == Set(keys))
         let first = try #require(registry.retained(keys[2]))
         let shell = try #require(try first.newShell())
         let document = first.files(issue: "ONE", cwd: "/repo").document("draft.md")
@@ -94,11 +95,10 @@ struct WorktreeWorkspaceTests {
         #if GHOSTTY_ENABLED
         let view = registry.surfaces.view(for: try #require(shell.terminal))
         #endif
-        registry.hide(keys[2])
         #expect(!registry.openWork.contains(keys[2]))
         #expect(registry.retained(keys[2]) === first)
-        #expect(registry.open(keys[2], title: "Renamed Task", location: nil, besideFocused: true) === first)
-        #expect(registry.openWork.count == 4)
+        #expect(registry.open(keys[2], title: "Renamed Task", location: nil) === first)
+        #expect(registry.openWork == [keys[2]])
         #expect(first.title == "Renamed Task")
         #expect(first.multiplexer.layout == layout)
         #expect(first.multiplexer.focusedPaneId == selected)
@@ -107,7 +107,7 @@ struct WorktreeWorkspaceTests {
         #if GHOSTTY_ENABLED
         #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
         #endif
-        for key in keys { registry.hide(key) }
+        registry.clearPresentation()
         #expect(registry.selectedWork == nil)
         #expect(registry.openWork.isEmpty)
         #expect(first.multiplexer.layout == layout)

@@ -220,11 +220,11 @@ fn prepare_prompt(
 fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
     let (harness, variant) = parse_agent(agent);
     match harness.as_str() {
-        "claude" | "codex" => return Ok(()),
+        "claude" | "codex" | "pi" => return Ok(()),
         "opencode" => {}
         _ => {
             return Err(CoreError::ExecutionFailed(format!(
-                "unsupported agent harness '{harness}': use 'claude', 'codex', or 'opencode'"
+                "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
             )));
         }
     }
@@ -649,7 +649,7 @@ Test skill body.
         let _name =
             crate::lf::commands::flow::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
-        for agent in ["claude", "codex", "opencode"] {
+        for agent in ["claude", "codex", "opencode", "pi"] {
             for surface in [
                 Surface::Cli,
                 Surface::Mac,

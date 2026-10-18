@@ -3606,10 +3606,14 @@ pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
     if !is_api_key_env_name(&env_name) {
         return true;
     }
-    if normalize_program_name(program) != "opencode" {
-        return false;
+    match normalize_program_name(program).as_str() {
+        "pi" => matches!(
+            env_name.as_str(),
+            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
+        ),
+        "opencode" => matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY"),
+        _ => false,
     }
-    matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY")
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {

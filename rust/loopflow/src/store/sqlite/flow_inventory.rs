@@ -458,10 +458,21 @@ mod tests {
                 .unwrap();
             }
         }
-        let (session, input, _) = store.process_input(&step).unwrap().unwrap();
+        for process in [&step, &transport, &served] {
+            let (session, input, _) = store.process_input(process).unwrap().unwrap();
+            assert_eq!(
+                (session.as_str(), input.as_str()),
+                ("step-session", "step-input")
+            );
+        }
+        let (session, input, _) = store.process_input(&nested).unwrap().unwrap();
         assert_eq!(
             (session.as_str(), input.as_str()),
-            ("step-session", "step-input")
+            ("nested-session", "nested-input")
+        );
+        assert_eq!(
+            store.process_input(&crate::id::LfProcessId::new()).unwrap(),
+            None
         );
     }
 

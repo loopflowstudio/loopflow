@@ -2866,17 +2866,7 @@ async fn reconcile_task_pr_observation(
     let previous = pr.clone();
     let repo = match checkout {
         Some(path) => path,
-        None => store
-            .sqlite
-            .repository_path(&task.repository_id)
-            .map_err(task_error)?
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                task_error(format!(
-                    "Task {} has no checkout or registered repository to observe its PR from",
-                    task.identifier
-                ))
-            })?,
+        None => repository_for_task(store, task)?,
     };
     let observation = match number {
         Some(number) => crate::ops::pr::observe_pr_by_number(&repo, number, &pr.branch, freshness),

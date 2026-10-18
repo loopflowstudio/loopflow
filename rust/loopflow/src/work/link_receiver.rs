@@ -316,7 +316,7 @@ fn launch_services(expression: &str) -> Option<PathBuf> {
     (output.status.success() && !path.is_empty()).then(|| PathBuf::from(path))
 }
 
-fn application_for_bundle(bundle: &str) -> Option<PathBuf> {
+pub(crate) fn application_for_bundle(bundle: &str) -> Option<PathBuf> {
     launch_services(&format!(
         "$.NSWorkspace.sharedWorkspace.URLForApplicationWithBundleIdentifier('{bundle}')"
     ))

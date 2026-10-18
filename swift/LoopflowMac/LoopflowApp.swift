@@ -196,14 +196,14 @@ struct LoopflowApp: App {
         case "sessions" where url.path.isEmpty:
             NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
-            Task {
+            taskLinks.receiveAddress { isLatest in
                 do {
                     let query = SessionFixture.query ?? RegistryQueryLocal.shared
                     let resolved = try await query.workLink(url)
                     let link = LinkedWork(resolved)
                     var path = resolved.target.repositoryPath
                     if case .task(let task) = link, let repo = task.repo { path = repo }
-                    try await openRepository(path, link: link, address: resolved.url)
+                    try await openRepository(path, link: link, address: resolved.url, raises: isLatest)
                 } catch { reportOpeningError(error) }
             }
         }
@@ -225,9 +225,11 @@ struct LoopflowApp: App {
     }
 
     @MainActor
-    private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil) async throws {
+    private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil,
+                                raises: @MainActor () -> Bool = { true }) async throws {
         let query = SessionFixture.query ?? RegistryQueryLocal.shared
-        let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query) { workspace in
+        let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query,
+                                                           raises: raises) { workspace in
             openWindow(id: "workspace", value: workspace)
         }
         try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))

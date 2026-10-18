@@ -156,11 +156,24 @@ struct Resolved {
     /// The Work's current primary conversation, read without admitting one.
     primary: Option<String>,
     execution_machine: Option<String>,
+    /// Why the Task's execution owner could not be read; opening refuses.
+    execution_unavailable: Option<String>,
+    /// Where the Task stands, such as `Available · Design`; links omit it.
+    standing: Option<String>,
 }
 
 impl Resolved {
     fn conversation(&self) -> Option<&str> {
         self.session.as_deref().or(self.primary.as_deref())
+    }
+
+    /// What a host names the destination it creates: the label, then where
+    /// the Task stands. Destinations are found by their IDs, never this name.
+    fn destination_name(&self) -> String {
+        match &self.standing {
+            Some(standing) => format!("{} · {standing}", self.label),
+            None => self.label.clone(),
+        }
     }
 
     fn connect_argv(&self, lf: &str) -> Vec<String> {
@@ -412,6 +425,11 @@ fn describe(
         }
         _ => None,
     };
+    // A link still prints; opening never falls back to this Machine.
+    let execution_unavailable = match (&task, &context.execution_machine) {
+        (Some(_), ContextFact::Unavailable { reason }) => Some(reason.clone()),
+        _ => None,
+    };
     let registered = registered(store)?;
     let canonical = repository_path
         .canonicalize()
@@ -458,6 +476,14 @@ fn describe(
         })
         .transpose()?
         .flatten();
+    let standing = match (store, &task) {
+        (Some(store), Some(task)) => crate::terminal_title::standing(
+            &store.sqlite,
+            &task.id,
+            session.as_deref().or(primary.as_deref()),
+        )?,
+        _ => None,
+    };
     let label = match (&task, &wave) {
         (Some(task), _) => format!("{} · {}", task.identifier, task.title),
         (None, Some(wave)) => format!("{short_name} · {wave} Wave"),
@@ -474,6 +500,8 @@ fn describe(
         session_cwd,
         primary,
         execution_machine,
+        execution_unavailable,
+        standing,
     })
 }
 
@@ -828,9 +856,17 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lf".into());
     let mut receipts: Vec<OpenReceipt> = Vec::new();
+    let mut desktop = DesktopBatch::default();
     for (index, target) in targets.iter().enumerate() {
         let focus = index + 1 == targets.len();
-        receipts.push(open_one(target, route, focus, in_place, &lf));
+        desktop.next = index;
+        receipts.push(open_one(target, route, focus, in_place, &lf, &mut desktop));
+    }
+    // Desktop addresses still unsent when the final item went elsewhere.
+    let _ = desktop.send(None, false);
+    for (index, reason) in desktop.failed {
+        receipts[index].status = OpenStatus::Failed;
+        receipts[index].reason = Some(reason);
     }
     // Raise one destination: the last that opened, when the final item did not.
     if receipts
@@ -850,13 +886,71 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
     receipts
 }
 
+/// A batch's Desktop addresses, sent in one Launch Services request with the
+/// final item last. Desktop opens what it receives in arrival order and raises
+/// only the latest arrival's window, so the batch changes focus once.
+#[derive(Default)]
+struct DesktopBatch {
+    installed: Option<bool>,
+    /// The receipt index of the item being opened.
+    next: usize,
+    /// Receipt index and address of each item waiting to be sent.
+    waiting: Vec<(usize, String)>,
+    failed: Vec<(usize, String)>,
+}
+
+impl DesktopBatch {
+    fn installed(&mut self) -> bool {
+        *self.installed.get_or_insert_with(|| {
+            crate::work::link_receiver::application_for_bundle(DESKTOP_BUNDLE).is_some()
+        })
+    }
+
+    /// Send every waiting address, then `last`; only a focused request activates Desktop.
+    fn send(&mut self, last: Option<&str>, focus: bool) -> Result<(), RouteError> {
+        if self.waiting.is_empty() && last.is_none() {
+            return Ok(());
+        }
+        let mut command = Command::new("open");
+        command.args(["-b", DESKTOP_BUNDLE]);
+        if !focus {
+            command.arg("-g");
+        }
+        command.args(self.waiting.iter().map(|(_, url)| url));
+        command.args(last);
+        let sent = run_host(command, "Launch Services").map(drop);
+        let waiting = std::mem::take(&mut self.waiting);
+        if let Err(error) = &sent {
+            // Waiting items cannot retry elsewhere: the request may have reached Desktop.
+            let reason = format!("{}: {}", OpenHost::Desktop.label(), error.reason());
+            self.failed.extend(
+                waiting
+                    .into_iter()
+                    .map(|(index, _)| (index, reason.clone())),
+            );
+        }
+        sent
+    }
+}
+
 fn open_one(
     target: &Resolved,
     route: &OpenRoute,
     focus: bool,
     in_place: bool,
     lf: &str,
+    desktop: &mut DesktopBatch,
 ) -> OpenReceipt {
+    if let Some(reason) = &target.execution_unavailable {
+        return target.receipt(
+            None,
+            None,
+            OpenStatus::Failed,
+            Some(format!(
+                "Task execution location unavailable: {reason}. Nothing was opened."
+            )),
+        );
+    }
     // Lookup and creation for one Work are serialized across processes.
     let mut opening = match Opening::lock(target) {
         Ok(opening) => opening,
@@ -899,7 +993,7 @@ fn open_one(
             }
         }
         let attempt = match host {
-            OpenHost::Desktop => open_desktop(target, focus),
+            OpenHost::Desktop => open_desktop(target, focus, desktop),
             OpenHost::Cmux => open_cmux(target, focus, lf),
             OpenHost::Herdr => open_herdr(target, focus, lf),
             OpenHost::Terminal => open_terminal(target, focus, in_place, lf),
@@ -1025,7 +1119,11 @@ fn elsewhere(target: &Resolved) -> Option<Live> {
     })
 }
 
-fn open_desktop(target: &Resolved, focus: bool) -> Result<Opened, RouteError> {
+fn open_desktop(
+    target: &Resolved,
+    focus: bool,
+    batch: &mut DesktopBatch,
+) -> Result<Opened, RouteError> {
     if !cfg!(target_os = "macos") {
         return Err(RouteError::Definite(
             "Loopflow Desktop requires macOS; use --host terminal".into(),
@@ -1036,13 +1134,18 @@ fn open_desktop(target: &Resolved, focus: bool) -> Result<Opened, RouteError> {
             "Desktop opens exact Sessions through their Task".into(),
         ));
     }
-    let mut command = Command::new("open");
-    command.args(["-b", DESKTOP_BUNDLE]);
-    if !focus {
-        command.arg("-g");
+    let url = target.url.to_string();
+    if focus {
+        batch.send(Some(&url), true)?;
+    } else {
+        if !batch.installed() {
+            return Err(RouteError::Definite(
+                "Launch Services finds no Loopflow Desktop".into(),
+            ));
+        }
+        batch.waiting.push((batch.next, url));
     }
-    command.arg(target.url.to_string());
-    run_host(command, "Launch Services").map(|_| Opened::opening(None))
+    Ok(Opened::opening(None))
 }
 
 fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
@@ -1051,7 +1154,13 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
     let mut command = Command::new("cmux");
     command
         .env("CMUX_QUIET", "1")
-        .args(["workspace", "create", "--name", &target.label, "--cwd"])
+        .args([
+            "workspace",
+            "create",
+            "--name",
+            &target.destination_name(),
+            "--cwd",
+        ])
         .arg(target.cwd())
         .args([
             "--command",
@@ -1074,7 +1183,7 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
         .arg(target.cwd())
         .args([
             "--label",
-            &target.label,
+            &target.destination_name(),
             if focus { "--focus" } else { "--no-focus" },
         ]);
     let output = run_host(create, "Herdr")?;

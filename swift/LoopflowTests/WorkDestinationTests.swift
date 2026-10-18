@@ -1231,6 +1231,39 @@ struct WorkDestinationTests {
         #expect(router.inspect().windows.map(\.window) == [window.uuidString])
     }
 
+    @Test func batchedAddressesOpenInArrivalOrderAndRaiseOnlyTheLatest() async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let fast = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
+        let workspace = try await router.openRepository(path: path, link: nil, query: fast) { _ in }
+        var raised = 0
+        var received: [String] = []
+        router.register(UUID(), repository: workspace.id, focus: { raised += 1 }, inspect: windowInspection,
+            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { link in
+            if case .task(let task) = link { received.append(task.issue) }
+        }
+        // The first read outlasts the second address's arrival.
+        let slow = RegistryQuery { _, _ in
+            await barrier.wait("first")
+            return #"{"id":"plan","locators":["plan"]}"#
+        }
+        var finished = 0
+        for (issue, query) in [("first", slow), ("second", fast)] {
+            router.receiveAddress { isLatest in
+                _ = try? await router.openRepository(path: path, link: .task(TaskLink(issue: issue, repo: path)),
+                                                     query: query, raises: isLatest) { _ in
+                    Issue.record("An open repository reuses its window")
+                }
+                finished += 1
+            }
+        }
+        while !(await barrier.contains("first")) { await Task.yield() }
+        await barrier.release("first")
+        while finished < 2 || received.count < 2 { await Task.yield() }
+        #expect(received == ["first", "second"], "both arrive, in arrival order")
+        #expect(raised == 1, "only the final item raises its window")
+    }
+
     @Test func plainRepositoryWaitsForRegistrationAndReusesTheWindow() async throws {
         let router = WorkLinkRouter()
         let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }

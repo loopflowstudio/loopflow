@@ -54,6 +54,21 @@ final class WorkLinkRouter {
         let task: Task<Void, Never>
     }
     private var delivering: [String: Delivery] = [:]
+    private var arrivals = 0
+    private var opening: Task<Void, Never>?
+
+    /// External addresses open one at a time, in arrival order. Only the latest
+    /// arrival raises its window, so a batch delivered together changes focus
+    /// once, at its final item, however long each read takes.
+    func receiveAddress(_ open: @escaping @MainActor (_ isLatest: @escaping @MainActor () -> Bool) async -> Void) {
+        arrivals += 1
+        let arrival = arrivals
+        let previous = opening
+        opening = Task {
+            await previous?.value
+            await open { [weak self] in self?.arrivals == arrival }
+        }
+    }
 
     func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
@@ -74,6 +89,7 @@ final class WorkLinkRouter {
     /// All entry points resolve before opening, including a repeated plain repo
     /// request. Late reads may neither open a window nor overwrite newer feedback.
     func openRepository(path: String, link: LinkedWork?, address: String? = nil, query: RegistryQuery,
+                        raises: @MainActor () -> Bool = { true },
                         openWindow: (RepositoryWorkspace) -> Void) async throws -> RepositoryWorkspace {
         let path = path.normalizedFilePath
         let receipt = link?.address ?? address ?? "loopflow://" + (URL(fileURLWithPath: path).lastPathComponent
@@ -89,7 +105,7 @@ final class WorkLinkRouter {
             let workspace = retainScene(resolved, observed: observed)
             let destination = link?.with(repo: workspace.path)
             repositoryOpenings[path]?.repository = workspace.id
-            if deliver(destination, scene: workspace.id) {
+            if deliver(destination, scene: workspace.id, raise: raises()) {
                 finishRepositoryOpening(path, id: id, status: .usable)
             } else {
                 openWindow(workspace)
@@ -247,10 +263,10 @@ final class WorkLinkRouter {
         deliver(link, scene: scene(for: repository) ?? repository)
     }
 
-    private func deliver(_ link: LinkedWork?, scene: String) -> Bool {
+    private func deliver(_ link: LinkedWork?, scene: String, raise: Bool = true) -> Bool {
         if let link { pending[scene, default: []].append(link) }
         guard let target = targets[scene] else { return false }
-        target.focus()
+        if raise { target.focus() }
         deliverPending(scene)
         return true
     }

@@ -203,7 +203,16 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
-    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    // The Task waits at its design review: the workspace name says so.
+    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "design", "skill": "review-design", "description": null}], "edges": [{"from": "design", "to": "end", "flow": null}]});
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'design',1)",
+            rusqlite::params![registered.task.id.as_str(), graph.to_string()],
+        )
+        .unwrap();
     let log = host(bin.path(), "cmux", "OK workspace:7", 0);
     let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
     let report = json(&lf(
@@ -218,7 +227,9 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     assert_eq!(receipt["destination"], "workspace:7");
     let call = std::fs::read_to_string(log).unwrap();
     assert!(
-        call.starts_with("workspace create --name INF-123 · Prove Task PR transitions --cwd "),
+        call.starts_with(
+            "workspace create --name INF-123 · Prove Task PR transitions · Design --cwd "
+        ),
         "{call}"
     );
     assert!(
@@ -504,6 +515,32 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         !log.exists(),
         "a live conversation never gets a second terminal"
     );
+
+    // Desktop receives the batch in one request. Here the final item, an
+    // exact secondary Session, cannot open there, so nothing activates Desktop.
+    if cfg!(target_os = "macos") {
+        host(bin.path(), "osascript", "/Applications/Loopflow.app", 0);
+        let opened = host(bin.path(), "open", "", 0);
+        let output = lf(
+            home.path(),
+            repo.path(),
+            Some(bin.path()),
+            &["open", "--available", "--host", "desktop", "--json"],
+        );
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let statuses: Vec<&str> = report["receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|receipt| receipt["status"].as_str().unwrap())
+            .collect();
+        assert_eq!(statuses, ["opening", "failed"], "{report}");
+        assert_eq!(
+            std::fs::read_to_string(opened).unwrap(),
+            format!("-b com.loopflow.mac -g {task_url}\n"),
+            "one background request"
+        );
+    }
 }
 
 #[test]
@@ -708,4 +745,57 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     );
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("is this conversation; continue here"));
+}
+
+#[test]
+fn unavailable_execution_owner_opens_nothing_locally() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let peer = loopflow::durable::MachineId::new();
+    store
+        .add_machine(&peer, "must-not-contact.invalid", "peer", "/repo")
+        .unwrap();
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+            rusqlite::params![registered.task.id.as_str(), peer.as_str()],
+        )
+        .unwrap();
+    let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
+    let links = json(&lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["open", &url, "--link", "--json"],
+    ));
+    assert_eq!(links[0]["url"], url.as_str(), "the link still prints");
+    let log = host(bin.path(), "cmux", "OK workspace:3", 0);
+    let output = lf(
+        home.path(),
+        repo.path(),
+        Some(bin.path()),
+        &["open", &url, "--host", "cmux", "--json"],
+    );
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let receipt = &report["receipts"][0];
+    assert_eq!(receipt["status"], "failed");
+    assert!(
+        receipt["reason"]
+            .as_str()
+            .unwrap()
+            .contains("no recorded execution owner was observed"),
+        "{receipt}"
+    );
+    assert!(
+        !log.exists(),
+        "no local conversation stands in for the owner"
+    );
+    assert_eq!(sessions(home.path()), 0);
 }

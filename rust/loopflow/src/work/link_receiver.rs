@@ -3,6 +3,8 @@
 //! URL to `lf open`, dropping inherited host context. An OS receiver's launch
 //! environment belongs to whichever host first launched it, not to the click.
 //! Installed Desktop receives `loopflow:` itself; another app's claim is kept.
+//! Herdr, when installed, gets a link handler: its click callback is fresh per
+//! activation, so `lf open` sees the clicked pane as its own context.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,6 +55,51 @@ fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
+}
+
+// ---------------------------------------------------------------------------
+// Herdr
+// ---------------------------------------------------------------------------
+
+/// Link the Herdr handler when Herdr is installed. `None` when it is not.
+pub fn install_herdr(home: &Path, lf: &Path) -> Result<Option<PathBuf>> {
+    if crate::os_process::which_on_path(Path::new("herdr")).is_none() {
+        return Ok(None);
+    }
+    let plugin = home.join(".lf/integrations/herdr");
+    fs::create_dir_all(&plugin).with_context(|| format!("create {}", plugin.display()))?;
+    write_atomic(&plugin.join("herdr-plugin.toml"), &herdr_manifest(lf))?;
+    let output = Command::new("herdr")
+        .args(["plugin", "link"])
+        .arg(&plugin)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .context("run herdr plugin link")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "herdr plugin link failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(Some(plugin))
+}
+
+/// Herdr supplies the clicked URL and pane in the action's environment; the
+/// URL reaches `lf open` as one argument, never as shell text.
+fn herdr_manifest(lf: &Path) -> String {
+    let command = serde_json::json!([
+        "/bin/sh",
+        "-c",
+        "HERDR_ENV=1 exec \"$0\" open -- \"$HERDR_PLUGIN_CLICKED_URL\"",
+        lf.display().to_string(),
+    ]);
+    format!(
+        "id = \"loopflow.links\"\nname = \"Loopflow links\"\nversion = \"1.0.0\"\n\
+         min_herdr_version = \"0.9.3\"\nplatforms = [\"macos\", \"linux\"]\n\n\
+         [[actions]]\nid = \"open\"\ntitle = \"Open Loopflow Work\"\ncontexts = [\"pane\"]\n\
+         command = {command}\n\n\
+         [[link_handlers]]\nid = \"work\"\ntitle = \"Open Loopflow Work\"\n\
+         pattern = \"^loopflow:\"\naction = \"open\"\n"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +330,7 @@ fn scheme_handler() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{install_xdg, receiver_argv, write_applet, Receiver};
+    use super::{herdr_manifest, install_xdg, receiver_argv, write_applet, Receiver};
     use std::path::Path;
 
     #[test]
@@ -374,5 +421,41 @@ mod tests {
         let script = String::from_utf8(script.stdout).unwrap();
         assert!(script.contains("quoted form of workURL"));
         assert!(script.contains("/Users/jack/.local/bin/lf open --"));
+    }
+
+    #[test]
+    fn herdr_handler_passes_the_clicked_url_as_one_argument() {
+        let root = tempfile::tempdir().unwrap();
+        let lf = root.path().join("lf");
+        let seen = root.path().join("argv");
+        std::fs::write(
+            &lf,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$HERDR_ENV\" \"$@\" > '{}'\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let manifest = herdr_manifest(&lf);
+        assert!(manifest.contains("\npattern = \"^loopflow:\"\n"));
+        let command = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("command = "))
+            .unwrap();
+        let argv: Vec<String> = serde_json::from_str(command).unwrap();
+        let url = "loopflow://loopflow/task/LOO-426?x=$(touch pwned)`id`";
+        let status = std::process::Command::new(&argv[0])
+            .args(&argv[1..])
+            .env("HERDR_PLUGIN_CLICKED_URL", url)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(
+            std::fs::read_to_string(seen).unwrap(),
+            format!("1\nopen\n--\n{url}\n")
+        );
+        assert!(!root.path().join("pwned").exists());
     }
 }

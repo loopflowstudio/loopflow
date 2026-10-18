@@ -845,8 +845,10 @@ unanswered request is reported and never repeated elsewhere.
 
 Terminal destinations run `lf session connect` for the resolved Work, so its
 primary conversation, admission and attachment fences decide what opens. A
-conversation already live in another client is reported as `elsewhere` with
-its `--takeover` command; ordinary opening never moves it. `--available` opens
+conversation already live in a cmux or Herdr workspace is focused there, draft
+intact, when this caller is in that host. Live in any other client, it is
+reported as `elsewhere` with its `--takeover` command; ordinary opening never
+moves it. `--available` opens
 conversations the shared reader judges available, across registered
 repositories unless `--repo`, `--task` or `--wave` narrows it. A Task's primary
 opens as its Work; another available conversation opens as its exact Session.
@@ -857,6 +859,13 @@ terminal, plain text when piped, or Markdown with `--format markdown`. JSON adds
 the target, the copyable `lf open` fallback, the proposed route and
 `conversation`: `current_conversation` when the caller is already in the
 destination, `other_conversation`, or `unknown` without caller identity.
+
+Clicked links open without Desktop too. Installation registers a `loopflow:`
+receiver when Desktop is absent (a small app on macOS, a desktop entry
+elsewhere) and leaves a handler you chose in place. It runs `lf open URL` with
+no inherited host context, so a click takes the Desktop-or-terminal route.
+With Herdr installed, installation links a Herdr link handler: Control-click
+opens the Work beside the clicked pane.
 
 ## Desktop navigation
 

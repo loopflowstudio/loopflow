@@ -2723,6 +2723,13 @@ fn install_link_receiver(desktop: Option<&Path>) {
             "warning: link receiver installation failed ({error:#}); `lf open URL` still opens links"
         ),
     }
+    let herdr = crate::installation::account_home().and_then(|home| {
+        let lf = crate::os_process::resolve_lf_binary()?;
+        crate::work::link_receiver::install_herdr(&home, &lf)
+    });
+    if let Err(error) = herdr {
+        eprintln!("warning: Herdr link handler installation failed ({error:#})");
+    }
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight

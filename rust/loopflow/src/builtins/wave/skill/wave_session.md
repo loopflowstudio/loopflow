@@ -35,7 +35,7 @@ watch, check back or follow up later.
   checks deliveries once; it never resumes a stopped Flow. Inspect its history
   and effects before selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
-  `lf session new <id>` gives the Wave a fresh conversation after an install.
+  `lf connect --wave <wave> --fresh` gives the Wave a fresh conversation after an install.
 
 ## Begin work in a Wave
 

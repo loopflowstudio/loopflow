@@ -891,14 +891,13 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
 }
 
 #[test]
-fn command_tree_has_no_registered_aliases() {
+fn command_tree_only_aliases_resume_to_connect() {
     fn check(command: &clap::Command) {
-        assert_eq!(
-            command.get_all_aliases().count(),
-            0,
-            "{}",
-            command.get_name()
-        );
+        let aliases = command.get_all_aliases().collect::<Vec<_>>();
+        if !aliases.is_empty() {
+            assert_eq!(command.get_name(), "connect");
+            assert_eq!(aliases, ["resume"]);
+        }
         for arg in command.get_arguments() {
             assert!(
                 arg.get_all_aliases().unwrap_or_default().is_empty(),

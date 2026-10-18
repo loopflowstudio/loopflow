@@ -329,29 +329,6 @@ fn read_summary(
     })())
 }
 
-fn interactive_sessions_in<P: rusqlite::Params>(
-    conn: &Connection,
-    selection: &str,
-    params: P,
-) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
-    let mut query = conn.prepare(&format!(
-        "SELECT candidates.*, (
-            SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-            FROM session_events WHERE session_id=candidates.id AND kind='observed'
-            AND json_extract(payload,'$.type')='interactive_opened'
-        ) AS opened_at FROM ({SESSION_SELECT}
-        WHERE s.interactive=1 {selection}) AS candidates"
-    ))?;
-    let rows = query.query_map(params, |row| {
-        Ok((read_session(row)?, row.get("opened_at")?))
-    })?;
-    rows.map(|row| {
-        let (session, opened) = row?;
-        Ok((session?, opened))
-    })
-    .collect()
-}
-
 fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
     conn.query_row(
         &format!(
@@ -422,25 +399,30 @@ impl SqliteStore {
             .transpose()
     }
 
-    pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        interactive_sessions_in(&conn, "", [])
-    }
-
     /// A Task's unfinished interactive conversations, each with its last opening.
     pub(crate) fn task_conversations(
         &self,
         task: &TaskId,
     ) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        interactive_sessions_in(
-            &conn,
-            &format!(
-                "AND s.completed_at IS NULL AND s.id IN ({})",
-                super::task_work::session_ids("?1")
-            ),
-            [task.as_str()],
-        )
+        let mut query = conn.prepare(&format!(
+            "SELECT candidates.*, (
+                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+                FROM session_events WHERE session_id=candidates.id AND kind='observed'
+                AND json_extract(payload,'$.type')='interactive_opened'
+            ) AS opened_at FROM ({SESSION_SELECT}
+            WHERE s.interactive=1 AND s.completed_at IS NULL
+            AND s.id IN ({})) AS candidates",
+            super::task_work::session_ids("?1")
+        ))?;
+        let rows = query.query_map([task.as_str()], |row| {
+            Ok((read_session(row)?, row.get("opened_at")?))
+        })?;
+        rows.map(|row| {
+            let (session, opened) = row?;
+            Ok((session?, opened))
+        })
+        .collect()
     }
 
     /// The conversation a Task's primary pointer names, while it is unfinished.
@@ -1669,48 +1651,6 @@ mod metadata_tests {
         assert_eq!(replacement.task_id, None);
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         assert_ne!(replacement.captured, session.captured);
-    }
-
-    #[test]
-    fn resume_candidates_keep_completed_conversations_and_original_opening_times() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session =
-            store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let background =
-            store.test_session("background", &crate::session_record::new_artifact_key());
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET completed_at=10 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
-                [&background.id],
-            )
-            .unwrap();
-        }
-        for (source, opened) in [("first", 30_000), ("recovered-earlier", 20_000)] {
-            store
-                .retain_session_observation(
-                    &session,
-                    &crate::session::SessionObservation {
-                        artifact_key: session.artifact_key.clone(),
-                        source: source.into(),
-                        observed_at: 999_999,
-                        task_id: None,
-                        wave_id: None,
-                        payload: json!({"type":"interactive_opened", "opened_at_ms":opened}),
-                    },
-                )
-                .unwrap();
-        }
-        let candidates = store.resume_candidates().unwrap();
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].0.id, session.id);
-        assert_eq!(candidates[0].1, Some(30_000));
     }
 
     #[test]

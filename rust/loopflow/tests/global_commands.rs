@@ -1504,6 +1504,11 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     let db_path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&db_path).unwrap();
     connection_history(&db, &session);
+    db.execute(
+        "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
+        [&session.id],
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&db_path).unwrap();
     let read = |args: &[&str]| -> serde_json::Value {
@@ -1696,11 +1701,7 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         .unwrap();
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = fs::read(&db_path).unwrap();
-        for (flag, blocked) in [
-            (None, true),
-            (Some("--takeover"), false),
-            (Some("--try"), false),
-        ] {
+        for flag in [None, Some("--takeover"), Some("--try")] {
             let mut args = vec![
                 "session",
                 "connect",
@@ -1715,9 +1716,8 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
             ))
             .unwrap();
             assert_eq!(report["state"], "active", "{report}");
-            assert_eq!(
-                !report["impediments"].as_array().unwrap().is_empty(),
-                blocked,
+            assert!(
+                report["impediments"].as_array().unwrap().is_empty(),
                 "{report}"
             );
             assert_eq!(report["actions"][1]["kind"], "move_here");
@@ -1846,7 +1846,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     };
     let before = identity(&old);
     let session: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &old, &["session", "ensure", "--json"])
+        command(home.path(), &old, &["connect", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))
@@ -1867,7 +1867,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     );
     assert_eq!(identity(&moved), after);
     let resumed: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &moved, &["session", "ensure", "--json"])
+        command(home.path(), &moved, &["connect", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))

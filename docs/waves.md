@@ -26,7 +26,7 @@ Flow execution; each Machine retains command and conversation history.
 
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
 Session for a conversation, or invoke `wave-operate` for one finite pass. The
-Wave's ongoing conversation (`lf session ensure -w <name>`) applies that same
+Wave's ongoing conversation (`lf connect --wave <name>`) applies that same
 pass each time you return.
 
 ## Nested Waves

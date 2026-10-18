@@ -67,7 +67,7 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    Ok((source.identifier == issue
+    Ok((source.identifier.eq_ignore_ascii_case(issue)
         || source.task_id.as_str() == issue
         || source.issue_id.as_deref() == Some(issue))
     .then_some(source))

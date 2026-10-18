@@ -2061,34 +2061,22 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let connection = match &cli.command {
-        Some(Commands::Session {
-            cmd:
-                loopflow::lf::SessionCommand::Connect {
-                    id,
-                    connection,
-                    takeover,
-                    try_open,
-                },
-        }) => Some((
+    if let Some(Commands::Session {
+        cmd:
+            loopflow::lf::SessionCommand::Connect {
+                id,
+                connection,
+                takeover,
+                try_open,
+            },
+    }) = &cli.command
+    {
+        let report = loopflow::lf::commands::context::explain_session_connect(
             connection.target(cli, id.as_deref())?,
             *takeover,
             *try_open,
             connection.prepare,
-        )),
-        Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::Resume(connection),
-        }) => Some((
-            connection.target(cli, None)?,
-            false,
-            false,
-            connection.prepare,
-        )),
-        _ => None,
-    };
-    if let Some((target, takeover, try_open, prepare)) = connection {
-        let report = loopflow::lf::commands::context::explain_session_connect(
-            target, takeover, try_open, prepare,
+            connection.fresh,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);

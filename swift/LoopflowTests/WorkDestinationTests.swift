@@ -58,7 +58,7 @@ struct WorkDestinationTests {
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "ensure"]) || args.starts(with: ["session", "connect"]) { return encoded }
+            if args.contains("connect") { return encoded }
             if args.starts(with: ["wave", "show"]) { return planning }
             throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
@@ -228,7 +228,7 @@ struct WorkDestinationTests {
                 if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
                 if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
             }
-            if args.starts(with: ["session", "ensure"]) || args.starts(with: ["session", "connect"]) { return encoded }
+            if args.contains("connect") { return encoded }
             if args.starts(with: ["wave", "show"]) {
                 if outcome == "updated-inventory" { await barrier.wait("planning") }
                 if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
@@ -965,7 +965,7 @@ struct WorkDestinationTests {
         // Keep the Wave, but remove the historical Task from the current plan.
         let current = try oneTask(data, taskId: "absent")
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            if args.starts(with: ["session", "ensure"]) || args.starts(with: ["session", "connect"]) { return encoded }
+            if args.contains("connect") { return encoded }
             if args.contains("--task") { return exact }
             if args.prefix(2) == ["wave", "show"] { return current }
             if args.first == "session" { return #"{"entries":[\#(encoded)],"next":null}"# }

@@ -78,14 +78,13 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "complete", "missing-session"],
         &["session", "stop-client", "missing-input"],
         &["session", "serve-flow"],
+        &["session", "ensure"],
+        &["session", "new", "missing-session"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"));
     }
-    let output = run(home.path(), &["session", "connect"]);
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("connect requires a Session ID"));
     let output = run(
         home.path(),
         &[
@@ -1445,7 +1444,7 @@ fn resume_shorthand_help_and_empty_worktree() {
     for args in [&["resume", "--help"][..], &["session", "resume", "--help"]] {
         let output = run(home.path(), args);
         assert!(output.status.success(), "{output:?}");
-        assert!(!String::from_utf8_lossy(&output.stdout).contains("[ID]"));
+        assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
         assert!(String::from_utf8_lossy(&output.stdout).contains("--task"));
     }
     for args in [&["resume"][..], &["session", "resume"]] {
@@ -1455,8 +1454,7 @@ fn resume_shorthand_help_and_empty_worktree() {
             .unwrap();
         assert!(!output.status.success());
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("No interactive Session found in this repository or worktree"),
+            String::from_utf8_lossy(&output.stderr).contains("not a git work tree"),
             "{output:?}"
         );
     }
@@ -1492,7 +1490,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     assert!(!first.status.success());
     assert!(String::from_utf8_lossy(&first.stderr).contains("did not report a resumable session"));
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
-    let retry = open(&["session", "resume"]);
+    let retry = open(&["session", "resume", &id]);
     assert!(retry.status.success(), "{retry:?}");
 
     // Discovery finds an executable, but its absent interpreter prevents spawn.
@@ -1504,7 +1502,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     assert!(!failed.status.success());
     write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
     for args in [
-        vec!["session", "resume"],
+        vec!["session", "resume", &id],
         vec!["session", "connect", &id, "--takeover"],
     ] {
         let result = open(&args);
@@ -1661,96 +1659,6 @@ fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
         SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
         FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
-    let home = tempfile::tempdir().unwrap();
-    let repo = home.path().join("repo");
-    let sibling = home.path().join("sibling");
-    std::fs::create_dir_all(repo.join("subdir")).unwrap();
-    std::fs::create_dir(&sibling).unwrap();
-    assert!(Command::new("git")
-        .args(["init", "--quiet"])
-        .arg(&repo)
-        .status()
-        .unwrap()
-        .success());
-    let link = home.path().join("link");
-    symlink(&repo, &link).unwrap();
-    let (a, input_a, _) = prepare_conversation(home.path(), &link.join("subdir"), "codex", "A");
-    let (b, input_b, _) = prepare_conversation(home.path(), &repo, "codex", "B");
-    let (background, _, _) = prepare_conversation(home.path(), &repo, "codex", "Background");
-    let (other, _, _) = prepare_conversation(home.path(), &sibling, "codex", "Other");
-    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET interactive=0,created_at=9999999999 WHERE id=?1",
-        [&background],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET created_at=9999999999 WHERE id=?1",
-        [&other],
-    )
-    .unwrap();
-    db.execute("UPDATE agent_sessions SET completed_at=2 WHERE id=?1", [&a])
-        .unwrap();
-    record_native(home.path(), &a, &input_a, "native-a");
-    record_native(home.path(), &b, &input_b, "native-b");
-    let codex = home.path().join("codex");
-    std::fs::create_dir(&codex).unwrap();
-    std::fs::write(
-        codex.join("history.jsonl"),
-        "{\"session_id\":\"native-b\",\"ts\":10}\n{\"session_id\":\"native-a\",\"ts\":20}\n",
-    )
-    .unwrap();
-    let bin = home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let provider = bin.join("codex");
-    install_codex_fixture(home.path(), Some("native-a"));
-    // An unavailable fixture must never fall through to a real provider.
-    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
-    let resume = |args: &[&str]| {
-        command(home.path(), args)
-            .current_dir(repo.join("subdir"))
-            .env("PATH", &path)
-            .env("CODEX_HOME", &codex)
-            .output()
-            .unwrap()
-    };
-    let result = resume(&["resume"]);
-    assert!(result.status.success(), "{result:?}");
-    assert_eq!(
-        std::fs::read_to_string(codex.join("opened")).unwrap(),
-        input_a
-    );
-    let openings: i64 = db.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.type')='interactive_opened'", [&a], |row| row.get(0)).unwrap();
-    assert_eq!(openings, 1);
-    // No native input: the recorded opening supplies recency, including completed conversations.
-    std::fs::remove_file(codex.join("history.jsonl")).unwrap();
-    let result = resume(&["session", "resume"]);
-    assert!(result.status.success(), "{result:?}");
-    assert_eq!(
-        std::fs::read_to_string(codex.join("opened")).unwrap(),
-        input_a
-    );
-    install_codex_fixture(home.path(), Some("native-b"));
-    for selector in [&b, "native-b"] {
-        let result = resume(&["connect", selector]);
-        assert!(result.status.success(), "{result:?}");
-        assert_eq!(
-            std::fs::read_to_string(codex.join("opened")).unwrap(),
-            input_b
-        );
-    }
-    // An unavailable provider must not add another opening receipt.
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
-    let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
-    assert!(!resume(&["connect", &b]).status.success());
-    let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
-    assert_eq!(before, after);
 }
 
 #[cfg(unix)]

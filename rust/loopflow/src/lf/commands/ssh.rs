@@ -36,8 +36,6 @@ pub fn run(
             cmd: crate::lf::SessionCommand::Attach { .. }
                 | crate::lf::SessionCommand::List { .. }
                 | crate::lf::SessionCommand::Connect { .. }
-                | crate::lf::SessionCommand::Ensure { .. }
-                | crate::lf::SessionCommand::Resume(..)
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Admission { .. }
@@ -144,9 +142,7 @@ pub fn run(
     }
     let preparation = match &cli.command {
         Some(crate::lf::Commands::Session {
-            cmd:
-                crate::lf::SessionCommand::Connect { connection, .. }
-                | crate::lf::SessionCommand::Resume(connection),
+            cmd: crate::lf::SessionCommand::Connect { connection, .. },
         }) if connection.prepare && !preview => Some(connection),
         _ => None,
     };

@@ -481,6 +481,19 @@ fn build_prompt_at(
             .then(crate::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
+    if let Some(skill) = &discovered_skill {
+        match crate::definition::name::portable_name(&skill.name).as_str() {
+            "task-session" => anyhow::ensure!(
+                task_input.is_some(),
+                "Select a Task with `lf connect --task ISSUE`"
+            ),
+            "wave-session" => anyhow::ensure!(
+                wave.is_some(),
+                "Select a Wave with `lf connect --wave NAME`"
+            ),
+            _ => {}
+        }
+    }
     // Ordinary third-party skills need their own instructions, not the Work
     // operating manual. Captured Flows and attributed Work retain that guidance.
     let standalone_native = task_input.is_none()

@@ -1614,7 +1614,7 @@ pub(super) fn resolve_task_id_in(
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1 COLLATE NOCASE
             OR substr(lower(t.id), 6, length(?2))=?2
             OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
                 AND json_extract(c.export_json,'$.id')=?1))
@@ -2406,7 +2406,7 @@ mod local_planning_tests {
             "ENG-123 Review login"
         );
         let history = store
-            .conversation_history(None, None, Some("ENG-123"), None, 0, true)
+            .conversation_history(None, None, Some("eng-123"), None, 0, true)
             .unwrap();
         assert_eq!(history.len(), 2);
         assert!(history
@@ -2753,6 +2753,11 @@ mod local_planning_tests {
         ).unwrap();
         let mapped = store.task_by_issue("TEAM-9").unwrap().unwrap();
         assert_eq!(mapped.id, local.id);
+        for selector in ["team-9", "Team-9", "tEaM-9"] {
+            let resolved = store.task_by_issue(selector).unwrap().unwrap();
+            assert_eq!(resolved.id, local.id);
+            assert_eq!(resolved.identifier, "TEAM-9");
+        }
         assert_eq!(
             store.task_by_issue(&local.identifier).unwrap().unwrap().id,
             local.id

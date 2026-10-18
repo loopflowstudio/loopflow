@@ -430,7 +430,8 @@ public struct RegistryQuery: Sendable {
 
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
-        var args = ["session", "ensure", "--json"]
+        var args = ["session", "connect", "--prepare", "--json"]
+        if wave == nil { args = ["--repo", cwd] + args }
         if let wave { args += ["--wave", wave] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
@@ -467,8 +468,17 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Replace the primary conversation with fresh Work context; retain its history.
-    public func resetSession(id: String, agent: String?, cwd: String?) async throws -> SessionRecord {
-        var args = ["session", "new", id, "--json"]
+    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
+        var args = ["session", "connect", "--fresh", "--prepare", "--json"]
+        if session.taskPrimary, session.taskIds.count == 1, let task = session.taskIds.first {
+            args += ["--task", task]
+        } else if session.primaryScope == "wave", let wave = session.waveId {
+            args += ["--wave", wave]
+        } else if session.primaryScope == "repository" {
+            args = ["--repo", session.cwd] + args
+        } else {
+            throw RegistryQueryError("Session is not a primary conversation.")
+        }
         if let agent { args += ["--agent", agent] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }

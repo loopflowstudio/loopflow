@@ -1,10 +1,5 @@
 import Foundation
 import Testing
-#if os(macOS)
-import ViewInspector
-@testable import Loopflow
-@testable import LoopflowMac
-#endif
 
 /// The W2-178 contract says the primary Wave hierarchy must not surface
 /// registered-wave vocabulary or raw sync-timestamp prominence. That vocabulary
@@ -43,24 +38,6 @@ struct WaveSurfacePrimaryHierarchyTests {
             }
         }
     }
-
-    #if os(macOS)
-    @Test("the primary Work Wave detail renders the shared metric portfolio")
-    @MainActor
-    func loopflowWaveDetailRendersMetricPortfolio() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")))
-        let wave = try #require(snapshot.waves.first)
-        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") },
-            repoPath: wave.wave.repo)
-        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
-        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
-        let metrics = try view.inspect().find(WaveMetricPortfolioView.self).actualView()
-        #expect(metrics.portfolio == wave.metricPortfolio)
-    }
-    #endif
 
     private static func paneSource(_ name: String, sourceFile: String = #filePath) throws -> String {
         let viewsDir = URL(fileURLWithPath: sourceFile)

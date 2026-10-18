@@ -575,6 +575,9 @@ actor. A newer local compiler's pass does not establish older-toolchain support.
 Runtime `#available` checks do not make new SDK symbols compile on older Xcode.
 Gate macOS 26 toolbar APIs behind the matching compiler condition as well;
 CI's SwiftPM and Xcode builds verify the older-SDK path.
+Keep Mac-only view tests in whole-file platform-gated suites, then run
+`uv run python scripts/check_swift_multiplatform_boundaries.py`; a focused
+Swift test pass does not check source boundaries.
 
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside

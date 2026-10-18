@@ -89,6 +89,17 @@ terminal rendering, or every extension/context boundary.
 
 ## Remaining work
 
+October 17 compatibility comparison requested by Jack Heart supersedes the
+earlier no-implementation-correction conclusion. See
+[Pi/OpenCode comparison](pi-opencode-compatibility.md): real Pi probes reproduced
+an outer synthetic retry prompt and empty successful headless results. Source
+review also found a missing automatic-compaction refresh boundary and absent
+live steering. Resolve those behaviors before shipping; preserve and expand the
+ownership, crash, PTY, Task/Flow and context acceptance matrix in that note.
+LOO-504's live gate includes a shared failed-start recovery repair, and its
+published branch conflicts in Session launch construction; integrate without
+duplicating that owner when it is delivered.
+
 The adapter and selection surfaces exist; acceptance remains open. Gate owns
 the affected suites and full matrix, including existing-harness regression
 coverage. Explicit gaps are a composed managed Task/Flow with Pi, a nested `lf`

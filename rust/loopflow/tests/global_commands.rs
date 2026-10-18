@@ -674,7 +674,9 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: store.ensure_repository(repo.to_str().unwrap()).unwrap(),
+                repository_id: store
+                    .ensure_repository(repo.canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),

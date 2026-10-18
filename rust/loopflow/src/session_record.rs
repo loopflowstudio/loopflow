@@ -808,7 +808,10 @@ fn recover_native_usage(
                     reasoning_tokens: tokens["reasoning"].as_u64(),
                     cache_read_tokens: cached,
                     cache_write_tokens: written,
-                    model: info["modelID"].as_str().map(str::to_owned),
+                    model: info["model"]["id"]
+                        .as_str()
+                        .or_else(|| info["modelID"].as_str())
+                        .map(str::to_owned),
                     cost_usd: info["cost"].as_f64(),
                 };
                 let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(receipt.observed_at)

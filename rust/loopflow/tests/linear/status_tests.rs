@@ -1029,7 +1029,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     let other = Wave::new(
         WaveId::new(),
         "other".into(),
-        other_repo.display().to_string(),
+        other_repo.canonicalize().unwrap().display().to_string(),
     );
     store.create_wave(&other).unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();

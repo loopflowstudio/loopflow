@@ -173,6 +173,13 @@ Context-hook changes also run `session_cli_tests`: resume callbacks supply the
 native Session identity and event payload, just like startup. Provider fixture
 scripts must fail when a callback fails, rather than report a successful turn
 with missing context evidence.
+OpenCode context-hook changes also run
+`node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` for refreshed
+system context after compaction, preserved user messages and child-session isolation.
+The native OpenCode 2 probe in `docs/reviews/opencode-2/loopflow_turns.py` accepts
+`--routing-and-failure` for JSON Flow routing and explicit input after model failure
+or provider death, and `--resize` for editable Unicode draft preservation;
+run it through `scripts/test_network.py` with the built candidate as its first argument.
 Claude stream fixtures must acknowledge the input's UUID before completing its
 result, and stay alive until the harness closes stdin. Include
 `explicit_launch_policy_survives_task_workflow_nested_flows_and_provider_children` when
@@ -1327,6 +1334,10 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
+When a provider launch fixture only resolves `lf` without invoking it, pin
+`LF_BIN` to `std::env::current_exe()`. Verify it with the test executable's PATH
+restricted to system tools (`/usr/bin:/bin`), so an installed `lf` cannot hide
+missing fixture setup; keep Cargo's build PATH unchanged.
 Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
 the Session attachment references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
@@ -1473,6 +1484,9 @@ Assert that attachment returns after execution exits, as well as checking its
 output: a spare slave descriptor can keep Linux PTY readers open indefinitely.
 Process ancestry assertions follow the recorded chain through transport owners
 rather than assuming a fixed number of launch processes.
+Terminal-status isolation assertions match the escaped OSC sequence, not its
+numeric opcode: ordinary paths and random IDs can contain `7501`. Transport
+fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.

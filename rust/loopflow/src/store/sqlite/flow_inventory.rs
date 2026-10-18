@@ -265,6 +265,8 @@ impl SqliteStore {
     }
 
     /// The conversation, captured input and its event a process opened last.
+    /// A process that delegated to `lf transport serve` captures through the
+    /// command that transport serves, so the delegation chain counts as itself.
     pub(crate) fn process_input(
         &self,
         process: &LfProcessId,
@@ -272,8 +274,16 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT session_id,receipt_key,seq FROM session_events
-                 WHERE kind='captured' AND lf_process_id=?1 ORDER BY seq DESC LIMIT 1",
+                "WITH RECURSIVE delegated(id,serves) AS (
+                     SELECT id,json_extract(command,'$[1]')='transport' AND json_extract(command,'$[2]')='serve'
+                     FROM processes WHERE id=?1
+                     UNION
+                     SELECT p.id,json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve'
+                     FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
+                     WHERE d.serves OR (json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve'))
+                 SELECT session_id,receipt_key,seq FROM session_events
+                 WHERE kind='captured' AND lf_process_id IN (SELECT id FROM delegated)
+                 ORDER BY seq DESC LIMIT 1",
                 params![process],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -401,6 +411,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(started, None);
+    }
+
+    #[test]
+    fn step_input_is_read_through_transport_delegation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
+        let [step, transport, served, nested] =
+            std::array::from_fn(|_| crate::id::LfProcessId::new());
+        {
+            let conn = store.conn.lock().unwrap();
+            let process = |id: &crate::id::LfProcessId,
+                           parent: Option<&crate::id::LfProcessId>,
+                           argv: &[&str]| {
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,started_at)
+                     VALUES(?1,'fixture',?2,?3,1)",
+                    rusqlite::params![id, parent, serde_json::to_string(argv).unwrap()],
+                )
+                .unwrap();
+            };
+            process(&step, None, &["lf", "--skill-input", "in"]);
+            process(
+                &transport,
+                Some(&step),
+                &["lf", "transport", "serve", "--", "lf"],
+            );
+            process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
+            // A command the agent ran is not the step's own capture.
+            process(&nested, Some(&served), &["lf", "-b", "skill", "other"]);
+            conn.execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+                 VALUES('step-session','Step','human',1,0,'/repo'),('nested-session','Nested','human',1,0,'/repo')",
+                [],
+            )
+            .unwrap();
+            for (session, key, process) in [
+                ("step-session", "step-input", &served),
+                ("nested-session", "nested-input", &nested),
+            ] {
+                conn.execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
+                     VALUES(?1,'captured',?2,?3,1,'{}')",
+                    rusqlite::params![session, key, process],
+                )
+                .unwrap();
+            }
+        }
+        let (session, input, _) = store.process_input(&step).unwrap().unwrap();
+        assert_eq!(
+            (session.as_str(), input.as_str()),
+            ("step-session", "step-input")
+        );
     }
 
     #[test]

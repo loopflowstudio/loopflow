@@ -122,6 +122,17 @@ Agent interpretation and action:
   - Open: should `lf desktop` express zoom-from-Dashboard (a CLI equivalent per
     the parity acceptance criterion), and should the Desktop inspection report it?
 
+- After the sync relaunch, Jack on the Hidden strip (`Paused`, `Idle`): “why oes its
+  show the state rather than the name?” Cause: the fixture Tasks were titled after their
+  states, so the chips did show names. Jack then: “dont thikn we need to show state in
+  the bottom, just the name”. Agreed: Hidden chips show the Task name only (`0d750ee778`).
+  Fixture Tasks retitled in the disposable lfdb: FIX-1 “Retry flaky upload test” (paused),
+  FIX-2 “Fix login redirect loop” (idle), FIX-3 “Add CSV export to reports” (unstarted).
+- Jack asked to preview a Task with an actual Session. The candidate was relaunched
+  with Jack's real `HOME`/PATH (provider auth) and the private `LF_HOME`, so a Session
+  started from the zoomed Task view runs a real provider against disposable lf data.
+  Pending Jack's look.
+
 ## Review disposition and next action
 
 No design change was agreed with Jack Heart. Retain the current accepted contract;

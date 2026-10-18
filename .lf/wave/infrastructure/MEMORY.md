@@ -64,20 +64,19 @@ startup also waits without a cutoff; viewer and release publication policies sta
 
 ## Native terminal diagnostics (LOO-501/508, 2026-10-18)
 
-Jack Heart authorized repair/delivery preserving editing, diagnostics and native
-history; account changes remain outside scope. OpenCode's private provider stderr
-log remains intact. LOO-501 evidence and limits: `036008ec26:.lf/wave/infrastructure/MEMORY.md`,
-this heading.
+Jack Heart authorized repair/delivery preserving editing, diagnostics and history;
+account changes remain outside scope. LOO-501 evidence:
+`036008ec26:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-508 reproduced raw Loopflow output across a Codex draft, not destroyed input.
 Tracing alone misses direct writes, inherited helpers and waiting launchers.
-The candidate saves native descriptors and scopes parent output to announced
-private Process logs, restoring ordinary output afterward. Transport uses saved
-descriptors. Real Codex/local-model PTY evidence covers launch/reconnect, warning,
-Unicode editing/submission, resize, history and cleanup; Claude/OpenCode coverage
-uses stand-ins. This proves no installed repair or account access. Broader gate,
-Linux and delivery remain open in `scratch/loo-508.md`. Release's entry-point
-lesson applies to every waiting launcher.
+Merged #1595 (`e204ce6072`) scopes parent output to announced private Process logs;
+transport retains native descriptors and OpenCode its provider stderr log.
+Codex/local-model PTY evidence covers launch/reconnect, warning, Unicode editing,
+submission, resize, history and cleanup; Claude/OpenCode coverage
+uses stand-ins. Linux's 39 checks and Clippy passed; macOS pending-request and
+title/reconnect startup remained unresolved in branch evidence. Installed repair
+and account access remain unproved.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -454,13 +453,15 @@ Superseded migration/receipt cutover details and prior proof references remain a
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 Five Python gate cases await CI; installation remains unproved.
 
-## Terminal conversation recovery (curated 2026-10-17)
+## Terminal conversation recovery (curated 2026-10-18)
 
-Jack Heart authorized both repairs through landing. LOO-409's discarded receipt,
-lf-8fed729's launch/retry invariants, implementation choices and stand-in proofs:
+Jack Heart authorized landing. LOO-409/lf-8fed729 evidence:
 `28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
-this heading. LOO-499 supersedes the ensure/replace entry points. Installed recovery
-of the two reported Sessions and real Codex interaction remain unproved.
+this heading. LOO-499 supersedes ensure/replace.
+LOO-512: fenced captured-input receipts and drained startup replies prevent replay.
+Candidate, 0.14.5 and 0.14.6 PTY faults preserve exact drafts/history, proving no
+original-reset repair. Incident records lack its initiating error; installed
+recovery remains unproved.
 Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)

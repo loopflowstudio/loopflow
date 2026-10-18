@@ -33,6 +33,7 @@ pub(super) struct Attention {
     yielded: bool,
     failed: bool,
     saved: Option<SessionActivity>,
+    pub(super) preview: Option<crate::session::SessionPreview>,
 }
 
 impl Attention {
@@ -72,6 +73,7 @@ impl Attention {
     /// The reading to save, when it changed or the saved one has aged.
     pub(super) fn reading(&mut self, now: i64) -> Option<SessionActivity> {
         let reading = SessionActivity {
+            preview: self.preview.clone(),
             observed_at: now,
             open_tools: self.open_tools.len(),
             pending_input: self.pending_input.len(),

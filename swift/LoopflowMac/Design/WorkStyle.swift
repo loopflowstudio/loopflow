@@ -284,6 +284,7 @@ private struct WorkDestinationSelection: ViewModifier {
         content
             .background(selected ? palette.workSelectedFill : (hovering ? palette.actionHover : .clear),
                         in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
             .onHover { hovering = $0 }
             .accessibilityAddTraits(selected ? [.isSelected] : [])
     }

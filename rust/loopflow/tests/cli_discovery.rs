@@ -1162,22 +1162,17 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     let output = success(run(
         repo.path(),
         home.path(),
-        &["help", "desktop", "split", "--json"],
+        &["help", "desktop", "shell", "--json"],
     ));
-    let split: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let shell: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
-        split,
-        describe_command(&["desktop".into(), "split".into()], false).unwrap()
+        shell,
+        describe_command(&["desktop".into(), "shell".into()], false).unwrap()
     );
     assert!(!home.path().join(".lf").exists());
-    let definition = &split["definition"];
+    let definition = &shell["definition"];
     let args = definition["arguments"].as_array().unwrap();
-    let axis = args.iter().find(|arg| arg["name"] == "axis").unwrap();
-    assert_eq!(axis["required"], true);
-    assert_eq!(
-        axis["values"],
-        serde_json::json!(["horizontal", "vertical"])
-    );
+    assert!(!args.iter().any(|arg| arg["name"] == "axis"));
     assert!(args
         .iter()
         .any(|arg| arg["name"] == "pane" && arg["required"] == false));
@@ -1202,7 +1197,7 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         serde_json::json!(["screen", "scrollback", "selection"])
     );
     assert!(read["definition"]["result_schema"]["$defs"]["DesktopTextResult"].is_object());
-    assert!(describe_command(&["desktop".into(), "splut".into()], false).is_err());
+    assert!(describe_command(&["desktop".into(), "split".into()], false).is_err());
     let all = describe_command(&["desktop".into()], true).unwrap();
     assert!(all["definition"]["commands"]
         .as_array()

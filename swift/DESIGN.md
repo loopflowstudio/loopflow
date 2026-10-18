@@ -203,12 +203,22 @@ From Cursor and Stripe:
 
 ### Work Tracking
 
-From loopflowstudio existing patterns:
+The sidebar presents the repository's retained working Task order, then direct Wave
+rows. Opening started, unpaused Work appends once. Activity and query refresh never
+reorder slots; explicit pause hides a slot without deleting its stored position.
+Working references are saved through WorkCache; they convey no execution authority.
+Unstarted Tasks show their brief without joining the working set.
 
-- Status badges per worktree (design, implement, review, polish)
-- Real-time updates from the selected Wave listener
-- History queryable per worktree
-- Live output streaming
+The navigator's Working tasks / Available / Running choice filters presentation
+without selecting Work or changing panes, clients, focus or drafts. Missing planning
+keeps an unavailable row. Work observation retains its last reading on failure.
+Wave navigation leaves working positions and the sidebar viewport intact.
+
+Title-bar breadcrumbs follow hierarchy, Back follows visits, and Cmd+K routes
+cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
+stable eligible slots, independent of the filter. Each Work owns one retained
+workspace. Multi-Session query grids, editable Dashboards and passive viewing of
+unopened Sessions remain deferred.
 
 ---
 

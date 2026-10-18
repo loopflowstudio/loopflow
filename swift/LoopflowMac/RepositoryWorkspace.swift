@@ -91,7 +91,7 @@ final class WorkLinkRouter {
             guard repositoryOpenings[path]?.id == id else { throw CancellationError() }
             let workspace = retainScene(resolved, observed: observed)
             var destination = link
-            if let link {
+            if let link, link.host == "task" {
                 let target = try TaskLink(url: link)
                 destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff, machine: target.machine, repository: target.repository).url
             }

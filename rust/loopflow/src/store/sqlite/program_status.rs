@@ -24,6 +24,7 @@ impl SqliteStore {
              ON CONFLICT(session_id) DO UPDATE SET
                 attachment_token=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.attachment_token ELSE NULL END,
                 program_status=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.program_status END,
+                preview=CASE WHEN session_activity.agent_process_id IS ?2 THEN session_activity.preview END,
                 agent_process_id=?2,status_stream=?3,status_sequence=0",
             params![session, agent_process, stream],
         )? == 1)
@@ -99,6 +100,7 @@ mod tests {
                         "session",
                         &attachment,
                         &SessionActivity {
+                            preview: None,
                             observed_at: 1,
                             open_tools: 0,
                             pending_input: usize::from(reading == "approval"),
@@ -202,6 +204,7 @@ mod tests {
                 "session",
                 &first,
                 &SessionActivity {
+                    preview: None,
                     observed_at: 1,
                     open_tools: 0,
                     pending_input: 0,
@@ -323,6 +326,7 @@ mod tests {
                 "session",
                 &third,
                 &SessionActivity {
+                    preview: None,
                     observed_at: 501,
                     open_tools: 0,
                     pending_input: 1,

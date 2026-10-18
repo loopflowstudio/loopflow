@@ -74,6 +74,7 @@ pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     PeerPlanning(Option<PeerPlanningPart>),
     Sessions(Option<SessionsPart>),
+    Selections(Option<SelectionsPart>),
     Task(Option<Box<TaskPart>>),
     TaskHistory(Option<Box<TaskHistoryPart>>),
     Wave(Option<Box<WavePart>>),
@@ -105,6 +106,12 @@ pub struct SessionsPart {
     pub repo: String,
     pub includes_headless: bool,
     pub entries: Vec<SessionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionsPart {
+    pub repo: String,
+    pub plans: Vec<crate::work::selection::ViewPlan>,
 }
 
 /// Selected workspace facts and `lf flow show --processes` for each of its Flows,
@@ -190,6 +197,7 @@ struct Scope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Part {
+    Selections,
     TaskHistory,
     Sessions,
     Planning,
@@ -203,18 +211,20 @@ enum Part {
 impl Part {
     // Deliver the selected Work before the portfolio; every part still reads
     // the same snapshot, and a checkpoint follows the complete pass.
-    const ALL: [Part; 8] = [
+    const ALL: [Part; 9] = [
         Part::Task,
         Part::Wave,
         Part::Sessions,
+        Part::Selections,
         Part::Planning,
         Part::PeerPlanning,
         Part::WorkActivity,
         Part::TaskHistory,
         Part::Activity,
     ];
-    const SCOPED: [Part; 5] = [
+    const SCOPED: [Part; 6] = [
         Part::Sessions,
+        Part::Selections,
         Part::PeerPlanning,
         Part::Task,
         Part::Wave,
@@ -224,6 +234,7 @@ impl Part {
     fn name(self) -> &'static str {
         match self {
             Part::Sessions => "sessions",
+            Part::Selections => "selections",
             Part::Planning => "planning",
             Part::PeerPlanning => "peer_planning",
             Part::Task => "task",
@@ -272,6 +283,7 @@ impl Part {
             Part::PeerPlanning => Duration::from_secs(5),
             Part::Activity
             | Part::Sessions
+            | Part::Selections
             | Part::Task
             | Part::TaskHistory
             | Part::WorkActivity => ACTIVITY_CLOCK,
@@ -280,7 +292,7 @@ impl Part {
 
     fn selected(self, scope: &Scope) -> bool {
         match self {
-            Part::Sessions | Part::PeerPlanning => scope.repo.is_some(),
+            Part::Sessions | Part::PeerPlanning | Part::Selections => scope.repo.is_some(),
             Part::Task => scope.task.is_some(),
             Part::TaskHistory => scope.history.is_some(),
             Part::Wave => scope.wave.is_some(),
@@ -577,6 +589,7 @@ impl Reader {
                 };
                 for part in Part::SCOPED {
                     let changed = match part {
+                        Part::Selections => self.scope.repo != next.repo,
                         Part::Sessions => {
                             self.scope.repo != next.repo || self.scope.headless != next.headless
                         }
@@ -687,6 +700,13 @@ impl Reader {
                     let destinations =
                         crate::ops::planning_sync::peer_status(store, &root.to_string()).await?;
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
+                }
+                Part::Selections => {
+                    let repo = self.scope.repo.clone().context("no repository in scope")?;
+                    let root = CanonicalRepo::discover(Path::new(&repo))?;
+                    let plans =
+                        crate::work::selection::default_plans(&store.sqlite, &root.to_string())?;
+                    WorkContent::Selections(Some(SelectionsPart { repo, plans }))
                 }
                 Part::Sessions => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
@@ -803,7 +823,7 @@ impl Reader {
                 entries: Vec::new(),
             })),
             Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
-            Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
+            Part::Selections | Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
                 anyhow::bail!("no Loopflow store exists in this Machine yet")
             }
         })
@@ -815,6 +835,7 @@ fn unavailable(part: Part) -> WorkContent {
         Part::Planning => WorkContent::Planning(None),
         Part::PeerPlanning => WorkContent::PeerPlanning(None),
         Part::Sessions => WorkContent::Sessions(None),
+        Part::Selections => WorkContent::Selections(None),
         Part::Task => WorkContent::Task(None),
         Part::TaskHistory => WorkContent::TaskHistory(None),
         Part::Wave => WorkContent::Wave(None),

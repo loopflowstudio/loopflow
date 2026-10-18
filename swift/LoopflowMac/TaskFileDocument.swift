@@ -314,7 +314,24 @@ final class TaskFilesStore {
     let issue: String
     let cwd: String
     let query: RegistryQuery
-    var selection: String?
+    private(set) var tabs: [WorkFileTab] = []
+    var selection: String? {
+        didSet {
+            if let path = selection, !tabs.contains(where: { $0.path == path }) {
+                tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
+            }
+        }
+    }
+
+    func closeTab(_ id: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let removed = tabs.remove(at: index)
+        if selection == removed.path {
+            selection = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].path
+        }
+        // Documents (including unsaved drafts and Undo) remain Task-owned.
+    }
+
     var mode = Mode.file
     private(set) var changes: TaskChangesSnapshot?
     private(set) var isRefreshingChanges = false

@@ -33,8 +33,7 @@
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-[LOO-427's comparison](../../../docs/reviews/terminal-command-comparison.md) records
-command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
+Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
 authorized through demo review. Owned cmux probe cleaned up.
 
@@ -138,8 +137,7 @@ pane IDs, including created/reused companions, not readiness. `help --json` deri
 syntax and Desktop result schemas from Clap/Rust DTOs; installed support and current
 Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
 Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
-and LOO-453 (readiness/events); research:
-[the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
+and LOO-453 (readiness/events).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 October 13 replaced their visible strip with sidebar switching, retaining ownership.
@@ -322,8 +320,7 @@ Stopped execution is history, not permission to resume; an open conversation
 schedules nothing. Naming the Wave as next owner must not evade its own duty.
 Original decisions, continuation history and evidence limits:
 `28588f8910:.lf/wave/product/MEMORY.md`, this heading.
-The [review](../../../docs/reviews/session-operate-prompts.md) established simulations
-and read-only model runs, not installed behavior.
+The review established simulations and read-only model runs, not installed behavior.
 
 ## Capture and work-first entry (October 1–14)
 
@@ -446,9 +443,8 @@ not establish status in cmux or herdr.
 Jack Heart's October 17 Console approval replaces the sidebar's completion-range
 controls and selected-terminal-Task exception with explicit retained working order.
 The October 2–14 decisions, Growth counterexample, inline-edit semantics and proof
-limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading, and
-[the review evidence](../../../docs/reviews/task-history.md). Historical records
-survive; navigation/filtering never completes Work or evicts panes and drafts.
+limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading. Historical
+records survive; navigation/filtering never completes Work or evicts panes and drafts.
 
 Preserve provider cancellation separately from successful completion and actual
 completion time. Reopening makes planning current despite an old timestamp;
@@ -531,9 +527,7 @@ Primary Sessions runtime moved to LOO-364.
 
 Jack also accepted ordinary Projects independent of optional chapter coordination
 (LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
-continuity to Flows, not separate execution semantics. See
-[the dated review and retained design references](../../../docs/reviews/task-workspace.md)
-and [research](../../../docs/reviews/independent-operations.md). These decisions do not
+continuity to Flows, not separate execution semantics. These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
 ## CI repair and waited landing (reconciled 2026-10-17)
@@ -831,9 +825,8 @@ or soak acceptance.
 
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
-and failed attempts. The opt-in desktop-performance runner and hash-verified
-[baseline](../../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
-remain useful instruments: synthetic Work, three owned cat PTYs, forced bitmap/text
+and failed attempts. The opt-in desktop-performance runner remains a useful
+instrument: synthetic Work, three owned cat PTYs, forced bitmap/text
 capture and PTY replies. They establish neither compositor hitches nor provider
 continuation. Its Monitor scenarios no longer compare because that pane was deleted.
 
@@ -856,9 +849,8 @@ no new store-cleanup or installation authority.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-The accepted start, not the summer draft, is frozen at
-[the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
-(23 September–21 October). Gate 2 accepted planning, not publication. The later
+The accepted start covered 23 September–21 October. Gate 2 accepted planning,
+not publication. The later
 September 24 hierarchy decisions govern. Historical KR counts and review mechanics:
 `b1e3f623a:wave/product/MEMORY.md`; planning-review lessons:
 `4a84d93b59:.lf/wave/product/MEMORY.md`, this heading.
@@ -1143,4 +1135,4 @@ proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
   must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Released migrations are immutable.** The Product/Intelligence `061` collision
   left existing databases missing a column. Test upgrades from the released frontier;
-  AGENTS.md owns one draft per Task. [Incident history](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).
+  AGENTS.md owns one draft per Task.

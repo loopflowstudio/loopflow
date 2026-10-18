@@ -182,10 +182,13 @@ mod tests {
     use crate::work::task::NewTask;
 
     fn new_task(store: &SqliteStore, repo: &str) -> TaskId {
-        let project = store.ensure_wave_project(repo, "work").unwrap();
+        let repo = crate::repository::CanonicalRepo::discover(std::path::Path::new(repo))
+            .unwrap()
+            .to_string();
+        let project = store.ensure_wave_project(&repo, "work").unwrap();
         store
             .create_task(&NewTask {
-                repository_id: store.ensure_repository(repo).unwrap(),
+                repository_id: store.ensure_repository(&repo).unwrap(),
                 id: TaskId::new(),
                 project_id: Some(project.id),
                 title: "One execution".into(),

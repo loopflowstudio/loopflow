@@ -250,6 +250,9 @@ struct TaskRowMetadataTests {
         value["title"] = id
         value["state"] = state.rawValue
         value["task_ids"] = ["ts_review00000000000000000000000000"]
+        var workspace = try #require(value["workspace"] as? [String: Any])
+        workspace["task_id"] = "ts_review00000000000000000000000000"
+        value["workspace"] = workspace
         value["attention"] = attention?.rawValue ?? NSNull() as Any
         value["program_status"] = try status.map { try JSONSerialization.jsonObject(with: JSONEncoder().encode($0)) } ?? NSNull()
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))

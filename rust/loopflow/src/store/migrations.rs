@@ -60,7 +60,7 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
 }
 
 #[cfg(test)]
-pub(crate) use tests::{apply_before_current_draft, current_draft_sql};
+pub(crate) use tests::{apply_before_current_draft, current_draft_sql, upgrade_from_draft};
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -1786,14 +1786,13 @@ mod tests {
         ))
         .unwrap();
         apply_project_content_cut(&conn).unwrap();
-        let (description, workflow, krs, targets, revision): (String, String, String, String, i64) = conn.query_row(
-            "SELECT description,workflow,krs,metric_targets,pm_snapshot_synced_at FROM projects WHERE id='retained-project'", [],
-            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
+        let (description, krs, targets, revision): (String, String, String, i64) = conn.query_row(
+            "SELECT description,krs,metric_targets,pm_snapshot_synced_at FROM projects WHERE id='retained-project'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
         assert_eq!(
             description,
             "Authored purpose.\n\n## Example\n````markdown\n```yaml\nworkflow: example\nflow: legacy-example\n```\n## KRs\n- [x] Example only\n````\nTarget rationale.\nTarget note.\nThis preamble is authored prose.\n## Notes\nKeep these bytes.\n"
         );
-        assert_eq!(workflow, "saved-selection");
         assert_eq!(revision, 7);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&krs).unwrap(),
@@ -2938,6 +2937,29 @@ mod tests {
         } else {
             apply_set(conn, MIGRATIONS).unwrap();
         }
+    }
+
+    /// Finish a historical fixture's partial migration before using current readers.
+    pub(crate) fn upgrade_from_draft(conn: &rusqlite::Connection, name: &str) {
+        super::_migration_transaction(conn, |conn| {
+            if _draft_is_canonical(name) {
+                let (index, sql, offset) = draft_location(name);
+                conn.execute_batch(&sql[offset..])?;
+                super::seed_peer_planning(conn, sql)?;
+                super::insert_applied_migration(
+                    conn,
+                    &MIGRATIONS[index],
+                    &super::migration_prefix_fingerprint(&MIGRATIONS[..index]),
+                )?;
+                apply_set(conn, MIGRATIONS)?;
+            }
+            for draft in crate::build_info::migration_draft_manifest() {
+                conn.execute_batch(draft.sql)?;
+                super::seed_peer_planning(conn, draft.sql)?;
+            }
+            super::validate_foreign_keys(conn)
+        })
+        .unwrap();
     }
 
     pub(crate) fn current_draft_sql(name: &str) -> String {
@@ -5264,7 +5286,9 @@ mod tests {
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project_fields','wave_fields','current',1);
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
                 VALUES('task_fields','project_fields','LOO-318','LOO-318',1);").unwrap();
-        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',17,?1)", [serde_json::to_string(project).unwrap()]).unwrap();
+        let mut historical_project = serde_json::to_value(&project).unwrap();
+        historical_project["workflow"] = serde_json::json!("");
+        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',17,?1)", [historical_project.to_string()]).unwrap();
         conn.execute("INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES('wave_fields','current',11)", []).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',17,?1)", [serde_json::to_string(item).unwrap()]).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();

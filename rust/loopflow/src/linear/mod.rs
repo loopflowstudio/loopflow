@@ -2751,14 +2751,21 @@ mod tests {
     #[tokio::test]
     async fn project_adoption_uses_the_mutation_acknowledgement() {
         let mut project = json!({"id":"project-1", "name":"Chapter", "description":"Summary",
-            "content":"## Flows\nrecommended: feature\n", "status":{"type":"started"},
+            "content":"## KRs\n- [ ] Preserve this proof\n", "status":{"type":"planned"},
             "updatedAt":"2026-10-10T12:00:00Z", "archivedAt":null,
             "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}});
         let before = json!({"data":{"project":project}});
-        project["content"] = json!("## Flows\nworkflow: feature\n");
+        project["status"]["type"] = json!("started");
         project["updatedAt"] = json!("2026-10-11T12:00:00Z");
         let (url, requests) = test_server::spawn(vec![
             json_response(StatusCode::OK, before),
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"projectStatuses":{
+                    "nodes":[{"id":"started", "type":"started", "teamId":"team-1", "position":0.0}],
+                    "pageInfo":{"hasNextPage":false, "endCursor":null}
+                }}}),
+            ),
             json_response(
                 StatusCode::OK,
                 json!({"data":{"projectUpdate":{"success":true,"project":project}}}),
@@ -2767,11 +2774,11 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), url);
         let adopted = client
-            .adopt_project("project-1", "initiative-1", "team-1", false, true)
+            .adopt_project("project-1", "initiative-1", "team-1", true, true)
             .await
             .unwrap();
         assert_eq!(adopted.revision.as_deref(), Some("2026-10-11T12:00:00Z"));
-        assert_eq!(requests.lock().await.len(), 2);
+        assert_eq!(requests.lock().await.len(), 3);
     }
 
     /// A wrong argument on a Linear mutation must fail here, not ship a 400 on

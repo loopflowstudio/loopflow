@@ -263,6 +263,10 @@ struct RegistryQueryTests {
     "items": [
       {
         "task": {
+          "repository_id": "repo_00000000000040008000000000000001",
+          "repo": "/tmp/repo-a",
+          "project_id": "project-1",
+          "wave_id": "goals",
           "id": "issue-1",
           "identifier": "INF-123",
           "name": "Wire it",
@@ -347,7 +351,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["wave", "show", "product", "--json"])
             #expect(cwd == nil)
-            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
         let result = try await query.roadmap(wave: "product")
@@ -360,7 +364,7 @@ struct RegistryQueryTests {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["wave", "show", "--all", "--json"])
             #expect(cwd == nil)
-            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[]}"#
+            return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
         let result = try await query.roadmap()

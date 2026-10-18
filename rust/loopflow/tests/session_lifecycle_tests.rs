@@ -434,7 +434,10 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
+    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+        .unwrap()
+        .observe_pm_issue_change("fixture-deleted", None, true)
+        .unwrap();
     let refused = fixture
         .command(&["session", "connect", &session])
         .current_dir(worktree)

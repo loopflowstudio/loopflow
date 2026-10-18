@@ -2037,6 +2037,14 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-flow-read", &repo.head_sha());
     observe_planning(&task, &checkout);
+    task.store
+        .sqlite
+        .select_wave_workflow(
+            task.task.wave_id.as_ref().unwrap(),
+            "feature",
+            loopflow::workflow::builtin_workflow("feature").unwrap(),
+        )
+        .unwrap();
     for skill in [
         "implement-proof",
         "decide-proof",

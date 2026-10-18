@@ -915,7 +915,7 @@ struct WorkDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         let exactQuery = RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
-            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"# }
+            if args.prefix(2) == ["wave", "show"] { return #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"# }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
@@ -1064,7 +1064,7 @@ struct WorkDestinationTests {
 
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {
         let data = try fixture()
-        for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#, "transport-error"] {
+        for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#, "transport-error"] {
             let (model, _) = destinationModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
                     if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
@@ -1090,7 +1090,7 @@ struct WorkDestinationTests {
     }
 
     @Test(arguments: [false, true])
-    func scopedTaskLinkOpensItsMatchWithAnotherWaveUnavailable(scoped: Bool) async throws {
+    func taskLinkUsesRepositoryInventoryWithAnotherWaveUnavailable(scoped: Bool) async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1109,8 +1109,8 @@ struct WorkDestinationTests {
         var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
         await model.openTaskLink(try #require(link.url))
-        #expect(model.selection == (scoped ? .task(id: task.id) : nil))
-        #expect(model.showsTaskLink == !scoped)
+        #expect(model.selection == .task(id: task.id))
+        #expect(!model.showsTaskLink)
     }
 
     @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {

@@ -1277,7 +1277,9 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(wave_error.to_string().contains("belongs to Wave"));
+        assert!(wave_error
+            .to_string()
+            .contains("selected Wave does not own Task"));
     }
 
     #[tokio::test]

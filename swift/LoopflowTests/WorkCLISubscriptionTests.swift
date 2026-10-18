@@ -45,7 +45,7 @@ struct WorkCLISubscriptionTests {
         originalDraft.editor.string = "retain original draft"
 
         // The reader and selected workspace are already open before either CLI mutation.
-        let created = try await fixture.json(["task", "create", "--title", "Arrives through CLI", "--json"])
+        let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
         #expect(rows(model).allSatisfy { $0.task == nil }) // Unstarted backlog stays hidden.

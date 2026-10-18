@@ -737,7 +737,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     conn.execute("INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000002',1)", []).unwrap();
     let retained_task = worker.task(&retained.parse().unwrap()).unwrap().unwrap();
     conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,interactive,input_published,cwd,task_id,wave_id)
-        VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_ref().unwrap().as_str()]).unwrap();
+        VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_ref().map(|wave| wave.as_str())]).unwrap();
     let graph = json!({"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]});
     conn.execute(
         "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",

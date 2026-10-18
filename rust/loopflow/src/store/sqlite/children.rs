@@ -2199,18 +2199,23 @@ mod local_planning_tests {
     use rusqlite::params;
     use rusqlite::OptionalExtension;
 
-    use crate::durable::{ProjectId, TaskId};
+    use crate::durable::{ProjectId, RepositoryId, TaskId};
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::work::task::NewTask;
     use crate::work::task::TaskUpdate;
 
-    fn local_project(store: &SqliteStore) -> ProjectId {
+    fn local_repository(store: &SqliteStore) -> RepositoryId {
         let repo = store.home_dir().unwrap();
-        // Fence Git discovery when the fixture runs inside a source checkout.
+        // Fence Git discovery before registering the fixture repository.
         std::fs::create_dir_all(repo.join(".git")).unwrap();
+        store.ensure_repository(repo.to_str().unwrap()).unwrap()
+    }
+
+    fn local_project(store: &SqliteStore) -> ProjectId {
+        local_repository(store);
         store
-            .ensure_wave_project(repo.to_str().unwrap(), "inbox")
+            .ensure_wave_project(store.home_dir().unwrap().to_str().unwrap(), "inbox")
             .unwrap()
             .id
     }
@@ -2238,9 +2243,11 @@ mod local_planning_tests {
             let task = TaskId::new();
             first.get_or_insert_with(|| task.to_string());
             let branch = format!("retired-{n}");
-            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at,branch,workspace_slug,base_commit)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1,?3,?3,'base')", params![task.as_str(),project.as_str(),branch]).unwrap();
+            conn.execute(
+                include_str!("../../../tests/fixtures/migrations/retired_work_lookup_task.sql"),
+                params![task.as_str(), project.as_str(), branch],
+            )
+            .unwrap();
             conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
                 VALUES(?1,?2,1,?3,?3,'base',1,1)", params![format!("pr-{n}"),task.as_str(),branch]).unwrap();
         }
@@ -2284,9 +2291,7 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
                 project_id: Some(local_project(&store)),
                 title: "Fix login".into(),
@@ -2426,9 +2431,7 @@ mod local_planning_tests {
         for id in [&first, &second] {
             store
                 .create_task(&NewTask {
-                    repository_id: store
-                        .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                        .unwrap(),
+                    repository_id: local_repository(&store),
                     id: id.clone(),
                     project_id: Some(project.clone()),
                     title: "Fix login".into(),
@@ -2460,9 +2463,7 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
         let task = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::new(),
                 project_id: Some(local_project(&store)),
@@ -2517,9 +2518,7 @@ mod local_planning_tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let task = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 id: TaskId::new(),
                 project_id: Some(local_project(&store)),
                 title: "Shared Task".into(),
@@ -2645,9 +2644,7 @@ mod local_planning_tests {
         let path = directory.path().join("loopflow.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = NewTask {
-            repository_id: store
-                .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -2689,9 +2686,7 @@ mod local_planning_tests {
         assert_eq!(retried, edited);
         let second = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::new(),
                 ..input.clone()
@@ -2709,9 +2704,7 @@ mod local_planning_tests {
         assert!(store.list_tasks(Some(&WaveId::new())).unwrap().is_empty());
         assert!(store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 due_date: None,
                 title: "Different request".into(),
                 ..input
@@ -2734,9 +2727,7 @@ mod local_planning_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
-            repository_id: store
-                .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -2793,9 +2784,7 @@ mod local_planning_tests {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
         let input = NewTask {
-            repository_id: store
-                .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                .unwrap(),
+            repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::parse("task_0123456789ab40008000000000000001").unwrap(),
             project_id: Some(local_project(&store)),
@@ -2823,9 +2812,7 @@ mod local_planning_tests {
         );
         let second = store
             .create_task(&NewTask {
-                repository_id: store
-                    .ensure_repository(store.home_dir().unwrap().to_str().unwrap())
-                    .unwrap(),
+                repository_id: local_repository(&store),
                 due_date: None,
                 id: TaskId::parse("task_0123456789ab40008000000000000002").unwrap(),
                 ..input
@@ -2853,7 +2840,9 @@ mod local_planning_tests {
     }
     #[test]
     fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{
+            apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+        };
         use std::sync::{Arc, Mutex};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -2864,14 +2853,19 @@ mod local_planning_tests {
         let task = TaskId::new();
         conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'shared','/repo',1),(?2,'recovery','/repo',1)", params![wave,orphan_wave]).unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',1,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
-        conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at,issue_title,issue_description,pm_snapshot_synced_at,worktree,workspace_slug,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'linear-task','LOO-1',1,'Retain title','Retain brief',7,'/repo/task','task',7)",params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute(
+            include_str!("../../../tests/fixtures/migrations/local_planning_retained_task.sql"),
+            params![task.as_str(), project.as_str()],
+        )
+        .unwrap();
         conn.execute("INSERT INTO task_issue_identities(wave_id,issue_id,identifier) VALUES(?1,'orphan-issue','LOO-2')",[&orphan_wave]).unwrap();
         let payload: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"
         ))
         .unwrap();
-        let project_body = payload["projects"][0].to_string();
+        let mut historical_project = payload["projects"][0].clone();
+        historical_project["workflow"] = serde_json::json!("");
+        let project_body = historical_project.to_string();
         let item_body = payload["items"][0].to_string();
         conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',7,?1)",[&project_body]).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',7,?1)",[&item_body]).unwrap();
@@ -2947,11 +2941,7 @@ mod local_planning_tests {
         for ((table, sql), expected) in tables.iter().zip(&queries).zip(before) {
             assert_eq!(rows(&conn, sql), expected, "{table}");
         }
-        conn.execute_batch(&current_draft_sql("optional_task_pr"))
-            .unwrap();
-        let peers = current_draft_sql("planning_peers");
-        conn.execute_batch(&peers).unwrap();
-        crate::store::migrations::seed_peer_planning(&conn, &peers).unwrap();
+        upgrade_from_draft(&conn, "optional_task_pr");
         let order: String = conn
             .query_row(
                 "SELECT task_order_json FROM pm_projects WHERE id='current'",
@@ -2959,15 +2949,6 @@ mod local_planning_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        // Exercise current readers only after the complete candidate schema.
-        for draft in [
-            "agent_process",
-            "lf_process_ids",
-            "process_terminal",
-            "task_checkout_machine",
-        ] {
-            conn.execute_batch(&current_draft_sql(draft)).unwrap();
-        }
         let store = SqliteStore {
             conn: Arc::new(Mutex::new(conn)),
         };

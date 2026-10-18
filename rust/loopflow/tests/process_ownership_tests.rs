@@ -443,6 +443,12 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
             [&wave],
         )
         .unwrap();
+    connection
+        .execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES(?1,'/missing',1)",
+            [loopflow::durable::RepositoryId::new().as_str()],
+        )
+        .unwrap();
     connection.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
         rusqlite::params![project.as_str(),wave]).unwrap();
     connection

@@ -98,8 +98,8 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     for (selector, expected, state, error) in [
         ("FIX-1", Some(&record), PlanningState::Available, false),
         ("issue-1", Some(&record), PlanningState::Available, false),
-        ("FIX-2", Some(&stale), PlanningState::Unavailable, true),
-        ("FIX-3", Some(&invalid), PlanningState::Invalid, true),
+        ("FIX-2", Some(&stale), PlanningState::Available, false),
+        ("FIX-3", Some(&invalid), PlanningState::Invalid, false),
         ("FIX-4", Some(&removed), PlanningState::Removed, false),
         ("uncached-removal", None, PlanningState::Removed, false),
         ("UNKNOWN", None, PlanningState::Unavailable, true),
@@ -122,18 +122,27 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             String::from_utf8_lossy(&output.stderr)
         );
         let status: TaskStatus = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(status.task.is_none());
+        assert_eq!(status.task.is_some(), expected.is_some(), "{selector}");
         assert!(status.project.is_none());
         assert_eq!(
             status.observed_at,
             expected.map(|record| record.observed_at)
         );
-        assert_eq!(status.planning_state, state);
-        assert!(status.execution.is_none());
-        assert_eq!(status.planning_error.is_some(), error);
-        assert_eq!(status.planning_stale, state != PlanningState::Available);
+        assert_eq!(status.planning_state, state, "{selector}");
+        if let Some(execution) = &status.execution {
+            assert!(execution.worktree.is_none());
+            assert!(execution.pr.is_none());
+            assert!(execution.work.sessions.is_empty());
+            assert!(execution.work.flow_processes.is_empty());
+        }
+        assert_eq!(status.planning_error.is_some(), error, "{selector}");
+        assert_eq!(
+            status.planning_stale,
+            state != PlanningState::Available || selector == "FIX-2",
+            "{selector}"
+        );
     }
-    assert!(runtime.block_on(store.list_tasks(None)).unwrap().is_empty());
+    assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 3);
     assert!(runtime
         .block_on(store.list_projects(None))
         .unwrap()

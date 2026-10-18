@@ -1348,7 +1348,8 @@
           }
         },
         "workspace_slug": "delivery",
-        "worktree": "/tmp/.tmp6k7XyI"
+        "worktree": "/tmp/.tmp6k7XyI",
+        "repository_id": "repo_00000000000040008000000000000001"
       },
       "planning": {
         "item": {
@@ -3080,7 +3081,8 @@
           }
         },
         "workspace_slug": "delivery",
-        "worktree": "/tmp/.tmp6k7XyI"
+        "worktree": "/tmp/.tmp6k7XyI",
+        "repository_id": "repo_00000000000040008000000000000001"
       },
       "planning": {
         "item": {
@@ -4488,7 +4490,8 @@
           }
         },
         "workspace_slug": "delivery",
-        "worktree": "/tmp/.tmp6k7XyI"
+        "worktree": "/tmp/.tmp6k7XyI",
+        "repository_id": "repo_00000000000040008000000000000001"
       },
       "planning": {
         "item": {

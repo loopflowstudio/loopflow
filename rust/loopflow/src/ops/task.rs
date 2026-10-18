@@ -5317,7 +5317,9 @@ mod tests {
                 assert_eq!(saved.file.content.as_deref(), Some("no PR needed\n"));
                 let directory = super::task_files("FILES-1", "scratch", None, false).unwrap();
                 assert_eq!(directory.entries[0].path, "scratch/note.md");
-                assert!(super::task_changes("FILES-1", "parent").is_err());
+                let changes = super::task_changes("FILES-1", "parent").unwrap();
+                assert_eq!(changes.base_commit, pr.base_commit);
+                assert_eq!(changes.scratch, ["scratch/note.md"]);
                 let conflict = super::task_save(
                     "FILES-1",
                     "scratch/note.md",

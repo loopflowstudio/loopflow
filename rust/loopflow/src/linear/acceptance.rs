@@ -1040,9 +1040,7 @@ mod tests {
 
     #[test]
     fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
-        use crate::store::migrations::{
-            apply_before_current_draft, current_draft_sql, seed_peer_planning,
-        };
+        use crate::store::migrations::{apply_before_current_draft, upgrade_from_draft};
         use crate::work::project::ProjectId;
         use crate::work::task::TaskId;
         use std::sync::{Arc, Mutex};
@@ -1056,6 +1054,7 @@ mod tests {
             ("UPDATE pm_items SET body=json_set(body,'$.project_id','unmapped') WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_items SET body=json_set(body,'$.team_id','foreign') WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_items SET body=json_remove(body,'$.team_id') WHERE id='issue'", PlanningState::Invalid),
+            ("UPDATE pm_items SET body=json_remove(body,'$.project_id') WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_projects SET body=json_set(body,'$.team_ids',json('[\"foreign\"]')) WHERE id='project'", PlanningState::Invalid),
             ("INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
             ("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT id,'issue','TEAM-1',55 FROM waves", PlanningState::Removed),
@@ -1086,9 +1085,7 @@ mod tests {
                 .unwrap()
                 .collect::<Result<_, _>>()
                 .unwrap();
-            let draft = current_draft_sql("planning_peers");
-            conn.execute_batch(&draft).unwrap();
-            seed_peer_planning(&conn, &draft).unwrap();
+            upgrade_from_draft(&conn, "planning_peers");
             let store = SqliteStore {
                 conn: Arc::new(Mutex::new(conn)),
             };
@@ -1537,10 +1534,7 @@ mod tests {
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
-        conn.execute_batch(&crate::store::migrations::current_draft_sql(
-            "planning_peers",
-        ))
-        .unwrap();
+        crate::store::migrations::upgrade_from_draft(&conn, "planning_peers");
         item.due_date = Some("2026-10-08".into());
         assert!(super::put_item(&conn, "/repo", 2, &item).unwrap());
         let observed: Option<String> = conn

@@ -560,6 +560,11 @@ fn nested_waves_create_files_and_store_project_identity() {
     lf(
         repo.path(),
         home.path(),
+        &["wave", "ensure", "instruments/lexer", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
         &[
             "task",
             "move",
@@ -3560,7 +3565,9 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Original", "--json"],
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Original", "--json",
+        ],
     );
     let id = created["id"].as_str().unwrap();
     let id = TaskId::parse(id).unwrap();
@@ -3897,6 +3904,23 @@ fn waveless_task_lifecycle() {
         lf(repo.path(), home.path(), &["task", "status", id, "--json"])["execution"]["status"],
         "done"
     );
+
+    let standalone = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Always standalone", "--json"],
+    );
+    let standalone_id = standalone["id"].as_str().unwrap();
+    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
+    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
+    let completed = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", standalone_id, "--json"],
+    );
+    assert_eq!(completed["execution"]["status"], "done");
+    assert!(completed["execution"]["wave"].is_null());
+    assert!(completed["execution"]["project_id"].is_null());
 }
 #[test]
 fn workflow_defaults_follow_task_wave_and_repository() {

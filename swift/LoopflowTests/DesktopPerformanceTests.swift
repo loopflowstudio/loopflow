@@ -999,6 +999,7 @@ struct DesktopPerformanceTests {
         waveInfo["repo"] = checkout
         wave["wave"] = waveInfo
         snapshot["waves"] = [wave]
+        snapshot["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)

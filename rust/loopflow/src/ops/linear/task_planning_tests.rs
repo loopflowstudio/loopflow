@@ -3265,7 +3265,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
             assert!(content.contains("Keep the introduction."));
             assert!(content.contains("## Notes\nKeep these notes."));
             let parsed = crate::linear::project_document::parse_project_document(&content).unwrap();
-            assert!(content.contains("workflow: code"));
+            assert!(content.contains("workflow: feature"));
             assert!(parsed.krs[0].holds);
             assert_eq!(parsed.krs[0].text, "Keep working offline");
             for assignee in [Some("person".to_string()), None] {

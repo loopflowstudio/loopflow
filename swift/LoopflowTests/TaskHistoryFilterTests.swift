@@ -36,6 +36,7 @@ struct TaskHistoryFilterTests {
         evidence["items"] = rows
         waves[0]["tasks"] = evidence
         root["waves"] = [waves[0]]
+        root["tasks"] = evidence
         return root
     }
 

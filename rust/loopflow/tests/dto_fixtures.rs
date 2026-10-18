@@ -173,9 +173,10 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
             .as_deref(),
         Some("build-server")
     );
-    assert_eq!(
-        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["workflow"],
-        "feature"
+    assert!(
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
+            .get("workflow")
+            .is_none()
     );
     assert_eq!(
         items[0].reference.workspace.as_ref().unwrap().local_exists,

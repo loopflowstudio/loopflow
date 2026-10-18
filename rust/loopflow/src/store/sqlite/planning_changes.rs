@@ -516,7 +516,9 @@ mod tests {
 
     use super::PlanningChanges;
     use crate::durable::TaskId;
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{
+        apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+    };
     use crate::work::edit::WorkValue;
 
     #[test]
@@ -606,8 +608,7 @@ mod tests {
                     [input.to_string()],
                 )
                 .unwrap();
-                conn.execute_batch(&current_draft_sql("planning_peers"))
-                    .unwrap();
+                upgrade_from_draft(&conn, "planning_peers");
                 let task = TaskId::from_raw("task-proof");
                 assert!(PlanningChanges::Task(&task)
                     .record(
@@ -634,9 +635,7 @@ mod tests {
                 assert_eq!(
                     base.map(|value| serde_json::from_str::<serde_json::Value>(&value).unwrap()),
                     expected.map(|mut expected| {
-                        if field_name=="assignee" || !expected["value"].is_null() {
-                            expected["value"]=json!({"field":if field_name=="project_id" {"task_project"} else {"task_assignee"},"value":expected["value"]});
-                        }
+                        expected["value"]=json!({"field":if field_name=="project_id" {"task_project"} else {"task_assignee"},"value":expected["value"]});
                         expected
                     })
                 );

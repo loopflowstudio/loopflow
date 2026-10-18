@@ -455,30 +455,19 @@ An unavailable platform check is deferred to its capable CI owner, not reported
 as passing. Native demo judges discoverability and conversation continuity;
 it is not an unattended gate requirement.
 
-## Remaining work and evidence limits — reconciled 2026-10-17
+## Remaining work and evidence limits — gated 2026-10-17
 
-1. Gate's affected-suite matrix and populated disposable installation upgrade
-   remain. Reuse applicable focused results above; broader Rust, headless Swift,
-   Desktop build and Linux-only reconnect checks retain their stated owners.
-   The earlier passing workflow-document test reported a leaked child; its suite
-   cleanup check must settle that evidence before an all-clear claim.
-2. Gate retains the live membership regression
-   `provider_completion_preserves_a_live_edge_and_the_flow_process_records_its_real_arrival`:
-   it detaches/reattaches a held Flow, compares Workflow/checkout/branch, checks
-   the child remains alive, then verifies one successful original Flow arrival.
-   `waveless_task_lifecycle` separately proves the standalone lifecycle after its
-   Flow returns; the store test proves capture ownership and stale-write refusal.
-   The full acceptance-3 combination of a between-Wave move, unchanged PR and
-   native conversation draft is not established by these component tests; the
-   remaining variants belong to Gate's focused coverage and the configured demo.
-3. Configured CLI/Desktop demo review remains: repository discovery, conversation
-   opening, unsent native input, movement during execution, continued standalone
-   use and completion, plus the normal PR/recovery path. Headless workspace/file
-   draft retention is useful evidence, not provider-input or visual acceptance.
-   A second Task must stay standalone throughout completion as designed.
-4. Jack Heart approved the overall PR review after requesting the standalone
-   default. The correction is implemented; delivery and required ship checks
-   remain with the authored Flow. Native hands-on evidence is still unclaimed.
+1. Local automated checks and their repairs are recorded below. Linux CI still
+   owns `planning_reconnect_tests`; the Linux-only fixture now unwraps its
+   explicitly assigned Project/Wave. Required remote checks remain with delivery.
+2. The live-Flow regression now covers a between-Wave move, detach and reattach,
+   preserving the PR, checkout, branch, captured Workflow and running child,
+   followed by exactly one original Flow arrival. A second Task completes while
+   remaining standalone. Native unsent provider input and subjective navigation
+   remain configured demo/review evidence, not a claim from headless file drafts.
+3. Jack Heart approved the overall PR review after requesting the standalone
+   default. Delivery remains with the authored Flow. Gate neither publishes nor
+   completes the Task.
 
 The design baseline remains `28dc141671`. Merge `2e137c1201` incorporates
 `40a9a697f0` (#1585), including #1586 (`070e5bb6a4`). #1586 removes elapsed-time
@@ -531,3 +520,36 @@ The provenance test derives its expected source from explicit selection rather
 than carrying the same choice twice.
 
 Check: 2026-10-17 — prose-only realignment: `git diff --check` passed; `lf context` within both budgets. Reused compression's `TMPDIR=/private/tmp uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(task_creation_defaults_to_standalone_in_bound_contexts) | test(task_planning_explain) | test(task_create_in_linear_repository_returns_published_task_without_execution)' --no-tests fail < /dev/null` (8/8), formatting and Clippy; earlier Wave-resolution matrix evidence retained. Combined acceptance belongs to Gate; native proof remains unclaimed.
+
+
+## Gate review and checks — 2026-10-17
+
+Review found two behavior defects and repaired them: exact Task roadmap queries
+now resolve identifiers per repository (including a cached repository without
+Git metadata), and a Wave-bound Session cannot switch Waves while first binding
+to a Task. Already Task-bound Sessions still follow membership moves. The
+existing ancestry and duplicate-identifier regressions prove both boundaries.
+
+The remaining failures were fixtures carrying the previous model: implicit
+Wave/default selection, historical schemas passed directly to current readers,
+Project-owned Workflow fields, missing repository DTO fields, and projections
+that updated only a Wave slice while leaving the root Task inventory stale.
+Historical fixture SQL stays under `tests/fixtures/migrations/`; the shared
+upgrade helper finishes the released frontier and drafts before current readers.
+Tests retain the behavioral assertions, including read-only Workflow recovery,
+provider deletion refusal, and retained Desktop workspace/draft identity.
+
+Check: `TMPDIR=/private/tmp uv run python scripts/test.py --reuse-passing` — architecture passed; website 75/75 passed; full materialized Rust exercised 2,680 cases (2,645 initial passes, 35 failures); Desktop built and 603 headless tests exposed 24 issues. This initial aggregate remains failed in its log; the repairs below resolve every observed failure without rerunning the full matrix or claiming a cache hit.
+Check: materialized, network-isolated `cargo nextest run` — 177 affected cases covered all 35 Rust failures plus migration, repository lookup, local planning and Flow lifecycle suites; 168 passed immediately, remaining cases passed in focused 9-case and 2-case repairs. No unresolved Rust failure from the initial run; workflow-document cleanup reported no leaked child.
+Check: materialized `cargo test -p loopflow --test integration --jobs 4 data_clones:: -- --test-threads 4` — 4/4 passed under the clone fixtures' own isolation boundary.
+Check: `uv run python scripts/test_network.py cargo test -p loopflow --lib linear::acceptance::tests::due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision -- --exact` — passed against the unmaterialized draft path as well.
+Check: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DesktopPerformanceFixtureTests|MockWaveFixtureTests|ProjectActivationTests|RegistryQueryTests|TaskHistoryFilterTests|TaskRowMetadataTests|WaveLensTests|WorkCLISubscriptionTests|WorkDestinationTests|WorkNavigationTests'` — 170/170 passed; final fixture formatting/scope check with `--filter 'RegistryQueryTests|MockWaveFixtureTests'` passed 24/24.
+Check: `uv run python scripts/test_task_installation.py --repository-upgrade` — passed after the Session trigger repair: populated 0.14.3 promotion, retained Task/Session identity, history, edits, move and retry; disposable installation only.
+Check: `cargo fmt --all -- --check`; `cargo clippy --all-targets -- -D warnings`; `uv run python scripts/check_migrations.py`; `uv run python scripts/check_swift_multiplatform_boundaries.py`; `git diff --check` — passed; 76 shipped migrations unchanged, three combined drafts validated.
+
+Performance evidence remains behavioral: no before/after latency claim. Existing
+Desktop benchmark signals `write_to_visible_ms` and `task_workspace_ready_ms`
+follow the relevant production paths. Proposed Product follow-up: measure
+membership changes and retained standalone Task entry through those scenarios
+on a display-capable runner; no new target is introduced here. Display-dependent terminal frames and native provider-input
+continuity remain demo/review; Linux reconnect execution remains CI-owned.

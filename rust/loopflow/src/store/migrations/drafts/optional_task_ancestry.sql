@@ -176,7 +176,7 @@ CREATE TRIGGER validate_conversation_ancestry_update BEFORE UPDATE OF task_id,wa
     ) THEN RAISE(ABORT,'Session Task and Wave disagree') END;
     SELECT CASE WHEN OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id
         THEN RAISE(ABORT,'Session Task binding is permanent') END;
-    SELECT CASE WHEN OLD.task_id IS NULL AND NEW.task_id IS NULL AND OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
+    SELECT CASE WHEN OLD.task_id IS NULL AND OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
         THEN RAISE(ABORT,'Wave Session binding is permanent') END;
 END;
 CREATE TRIGGER task_session_membership AFTER UPDATE OF project_id ON tasks BEGIN

@@ -677,7 +677,11 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
         } else {
             std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
         };
-        let repo = crate::repo::find_repo_root().ok();
+        let repo = crate::repo::find_repo_root().ok().or_else(|| {
+            (task.is_some() && !all)
+                .then(|| std::env::current_dir().ok())
+                .flatten()
+        });
         let waves = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             repo.as_deref(),
@@ -803,10 +807,21 @@ async fn roadmap_snapshot(
         tasks.retain(|task| Some(&task.repository_id) == repository.as_ref());
     }
     if let Some(selector) = task {
-        let selected = store
-            .sqlite
-            .resolve_task_id(selector, repo_scope.and_then(Path::to_str))?;
-        tasks.retain(|task| Some(&task.id) == selected.as_ref());
+        // Identifiers may repeat across repositories. Resolve within each owner,
+        // including cached repositories whose Git checkout is unavailable.
+        let mut selected = std::collections::HashSet::new();
+        let repositories: std::collections::HashSet<_> =
+            tasks.iter().map(|task| &task.repository_id).collect();
+        for repository in repositories {
+            let path = store
+                .sqlite
+                .repository_path(repository)?
+                .ok_or_else(|| anyhow!("Task repository {repository} has no local path"))?;
+            if let Some(id) = store.sqlite.resolve_task_id(selector, Some(&path))? {
+                selected.insert(id);
+            }
+        }
+        tasks.retain(|task| selected.contains(&task.id));
     }
     let inventory = snapshot_tasks(
         store,

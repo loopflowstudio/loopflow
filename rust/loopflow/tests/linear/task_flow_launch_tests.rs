@@ -407,6 +407,15 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
     ] {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
+        let config = repo.path().join(".lf/config.yaml");
+        fs::write(
+            &config,
+            format!(
+                "{}\nworkflow: proof\n",
+                fs::read_to_string(&config).unwrap()
+            ),
+        )
+        .unwrap();
         repo.create_branch("launch-proof");
         let home = tempfile::tempdir().unwrap();
         let _env = support::EnvGuard::new(&[
@@ -420,14 +429,12 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             &repo.head_sha(),
         );
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-        // `feature` is the fixture Project's Flow.
-        for flow in ["proof", "feature"] {
-            fs::write(
-                repo.path().join(format!(".lf/flows/{flow}.yaml")),
-                "- cmd: task sync --plan\n",
-            )
-            .unwrap();
-        }
+        // The repository selects `proof`, initially only a Flow.
+        fs::write(
+            repo.path().join(".lf/flows/proof.yaml"),
+            "- cmd: task sync --plan\n",
+        )
+        .unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let scope = repo.path().canonicalize().unwrap().display().to_string();
         let mut record: crate::test_linear_input::IssueFixture =
@@ -441,11 +448,11 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             record.item.team_id = Some("another-team".into());
         }
         if condition == "moved" {
-            // The retained parent still selects feature; give that Workflow a proof edge
+            // The repository still selects proof; give that Workflow a proof edge
             // so this fixture reaches the planning mismatch admission check.
             fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
             fs::write(
-                repo.path().join(".lf/workflows/feature.yaml"),
+                repo.path().join(".lf/workflows/proof.yaml"),
                 "edges:\n  - {from: start, to: end, flow: proof}\n",
             )
             .unwrap();
@@ -529,14 +536,13 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
-        // The Project names a repository Flow, which is not a workflow: a
+        // The repository names a Flow, which is not a Workflow: a
         // run that names nothing is refused and starts no Flow.
         let output = run(&["-b", "task", "run", "INF-123"]);
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("which is not a workflow"), "{error}");
         assert!(
-            error.contains("lf wave workflow set <name> <wave>"),
+            error.contains("repository Workflow \"proof\" is unavailable"),
             "{error}"
         );
         assert_eq!(support::recorded_flows(home.path()).len(), 3);
@@ -1848,8 +1854,20 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     }
     let before = task.workflow();
     assert_eq!(before["position"]["running"], true);
+    task.publish(false);
     let placement = task.status();
+    assert!(placement["pr"]["id"].is_string());
+    task.ok(&["wave", "ensure", "other", "--json"]);
+    task.ok(&["task", "move", "INF-123", "--wave", "other"]);
+    let moved = task.status();
+    assert_eq!(moved["wave"], "other");
+    assert_eq!(moved["pr"], placement["pr"]);
+    assert_eq!(moved["worktree"], placement["worktree"]);
+    assert_eq!(moved["branch"], placement["branch"]);
+    assert_eq!(task.workflow(), before);
+    assert!(held.child.try_wait().unwrap().is_none());
     task.ok(&["task", "move", "INF-123", "--no-wave"]);
+    assert_eq!(task.status()["pr"], placement["pr"]);
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     task.ok(&[
@@ -1862,6 +1880,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(task.workflow(), before);
     assert_eq!(task.status()["worktree"], placement["worktree"]);
     assert_eq!(task.status()["branch"], placement["branch"]);
+    assert_eq!(task.status()["pr"], placement["pr"]);
     assert!(held.child.try_wait().unwrap().is_none());
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
@@ -1871,6 +1890,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());
+    task.publish(true);
     fs::write(&held.release, "").unwrap();
     assert!(
         held.child.wait().unwrap().success(),

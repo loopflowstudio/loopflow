@@ -16,7 +16,7 @@ from typing import Any, Iterable, Mapping, Sequence, TextIO
 from urllib.parse import quote
 
 SCHEMA_VERSION = 1
-POLICY_PATH = Path("performance/budgets.json")
+POLICY_PATH = Path("scripts/performance-budgets.json")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

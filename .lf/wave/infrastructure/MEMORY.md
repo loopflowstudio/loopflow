@@ -70,7 +70,8 @@ Release's entry-point lesson applies: source tests miss competing terminal write
 Jack Heart selected OpenCode 2 repair/delivery;
 automatic crash continuation is deferred. Candidate deterministic-native
 tool/context/Flow and configured-account launch/tool/resume passed.
-[Audit](../../../docs/reviews/opencode-2/README.md).
+[PR #1590](https://github.com/loopflowstudio/loopflow/pull/1590) records verification
+and remaining native acceptance.
 
 No parent IDs or replayable events; steer/queue share idle.
 Readmission can emit empty success; managed recovery injects synthetic guidance
@@ -85,8 +86,7 @@ acceptance and delivery remain open.
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
 #1545 merged; installation and measured savings remain unproved. Assertion
 boundaries, counts and acquisition evidence:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading;
-[assertion mapping](../../../docs/reviews/ci-test-coverage.md#applied-excess-test-reduction--2026-10-13).
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
 
@@ -451,7 +451,7 @@ Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized investigation, cleanup and delivery. Evidence: [storage footprint review](../../../docs/reviews/storage-footprint.md).
+Jack Heart authorized investigation, cleanup and delivery.
 `session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
 also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
 measured): new captures keep 28% of rows and 72% of bytes, preflight validates
@@ -535,8 +535,7 @@ Release owns re-entry leases, transfer deadlines and pending-version lessons.
 `cad03fe6d:wave/infrastructure/MEMORY.md`. October 11 lf-cb9012a supersedes
 its ancestry veto in source. Jack Heart subsequently authorized landing #1533
 after resolving main conflicts (`7689d642`); this gate does not establish delivery.
-The [durable review](../../../docs/reviews/stale-pr-bases.md) preserves the 5 Whys
-and refusal inventory. Current Git ancestry owns PR comparison; saved placement cannot
+Current Git ancestry owns PR comparison; saved placement cannot
 classify commits as foreign. Preserve every commit. Stack forks still own squash-parent sync;
 refreshing them during publication can restore files main deleted. Disposable
 CLI proofs pass; installed Etude and hosted acceptance remain unproved.
@@ -1126,14 +1125,13 @@ Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/networ
 proof remains; Release's lesson separates local proof from delivery.
 Preserve copy/sign, development/validation-only authority and disposable
 OS accounts for installation. No paid runners, test removal, cache relaxation or
-retries. [Trials and limits](../../../docs/reviews/ci-under-five-minutes.md#october-13-follow-up-exact-cache-miss-overlap).
+retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
 Jack Heart requested landing #1505 on October 8, superseding review-only Flow feedback.
 Keep the Task open for outstanding cold-cache verification.
-[The report](../../../scripts/benchmarks/agent-startup/README.md) owns numbers,
-release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
+Git retains the dated measurements and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and
 ancestor-probe deferral did not and were removed. The last rejection meets
 the stopping condition, not exhaustion.

@@ -3082,8 +3082,19 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         (alias.as_path(), &tasks[0]),
         (second.path(), &tasks[1]),
     ] {
-        let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
-        assert_eq!(status["task"]["id"], task["id"]);
+        for selector in ["DUP-1", "dup-1", "Dup-1"] {
+            let status = lf(repo, home.path(), &["task", "status", selector, "--json"]);
+            assert_eq!(status["task"]["id"], task["id"]);
+            assert_eq!(status["task"]["identifier"], "DUP-1");
+        }
+    }
+    let ambiguous = command(home.path(), home.path(), &["--task", "dup-1", "--explain"])
+        .output()
+        .unwrap();
+    assert!(ambiguous.status.success());
+    let error = String::from_utf8_lossy(&ambiguous.stdout);
+    for task in &tasks {
+        assert!(error.contains(task["id"].as_str().unwrap()), "{error}");
     }
     // Exact identity remains constrained to the selected repository.
     let foreign = tasks[1]["id"].as_str().unwrap();
@@ -3112,7 +3123,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     lf(
         &alias,
         home.path(),
-        &["task", "edit", "DUP-1", "--title", "First only"],
+        &["task", "edit", "dup-1", "--title", "First only"],
     );
     let status = lf(
         second.path(),

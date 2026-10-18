@@ -179,13 +179,10 @@ impl Cli {
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
-                SessionCommand::Resume(SessionConnectionArgs { prepare: false, .. })
-                    | SessionCommand::Connect {
-                        connection: SessionConnectionArgs { prepare: false, .. },
-                        ..
-                    }
-                    | SessionCommand::Ensure { .. }
-                    | SessionCommand::New { .. }
+                SessionCommand::Connect {
+                    connection: SessionConnectionArgs { prepare: false, .. },
+                    ..
+                }
             ),
             Some(Commands::Commit { message, .. }) => message.is_none(),
             Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
@@ -221,26 +218,17 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
-        if let Some(Commands::Session { cmd }) = &self.command {
-            let selection = match cmd {
-                SessionCommand::Connect { id, connection, .. } => Some((id.as_deref(), connection)),
-                SessionCommand::Resume(connection) => Some((None, connection)),
-                _ => None,
-            };
-            if let Some((id, connection)) = selection {
-                let target = connection.target(&self, id).map_err(|error| {
-                    clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
-                })?;
-                if matches!(cmd, SessionCommand::Connect { .. })
-                    && matches!(target, crate::ops::human_session::SessionTarget::Context)
-                {
-                    return Err(clap::Error::raw(clap::error::ErrorKind::MissingRequiredArgument, "connect requires a Session ID, --task or --wave; use resume for contextual discovery"));
-                }
-            }
+        if let Some(Commands::Session {
+            cmd: SessionCommand::Connect { id, connection, .. },
+        }) = &self.command
+        {
+            connection.target(&self, id.as_deref()).map_err(|error| {
+                clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
+            })?;
         }
         // Work routing consumes the same explicit selector in either flag position.
         if let Some(Commands::Session {
-            cmd: SessionCommand::Connect { connection, .. } | SessionCommand::Resume(connection),
+            cmd: SessionCommand::Connect { connection, .. },
         }) = &mut self.command
         {
             if connection.task.is_some() {
@@ -854,6 +842,9 @@ pub struct SessionConnectionArgs {
     pub task: Option<String>,
     #[arg(long)]
     pub wave: Option<String>,
+    /// Create a fresh primary in this scope, keeping the previous client and history
+    #[arg(long, conflicts_with = "id")]
+    pub fresh: bool,
     /// With `-b`: send the conversation its next turn
     #[arg(long)]
     pub message: Option<String>,
@@ -878,10 +869,20 @@ impl SessionConnectionArgs {
             self.wave.is_none() || cli.wave.is_none(),
             "select a Wave only once"
         );
-        crate::ops::human_session::SessionTarget::from_selectors(
+        use crate::ops::human_session::SessionTarget;
+        let target = SessionTarget::from_selectors(
             id,
             self.task.as_deref().or(cli.task.as_deref()),
             self.wave.as_deref().or(cli.wave.as_deref()),
+        )?;
+        Ok(
+            if matches!(target, SessionTarget::Context)
+                && (cli.repo.is_some() || cli.repository.is_some())
+            {
+                SessionTarget::Repository
+            } else {
+                target
+            },
         )
     }
 }
@@ -921,8 +922,6 @@ pub enum SessionCommand {
         #[arg(long)]
         agent_process: Option<String>,
     },
-    /// Resume the relevant existing conversation of this checkout or explicit Work
-    Resume(SessionConnectionArgs),
     /// Read this conversation's native start, usage and completion receipts
     History {
         /// Session ID or provider conversation ID
@@ -970,7 +969,8 @@ pub enum SessionCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Connect to a Session, or find/prepare a Task or Wave's primary conversation
+    /// Open the ongoing conversation of this scope, or an exact Session
+    #[command(visible_alias = "resume")]
     Connect {
         /// Session ID or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
@@ -983,26 +983,6 @@ pub enum SessionCommand {
         /// Ask the provider to resume even when another client is active
         #[arg(long = "try", conflicts_with = "takeover")]
         try_open: bool,
-    },
-    /// Find or prepare the one ongoing conversation of this repository, a Wave or a Task
-    Ensure {
-        /// The Wave's conversation instead of the repository's
-        #[arg(short = 'w', long)]
-        wave: Option<String>,
-        /// The Task's: the one chosen, else its only or most recently used conversation
-        #[arg(long, conflicts_with = "wave")]
-        task: Option<String>,
-        /// Make this conversation of the Task its primary
-        #[arg(long, value_name = "SESSION", requires = "task")]
-        choose: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Give a primary Session's scope a fresh conversation
-    New {
-        id: String,
-        #[arg(long)]
-        json: bool,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
@@ -3022,6 +3002,16 @@ mod tests {
     #[test]
     fn session_work_flags_normalize_before_machine_routing() {
         for command in ["resume", "connect"] {
+            let cli = Cli::try_parse_from(["lf", "session", command, "session-id"])
+                .unwrap()
+                .checked()
+                .unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Session {
+                    cmd: SessionCommand::Connect { id: Some(id), .. }
+                }) if id == "session-id"
+            ));
             for (flag, value) in [("--task", "LOO-1"), ("--wave", "infra")] {
                 for argv in [
                     vec!["lf", flag, value, "session", command, "--prepare"],
@@ -3041,7 +3031,6 @@ mod tests {
             }
         }
         for argv in [
-            vec!["lf", "session", "resume", "session-id"],
             vec!["lf", "--task", "LOO-1", "session", "connect", "session-id"],
             vec![
                 "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",

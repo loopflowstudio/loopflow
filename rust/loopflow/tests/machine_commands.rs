@@ -288,8 +288,13 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
     assert_eq!(argv[0], "ssh");
     assert!(argv.contains(&"-tt"));
     assert!(!argv.contains(&"--takeover"));
-    for target in [vec!["connect", id.as_str()], vec!["resume"]] {
-        let mut arguments = vec!["--machine", "mini", "session"];
+    for target in [
+        vec!["session", "connect", id.as_str()],
+        vec!["session", "resume"],
+        vec!["connect", id.as_str()],
+        vec!["resume"],
+    ] {
+        let mut arguments = vec!["--machine", "mini"];
         arguments.extend(target);
         arguments.push("--prepare");
         let output = fixture.command(&arguments).output().unwrap();

@@ -140,7 +140,7 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
-lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
+lf connect --wave designer             # the Wave's ongoing conversation, applying that pass on every return
 ```
 
 Edit `.lf/wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -215,7 +215,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 
 ```bash
 lf session list
-lf resume                         # relevant conversation for this checkout
+lf connect                        # this scope's ongoing conversation
 lf connect SESSION                # Loopflow, Claude, or Codex ID
 lf session attach SESSION         # existing execution; Ctrl+] detaches
 lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
@@ -272,16 +272,21 @@ across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
-`lf resume` is short for `lf session resume`. It selects the active Task’s conversation,
-or the most recent interactive Session in this worktree. From the main checkout,
-it searches all worktrees of the repository. `--task ISSUE` or `--wave NAME`
-overrides discovery. Recency uses native human input, falling back to last opening.
-Assistant output and background work do not change that order. A Flow is never
-resumed; `lf task run ISSUE` runs a fresh one.
+`lf connect` opens this scope's ongoing conversation, creating one when absent.
+From the canonical checkout or the repository's persistent checkout it opens the
+repository primary; Task and persistent Wave checkouts open their own primary.
+`lf resume` is an exact alias, including all flags. An unassociated linked checkout
+requires an explicit target; ordinary `lf` starts a new conversation there.
 
-`lf connect --wave NAME` and `lf connect --task ISSUE` find or prepare the Work’s
-primary conversation and open it in its checkout. `--prepare` returns the terminal
-command without launching; `--json` changes output format only.
+`lf --repo NAME connect`, `lf connect --wave NAME`, and `lf connect --task ISSUE`
+select an explicit scope. `lf connect SESSION` opens the exact retained conversation.
+`--fresh` creates a new primary without stopping the previous client or losing its
+history. Ordinary connect recovers the current primary after a lost reply; each
+explicit `--fresh` creates another. `--prepare` returns connection data without
+launching or taking over a client; `--json` changes only the output format.
+First creation uses the matching repository, Wave or Task session skill;
+reconnection retains its instructions and history.
+
 Headless continuation reads the saved workspace's context and native history,
 even from another directory, without re-running the original skill.
 

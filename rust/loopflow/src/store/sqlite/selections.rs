@@ -1,39 +1,63 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
+mod panes;
 use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    Arrangement, QueryId, SavedSelection, Selection, SelectionReading, SelectionResolution,
-    SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
+    Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionResolution,
+    SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
-use rusqlite::{params, Connection, TransactionBehavior};
-use std::collections::BTreeMap;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-fn catalog_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<SavedSelection>> {
-    let mut statement = conn.prepare("SELECT id,revision,selection_json,arrangement_json FROM saved_selections WHERE repository_id=?1 ORDER BY id")?;
+fn catalog_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
+    let mut statement = conn.prepare("SELECT s.id,s.revision,a.selection_json,a.arrangement_json,s.name,s.pinned FROM dashboards s JOIN dashboard_arrangements a ON a.repository_id=s.repository_id AND a.dashboard_id=s.id AND a.expression_key=s.expression_key WHERE s.repository_id=?1 ORDER BY s.id")?;
     let rows = statement.query_map([repository.as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, i64>(1)?,
             row.get::<_, String>(2)?,
             row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, bool>(5)?,
         ))
     })?;
     rows.map(|row| {
-        let (id, revision, selection, arrangement) = row?;
-        Ok(SavedSelection {
+        let (id, revision, selection, arrangement, name, pinned) = row?;
+        Ok(Dashboard {
             repository: repository.to_string(),
-            id: QueryId(id),
+            id: DashboardId(id),
             revision,
+            name,
+            pinned,
             selection: serde_json::from_str(&selection)?,
             arrangement: serde_json::from_str(&arrangement)?,
         })
     })
     .collect()
+}
+
+fn arrangement_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    id: &DashboardId,
+    expression_key: &str,
+) -> StoreResult<Option<(Selection, Arrangement)>> {
+    let row: Option<(String, String)> = conn.query_row(
+        "SELECT selection_json,arrangement_json FROM dashboard_arrangements WHERE repository_id=?1 AND dashboard_id=?2 AND expression_key=?3",
+        params![repository.as_str(), id.0, expression_key], |row| Ok((row.get(0)?,row.get(1)?)),
+    ).optional()?;
+    row.map(|(selection, arrangement)| {
+        Ok((
+            serde_json::from_str(&selection)?,
+            serde_json::from_str(&arrangement)?,
+        ))
+    })
+    .transpose()
 }
 
 fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<SelectionWork>> {
@@ -53,12 +77,18 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
         open: None,
+        name: repo.clone(),
+        states: BTreeSet::new(),
+        activity_known: false,
     }];
     for wave in &waves {
         work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             open: None,
+            name: wave.name().to_string(),
+            states: BTreeSet::new(),
+            activity_known: false,
         });
     }
     let mut tasks = Vec::new();
@@ -66,15 +96,88 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         tasks.extend(super::children::tasks_in(conn, Some(wave.id()))?);
     }
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
+    let sessions = super::sessions::session_summaries_in(
+        conn,
+        &crate::session::SessionFilter {
+            repo: Some(repo),
+            limit: 0,
+            after: Some(String::new()),
+            ..Default::default()
+        },
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        "[]",
+    )?;
+    let mut sessions_by_task = HashMap::<_, Vec<_>>::new();
+    for session in sessions
+        .iter()
+        .filter(|session| session.completed_at.is_none())
+    {
+        for task in &session.task_ids {
+            sessions_by_task.entry(task).or_default().push(session);
+        }
+    }
     for task in tasks {
-        let open = super::chapters::task_started_in(conn, &task.id)?
-            && !super::durable::task_state_in(conn, &task.id)?.is_terminal();
+        let started = super::chapters::task_started_in(conn, &task.id)?;
+        let state = super::durable::task_state_in(conn, &task.id)?;
+        let open = started && !state.is_terminal();
+        let mut states = BTreeSet::new();
+        if open {
+            states.insert(SelectionState::Open);
+        }
+        if state.is_terminal() {
+            states.insert(SelectionState::Done);
+        } else if !started {
+            states.insert(SelectionState::Backlog);
+        }
+        if state == crate::durable::TaskState::Paused {
+            states.insert(SelectionState::Paused);
+        }
+        let mut activity_known = true;
+        for session in sessions_by_task.get(&task.id).into_iter().flatten() {
+            if session.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Unknown {
+                activity_known = false;
+            }
+            if session.available {
+                states.insert(SelectionState::Available);
+            }
+            if let Some(status) = &session.program_status {
+                for report in &status.records {
+                    match report.state {
+                        crate::program_status::State::Working => {
+                            states.insert(SelectionState::Running);
+                        }
+                        crate::program_status::State::Blocked => {
+                            states.insert(SelectionState::Blocked);
+                        }
+                        crate::program_status::State::Idle => {
+                            states.insert(SelectionState::Idle);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Task, task.id.to_string()),
             parent_wave: Some(task.wave_id),
             open: Some(open),
+            name: task.identifier,
+            states,
+            activity_known,
         });
     }
+    // Stable sorting retains rank/ID within each attention class.
+    work.sort_by_key(|item| match item.key.kind {
+        WorkWorkspaceKind::Task
+            if item.states.contains(&SelectionState::Available)
+                || item.states.contains(&SelectionState::Blocked) =>
+        {
+            0
+        }
+        WorkWorkspaceKind::Task => 1,
+        WorkWorkspaceKind::Wave => 2,
+        WorkWorkspaceKind::Repository => 3,
+    });
     Ok(work)
 }
 
@@ -82,7 +185,7 @@ fn resolve_in(
     conn: &Connection,
     repository: &RepositoryId,
     selection: &Selection,
-    catalog: &[SavedSelection],
+    catalog: &[Dashboard],
 ) -> StoreResult<SelectionResolution> {
     selection
         .resolve(
@@ -90,17 +193,269 @@ fn resolve_in(
             &work_in(conn, repository)?,
             &definitions(catalog),
         )
-        .map_err(invalid)
+        .map_err(StoreError::from)
 }
 
-fn definitions(catalog: &[SavedSelection]) -> BTreeMap<QueryId, Selection> {
+fn definitions(catalog: &[Dashboard]) -> BTreeMap<DashboardId, Selection> {
     catalog
         .iter()
         .map(|saved| (saved.id.clone(), saved.selection.clone()))
         .collect()
 }
 
+fn plan_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    selection: Selection,
+    saved: Option<&Dashboard>,
+    queries: &BTreeMap<DashboardId, Selection>,
+    work: &[SelectionWork],
+) -> StoreResult<crate::work::selection::ViewPlan> {
+    use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
+    let resolution = selection
+        .resolve(repository.as_str(), work, queries)
+        .map_err(StoreError::from)?;
+    let mut arrangement = saved.map_or_else(
+        || Arrangement::automatic(&[]),
+        |saved| saved.arrangement.clone(),
+    );
+    arrangement.reconcile(&resolution);
+    let selected: BTreeSet<_> = arrangement
+        .members()
+        .into_iter()
+        .map(|member| member.work)
+        .collect();
+    let mut contents = Vec::new();
+    for key in selected {
+        let facts = work.iter().find(|item| item.key == key);
+        let pane_layout = panes::layout_in(conn, &key)?;
+        let face = pane_layout.as_ref().and_then(|layout| {
+            layout
+                .zoomed
+                .as_ref()
+                .and_then(|id| layout.tree.as_ref()?.pane(id))
+                .cloned()
+        });
+        let mut content = ViewContent {
+            pane_revision: pane_layout.as_ref().map(|layout| layout.revision),
+            face,
+            work: key.clone(),
+            title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
+            states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+            primary_session: None,
+            location: None,
+            argv: None,
+            unavailable: Vec::new(),
+        };
+        if facts.is_none() {
+            content
+                .unavailable
+                .push("Work is unavailable; retained intent only".into());
+        } else if key.kind == WorkWorkspaceKind::Task {
+            let task_id = crate::durable::TaskId::parse(&key.id).map_err(invalid)?;
+            let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
+            content.title = task.title;
+            let primary = super::sessions::primary_session_in(
+                conn,
+                &crate::session::PrimaryScope::Task(task_id.clone()),
+            )?;
+            content.primary_session = primary.as_ref().map(|session| session.id.clone());
+            if primary.is_none() {
+                content
+                    .unavailable
+                    .push("No primary Session is recorded".into());
+            }
+            if let Some(checkout) = super::children::task_checkout_in(conn, &task_id)? {
+                if let Some(machine) = checkout.machine_id {
+                    content.location = Some(ViewLocation {
+                        machine_id: machine.to_string(),
+                        cwd: checkout.worktree.display().to_string(),
+                    });
+                }
+            }
+            if content.location.is_none() {
+                content
+                    .unavailable
+                    .push("Recorded execution location is unavailable".into());
+            }
+            if content.face.is_none() {
+                content.face = primary.map(|primary| PaneIntent::Session {
+                    session_id: primary.id,
+                    location: content.location.clone(),
+                });
+            }
+            if let Some(PaneIntent::Session {
+                session_id,
+                location: Some(location),
+            }) = &content.face
+            {
+                match crate::ops::human_session::human_open_argv(session_id) {
+                    Ok(mut argv) => {
+                        // Keep the existing connect command and data-selection fences.
+                        let at = argv.len() - 3;
+                        argv.splice(
+                            at..at,
+                            [
+                                "--machine".into(),
+                                location.machine_id.clone(),
+                                "--repository".into(),
+                                repository.to_string(),
+                            ],
+                        );
+                        content.argv = Some(argv);
+                    }
+                    Err(error) => content.unavailable.push(error.to_string()),
+                }
+            }
+        }
+        contents.push(content);
+    }
+    Ok(ViewPlan {
+        name: saved.and_then(|saved| saved.name.clone()),
+        pinned: saved.is_some_and(|saved| saved.pinned),
+        dashboard_id: saved.map(|saved| saved.id.clone()),
+        repository: repository.to_string(),
+        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        selection,
+        saved_revision: saved.map(|saved| saved.revision),
+        resolution,
+        projection: arrangement.project(),
+        arrangement,
+        contents,
+    })
+}
+
 impl SqliteStore {
+    /// Resolve text/defaults and saved intent without creating Work or acquiring a client.
+    pub fn view_plan(
+        &self,
+        repository: &RepositoryId,
+        source: Option<&str>,
+    ) -> StoreResult<crate::work::selection::ViewPlan> {
+        let selection = match source {
+            Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
+            None => Selection {
+                id: crate::work::selection::SelectionId("repository-default".into()),
+                expression: crate::work::selection::SelectionExpression::Repository,
+            },
+        };
+        self.plan_selection(repository, selection)
+    }
+
+    pub fn plan_selection(
+        &self,
+        repository: &RepositoryId,
+        selection: Selection,
+    ) -> StoreResult<crate::work::selection::ViewPlan> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let catalog = catalog_in(&snapshot, repository)?;
+        let work = work_in(&snapshot, repository)?;
+        let saved = selection
+            .referenced_query()
+            .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
+        plan_in(
+            &snapshot,
+            repository,
+            saved.map_or(selection, |saved| saved.selection.clone()),
+            saved,
+            &definitions(&catalog),
+            &work,
+        )
+    }
+
+    /// The observer and one-shot plans expose the same repository/default and saved views.
+    pub fn selection_plans(
+        &self,
+        repository: &RepositoryId,
+    ) -> StoreResult<Vec<crate::work::selection::ViewPlan>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let catalog = catalog_in(&snapshot, repository)?;
+        let queries = definitions(&catalog);
+        let work = work_in(&snapshot, repository)?;
+        let mut plans = vec![plan_in(
+            &snapshot,
+            repository,
+            Selection {
+                id: crate::work::selection::SelectionId("repository-default".into()),
+                expression: crate::work::selection::SelectionExpression::Repository,
+            },
+            None,
+            &queries,
+            &work,
+        )?];
+        for wave in work
+            .iter()
+            .filter(|item| item.key.kind == WorkWorkspaceKind::Wave)
+        {
+            plans.push(plan_in(
+                &snapshot,
+                repository,
+                Selection {
+                    id: crate::work::selection::SelectionId(format!(
+                        "wave-default:{}",
+                        wave.key.id
+                    )),
+                    expression: crate::work::selection::SelectionExpression::Wave {
+                        wave: crate::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
+                    },
+                },
+                None,
+                &queries,
+                &work,
+            )?);
+        }
+        for saved in &catalog {
+            plans.push(plan_in(
+                &snapshot,
+                repository,
+                saved.selection.clone(),
+                Some(saved),
+                &queries,
+                &work,
+            )?);
+        }
+        Ok(plans)
+    }
+
+    pub fn edit_dashboard(
+        &self,
+        repository: &RepositoryId,
+        id: &DashboardId,
+        source: &str,
+        expected_revision: Option<i64>,
+    ) -> StoreResult<Dashboard> {
+        // Editing must remain possible when the old query has become ambiguous.
+        let previous = self
+            .dashboards(repository)?
+            .into_iter()
+            .find(|saved| &saved.id == id);
+        if previous.as_ref().map(|saved| saved.revision) != expected_revision {
+            return Err(invalid("Dashboard changed; read it again before editing"));
+        }
+        let mut selection =
+            Selection::parse(source, previous.as_ref().map(|saved| &saved.selection))
+                .map_err(StoreError::from)?;
+        if previous.is_none() {
+            // Identical text in separately authored queries still names separate sources.
+            selection.id = crate::work::selection::SelectionId(format!("query:{}", id.0));
+        }
+        let recovered = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            arrangement_in(&conn, repository, id, &selection.expression_key())?
+        };
+        let mut arrangement = if let Some((authored, arrangement)) = recovered {
+            selection = authored;
+            arrangement
+        } else {
+            previous.map_or_else(|| Arrangement::automatic(&[]), |saved| saved.arrangement)
+        };
+        let resolution = self.resolve_selection(repository, &selection)?;
+        arrangement.reconcile(&resolution);
+        self.save_dashboard(repository, id, expected_revision, &selection, &arrangement)
+    }
+
     /// A read composes with the Work observer's pinned snapshot. No acquisition.
     pub fn resolve_selection(
         &self,
@@ -117,16 +472,16 @@ impl SqliteStore {
         )
     }
 
-    pub fn saved_selections(&self, repository: &RepositoryId) -> StoreResult<Vec<SavedSelection>> {
+    pub fn dashboards(&self, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         catalog_in(&conn, repository)
     }
 
-    pub fn read_selection(
+    pub fn read_dashboard(
         &self,
         repository: &RepositoryId,
-        id: &QueryId,
-    ) -> StoreResult<Option<SelectionReading>> {
+        id: &DashboardId,
+    ) -> StoreResult<Option<DashboardReading>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
         let catalog = catalog_in(&snapshot, repository)?;
@@ -136,7 +491,7 @@ impl SqliteStore {
         let resolution = resolve_in(&snapshot, repository, &saved.selection, &catalog)?;
         let mut arrangement = saved.arrangement.clone();
         arrangement.reconcile(&resolution);
-        Ok(Some(SelectionReading {
+        Ok(Some(DashboardReading {
             saved: saved.clone(),
             resolution,
             arrangement,
@@ -144,72 +499,97 @@ impl SqliteStore {
     }
 
     /// Compare-and-swap both authored values. A stale or invalid edit writes nothing.
-    pub fn save_selection(
+    pub fn save_dashboard(
         &self,
         repository: &RepositoryId,
-        id: &QueryId,
+        id: &DashboardId,
         expected_revision: Option<i64>,
         selection: &Selection,
         arrangement: &Arrangement,
-    ) -> StoreResult<SavedSelection> {
+    ) -> StoreResult<Dashboard> {
         if id.0.is_empty() {
-            return Err(invalid("query ID must be nonempty"));
+            return Err(invalid("Dashboard ID must be nonempty"));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut catalog = catalog_in(&tx, repository)?;
+        let catalog = catalog_in(&tx, repository)?;
         let prior = catalog.iter().find(|saved| &saved.id == id).cloned();
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
-            return Err(invalid(
-                "saved selection changed; read it again before editing",
-            ));
+            return Err(invalid("Dashboard changed; read it again before editing"));
         }
-        let saved = SavedSelection {
+        let saved = Dashboard {
             repository: repository.to_string(),
             id: id.clone(),
             revision: expected_revision.unwrap_or(0) + 1,
+            name: prior.as_ref().and_then(|saved| saved.name.clone()),
+            pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
             selection: selection.clone(),
             arrangement: arrangement.clone(),
         };
-        catalog.retain(|saved| &saved.id != id);
-        catalog.push(saved.clone());
         let work = work_in(&tx, repository)?;
-        let definitions = definitions(&catalog);
+        let mut definitions = definitions(&catalog);
+        definitions.insert(id.clone(), selection.clone());
+        // Any cycle introduced by this edit must pass through this selection.
+        // Unrelated Dashboards may have ambiguous references and still be repairable.
         let resolution = selection
             .resolve(repository.as_str(), &work, &definitions)
-            .map_err(invalid)?;
-        // Validate dependents against the same facts; an edit must not introduce a cycle.
-        for entry in catalog.iter().filter(|entry| &entry.id != id) {
-            entry
-                .selection
-                .resolve(repository.as_str(), &work, &definitions)
-                .map_err(invalid)?;
-        }
-        let mut expected =
-            prior.map_or_else(|| Arrangement::automatic(&[]), |saved| saved.arrangement);
+            .map_err(StoreError::from)?;
+        let expression_key = selection.expression_key();
+        let mut expected = arrangement_in(&tx, repository, id, &expression_key)?
+            .map(|(_, arrangement)| arrangement)
+            .or_else(|| prior.map(|saved| saved.arrangement))
+            .unwrap_or_else(|| Arrangement::automatic(&[]));
         expected.reconcile(&resolution);
-        arrangement.validate(&expected.members()).map_err(invalid)?;
-        tx.execute("INSERT INTO saved_selections(repository_id,id,revision,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
-            params![repository.as_str(),id.0,saved.revision,serde_json::to_string(selection)?,serde_json::to_string(arrangement)?])?;
+        arrangement
+            .validate(&expected.members())
+            .map_err(StoreError::from)?;
+        tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
+            params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
+        tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
+            params![repository.as_str(),id.0,expression_key,serde_json::to_string(selection)?,serde_json::to_string(arrangement)?])?;
         tx.commit()?;
         Ok(saved)
     }
 
-    pub fn delete_selection(
+    pub fn set_dashboard_metadata(
         &self,
         repository: &RepositoryId,
-        id: &QueryId,
+        id: &DashboardId,
+        expected_revision: i64,
+        name: Option<&str>,
+        pinned: Option<bool>,
+    ) -> StoreResult<Dashboard> {
+        if name.is_some_and(|name| name.trim().is_empty()) {
+            return Err(invalid("Dashboard name must be nonempty"));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute("UPDATE dashboards SET name=coalesce(?1,name),pinned=coalesce(?2,pinned),revision=revision+1 WHERE repository_id=?3 AND id=?4 AND revision=?5",
+            params![name,pinned,repository.as_str(),id.0,expected_revision])?;
+        if changed == 0 {
+            return Err(invalid("Dashboard changed; read it again before editing"));
+        }
+        let saved = catalog_in(&tx, repository)?
+            .into_iter()
+            .find(|saved| &saved.id == id)
+            .ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(saved)
+    }
+
+    pub fn delete_dashboard(
+        &self,
+        repository: &RepositoryId,
+        id: &DashboardId,
         expected_revision: i64,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let deleted = conn.execute(
-            "DELETE FROM saved_selections WHERE repository_id=?1 AND id=?2 AND revision=?3",
+            "DELETE FROM dashboards WHERE repository_id=?1 AND id=?2 AND revision=?3",
             params![repository.as_str(), id.0, expected_revision],
         )?;
         if deleted == 0 {
-            return Err(invalid(
-                "saved selection changed; read it again before deleting",
-            ));
+            return Err(invalid("Dashboard changed; read it again before deleting"));
         }
         Ok(())
     }
@@ -220,7 +600,7 @@ mod tests {
     use super::SqliteStore;
     use crate::durable::RepositoryId;
     use crate::work::selection::{
-        Arrangement, ArrangementTree, QueryId, Selection, SelectionExpression, SelectionId,
+        Arrangement, ArrangementTree, DashboardId, Selection, SelectionExpression, SelectionId,
         WorkWorkspaceKind,
     };
 
@@ -247,6 +627,645 @@ mod tests {
     }
 
     #[test]
+    fn selection_edits_can_repair_ambiguity_without_blocking_other_dashboards() {
+        let (_dir, store, repo) = fixture();
+        let id = DashboardId("picked".into());
+        let saved = store.edit_dashboard(&repo, &id, "task:#1", None).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET issue_identifier='OTHER-1' WHERE issue_identifier='FIX-2'",
+                [],
+            )
+            .unwrap();
+        assert!(store.read_dashboard(&repo, &id).is_err());
+
+        let independent = store
+            .edit_dashboard(&repo, &DashboardId("backlog".into()), "state:backlog", None)
+            .unwrap();
+        assert_eq!(independent.arrangement.members().len(), 1);
+        let repaired = store
+            .edit_dashboard(&repo, &id, "task:FIX-1", Some(saved.revision))
+            .unwrap();
+        assert_eq!(repaired.arrangement, saved.arrangement);
+        assert_eq!(
+            store.read_dashboard(&repo, &id).unwrap().unwrap().saved,
+            repaired
+        );
+    }
+
+    #[test]
+    fn selection_revisit_recovers_authored_geometry_and_stale_edits_change_nothing() {
+        let (_dir, store, repo) = fixture();
+        let id = DashboardId("revisit".into());
+        let first = store
+            .edit_dashboard(&repo, &id, "state:open or state:backlog", None)
+            .unwrap();
+        let mut arranged = first.arrangement.clone();
+        arranged.hide(&arranged.members()[0], true).unwrap();
+        if let Some(ArrangementTree::Split { ratio, .. }) = &mut arranged.tree {
+            *ratio = 0.27;
+        }
+        arranged.replace(arranged.tree.clone()).unwrap();
+        let first = store
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(first.revision),
+                &first.selection,
+                &arranged,
+            )
+            .unwrap();
+        let next = store
+            .edit_dashboard(&repo, &id, "state:done", Some(first.revision))
+            .unwrap();
+        let restored = store
+            .edit_dashboard(
+                &repo,
+                &id,
+                "  state:open   or state:backlog  ",
+                Some(next.revision),
+            )
+            .unwrap();
+        assert_eq!(restored.selection, first.selection);
+        assert_eq!(restored.arrangement, arranged);
+        let revisions = store.revisions().unwrap();
+        assert!(store
+            .edit_dashboard(&repo, &id, "state:paused", Some(next.revision))
+            .is_err());
+        assert!(store
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(next.revision),
+                &next.selection,
+                &next.arrangement
+            )
+            .is_err());
+        let invalid = Arrangement::automatic(&[]);
+        assert!(store
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(restored.revision),
+                &restored.selection,
+                &invalid
+            )
+            .is_err());
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert_eq!(
+            store.read_dashboard(&repo, &id).unwrap().unwrap().saved,
+            restored
+        );
+        assert_eq!(
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM dashboard_arrangements", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn dashboards_leave_repository_and_wave_defaults_unchanged() {
+        let (_dir, store, repo) = fixture();
+        let defaults = store.selection_plans(&repo).unwrap();
+        let id = DashboardId("backlog".into());
+        let saved = store
+            .edit_dashboard(&repo, &id, "state:backlog", None)
+            .unwrap();
+        let named = store
+            .set_dashboard_metadata(&repo, &id, saved.revision, Some("Later"), Some(true))
+            .unwrap();
+        let revisions = store.revisions().unwrap();
+        let dashboard = store.view_plan(&repo, Some("query:backlog")).unwrap();
+        assert_eq!(dashboard.dashboard_id, Some(id.clone()));
+        assert_eq!(dashboard.name.as_deref(), Some("Later"));
+        assert!(dashboard.pinned);
+        assert_eq!(dashboard.contents.len(), 1);
+        assert!(dashboard.contents[0].primary_session.is_none());
+        let plans = store.selection_plans(&repo).unwrap();
+        assert_eq!(plans.len(), defaults.len() + 1);
+        for (before, after) in defaults.iter().zip(&plans) {
+            assert_eq!(before.selection, after.selection);
+            assert_eq!(before.resolution, after.resolution);
+            assert_eq!(before.arrangement, after.arrangement);
+            assert!(after.dashboard_id.is_none());
+        }
+        assert_eq!(
+            store.view_plan(&repo, None).unwrap().resolution,
+            defaults[0].resolution
+        );
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert!(store
+            .set_dashboard_metadata(&repo, &id, saved.revision, Some("stale"), Some(false),)
+            .is_err());
+        assert_eq!(store.dashboards(&repo).unwrap(), [named]);
+        assert_eq!(store.revisions().unwrap(), revisions);
+    }
+
+    #[test]
+    fn selection_pane_ownership_is_repository_scoped_for_every_work_kind() {
+        use crate::store::StoreError;
+        use crate::work::selection::{WorkPaneLayout, WorkWorkspaceKey};
+        let (_dir, store, repo) = fixture();
+        let other = store.ensure_repository("/other").unwrap();
+        for (kind, id) in [
+            (WorkWorkspaceKind::Repository, repo.to_string()),
+            (
+                WorkWorkspaceKind::Wave,
+                "11111111-1111-1111-1111-111111111111".into(),
+            ),
+            // Backlog Work still owns panes even though it is outside the default view.
+            (
+                WorkWorkspaceKind::Task,
+                "task_33333333333333333333333333333333".into(),
+            ),
+        ] {
+            let mut layout = WorkPaneLayout {
+                work: WorkWorkspaceKey {
+                    repository: repo.to_string(),
+                    kind,
+                    id,
+                },
+                revision: 0,
+                tree: None,
+                focused: None,
+                zoomed: None,
+                hidden: Default::default(),
+                drafts: vec![],
+            };
+            assert!(store.pane_layout(&layout.work).unwrap().is_none());
+            let saved = store.save_pane_layout(&layout).unwrap();
+            assert_eq!(store.pane_layout(&layout.work).unwrap(), Some(saved));
+            let revision = store.revisions().unwrap();
+            layout.work.repository = other.to_string();
+            assert!(matches!(
+                store.pane_layout(&layout.work),
+                Err(StoreError::NotFound)
+            ));
+            assert!(matches!(
+                store.save_pane_layout(&layout),
+                Err(StoreError::NotFound)
+            ));
+            assert_eq!(store.revisions().unwrap(), revision);
+            layout.work.repository = repo.to_string();
+            match layout.work.kind {
+                WorkWorkspaceKind::Task => {
+                    store
+                        .conn
+                        .lock()
+                        .unwrap()
+                        .execute(
+                            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+                            [&layout.work.id],
+                        )
+                        .unwrap();
+                }
+                WorkWorkspaceKind::Wave => {
+                    // Use the empty Wave so the later Task case remains available.
+                    layout.work.id = "22222222-2222-2222-2222-222222222222".into();
+                    store
+                        .conn
+                        .lock()
+                        .unwrap()
+                        .execute(
+                            "UPDATE waves SET retired_at=1, superseded_by_wave_id='11111111-1111-1111-1111-111111111111', retirement_reason='Merged into Product' WHERE id=?1",
+                            [&layout.work.id],
+                        )
+                        .unwrap();
+                }
+                WorkWorkspaceKind::Repository => continue,
+            }
+            assert!(matches!(
+                store.pane_layout(&layout.work),
+                Err(StoreError::NotFound)
+            ));
+        }
+    }
+
+    #[test]
+    fn selection_tool_tabs_restore_and_invalid_writes_are_atomic() {
+        use crate::work::selection::{PaneIntent, PaneTree, WorkPaneLayout};
+        let (dir, store, repo) = fixture();
+        let mut layout: WorkPaneLayout = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/pane_layout.json"
+        ))
+        .unwrap();
+        layout.work.repository = repo.to_string();
+        layout.revision = 0;
+        let Some(PaneTree::Split { second, .. }) = layout.tree.take() else {
+            panic!("fixture tree")
+        };
+        layout.tree = Some(*second);
+        let saved = store.save_pane_layout(&layout).unwrap();
+        let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+        assert_eq!(
+            reader.pane_layout(&saved.work).unwrap(),
+            Some(saved.clone())
+        );
+        let revision = store.revisions().unwrap();
+        let shell = saved.tree.as_ref().unwrap().pane("pane-1").unwrap().clone();
+        let files = saved.tree.as_ref().unwrap().pane("pane-2").unwrap().clone();
+        let PaneIntent::Shell { tabs, selected } = &shell else {
+            panic!("shell")
+        };
+        assert_eq!(
+            tabs.iter().map(|tab| tab.id.as_str()).collect::<Vec<_>>(),
+            ["shell-1", "shell-2"]
+        );
+        assert_eq!(selected, "shell-2");
+        let PaneIntent::Files { tabs, selected, .. } = &files else {
+            panic!("files")
+        };
+        assert_eq!(tabs.len(), 2);
+        assert_eq!(selected.as_deref(), Some("file-1"));
+        assert_eq!(saved.drafts[0].text, "unsaved edits");
+        for kind in [WorkWorkspaceKind::Repository, WorkWorkspaceKind::Wave] {
+            let mut invalid = saved.clone();
+            invalid.work.kind = kind;
+            assert!(store.save_pane_layout(&invalid).is_err());
+        }
+        for tool in [shell, files] {
+            let mut invalid = saved.clone();
+            invalid.tree = Some(PaneTree::Split {
+                axis: crate::work::selection::ArrangementAxis::Vertical,
+                ratio: 0.5,
+                first: Box::new(invalid.tree.take().unwrap()),
+                second: Box::new(PaneTree::Pane {
+                    id: "duplicate-tool".into(),
+                    content: tool,
+                }),
+            });
+            assert!(store.save_pane_layout(&invalid).is_err());
+        }
+        let mut invalid = saved.clone();
+        if let Some(PaneTree::Split { first, .. }) = &mut invalid.tree {
+            if let PaneTree::Pane {
+                content: PaneIntent::Shell { selected, .. },
+                ..
+            } = first.as_mut()
+            {
+                *selected = "removed".into();
+            }
+        }
+        assert!(store.save_pane_layout(&invalid).is_err());
+        assert_eq!(store.revisions().unwrap(), revision);
+        assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved));
+    }
+
+    #[test]
+    fn selection_panes_restore_drafts_and_reject_stale_or_foreign_intent() {
+        use crate::work::selection::{
+            FileDraft, PaneIntent, PaneTree, ViewLocation, WorkPaneLayout, WorkWorkspaceKey,
+        };
+        let (dir, store, repo) = fixture();
+        store.test_session(
+            "selection-primary",
+            &crate::session_record::new_artifact_key(),
+        );
+        store.conn.lock().unwrap().execute_batch("UPDATE agent_sessions SET repo='/repo',task_id='task_22222222222222222222222222222222',wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-primary'; UPDATE tasks SET primary_session_id='selection-primary' WHERE id='task_22222222222222222222222222222222';").unwrap();
+        let location = ViewLocation {
+            machine_id: "machine_recorded".into(),
+            cwd: "/repo/task".into(),
+        };
+        let layout = WorkPaneLayout {
+            work: WorkWorkspaceKey {
+                repository: repo.to_string(),
+                kind: WorkWorkspaceKind::Task,
+                id: "task_22222222222222222222222222222222".into(),
+            },
+            revision: 0,
+            tree: Some(PaneTree::Pane {
+                id: "files".into(),
+                content: PaneIntent::Files {
+                    location: Some(location.clone()),
+                    tabs: vec![crate::work::selection::FileTab {
+                        id: "file-1".into(),
+                        path: "src/lib.rs".into(),
+                    }],
+                    selected: Some("file-1".into()),
+                },
+            }),
+            focused: Some("files".into()),
+            zoomed: Some("files".into()),
+            hidden: Default::default(),
+            drafts: vec![FileDraft {
+                location,
+                path: "src/lib.rs".into(),
+                base_revision: "disk-revision".into(),
+                base_content: "base".into(),
+                text: "unsaved edits".into(),
+            }],
+        };
+        let saved = store.save_pane_layout(&layout).unwrap();
+        let plan = store
+            .view_plan(&repo, Some(&format!("task:{}", layout.work.id)))
+            .unwrap();
+        assert_eq!(plan.contents[0].pane_revision, Some(saved.revision));
+        assert!(matches!(
+            plan.contents[0].face,
+            Some(PaneIntent::Files { .. })
+        ));
+        assert!(plan.contents[0].argv.is_none());
+        for id in ["first", "second"] {
+            store
+                .edit_dashboard(
+                    &repo,
+                    &DashboardId(id.into()),
+                    &format!("task:{}", layout.work.id),
+                    None,
+                )
+                .unwrap();
+        }
+        let first = store
+            .read_dashboard(&repo, &DashboardId("first".into()))
+            .unwrap()
+            .unwrap();
+        let mut hidden = first.arrangement;
+        hidden.hide(&hidden.members()[0], true).unwrap();
+        store
+            .save_dashboard(
+                &repo,
+                &first.saved.id,
+                Some(first.saved.revision),
+                &first.saved.selection,
+                &hidden,
+            )
+            .unwrap();
+        let revisions = store.revisions().unwrap();
+        let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
+        let first = reader.view_plan(&repo, Some("query:first")).unwrap();
+        let second = reader.view_plan(&repo, Some("query:second")).unwrap();
+        assert!(first.projection.visible.is_none());
+        assert!(second.projection.visible.is_some());
+        assert_ne!(first.dashboard_id, second.dashboard_id);
+        assert_eq!(first.contents, second.contents);
+        assert_eq!(first.contents[0].pane_revision, Some(saved.revision));
+        assert_eq!(
+            reader.pane_layout(&layout.work).unwrap(),
+            Some(saved.clone())
+        );
+        assert!(store.save_pane_layout(&layout).is_err());
+        let mut invalid = saved.clone();
+        invalid.hidden.insert("files".into());
+        assert!(store.save_pane_layout(&invalid).is_err());
+        invalid = saved.clone();
+        invalid.drafts[0].path = "../outside".into();
+        assert!(store.save_pane_layout(&invalid).is_err());
+        invalid = saved.clone();
+        invalid.tree = Some(PaneTree::Pane {
+            id: "files".into(),
+            content: PaneIntent::Session {
+                session_id: "unknown-session".into(),
+                location: None,
+            },
+        });
+        assert!(store.save_pane_layout(&invalid).is_err());
+        invalid = saved.clone();
+        invalid.work.id = "task_99999999999999999999999999999999".into();
+        assert!(store.save_pane_layout(&invalid).is_err());
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert_eq!(store.pane_layout(&saved.work).unwrap(), Some(saved.clone()));
+        let mut unzoomed = saved;
+        unzoomed.zoomed = None;
+        let mut unzoomed = store.save_pane_layout(&unzoomed).unwrap();
+        let plan = store
+            .view_plan(&repo, Some(&format!("task:{}", unzoomed.work.id)))
+            .unwrap();
+        assert!(
+            matches!(&plan.contents[0].face, Some(PaneIntent::Session {session_id, ..}) if session_id == "selection-primary")
+        );
+        unzoomed.tree = Some(PaneTree::Pane {
+            id: "files".into(),
+            content: PaneIntent::Session {
+                session_id: "selection-primary".into(),
+                location: None,
+            },
+        });
+        let mut session_layout = store.save_pane_layout(&unzoomed).unwrap();
+        session_layout.work.id = "task_11111111111111111111111111111111".into();
+        session_layout.revision = 0;
+        assert!(store.save_pane_layout(&session_layout).is_err());
+    }
+
+    #[test]
+    fn query_selection_identical_saved_expressions_keep_distinct_sources() {
+        let (_dir, store, repo) = fixture();
+        for id in ["first", "second"] {
+            store
+                .edit_dashboard(&repo, &DashboardId(id.into()), "state:open", None)
+                .unwrap();
+        }
+        let first = store.view_plan(&repo, Some("query:first")).unwrap();
+        let second = store.view_plan(&repo, Some("query:second")).unwrap();
+        assert_eq!(
+            first.resolution.members[0].work,
+            second.resolution.members[0].work
+        );
+        assert_ne!(
+            first.resolution.members[0].source,
+            second.resolution.members[0].source
+        );
+        let edited = store
+            .edit_dashboard(
+                &repo,
+                &DashboardId("first".into()),
+                "state:open or state:backlog",
+                first.saved_revision,
+            )
+            .unwrap();
+        assert_eq!(edited.arrangement.members()[0], first.resolution.members[0]);
+    }
+
+    #[test]
+    fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
+        let (_dir, store, repo) = fixture();
+        store.test_session(
+            "selection-session",
+            &crate::session_record::new_artifact_key(),
+        );
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-session'", []).unwrap();
+        }
+        let attachment = store
+            .claim_session_attachment(
+                "selection-session",
+                None,
+                &crate::id::LfProcessId::new(),
+                true,
+            )
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                "selection-session",
+                &attachment,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        store
+            .begin_program_status(
+                "selection-session",
+                Some(&attachment.agent_process_id),
+                "selection-surface",
+            )
+            .unwrap();
+        let report = crate::program_status::Records {
+            seen: true,
+            records: vec![crate::program_status::Report {
+                state: crate::program_status::State::Blocked,
+                id: None,
+                kind: Some(crate::program_status::Kind::Question),
+                progress: None,
+                app: None,
+                title: None,
+                msg: None,
+            }],
+        };
+        store
+            .record_program_status(
+                "selection-session",
+                Some(&attachment.agent_process_id),
+                "selection-surface",
+                1,
+                &report,
+            )
+            .unwrap();
+        let available = Selection::parse("state:available", None).unwrap();
+        let members = store.resolve_selection(&repo, &available).unwrap();
+        assert_eq!(members.members.len(), 1);
+        assert_eq!(
+            members.members[0].work.id,
+            "task_22222222222222222222222222222222"
+        );
+        let default = store.resolve_selection(&repo, &selection()).unwrap();
+        assert_eq!(default.members[0].work, members.members[0].work);
+        let id = DashboardId("available".into());
+        store
+            .save_dashboard(
+                &repo,
+                &id,
+                None,
+                &available,
+                &Arrangement::automatic(&members.members),
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE processes SET completed_at=2,outcome='succeeded' WHERE id=?1",
+                [&attachment.agent_process_id],
+            )
+            .unwrap();
+        let ended = store.read_dashboard(&repo, &id).unwrap().unwrap();
+        assert!(ended.resolution.unavailable.is_empty());
+        assert!(ended.arrangement.members().is_empty());
+        // The same Task is still open; only its current attention departed.
+        assert_eq!(
+            store
+                .resolve_selection(&repo, &selection())
+                .unwrap()
+                .members
+                .len(),
+            4
+        );
+    }
+
+    #[test]
+    fn query_plans_include_backlog_without_creating_execution_and_keep_saved_edits() {
+        let (_dir, store, repo) = fixture();
+        let before = store.revisions().unwrap();
+        let plan = store.view_plan(&repo, Some("state:backlog")).unwrap();
+        assert_eq!(plan.contents.len(), 1);
+        let backlog = &plan.contents[0];
+        assert_eq!(backlog.title, "Backlog");
+        assert!(backlog.primary_session.is_none());
+        assert!(backlog.location.is_none());
+        assert!(backlog.argv.is_none());
+        assert_eq!(backlog.unavailable.len(), 2);
+        assert_eq!(store.revisions().unwrap(), before);
+        let default = store.view_plan(&repo, None).unwrap();
+        assert_eq!(
+            default.resolution.members[0].work.kind,
+            WorkWorkspaceKind::Task
+        );
+        assert_eq!(
+            default.resolution.members.last().unwrap().work.kind,
+            WorkWorkspaceKind::Wave
+        );
+        let id = DashboardId("picked".into());
+        let first = store
+            .edit_dashboard(&repo, &id, "task:FIX-1 or task:FIX-2", None)
+            .unwrap();
+        let original = first.arrangement.members();
+        let mut arrangement = first.arrangement.clone();
+        arrangement.hide(&original[0], true).unwrap();
+        arrangement.replace(arrangement.tree.clone()).unwrap();
+        let touched = store
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(first.revision),
+                &first.selection,
+                &arrangement,
+            )
+            .unwrap();
+        let second = store
+            .edit_dashboard(
+                &repo,
+                &id,
+                "task:FIX-3 or task:FIX-1 or task:FIX-2",
+                Some(touched.revision),
+            )
+            .unwrap();
+        assert_eq!(&second.arrangement.members()[..2], original);
+        assert!(second.arrangement.hidden.contains(&original[0]));
+        assert!(store
+            .edit_dashboard(&repo, &id, "state:open", Some(first.revision))
+            .is_err());
+        assert!(store
+            .edit_dashboard(&repo, &id, "query:picked", Some(second.revision))
+            .is_err());
+        let plan = store.view_plan(&repo, Some("query:picked")).unwrap();
+        assert_eq!(plan.saved_revision, Some(second.revision));
+        assert_eq!(plan.arrangement, second.arrangement);
+        let plans = store.selection_plans(&repo).unwrap();
+        let observed = plans
+            .iter()
+            .find(|plan| plan.dashboard_id.as_ref() == Some(&id))
+            .unwrap();
+        assert_eq!(observed.selection, plan.selection);
+        assert_eq!(observed.resolution, plan.resolution);
+        assert_eq!(observed.arrangement, plan.arrangement);
+        assert_eq!(observed.contents, plan.contents);
+        assert_eq!(store.dashboards(&repo).unwrap(), [second]);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM task_admissions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn released_work_upgrades_to_saved_intent_without_rewriting_work() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
@@ -270,9 +1289,9 @@ mod tests {
         let selection = selection();
         let result = store.resolve_selection(&repo, &selection).unwrap();
         assert_eq!(result.members.len(), 4);
-        let id = QueryId::new();
+        let id = DashboardId::new();
         let saved = store
-            .save_selection(
+            .save_dashboard(
                 &repo,
                 &id,
                 None,
@@ -282,7 +1301,7 @@ mod tests {
             .unwrap();
         let reader = SqliteStore::open_read_only(&path).unwrap();
         assert_eq!(
-            reader.read_selection(&repo, &id).unwrap().unwrap().saved,
+            reader.read_dashboard(&repo, &id).unwrap().unwrap().saved,
             saved
         );
         let conn = store.conn.lock().unwrap();
@@ -298,7 +1317,7 @@ mod tests {
     fn saved_selections_upgrade_reload_and_edit_atomically_without_execution() {
         let (_dir, store, repo) = fixture();
         let selection = selection();
-        let id = QueryId::new();
+        let id = DashboardId::new();
         let result = store.resolve_selection(&repo, &selection).unwrap();
         assert!(result.unavailable.is_empty());
         assert_eq!(result.members.len(), 4); // Two Waves, paused and idle Tasks.
@@ -318,11 +1337,11 @@ mod tests {
         let mut arrangement = Arrangement::automatic(&result.members);
         arrangement.hide(&hidden, true).unwrap();
         let first = store
-            .save_selection(&repo, &id, None, &selection, &arrangement)
+            .save_dashboard(&repo, &id, None, &selection, &arrangement)
             .unwrap();
         // A second connection reads real lfdb bytes, without opening a native surface.
         let reader = SqliteStore::open_read_only(&_dir.path().join("db")).unwrap();
-        let loaded = reader.read_selection(&repo, &id).unwrap().unwrap();
+        let loaded = reader.read_dashboard(&repo, &id).unwrap().unwrap();
         assert_eq!(loaded.saved, first);
         assert_eq!(loaded.arrangement, arrangement);
         let mut edited = arrangement.tree.clone().unwrap();
@@ -331,18 +1350,18 @@ mod tests {
         }
         arrangement.replace(Some(edited)).unwrap();
         let saved = store
-            .save_selection(&repo, &id, Some(first.revision), &selection, &arrangement)
+            .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
             .unwrap();
         assert!(store
-            .save_selection(&repo, &id, Some(first.revision), &selection, &arrangement)
+            .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
             .is_err());
         let incomplete = Arrangement::automatic(&result.members[1..]);
         assert!(store
-            .save_selection(&repo, &id, Some(saved.revision), &selection, &incomplete)
+            .save_dashboard(&repo, &id, Some(saved.revision), &selection, &incomplete)
             .is_err());
-        assert_eq!(reader.saved_selections(&repo).unwrap(), [saved]);
+        assert_eq!(reader.dashboards(&repo).unwrap(), [saved]);
         let mut restored = reader
-            .read_selection(&repo, &id)
+            .read_dashboard(&repo, &id)
             .unwrap()
             .unwrap()
             .arrangement;
@@ -364,10 +1383,10 @@ mod tests {
     fn nested_query_failure_retains_prior_members_but_confirmed_departure_prunes() {
         let (_dir, store, repo) = fixture();
         let base = selection();
-        let base_id = QueryId::new();
+        let base_id = DashboardId::new();
         let resolution = store.resolve_selection(&repo, &base).unwrap();
         store
-            .save_selection(
+            .save_dashboard(
                 &repo,
                 &base_id,
                 None,
@@ -381,12 +1400,12 @@ mod tests {
                 query: base_id.clone(),
             },
         };
-        let nested_id = QueryId::new();
+        let nested_id = DashboardId::new();
         let result = store.resolve_selection(&repo, &nested).unwrap();
         let mut arrangement = Arrangement::automatic(&result.members);
         arrangement.replace(arrangement.tree.clone()).unwrap();
         store
-            .save_selection(&repo, &nested_id, None, &nested, &arrangement)
+            .save_dashboard(&repo, &nested_id, None, &nested, &arrangement)
             .unwrap();
         // The named query edit would introduce a cycle through the dependent.
         let cycle = Selection {
@@ -396,26 +1415,26 @@ mod tests {
             },
         };
         assert!(store
-            .save_selection(&repo, &base_id, Some(1), &cycle, &arrangement)
+            .save_dashboard(&repo, &base_id, Some(1), &cycle, &arrangement)
             .is_err());
-        assert!(store.delete_selection(&repo, &base_id, 2).is_err());
+        assert!(store.delete_dashboard(&repo, &base_id, 2).is_err());
         assert_eq!(
             store
-                .read_selection(&repo, &nested_id)
+                .read_dashboard(&repo, &nested_id)
                 .unwrap()
                 .unwrap()
                 .arrangement,
             arrangement
         );
-        assert!(store.read_selection(&repo, &base_id).unwrap().is_some());
-        store.delete_selection(&repo, &base_id, 1).unwrap();
-        assert!(store.read_selection(&repo, &base_id).unwrap().is_none());
-        assert!(store.delete_selection(&repo, &base_id, 1).is_err());
-        let unavailable = store.read_selection(&repo, &nested_id).unwrap().unwrap();
+        assert!(store.read_dashboard(&repo, &base_id).unwrap().is_some());
+        store.delete_dashboard(&repo, &base_id, 1).unwrap();
+        assert!(store.read_dashboard(&repo, &base_id).unwrap().is_none());
+        assert!(store.delete_dashboard(&repo, &base_id, 1).is_err());
+        let unavailable = store.read_dashboard(&repo, &nested_id).unwrap().unwrap();
         assert!(!unavailable.resolution.unavailable.is_empty());
         assert_eq!(unavailable.arrangement, arrangement);
         store
-            .save_selection(
+            .save_dashboard(
                 &repo,
                 &base_id,
                 None,
@@ -432,7 +1451,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        let current = store.read_selection(&repo, &nested_id).unwrap().unwrap();
+        let current = store.read_dashboard(&repo, &nested_id).unwrap().unwrap();
         assert!(current.resolution.unavailable.is_empty());
         assert_eq!(current.arrangement.members().len(), 3);
         assert_eq!(current.saved.arrangement.members().len(), 4); // Reading does not write.

@@ -449,8 +449,7 @@ final class WorkModel {
            let retained = registry.retained(key) {
             workspace = retained
             select(key.reference, preservingOpening: true)
-            workspace.multiplexer.setCollapsed(paneId: id, collapsed: false)
-            workspace.multiplexer.setFocusedPane(id)
+            workspace.multiplexer.selectShell(id)
             store.surfaces.focus(.shell(id, machineId: machine))
         } else {
             workspace = target
@@ -485,7 +484,7 @@ final class WorkModel {
         let layout = workspace.multiplexer.layout
         let sessionPane: PaneState?
         if case .shell(let id, _) = store.localTerminal(for: destination.record) {
-            sessionPane = layout.pane(for: id)
+            sessionPane = workspace.multiplexer.shell(id) == nil ? nil : workspace.multiplexer.shellPane
         } else { sessionPane = layout.allPanes.first { $0.sessionId == destination.record.id } }
         var panes = [PaneState]()
         if let sessionPane { panes.append(sessionPane) }
@@ -626,7 +625,7 @@ final class WorkModel {
             path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout?.inspection, opening: taskOpening)
+            supportedOperations: ["state", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout?.inspection, opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

@@ -41,6 +41,18 @@ struct TaskFilesView: View {
             } else {
                 VStack(spacing: 0) {
                     navigationBar
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 4) {
+                            ForEach(store.tabs) { tab in
+                                HStack(spacing: 4) {
+                                    Button(tab.path) { store.selectFile(tab.path, mode: store.mode) }
+                                        .fontWeight(store.selection == tab.path ? .semibold : .regular)
+                                    Button { store.closeTab(tab.id) } label: { Image(systemName: "xmark") }
+                                        .accessibilityLabel("Close \(tab.path)")
+                                }.buttonStyle(.plain).padding(6)
+                            }
+                        }
+                    }
                     GeometryReader { geometry in
                         let docked = store.navigator == .pinned && geometry.size.width >= 360
                         HSplitView {

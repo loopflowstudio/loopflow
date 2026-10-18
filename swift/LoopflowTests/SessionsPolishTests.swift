@@ -35,31 +35,34 @@ struct SessionsPolishTests {
         let local = fixtureWork(registry, fixtureWorkspace("/same/path"))
         local.multiplexer.newShell(location: local.location)
         let shell = local.multiplexer.focusedPane
-        #expect(registry.key(containingShell: shell.id, machineId: "peer") == nil)
+        let tab = try #require(shell.content.selectedShell)
+        #expect(registry.key(containingShell: tab.id, machineId: "peer") == nil)
         NotificationCenter.default.post(name: .ghosttySurfaceClosed,
-            object: TerminalIdentity.shell(shell.id, machineId: "peer"))
+            object: TerminalIdentity.shell(tab.id, machineId: "peer"))
         #expect(local.multiplexer.focusedPane == shell)
     }
 
     @Test("A shell exit closes its retained pane while SessionsView is absent")
-    func shellExitSurvivesNavigation() {
+    func shellExitSurvivesNavigation() throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace("/tmp/repo"))
         workspace.multiplexer.newShell(location: workspace.location)
-        let paneId = workspace.multiplexer.focusedPaneId
+        let shell = workspace.multiplexer.focusedPane
+        let tab = try #require(shell.content.selectedShell)
         let other = fixtureWork(registry, fixtureWorkspace("/tmp/other"))
         other.multiplexer.newShell(location: other.location)
+        let otherShell = other.multiplexer.focusedPane
 
         NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(paneId, machineId: fixtureMachineId)
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.session(tab.id, machineId: fixtureMachineId)
         )
-        #expect(workspace.multiplexer.focusedPane.content == .shell(location: workspace.location))
+        #expect(workspace.multiplexer.focusedPane == shell)
         NotificationCenter.default.post(
-            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(paneId, machineId: fixtureMachineId)
+            name: .ghosttySurfaceClosed, object: TerminalIdentity.shell(tab.id, machineId: fixtureMachineId)
         )
 
         #expect(fixtureWork(registry, fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
-        #expect(other.multiplexer.focusedPane.content == .shell(location: other.location))
+        #expect(other.multiplexer.focusedPane == otherShell)
     }
 }
 #endif

@@ -1,0 +1,554 @@
+import Loopflow
+import SwiftUI
+
+/// Keep current Workflow position/actions compact; disclose its graph in Overview.
+/// Rust owns the graph, position and legal actions.
+struct TaskWorkflowHeader: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    /// The Task part of the workspace stream, as last read.
+    let work: WorkReading<TaskOverview>
+    var workspaceActions: AnyView? = nil
+    @Environment(\.palette) private var palette
+
+    @State private var confirmingAbandon = false
+    @State private var expandedTasks: Set<String> = []
+
+    private var controls: some View {
+            HStack(alignment: .center, spacing: Spacing.md) {
+                if let label = task.task.terminalLabel {
+                    Text(label)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
+                if task.runtime?.status == .paused {
+                    Text("Paused").foregroundStyle(palette.textSecondary)
+                } else if task.task.terminalLabel == nil, let state = task.task.state {
+                    Text(state.capitalized).foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-lifecycle-status")
+                }
+                if let workflow = work.value?.workflow {
+                    Text(positionLabel(workflow))
+                        .lineLimit(1)
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-workflow-position")
+                    ForEach(workflow.outgoing, id: \.self) { index in
+                        if workflow.edges.indices.contains(index) {
+                            let edge = workflow.edges[index]
+                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
+                                .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                                .disabled(unavailable != nil)
+                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
+                                .accessibilityIdentifier("task-workflow-action-\(index)")
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    // Put the Task at a node without running anything.
+                    Menu("Move to") {
+                        ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
+                            Button(node) { Task { await model.moveTask(to: node, task: task) } }
+                                .accessibilityIdentifier("task-workflow-move-\(node)")
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(acting || readingUnavailable != nil)
+                    .help("lf task workflow move \(task.task.identifier) <node>")
+                    .accessibilityIdentifier("task-workflow-move")
+
+                } else if work.value != nil, work.errorMessage == nil {
+                    // The shared resolver reports the first-run default and its owner.
+                    Text(task.workflowName.map { "\($0) · \(task.workflowSource ?? "")" } ?? "No workflow selected")
+                        .foregroundStyle(palette.textSecondary)
+                    Menu("Choose workflow") {
+                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
+                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
+                        }
+                    }.task { await model.loadWorkflowCatalog() }
+                    Button("Start") { Task { await model.startTask(nil, task: task) } }
+                        .buttonStyle(WorkOutlineButtonStyle())
+                        .disabled(unavailable != nil)
+                        .help(unavailable ?? "lf task run \(task.task.identifier)")
+                        .accessibilityIdentifier("task-workflow-start")
+                    Spacer()
+                } else {
+                    Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
+                         ?? "Reading workflow…")
+                        .foregroundStyle(palette.textSecondary)
+                    Spacer()
+                }
+                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+                    Button("Reopen") { Task { await model.reopenTask(task) } }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-reopen")
+                } else {
+                    Button("Complete") { Task { await model.completeTask(task) } }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-complete")
+                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
+                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+                    }
+                    .disabled(acting || readingUnavailable != nil)
+                    .accessibilityIdentifier("task-pause-resume")
+                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
+                        .disabled(acting || readingUnavailable != nil)
+                        .accessibilityIdentifier("task-abandon")
+                }
+                workspaceActions
+                if acting {
+                    ProgressView().controlSize(.small)
+                    Text(draft?.progress ?? "Updating Task…").foregroundStyle(palette.textSecondary)
+                }
+            }
+            .lineLimit(1)
+            .frame(minHeight: 28)
+    }
+
+    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
+    private var acting: Bool { draft?.acting == true }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal) { controls }
+                .scrollIndicators(.visible)
+            if work.value?.workflow != nil, let error = work.errorMessage {
+                Text("Workflow refresh failed: \(error)")
+                    .foregroundStyle(palette.failure)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-workflow-refresh-error")
+            }
+            DisclosureGroup("Overview", isExpanded: Binding(
+                get: { expandedTasks.contains(task.id) },
+                set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
+            )) {
+                if let workflow = work.value?.workflow {
+                    WorkflowGraph(
+                        nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
+                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
+                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
+                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text(task.task.description)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            }
+            .accessibilityIdentifier("task-overview")
+            TaskDueDateView(task: task)
+            // Completion may fail after the Workflow has already arrived.
+            if let conflict = task.runtime?.completionPending {
+                HStack(spacing: Spacing.sm) {
+                    Text(conflict)
+                        .foregroundStyle(palette.failure)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("task-completion-pending")
+                    Button("Retry completion") {
+                        Task { await model.completeTask(task) }
+                    }
+                    .buttonStyle(WorkOutlineButtonStyle())
+                    .disabled(acting || readingUnavailable != nil)
+                    .help("lf task complete \(task.task.identifier)")
+                    .accessibilityIdentifier("task-completion-retry")
+                }
+            }
+            if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
+                Text(error)
+                    .foregroundStyle(palette.failure)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-workflow-error")
+                Button("Refresh readings") { model.rescanWork() }
+                    .accessibilityIdentifier("task-refresh-readings")
+            }
+        }
+        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) {
+                Task { await model.abandonTask(task) }
+            }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
+        }
+        .font(Typography.body(12))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            palette.background
+            if task.task.terminalLabel != nil {
+                (task.task.isSuccessful ? palette.success : palette.failure).opacity(0.14)
+            }
+        }
+        .overlay(alignment: .leading) {
+            if task.task.terminalLabel != nil {
+                Rectangle()
+                    .fill(task.task.isSuccessful ? palette.success : palette.failure)
+                    .frame(width: 3)
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .accessibilityIdentifier("task-workflow")
+        .onChange(of: work, initial: true) { _, reading in
+            if reading.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: task.id) }
+        }
+        .onChange(of: task.id) { _, id in
+            if work.value != nil { Perf.endAfterCommit(Perf.workflowReady, id: id) }
+        }
+    }
+
+    private func positionLabel(_ workflow: Workflow) -> String {
+        switch workflow.position {
+        case .node(let name): return "\(workflow.name) · \(name)"
+        case .edge(let index, _, let running):
+            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
+            let edge = workflow.edges[index]
+            return "\(edge.from) → \(edge.to) · \(running ? "running" : "stopped")"
+        }
+    }
+
+    /// Why no edge can be started now.
+    private var unavailable: String? {
+        if acting { return draft?.progress ?? "Updating Task…" }
+        if task.task.isTerminal { return "Reopen the Task before starting work" }
+        return readingUnavailable ?? task.runControl.unavailable
+    }
+
+    private var readingUnavailable: String? {
+        if let error = work.errorMessage ?? model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+}
+
+/// One compact control; hover or click reveals the Task's lifecycle actions.
+struct TaskLifecycleActions: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+
+    var body: some View {
+        Menu {
+            TaskActionItems(model: model, task: task, wave: wave,
+                newConversation: newConversation, openSession: openSession)
+        } label: { Image(systemName: "ellipsis") }
+            .keyboardShortcut("/", modifiers: .command)
+            .help("Task actions (⌘/)").accessibilityLabel("Task actions")
+            .accessibilityIdentifier("task-lifecycle-menu")
+    }
+}
+
+/// One Task action surface for the titlebar and clicked rows; target is captured.
+struct TaskActionItems: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+    @State private var copied: String?
+
+    private var unavailable: Bool {
+        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
+    }
+
+    var body: some View {
+        Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
+        Menu("Move to Wave") {
+            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
+                .disabled(task.task.waveId == nil)
+            ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
+                Button(destination.wave.displayName) {
+                    Task { await model.moveTask(task, toWave: destination.wave.id) }
+                }.disabled(destination.wave.id == task.task.waveId)
+            }
+        }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
+        if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        } else {
+            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
+                Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+            }.disabled(unavailable)
+        }
+        if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
+        Divider()
+        Button(copied == "id" ? "Copied Task ID" : "Copy Task ID") { copy(task.task.identifier, key: "id") }
+        if let url = task.reference.issueUrl {
+            Button(copied == "link" ? "Copied Task link" : "Copy Task link") { copy(url.absoluteString, key: "link") }
+        }
+        if let branch = task.reference.workspace?.branch {
+            Button(copied == "branch" ? "Copied branch" : "Copy branch") { copy(branch, key: "branch") }
+        }
+        if let pr = task.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
+        ForEach(model.taskSessions(task.id)) { session in
+            Button("Open \(session.title)") { openSession?(session) }.disabled(openSession == nil)
+            if !session.taskPrimary, session.titleSource != .unavailable {
+                Button("Rename \(session.title)…") { model.beginSessionRename(session) }
+            }
+            if session.work?.kind != .task {
+                Button("Bind \(session.title) to Task…") { model.beginSessionBinding(session) }
+            }
+        }
+        if let error = model.navigation.taskRunDrafts[task.id]?.error { Text(error) }
+    }
+
+    private func copy(_ value: String, key: String) {
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(value, forType: .string) { copied = key }
+    }
+}
+
+
+/// The Task due date stays beside the conversation and in Task details.
+struct TaskDueDateView: View {
+    let task: RoadmapTask
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            if let due = task.task.dueDate {
+                Text("Due \(due)")
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+        }
+    }
+}
+
+/// Every Flow process in the Task's checkout, newest first, whatever started
+/// it: one line each, opening to its launched graph and steps. It is not the
+/// Workflow's history: a process that carried an edge and one started ad hoc
+/// are the same kind of row. A multiplexer pane on the page surface.
+struct FlowProcessLog: View {
+    let model: WorkModel
+    let taskId: String
+    let location: WorkspaceIdentity?
+    var execution: TaskLocationObservation? = nil
+    var query: RegistryQuery = RegistryQueryLocal.shared
+    @State private var captured: [FlowProcessDetail]?
+    @State private var error: String?
+    @State private var refresh = 0
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let task = model.task(id: taskId)?.task
+        let reading = task.map { model.taskWork[$0.id] }
+        let readsWindow = execution == nil && query.remoteMachine == nil && location != nil
+            && location?.machineId == model.observingMachineId && location == task?.reference.workspace?.identity
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if !readsWindow {
+                    Button("Refresh") { refresh += 1 }
+                    if let error { Text("Flow processes could not be read: \(error)").padding(.vertical, 6) }
+                }
+                if let flows = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.flowProcesses : nil) {
+                    ForEach(Array(flows.reversed().enumerated()), id: \.element.id) { index, flow in
+                        if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
+                        FlowProcessView(model: model, flow: flow, run: captured?.first { $0.entry.id == flow.id } ?? (readsWindow ? model.flowProcesses[flow.id] : nil))
+                    }
+                    if flows.isEmpty {
+                        Text("No Flow has run.").padding(.vertical, 6)
+                            .accessibilityIdentifier("task-flow-processes-empty")
+                    }
+                } else if let error = error ?? reading?.errorMessage {
+                    Text("Flow processes could not be read: \(error)").padding(.vertical, 6)
+                } else {
+                    Text(task == nil ? "Task unavailable" : "Reading Flow processes…").padding(.vertical, 6)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.textSecondary)
+        .textSelection(.enabled)
+        .background(palette.background)
+        .environment(\.colorScheme, .light)
+        .accessibilityIdentifier("task-flow-processes")
+        .task(id: refresh) {
+            guard !readsWindow else { return }
+            do {
+                let ownerQuery: RegistryQuery
+                let subject: String
+                let cwd: String?
+                if let execution {
+                    guard case .recorded(let ownerTask, _) = execution.location else {
+                        throw RegistryQueryError("Task log location is unavailable.")
+                    }
+                    ownerQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinTaskLocation(to: execution)
+                    subject = ownerTask
+                    cwd = nil
+                } else {
+                    guard let location, location.machineId == model.savedMachineId,
+                          query.remoteMachine == nil else {
+                        throw RegistryQueryError("Task log location is unavailable; no local fallback was used.")
+                    }
+                    ownerQuery = query
+                    subject = task?.runtime?.workId ?? taskId
+                    cwd = location.worktree
+                }
+                let flows = try await ownerQuery.taskFlowProcesses(task: subject, cwd: cwd)
+                try Task.checkCancellation()
+                captured = flows
+                error = nil
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// Diagnostic history is observed only while explicitly expanded.
+struct TaskDiagnosticsView: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup("Debug", isExpanded: $expanded) {
+            if expanded { TaskWorkView(model: model, task: task) }
+        }
+        .onChange(of: expanded) { _, visible in model.observeTaskDiagnostics(task, visible: visible) }
+        .onDisappear { model.observeTaskDiagnostics(task, visible: false) }
+    }
+}
+
+/// The Task's conversations and mechanical Processes, including headless work and
+/// conversations without turns: raw records, shown under Debug. Its Flow
+/// processes are listed by `FlowProcessLog`.
+struct TaskWorkView: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            WorkSectionHeading(title: "Work") {
+                Button("Refresh") { model.observeTaskDiagnostics(task, visible: true) }
+            }
+            if let work = model.taskDiagnostics[task.id].value {
+                ForEach(work.sessions) { session in
+                    row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
+                        state: session.completedAt == nil ? "open" : "completed")
+                }
+                ForEach(work.processes) { process in
+                    row("Process", id: process.id, name: process.command ?? "Unknown command",
+                        state: process.outcome ?? "unknown")
+                }
+                if work.sessions.isEmpty && work.processes.isEmpty {
+                    Text("No recorded work.")
+                }
+            }
+            if let error = model.taskDiagnostics[task.id].errorMessage {
+                Text("Work could not be read: \(error)")
+                Button("Retry") { model.observeTaskDiagnostics(task, visible: true) }
+            }
+        }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.textSecondary)
+        .textSelection(.enabled)
+        .accessibilityIdentifier("task-work")
+    }
+
+    private func row(_ kind: String, id: String, name: String, state: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+            Text(kind)
+            Text(name).lineLimit(2)
+            Spacer()
+            Text(state)
+            Text(id).font(Typography.code(10)).help(id)
+        }
+        .accessibilityIdentifier("task-work-\(id)")
+    }
+}
+
+/// One Flow process of the Task: its Flow, state, when it started and how long
+/// it ran, opening to its id, launched graph, where it stands and each step
+/// it started. Every process reads the same way, whoever started it.
+struct FlowProcessView: View {
+    let model: WorkModel
+    let flow: FlowProcessInventoryEntry
+    let run: FlowProcessDetail?
+    private var expanded: Bool { model.navigation.expandedFlowProcesses.contains(flow.id) }
+    @State private var inspected: UInt32?
+    @Environment(\.palette) private var palette
+
+    private var started: Int64 { run?.steps.first?.startedAt ?? flow.updatedAt }
+
+    /// How long the process ran; a running one has no length yet.
+    static func duration(_ seconds: Int64) -> String {
+        let seconds = max(0, seconds)
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m \(seconds % 60)s" }
+        return "\(seconds / 3600)h \(seconds % 3600 / 60)m"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Button {
+                if expanded { model.navigation.expandedFlowProcesses.remove(flow.id) }
+                else { model.navigation.expandedFlowProcesses.insert(flow.id) }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 10)
+                        .accessibilityHidden(true)
+                    Text(flow.name).font(Typography.code(12)).foregroundStyle(palette.text)
+                    Text(flow.state == .current ? "running" : flow.state.rawValue)
+                        .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
+                    Spacer()
+                    Text(Date(timeIntervalSince1970: TimeInterval(started))
+                        .formatted(date: .abbreviated, time: .shortened))
+                    if let ended = flow.endedAt {
+                        Text(Self.duration(ended - started)).monospacedDigit()
+                            .frame(minWidth: 52, alignment: .trailing)
+                    }
+                }
+                .lineLimit(1)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(WorkPlainButtonStyle())
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("task-work-\(flow.id)")
+            if expanded { detail.padding(.leading, 18) }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var tone: WorkTone? {
+        switch flow.state {
+        case .current: .running
+        case .stopped: .stopped
+        case .completed: nil
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        Text(flow.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
+            .accessibilityIdentifier("flow-process-id-\(flow.id)")
+        if let run {
+            FlowDiagram(graph: run.graph, latest: run, inspected: $inspected)
+            Text([run.presentation.reason, flowIterationLabel(run.iterations)]
+                .compactMap { $0 }.joined(separator: " · "))
+                .accessibilityIdentifier("flow-process-status-\(flow.id)")
+            ForEach(run.steps) { step in
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Text(step.label).font(Typography.code(11))
+                    if let iteration = flowIterationLabel(step.iterations) { Text(iteration).monospacedDigit() }
+                    Spacer()
+                    Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
+                    if let completed = step.completedAt {
+                        Text(Self.duration(completed - step.startedAt)).monospacedDigit()
+                            .frame(minWidth: 52, alignment: .trailing)
+                    }
+                }
+                .help(step.lfProcessId)
+                .accessibilityIdentifier("flow-process-step-\(step.lfProcessId)")
+            }
+        } else {
+            Text("Reading Flow…")
+        }
+    }
+}

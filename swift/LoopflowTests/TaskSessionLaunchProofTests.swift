@@ -128,17 +128,21 @@ struct TaskSessionLaunchProofTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(repo))
         workspace.multiplexer.newShell(location: workspace.location)
-        let pane = workspace.multiplexer.focusedPaneId
-        let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
+        let shell = try #require(workspace.multiplexer.focusedPane.content.selectedShell)
+        let terminal = registry.surfaces.view(for: try #require(shell.terminal))
         terminal.frame = CGRect(x: 0, y: 0, width: 600, height: 350)
         terminal.workingDirectory = repo
-        terminal.command = buildWorkspaceShellCommand(id: pane, argv: ["/bin/cat"], env: [:])
+        terminal.command = buildWorkspaceShellCommand(id: shell.id, argv: ["/bin/cat"], env: [:])
         terminal.createSurface(manager: GhosttyManager.shared)
         let surface = try #require(terminal.surface)
         defer {
             for path in registry.keys {
                 for pane in registry.retained(path)!.multiplexer.layout.allPanes {
-                    registry.surfaces.release(.shell(pane.id, machineId: fixtureMachineId))
+                    if case .shell(let tabs, _) = pane.content {
+                        for tab in tabs {
+                            if let identity = tab.terminal { registry.surfaces.release(identity) }
+                        }
+                    }
                 }
             }
         }

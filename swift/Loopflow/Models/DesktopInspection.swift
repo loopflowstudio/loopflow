@@ -156,6 +156,13 @@ public struct DesktopWorkspaceInspection: Codable, Sendable, Equatable {
 
 /// Children retain first/second order; a pane has no children. Values are copied
 /// from MultiplexerStore at inspection, never written back as layout authority.
+public struct DesktopShellInspection: Codable, Sendable, Equatable {
+    public let id: String
+    public let incarnation: String
+    public let surface: String?
+    public let location: WorkspaceIdentity?
+}
+
 public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let pane: String?
     public let incarnation: String?
@@ -166,12 +173,26 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
     public let ratio: Double?
     public let children: [DesktopLayoutInspection]
     public let location: WorkspaceIdentity?
+    public let tabs: [DesktopShellInspection]
+    public let selectedTab: String?
 
-    public init(_ layout: LayoutNode, surface: (PaneState) -> String?) {
+    enum CodingKeys: String, CodingKey {
+        case pane, incarnation, surface, content, subject, axis, ratio, children, location, tabs
+        case selectedTab = "selected_tab"
+    }
+
+    public init(_ layout: LayoutNode, surface: (PaneContent) -> String?) {
         switch layout {
         case .leaf(let state):
+            if case .shell(let shells, let selected) = state.content {
+                tabs = shells.map { tab in
+                    let content = PaneContent.shell(tabs: [tab], selected: tab.id)
+                    return DesktopShellInspection(id: tab.id, incarnation: tab.incarnation, surface: surface(content), location: tab.location)
+                }
+                selectedTab = selected
+            } else { tabs = []; selectedTab = nil }
             location = state.content.location
-            pane = state.id; incarnation = state.incarnation; self.surface = surface(state); axis = nil; ratio = nil; children = []
+            pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
             case .empty: content = "empty"; subject = nil
             case .shell: content = "shell"; subject = nil
@@ -180,6 +201,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             case .flowLog(let id, _, _): content = "flow_log"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
+            tabs = []; selectedTab = nil
             location = nil
             pane = nil; incarnation = nil; self.surface = nil; content = nil; subject = nil; axis = splitAxis.rawValue; ratio = splitRatio
             children = [Self(first, surface: surface), Self(second, surface: surface)]
@@ -195,13 +217,14 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     public let work: WorkWorkspaceKey
     public let pane: String
     public let incarnation: String
+    public let tab: String?
 
     public init(repository: String, window: String, work: WorkWorkspaceKey,
-                pane: String, incarnation: String) {
-        self.repository = repository; self.window = window; self.work = work; self.pane = pane; self.incarnation = incarnation
+                pane: String, incarnation: String, tab: String?) {
+        self.repository = repository; self.window = window; self.work = work; self.pane = pane; self.incarnation = incarnation; self.tab = tab
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, work, pane, incarnation
+        case repository, window, work, pane, incarnation, tab
     }
 }
 
@@ -213,14 +236,15 @@ public struct DesktopPaneReceipt: Codable, Sendable, Equatable {
     public let work: WorkWorkspaceKey
     public let pane: String
     public let observedAt: Int64
+    public let tab: String?
 
-    public init(target: DesktopPaneTarget, pane: String, observedAt: Int64) {
+    public init(target: DesktopPaneTarget, pane: String, tab: String?, observedAt: Int64) {
         repository = target.repository; window = target.window
         work = target.work
-        self.pane = pane; self.observedAt = observedAt
+        self.pane = pane; self.tab = tab; self.observedAt = observedAt
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, work, pane
+        case repository, window, work, pane, tab
         case observedAt = "observed_at"
     }
 }
@@ -239,13 +263,12 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
     case text(surface: String, text: String)
     case key(surface: String, key: DesktopKey)
     case files(task: String), flowLog(task: String)
-    case split(axis: SplitAxis)
     case move(destination: DesktopPaneTarget, axis: SplitAxis)
     case resize(toward: DesktopPaneTarget, ratio: Double)
     case zoom(enabled: Bool)
 
     enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task, surface, text, key }
-    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom, shell, files, text, key; case flowLog = "flow_log" }
+    private enum Kind: String, Codable { case hide, restore, focus, move, resize, zoom, shell, files, text, key; case flowLog = "flow_log" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -260,7 +283,6 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .shell: self = .shell
         case .files: self = .files(task: try values.decode(String.self, forKey: .task))
         case .flowLog: self = .flowLog(task: try values.decode(String.self, forKey: .task))
-        case .split: self = .split(axis: try values.decode(SplitAxis.self, forKey: .axis))
         case .move: self = .move(destination: try values.decode(DesktopPaneTarget.self, forKey: .destination),
                                 axis: try values.decode(SplitAxis.self, forKey: .axis))
         case .resize: self = .resize(toward: try values.decode(DesktopPaneTarget.self, forKey: .toward),
@@ -291,9 +313,6 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         case .flowLog(let task):
             kind = .flowLog
             try values.encode(task, forKey: .task)
-        case .split(let axis):
-            kind = .split
-            try values.encode(axis, forKey: .axis)
         case .move(let destination, let axis):
             kind = .move
             try values.encode(destination, forKey: .destination)

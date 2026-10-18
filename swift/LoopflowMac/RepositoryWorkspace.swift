@@ -25,7 +25,7 @@ final class WorkLinkRouter {
         let focus: () -> Void
         let receive: (URL) async -> Void
         let inspect: (String, UUID) -> DesktopWindowInspection
-        let controlPane: (DesktopPaneCommand) throws -> String
+        let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
     }
     private struct RepositoryOpening {
@@ -58,7 +58,7 @@ final class WorkLinkRouter {
     func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-                  controlPane: @escaping (DesktopPaneCommand) throws -> String,
+                  controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
                   readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
                   receive: @escaping (URL) async -> Void) {
         let previous = targets[repository]
@@ -223,7 +223,7 @@ final class WorkLinkRouter {
     func controlPane(_ request: DesktopPaneCommand) throws -> DesktopPaneReceipt {
         let receiver = try receiver(for: request.target)
         let pane = try receiver.controlPane(request)
-        return DesktopPaneReceipt(target: request.target, pane: pane, observedAt: Int64(Date().timeIntervalSince1970))
+        return DesktopPaneReceipt(target: request.target, pane: pane.pane, tab: pane.tab, observedAt: Int64(Date().timeIntervalSince1970))
     }
 
     /// Resolve and read synchronously; no client acquisition or focus fallback.

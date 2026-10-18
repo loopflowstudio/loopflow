@@ -148,7 +148,7 @@ struct TaskRowMetadataTests {
         let workspace = try #require(registry.retained(key))
         let record = try session("retained")
         registry.revealSession(record, in: workspace)
-        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: record.cwd)
+        let files = workspace.files(issue: task.task.identifier, cwd: record.cwd)
         let document = files.document("draft.md")
         document.editor.string = "unfinished"
         let layout = workspace.multiplexer.layout

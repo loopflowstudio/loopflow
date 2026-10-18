@@ -130,9 +130,7 @@ quit. The watcher starts a ci-fix when a recorded landing fails its required
 checks; `lf ci watch --status` shows its last poll and what it started.
 
 ```text
-⌘T          new terminal; split right, then down, alternating
-⌘D          split right
-⌘⇧D         split down
+⌘T          new shell tab in the Task
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
 ⌘W / ⌘Z     close / restore a pane
@@ -147,9 +145,10 @@ Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
 Task workspaces start with the Session on the left and Files on the right,
-at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
-**Shell**, and **lf process**. Hidden shells keep running and file drafts stay
-retained. Files starts with its chooser closed. Click the selected path or press
+at 61.8/38.2. Each Task keeps one Shell pane and one Files pane. New shells
+add and select independent tabs; background shells keep running. Opening a file
+adds its tab, or selects the existing tab with the same draft. Tool selection
+reveals retained panes; it never replaces another tool's content. Files starts with its chooser closed. Click the selected path or press
 Command-P in the file pane to search **scratch** and files changed from the
 branch's recorded parent commit. Selection closes the dropdown; pin it to keep
 the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
@@ -165,8 +164,8 @@ CLI on this Mac. Missing access and omitted large/binary patches are shown inlin
 local uncommitted edits stay in Files.
 
 Hover over or click **Task** in the compact workspace header to reveal Complete,
-Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
-alternate right/down. The main Session's menu switches between **Claude**,
+Pause, and Abandon. Use **+** or Command-T to add a shell tab. Shell creation
+requires a Task; repository and Wave workspaces cannot add shells. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains
@@ -208,7 +207,8 @@ shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 Files panes retain their opening location through Close/Undo, including a first open
-without a Session link. A shell split beside Files uses that same location.
+without a Session link. New shell tabs use the Task's recorded location;
+existing tabs and file drafts keep their original locations.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
 Remote paths are never opened or watched on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects
@@ -339,8 +339,8 @@ the Task's read-only worktree location and the Activity glyph.
 
 Each nonempty pane has a compact program header with its known provider,
 conversation or terminal title, directory and current reported status. Hovering
-the focused header reveals split right, split down and close; its context menu
-and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
+the focused header reveals new shell tab and close; its context menu
+also offers zoom. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
 Terminal surfaces sit inside the rounded edge, so text wraps before the border
 in both single and split panes.
@@ -367,9 +367,10 @@ may not reach the requested ratio. Graphics, images, transparent backdrops and
 custom postprocessing are outside the opaque-text contrast guarantee.
 
 Files and the Flow process log open beside retained Sessions and shells in the
-same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
+same multiplexer. Resize, zoom, close and Undo retain the other tools.
 Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
-61.8%. New shell splits give 61.8% to the existing pane and 38.2% to the shell.
+61.8%. The first Shell pane gives 61.8% to the existing pane and 38.2% to Shell;
+additional shell tabs keep that geometry.
 Both sides retain usable minimum sizes, including nested splits; small windows
 shrink those minimums together.
 
@@ -461,15 +462,14 @@ waiting for input, plus disclosed Session history and raw diagnostics.
 Use **New conversation** to talk about the selected repo, Wave, or Task
 in the configured app or terminal. It opens an interactive prompt without
 creating a Task or running an autonomous operating pass. **New shell** opens
-an ordinary shell in the active checkout. A conversation launched here returns
+another ordinary shell tab in the Task's recorded checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
 Running shells stay intact when a Task's Session or another pane opens.
 
 Selecting a Session in another checkout restores that worktree's conversation,
-companion terminals, split layout, and focus. Outside Task context, the toolbar's
-worktree menu splits entire workspaces; pane strips and keybinds split within one
-workspace. Hiding a worktree retains its processes. Closing a shell ends that shell. Changing a shell's
+companion terminals, tool layout, and focus. Shell tabs stay inside their Task's
+single Shell pane. Hiding a worktree retains its processes. Closing a shell ends that shell. Changing a shell's
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
@@ -807,7 +807,7 @@ keeping the owner's data directory and explicit takeover behavior. Local panes a
 drafts remain retained; no remote planning tree or execution record is imported.
 
 `lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
-change retained pane visibility. Focus, split, move, resize and zoom use that same
+change retained pane visibility. Focus, move, resize and zoom use that same
 exact-target path through the registry and multiplexer; see the
 [CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
 `--pane` selects a pane ID from inspection or a creation receipt. Without it,
@@ -815,12 +815,15 @@ the verified caller terminal wins within selected Work, otherwise one eligible
 pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
 Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
-Split adds a shell on the addressed pane’s execution Machine and checkout. Shell panes retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
+Shell creation adds and selects a tab at the Task's recorded location. Each tab
+retains its location through arrangement and Close/Undo; restored intent does not
+restart a process. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; they are not native-rendering proof. Shell, Files and Flow-log add
-companions beside the exact target without changing focus or zoom. Files and
-Flow-log reuse existing panes for the named Task; its recorded checkout must
+identify the affected pane directly; shell creation also returns its new `tab`.
+They are not native-rendering proof. `--pane shell:ID` targets an exact shell even
+when another tab is selected. Files and Flow-log reveal retained companions without
+changing focus or zoom. They reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts
 refuse launch without opening a local shell. Disconnects never replay shell commands.
 

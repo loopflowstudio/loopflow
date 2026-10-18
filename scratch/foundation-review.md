@@ -15,8 +15,10 @@ savepoint composition and errors for an unknown repository.
 
 Compression removed repeated Work reads per saved query, subtree revalidation,
 a redundant membership filter and a read-before-delete transaction. All catalog
-entries still validate against the same Work snapshot; conditional deletion
-checks revision atomically. Shared Work identity is imported from its owner.
+entries originally validated against the same Work snapshot; October 17 compression
+narrows validation to the edited selection and its references so unrelated
+ambiguity cannot block edits. Conditional deletion checks revision atomically.
+Shared Work identity is imported from its owner.
 
 Publication review reproduced the broad selection failure: the binary-selection
 fixture changed `LF_HOME`/`LF_BIN` without the shared environment lock. It passed
@@ -24,4 +26,4 @@ alone but raced other fixtures in the broad run. The fixture now takes that lock
 production dispatch is unchanged. Publication remains a review checkpoint, with
 native integration and the released-frontier gate still deferred as documented.
 
-Check (October 16): `uv run python scripts/test_network.py cargo test -p loopflow --lib selection < /dev/null` — 34 passed after the lock repair; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed; prior unchanged Swift/DTO checks reused, native integration and newer released-frontier validation remain gate-owned.
+Check (October 16, foundations): `uv run python scripts/test_network.py cargo test -p loopflow --lib selection < /dev/null` — 34 passed after the lock repair; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `git diff --check` — passed; prior unchanged Swift/DTO checks reused, native integration remains gate-owned. The later post-merge upgrade pass in `design.md` resolves the released-frontier deferral.

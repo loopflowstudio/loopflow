@@ -40,7 +40,7 @@ struct WorkCLISubscriptionTests {
         let original = try #require(registry.selectedWork.flatMap(registry.retained))
         original.multiplexer.newShell(command: ["/bin/cat"], location: original.location)
         let originalLayout = original.multiplexer.layout
-        let originalFiles = original.files(taskId: seedID, issue: seedID, cwd: fixture.repo.path, query: query)
+        let originalFiles = original.files(issue: seedID, cwd: fixture.repo.path, query: query)
         let originalDraft = originalFiles.document("notes.txt")
         originalDraft.editor.string = "retain original draft"
 
@@ -75,7 +75,7 @@ struct WorkCLISubscriptionTests {
         let surface = registry.surfaces.view(for: surfaceID)
         #endif
         workspace.multiplexer.show(.files(taskId: id))
-        let files = workspace.files(taskId: id, issue: task.task.identifier, cwd: checkout.worktree, query: query)
+        let files = workspace.files(issue: task.task.identifier, cwd: checkout.worktree, query: query)
         let draft = files.document("notes.txt")
         draft.editor.string = "unsaved Task draft"
         let layout = workspace.multiplexer.layout

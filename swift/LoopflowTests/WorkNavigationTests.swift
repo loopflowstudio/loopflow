@@ -165,7 +165,7 @@ struct WorkNavigationTests {
         let workspace = try #require(registry.retained(taskKey))
         registry.revealSession(taskPrimary, in: workspace)
         workspace.multiplexer.show(.files(taskId: task.id))
-        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: taskPrimary.cwd)
+        let files = workspace.files(issue: task.task.identifier, cwd: taskPrimary.cwd)
         let document = files.document("draft.md")
         document.editor.string = "unfinished idea"
         let layout = workspace.multiplexer.layout
@@ -714,7 +714,7 @@ struct WorkNavigationTests {
         let workspace = fixtureWork(registry, fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "human")
         let sessionPane = workspace.multiplexer.focusedPaneId
-        _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
+        _ = workspace.multiplexer.newShell()
         workspace.multiplexer.newShell(location: workspace.location)
         let layout = workspace.multiplexer.layout
         let focused = workspace.multiplexer.focusedPaneId
@@ -996,7 +996,7 @@ struct WorkNavigationTests {
         let workspace = fixtureWork(registry, WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
         workspace.multiplexer.load(sessionId: "first")
         let pane = workspace.multiplexer.focusedPaneId
-        _ = workspace.multiplexer.split(pane, axis: .vertical)
+        _ = workspace.multiplexer.newShell()
         workspace.multiplexer.load(sessionId: "second")
         workspace.multiplexer.load(sessionId: "first")
         let layout = workspace.multiplexer.layout
@@ -1231,7 +1231,7 @@ struct WorkNavigationTests {
         model.select(.task(id: "issue-review"))
         let key = try #require(registry.selectedWork)
         let retained = try #require(registry.retained(key))
-        let files = retained.files(taskId: "issue-review", issue: "W2-131", cwd: "/src/loopflow")
+        let files = retained.files(issue: "W2-131", cwd: "/src/loopflow")
         let draft = files.document("notes.md")
         draft.editor.string = "keep this thought"
         retained.multiplexer.newShell(location: WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
@@ -1281,8 +1281,7 @@ struct WorkNavigationTests {
         #expect(registry.openWork == [root, taskKey])
         let rootEntry = try #require(registry.retained(root))
         let rootLayout = rootEntry.multiplexer.layout
-        let pane = entry.multiplexer.focusedPane
-        _ = entry.multiplexer.split(pane.id, axis: .horizontal)
+        _ = entry.multiplexer.newShell()
         let innerLayout = entry.multiplexer.layout
         #expect(registry.openWork.count == 2)
         #expect(rootEntry.multiplexer.layout == rootLayout)

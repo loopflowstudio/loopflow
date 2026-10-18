@@ -80,7 +80,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let repository: String
     let openingRequests: Set<UUID>
     let inspect: (String, UUID) -> DesktopWindowInspection
-    let controlPane: (DesktopPaneCommand) throws -> String
+    let controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
     let receive: (URL) async -> Void
 
@@ -103,12 +103,12 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let repository: String
         let openingRequests: Set<UUID>
         var inspect: (String, UUID) -> DesktopWindowInspection
-        var controlPane: (DesktopPaneCommand) throws -> String
+        var controlPane: (DesktopPaneCommand) throws -> (pane: String, tab: String?)
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
         var receive: (URL) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
-             controlPane: @escaping (DesktopPaneCommand) throws -> String,
+             controlPane: @escaping (DesktopPaneCommand) throws -> (pane: String, tab: String?),
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
              receive: @escaping (URL) async -> Void) {
             self.router = router

@@ -394,16 +394,17 @@ struct DesktopPerformanceTests {
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(checkout.path))
-        let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
+        let files = workspace.files(issue: "perf-work-0", cwd: checkout.path, query: query)
         files.autosave = false
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: "perf-session-0", location: model.sessions.value?.first { $0.id == "perf-session-0" }?.workspace?.identity)
         let sessionPane = multiplexer.focusedPaneId
         multiplexer.newShell(location: workspace.location)
-        let companionPane = multiplexer.focusedPaneId
+        let companion = multiplexer.focusedPane
+        let companionPane = companion.id
         multiplexer.load(sessionId: "perf-session-2", location: model.sessions.value?.first { $0.id == "perf-session-2" }?.workspace?.identity)
         let otherPane = multiplexer.focusedPaneId
-        let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), .shell(companionPane, machineId: fixtureMachineId), .session("perf-session-2", machineId: fixtureMachineId)]
+        let identities: [TerminalIdentity] = [.session("perf-session-0", machineId: fixtureMachineId), try #require(companion.terminal), .session("perf-session-2", machineId: fixtureMachineId)]
         let terminals = identities.map { registry.surfaces.view(for: $0) }
         defer { for identity in identities { registry.surfaces.release(identity) } }
         for terminal in terminals {
@@ -430,7 +431,6 @@ struct DesktopPerformanceTests {
         let first = try #require(records.first { $0.id == "perf-session-0" })
         let other = try #require(records.first { $0.id == "perf-session-2" })
         let openTask = try #require(navigator.onOpenTask)
-        let selected = try #require(model.task(id: "perf-task-0"))
 
         for attempt in 0..<samples {
             // Reset outside the measured interval; every attempt starts from the
@@ -613,7 +613,7 @@ struct DesktopPerformanceTests {
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
-                  multiplexer.layout.pane(for: companionPane)?.content == .shell(location: workspace.location),
+                  multiplexer.layout.pane(for: companionPane) == companion,
                   multiplexer.layout.pane(for: otherPane)?.sessionId == other.id else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
@@ -694,7 +694,7 @@ struct DesktopPerformanceTests {
             registry.surfaces.release(identity)
             registry.surfaces.release(companionIdentity)
         }
-        let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
+        let files = workspace.files(issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
         files.selection = "notes.txt"
         await files.loadFile()

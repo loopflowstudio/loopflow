@@ -1,15 +1,25 @@
-# LOO-497 assumptions — October 16, 2026
+# LOO-497 current decisions
 
-Jack Heart authorized the foundations slice in `design.md`, preserving the
-query-view prototype for later review. That authorization does not approve its
-UX/grammar, merge, or completion of the broader Task.
+Jack Heart accepted the prototype for implementation, requested integration with
+LOO-489, corrected the invisible query aliases, then said “keep going.” The
+materialized 489 source and current procedure are in native-console-integration.md.
+Earlier decisions/readbacks are preserved in
+history/loo489-console-source-2026-10-17/loo497-prior-questions.txt.
 
-Implementation interpretations: immediate child Waves plus recursive Task
-membership; first-visible-wins traversal in first/second order; touched layouts
-append arrivals in a trailing subtree. The inbox's appearance remains LOO-489's
-choice. Schema evolution is authorized; concrete persistence/transport writers
-still need coordination with LOO-489/416, whose replies remain unconfirmed.
+Repository scope is implicit. Cmd K finds Work across repositories; another repo
+opens its own window. Separate Dashboards never replace ordinary repo/Wave views.
+Unstarted matches show briefs and cause no Session, checkout or execution effects.
+Use one Shell and one Files tool per Task, with tabs; higher scopes have neither.
+File close preserves its Task/path draft. Shell tab ID owns terminal identity;
+restored intent cannot replay launch arguments or imply a running process.
 
-Accepted decisions live in the brief and layout direction; remaining work and
-open product choices are in `desktop-api-coordination.md`. Full prior notes:
-`refs/loopflow/evidence/loo-497-before-compress:questions.md`.
+Shared grammar, clause IDs, expression-specific arrangement history and Dashboard
+identity already exist. Direct predicates replace invented prototype aliases.
+Genuine saved references must have a visible owner. Full maps preserve hidden
+occurrences; first visible wins independently of focus. Newer edits survive restore.
+
+497 now owns adoption of its Dashboard/editor/persistence callers in the combined
+Console. Existing 489 navigation and 416 lifetime owners are reused, never cloned.
+Source handoff is available locally; do not repeat that historical blocker.
+Cold Process reattachment and native mounted retention still need real evidence.
+Publish for demo review only. No merge or automatic completion authorization.

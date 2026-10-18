@@ -903,10 +903,89 @@ Print the configured participant display name
 
 ## lf desktop
 
-Open, inspect and control Loopflow Desktop (macOS only)
+Select Work and control Loopflow Desktop
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf desktop view
+
+Derive a passive Work view for external hosts; never opens Desktop
+
+| Argument | What it does |
+|---|---|
+| `<expression>` | wave/task/query/kind/state expression; omitted uses the repository default |
+| `--plan` | plan Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop query
+
+Create or edit a Dashboard query with revision checking
+
+| Argument | What it does |
+|---|---|
+| `<container>` | container |
+| `<expression>` | expression |
+| `--revision` | Last observed revision; omit only when creating a new Dashboard |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop pin
+
+Pin a Dashboard in repository discovery
+
+| Argument | What it does |
+|---|---|
+| `<query>` | query |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop unpin
+
+Unpin a Dashboard without changing its membership or arrangement
+
+| Argument | What it does |
+|---|---|
+| `<query>` | query |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop rename
+
+Rename a Dashboard or Task through its shared owner
+
+| Argument | What it does |
+|---|---|
+| `<target>` | target |
+| `<name>` | name |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop arrange
+
+Replace a Dashboard's retained arrangement from JSON on stdin
+
+| Argument | What it does |
+|---|---|
+| `<query>` | query |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop layout
+
+Read portable pane intent, or save a complete revision-checked record from stdin
+
+| Argument | What it does |
+|---|---|
+| `<work>` | work |
+| `--save` | save Default: false. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf desktop open
@@ -986,7 +1065,7 @@ Focus an exact pane in its retained workspace (does not select Work)
 
 ## lf desktop shell
 
-Add a shell on the recorded Machine beside a pane without changing selection
+Add and select a shell tab at the Task’s recorded location
 
 | Argument | What it does |
 |---|---|
@@ -1011,17 +1090,6 @@ Show the recorded Task's Flow processes beside an exact pane
 | Argument | What it does |
 |---|---|
 | `--pane` | pane |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf desktop split
-
-Add a shell split beside an exact pane, retaining selection and clients
-
-| Argument | What it does |
-|---|---|
-| `--pane` | pane |
-| `--axis` | axis |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

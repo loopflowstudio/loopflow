@@ -1,0 +1,50 @@
+{
+  "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
+  "work": {
+    "kind": "task",
+    "id": "task_00000000000000000000000000000001"
+  },
+  "title": "Simplify cross-Work questions",
+  "title_source": "generated",
+  "detail": "review-design",
+  "provider": "codex",
+  "cwd": "/src/loopflow.task",
+  "state": "unknown",
+  "ready_summary": null,
+  "open_argv": [
+    "lf",
+    "session",
+    "open",
+    "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+  ],
+  "wave_id": "00000000-0000-0000-0000-000000000001",
+  "task_ids": [
+    "task_00000000000000000000000000000001"
+  ],
+  "terminal_ids": [],
+  "work_path": "product / LOO-291",
+  "actions": [
+    {
+      "kind": "open",
+      "label": "Open here",
+      "help": "Open this Session in a terminal",
+      "unavailable_reason": null
+    }
+  ],
+  "flow_membership": {
+    "kind": "step",
+    "flow": "task-design",
+    "step": "review-design",
+    "occurrence": "unknown",
+    "node": null,
+    "iterations": null,
+    "flow_lf_process_id": "00000000-0000-0000-0000-00000000f10w"
+  },
+  "interactive": true,
+  "workspace": null,
+  "primary_scope": null,
+  "attention": "available",
+  "task_primary": false,
+  "program_status": null,
+  "agent_process_id": "44444444-4444-4444-8444-444444444444"
+}

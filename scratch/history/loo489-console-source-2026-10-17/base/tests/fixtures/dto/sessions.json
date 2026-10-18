@@ -1,0 +1,65 @@
+[
+  {
+    "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
+    "work": {
+      "kind": "task",
+      "id": "task_00000000000000000000000000000001"
+    },
+    "title": "Simplify cross-Work questions",
+    "title_source": "human",
+    "detail": "review-design",
+    "provider": "codex",
+    "cwd": "/src/loopflow.task",
+    "state": "active",
+    "ready_summary": null,
+    "open_argv": [
+      "lf",
+      "session",
+      "connect",
+      "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+    ],
+    "wave_id": "00000000-0000-0000-0000-000000000001",
+    "task_ids": [
+      "task_00000000000000000000000000000001"
+    ],
+    "terminal_ids": [],
+    "work_path": "product / LOO-291",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+      },
+      {
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Transfer control here; unsent text in the previous terminal is not transferred",
+        "unavailable_reason": null
+      }
+    ],
+    "flow_membership": {
+      "kind": "step",
+      "flow": "task-design",
+      "step": "review-design",
+      "occurrence": "current",
+      "node": 1,
+      "iterations": [
+        []
+      ],
+      "flow_lf_process_id": "00000000-0000-0000-0000-00000000f10w"
+    },
+    "workspace": {
+      "machine_id": "home_00000000000000000000000000000001",
+      "worktree": "/src/loopflow.task",
+      "task_id": "task_00000000000000000000000000000001",
+      "unavailable": null
+    },
+    "interactive": true,
+    "primary_scope": null,
+    "attention": "available",
+    "task_primary": false,
+    "program_status": null,
+    "agent_process_id": "44444444-4444-4444-8444-444444444444"
+  }
+]

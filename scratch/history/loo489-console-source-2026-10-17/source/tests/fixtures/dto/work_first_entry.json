@@ -1,0 +1,568 @@
+{
+  "empty": {
+    "generated_at": "2026-10-11T22:28:00.900135Z",
+    "waves": [],
+    "tasks": {
+      "state": "ok",
+      "items": [],
+      "truncated": false
+    }
+  },
+  "primary": {
+    "actions": [
+      {
+        "help": "Open this Session in a terminal",
+        "kind": "open",
+        "label": "Open here",
+        "unavailable_reason": null
+      }
+    ],
+    "agent_process_id": null,
+    "attention": null,
+    "cwd": "/private/tmp/.tmpRKKNhK.repo",
+    "detail": "opencode:opencode/test-model",
+    "flow_membership": {
+      "kind": "unknown",
+      "reason": "Flow membership was not recorded"
+    },
+    "id": "cc797f6de1e54aa4a1888591b7da9743",
+    "interactive": true,
+    "open_argv": [
+      "/usr/bin/env",
+      "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "LF_HOME=/private/tmp/.tmp346qSS",
+      "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "session",
+      "connect",
+      "cc797f6de1e54aa4a1888591b7da9743"
+    ],
+    "primary_scope": "repository",
+    "program_status": null,
+    "provider": "opencode",
+    "ready_summary": null,
+    "state": "unknown",
+    "task_ids": [],
+    "task_primary": false,
+    "terminal_ids": [],
+    "title": ".tmpRKKNhK",
+    "title_source": "generated",
+    "wave_id": null,
+    "work": null,
+    "work_path": null,
+    "workspace": {
+      "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+      "task_id": null,
+      "unavailable": null,
+      "worktree": "/private/tmp/.tmpRKKNhK.repo"
+    },
+    "preview": null
+  },
+  "reopened": {
+    "actions": [
+      {
+        "help": "Open this Session in a terminal",
+        "kind": "open",
+        "label": "Open here",
+        "unavailable_reason": null
+      }
+    ],
+    "agent_process_id": null,
+    "attention": null,
+    "cwd": "/private/tmp/.tmpRKKNhK.repo",
+    "detail": "opencode:opencode/test-model",
+    "flow_membership": {
+      "kind": "unknown",
+      "reason": "Flow membership was not recorded"
+    },
+    "id": "cc797f6de1e54aa4a1888591b7da9743",
+    "interactive": true,
+    "open_argv": [
+      "/usr/bin/env",
+      "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "LF_HOME=/private/tmp/.tmp346qSS",
+      "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "session",
+      "connect",
+      "cc797f6de1e54aa4a1888591b7da9743"
+    ],
+    "primary_scope": "repository",
+    "program_status": null,
+    "provider": "opencode",
+    "ready_summary": null,
+    "state": "unknown",
+    "task_ids": [],
+    "task_primary": false,
+    "terminal_ids": [],
+    "title": ".tmpRKKNhK",
+    "title_source": "generated",
+    "wave_id": null,
+    "work": null,
+    "work_path": null,
+    "workspace": {
+      "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+      "task_id": null,
+      "unavailable": null,
+      "worktree": "/private/tmp/.tmpRKKNhK.repo"
+    },
+    "preview": null
+  },
+  "roadmap": {
+    "generated_at": "2026-10-11T22:28:09.267041Z",
+    "waves": [
+      {
+        "metric_portfolio": {
+          "contract_issues": [],
+          "metrics": []
+        },
+        "project_readiness": {
+          "activation": null,
+          "observed_at": 1791757688,
+          "pending_successor": null,
+          "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+          "state": "ready"
+        },
+        "projects": {
+          "items": [
+            {
+              "current": true,
+              "id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+              "krs": [],
+              "linear_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
+              "metric_targets": [],
+              "name": "Task PR tests",
+              "slug": "task-pr-tests",
+              "status": "started",
+              "sync": {
+                "changes": [],
+                "connected": false
+              }
+            }
+          ],
+          "state": "ok",
+          "truncated": false
+        },
+        "tasks": {
+          "items": [
+            {
+              "actions": {
+                "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+                "recommended": "no_action"
+              },
+              "condition": {
+                "evidence_age_secs": 1,
+                "local_progress": {
+                  "authored_commits": false,
+                  "dirty": false,
+                  "reason": null,
+                  "recovery_required": false,
+                  "state": "observed",
+                  "unsettled": false
+                },
+                "observed_at": "2026-10-11T22:28:09.749519Z",
+                "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+                "state": "blocked",
+                "unresolved_execution": true
+              },
+              "execution": {
+                "captured": null,
+                "reason": "No Task Flow has run; independent Sessions may still be active",
+                "state": "idle",
+                "step": null
+              },
+              "follow_through": {
+                "intents": [],
+                "links": [],
+                "needs_conversion": false,
+                "reason": null,
+                "scope_notes": []
+              },
+              "latest_flow_process": null,
+              "next_move": {
+                "owner": "user",
+                "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+              },
+              "pr": null,
+              "reference": {
+                "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
+                "workspace": {
+                  "base_commit": "c2f00286f20ae8ddf775995d21a3f7d37f70b25c",
+                  "branch": "work-first",
+                  "local_exists": true,
+                  "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+                  "machine_label": "build-server",
+                  "slug": "task-pr-proof",
+                  "worktree": "/private/tmp/.tmpRKKNhK"
+                }
+              },
+              "run_control": {
+                "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+              },
+              "runtime": {
+                "completion_pending": null,
+                "provider": "opencode",
+                "reason": "No Task Flow has run; independent Sessions may still be active",
+                "started": true,
+                "status": "not_ready",
+                "updated_at": "2026-10-11T22:28:08Z",
+                "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
+              },
+              "section": "waiting",
+              "task": {
+                "acquisition": {
+                  "observed_at": 1791757688,
+                  "state": "available"
+                },
+                "assignee": null,
+                "completed": false,
+                "completed_at": null,
+                "description": "Exercise the persisted lifecycle.",
+                "due_date": null,
+                "follow_up_sources": [],
+                "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+                "identifier": "INF-123",
+                "linear_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+                "name": "Prove Task PR transitions",
+                "rank": 0,
+                "state": null,
+                "sync": {
+                  "changes": [],
+                  "connected": false
+                },
+                "repository_id": "repo_00000000000040008000000000000001",
+                "repo": "/private/tmp/.tmpRKKNhK",
+                "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+                "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
+              },
+              "workflow_name": "feature",
+              "workflow_source": "task"
+            }
+          ],
+          "state": "ok",
+          "truncated": false
+        },
+        "unavailable_tasks": [],
+        "wave": {
+          "active_tasks": 1,
+          "created_at": "2026-10-11T22:28:08Z",
+          "goal": "",
+          "id": "d1b09180-31e8-4cee-b058-413a3fd52616",
+          "machine": null,
+          "name": "task-pr-tests",
+          "parent_wave_id": null,
+          "repo": "/private/tmp/.tmpRKKNhK",
+          "retired_at": null,
+          "retirement_reason": null,
+          "status": "ready",
+          "superseded_by_wave_id": null
+        },
+        "workflow": "feature"
+      }
+    ],
+    "tasks": {
+      "state": "ok",
+      "items": [
+        {
+          "actions": {
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+            "recommended": "no_action"
+          },
+          "condition": {
+            "evidence_age_secs": 1,
+            "local_progress": {
+              "authored_commits": false,
+              "dirty": false,
+              "reason": null,
+              "recovery_required": false,
+              "state": "observed",
+              "unsettled": false
+            },
+            "observed_at": "2026-10-11T22:28:09.749519Z",
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude",
+            "state": "blocked",
+            "unresolved_execution": true
+          },
+          "execution": {
+            "captured": null,
+            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "state": "idle",
+            "step": null
+          },
+          "follow_through": {
+            "intents": [],
+            "links": [],
+            "needs_conversion": false,
+            "reason": null,
+            "scope_notes": []
+          },
+          "latest_flow_process": null,
+          "next_move": {
+            "owner": "user",
+            "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+          },
+          "pr": null,
+          "reference": {
+            "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
+            "workspace": {
+              "base_commit": "c2f00286f20ae8ddf775995d21a3f7d37f70b25c",
+              "branch": "work-first",
+              "local_exists": true,
+              "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+              "machine_label": "build-server",
+              "slug": "task-pr-proof",
+              "worktree": "/private/tmp/.tmpRKKNhK"
+            }
+          },
+          "run_control": {
+            "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+          },
+          "runtime": {
+            "completion_pending": null,
+            "provider": "opencode",
+            "reason": "No Task Flow has run; independent Sessions may still be active",
+            "started": true,
+            "status": "not_ready",
+            "updated_at": "2026-10-11T22:28:08Z",
+            "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
+          },
+          "section": "waiting",
+          "task": {
+            "acquisition": {
+              "observed_at": 1791757688,
+              "state": "available"
+            },
+            "assignee": null,
+            "completed": false,
+            "completed_at": null,
+            "description": "Exercise the persisted lifecycle.",
+            "due_date": null,
+            "follow_up_sources": [],
+            "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+            "identifier": "INF-123",
+            "linear_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+            "name": "Prove Task PR transitions",
+            "rank": 0,
+            "state": null,
+            "sync": {
+              "changes": [],
+              "connected": false
+            },
+            "repository_id": "repo_00000000000040008000000000000001",
+            "repo": "/private/tmp/.tmpRKKNhK",
+            "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
+            "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
+          },
+          "workflow_name": "feature",
+          "workflow_source": "task"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "sessions": [
+    {
+      "actions": [
+        {
+          "help": "Open this Session in a terminal",
+          "kind": "open",
+          "label": "Open here",
+          "unavailable_reason": null
+        }
+      ],
+      "agent_process_id": null,
+      "attention": null,
+      "cwd": "/private/tmp/.tmpRKKNhK.repo",
+      "detail": "opencode:opencode/test-model",
+      "flow_membership": {
+        "kind": "unknown",
+        "reason": "Flow membership was not recorded"
+      },
+      "id": "cc797f6de1e54aa4a1888591b7da9743",
+      "interactive": true,
+      "open_argv": [
+        "/usr/bin/env",
+        "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "LF_HOME=/private/tmp/.tmp346qSS",
+        "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "session",
+        "connect",
+        "cc797f6de1e54aa4a1888591b7da9743"
+      ],
+      "primary_scope": "repository",
+      "program_status": null,
+      "provider": "opencode",
+      "ready_summary": null,
+      "state": "unknown",
+      "task_ids": [],
+      "task_primary": false,
+      "terminal_ids": [],
+      "title": ".tmpRKKNhK",
+      "title_source": "generated",
+      "wave_id": null,
+      "work": null,
+      "work_path": null,
+      "workspace": {
+        "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+        "task_id": null,
+        "unavailable": null,
+        "worktree": "/private/tmp/.tmpRKKNhK.repo"
+      },
+      "preview": null
+    },
+    {
+      "actions": [
+        {
+          "help": "Open this Session in a terminal",
+          "kind": "open",
+          "label": "Open here",
+          "unavailable_reason": null
+        }
+      ],
+      "agent_process_id": null,
+      "attention": null,
+      "cwd": "/private/tmp/.tmpRKKNhK",
+      "detail": "opencode:opencode/test-model",
+      "flow_membership": {
+        "kind": "unknown",
+        "reason": "Flow membership was not recorded"
+      },
+      "id": "480d8ca67cdb41ffa963f79fdb34637c",
+      "interactive": true,
+      "open_argv": [
+        "/usr/bin/env",
+        "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "LF_HOME=/private/tmp/.tmp346qSS",
+        "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "session",
+        "connect",
+        "480d8ca67cdb41ffa963f79fdb34637c"
+      ],
+      "primary_scope": null,
+      "program_status": null,
+      "provider": "opencode",
+      "ready_summary": null,
+      "state": "unknown",
+      "task_ids": [
+        "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
+      ],
+      "task_primary": true,
+      "terminal_ids": [],
+      "title": "Prove Task PR",
+      "title_source": "generated",
+      "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616",
+      "work": {
+        "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+        "kind": "task"
+      },
+      "work_path": "task-pr-tests / INF-123",
+      "workspace": {
+        "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+        "task_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+        "unavailable": null,
+        "worktree": "/private/tmp/.tmpRKKNhK"
+      },
+      "preview": null
+    },
+    {
+      "actions": [
+        {
+          "help": "Open this Session in a terminal",
+          "kind": "open",
+          "label": "Open here",
+          "unavailable_reason": null
+        }
+      ],
+      "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
+      "attention": null,
+      "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
+      "detail": "opencode",
+      "flow_membership": {
+        "kind": "independent"
+      },
+      "id": "session_bf12c20b53be450998e36bf24a58b56f",
+      "interactive": true,
+      "open_argv": [
+        "/usr/bin/env",
+        "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "LF_HOME=/private/tmp/.tmp346qSS",
+        "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+        "session",
+        "connect",
+        "session_bf12c20b53be450998e36bf24a58b56f"
+      ],
+      "primary_scope": null,
+      "program_status": null,
+      "provider": "opencode",
+      "ready_summary": null,
+      "state": "closed",
+      "task_ids": [],
+      "task_primary": false,
+      "terminal_ids": [],
+      "title": "Review parser",
+      "title_source": "generated",
+      "wave_id": null,
+      "work": null,
+      "work_path": null,
+      "workspace": {
+        "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+        "task_id": null,
+        "unavailable": null,
+        "worktree": "/private/tmp/.tmpRKKNhK.unscoped"
+      },
+      "preview": null
+    }
+  ],
+  "task_primary": {
+    "actions": [
+      {
+        "help": "Open this Session in a terminal",
+        "kind": "open",
+        "label": "Open here",
+        "unavailable_reason": null
+      }
+    ],
+    "agent_process_id": null,
+    "attention": null,
+    "cwd": "/private/tmp/.tmpRKKNhK",
+    "detail": "opencode:opencode/test-model",
+    "flow_membership": {
+      "kind": "unknown",
+      "reason": "Flow membership was not recorded"
+    },
+    "id": "480d8ca67cdb41ffa963f79fdb34637c",
+    "interactive": true,
+    "open_argv": [
+      "/usr/bin/env",
+      "LF_BIN=/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "LF_HOME=/private/tmp/.tmp346qSS",
+      "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
+      "session",
+      "connect",
+      "480d8ca67cdb41ffa963f79fdb34637c"
+    ],
+    "primary_scope": null,
+    "program_status": null,
+    "provider": "opencode",
+    "ready_summary": null,
+    "state": "unknown",
+    "task_ids": [
+      "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
+    ],
+    "task_primary": true,
+    "terminal_ids": [],
+    "title": "Prove Task PR",
+    "title_source": "generated",
+    "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616",
+    "work": {
+      "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+      "kind": "task"
+    },
+    "work_path": "task-pr-tests / INF-123",
+    "workspace": {
+      "machine_id": "home_3e605971a0c316fdfeafc7e91579940f",
+      "task_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
+      "unavailable": null,
+      "worktree": "/private/tmp/.tmpRKKNhK"
+    },
+    "preview": null
+  }
+}

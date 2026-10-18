@@ -51,6 +51,39 @@ public struct RegistryQuery: Sendable {
         self.observeWork = watchWork
     }
 
+    public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
+        let args = ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
+        return try Self.decode(WorkViewPlan.self, from: await run(args, repoPath))
+    }
+
+    public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
+        let args = ["desktop", "query", id, expression] + (revision.map { ["--revision", String($0)] } ?? []) + ["--json"]
+        return try Self.decode(Dashboard.self, from: await run(args, repoPath))
+    }
+
+    public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision), "--json"], repoPath))
+    }
+
+    public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision), "--json"], repoPath))
+    }
+
+    public func saveDashboardArrangement(id: String, arrangement: WorkArrangement, revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(arrangement), as: UTF8.self)
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision), "--json"], repoPath, input))
+    }
+
+    public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
+        try Self.decode(WorkPaneLayout?.self, from: await run(["desktop", "layout", work, "--json"], repoPath))
+    }
+
+    public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
+        let work = layout.work.kind == .repository ? "repository" : layout.work.kind.rawValue + ":" + layout.work.id
+        let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
+        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", work, "--save", "--json"], repoPath, input))
+    }
+
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
         try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
     }

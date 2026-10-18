@@ -1,0 +1,153 @@
+{
+  "observed_at": 1791500000,
+  "openings": [
+    {
+      "url": "loopflow://open?repo=/missing",
+      "status": "failed",
+      "reason": "Repository path is unavailable"
+    }
+  ],
+  "windows": [
+    {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "path": "/repo",
+      "selection_kind": "task",
+      "selection_id": "task_44444444444444444444444444444444",
+      "reading": "unavailable",
+      "reason": "Registry read failed; retained views remain available",
+      "supported_operations": [
+        "list",
+        "hide",
+        "restore",
+        "focus",
+        "move",
+        "resize",
+        "zoom"
+      ],
+      "workspaces": [
+        {
+          "focused_pane": "session-pane",
+          "zoomed_pane": null,
+          "hidden_panes": [
+            "files-pane"
+          ],
+          "layout": {
+            "pane": null,
+            "content": null,
+            "subject": null,
+            "axis": "vertical",
+            "ratio": 0.6,
+            "children": [
+              {
+                "pane": "session-pane",
+                "content": "session",
+                "subject": "session-one",
+                "axis": null,
+                "ratio": null,
+                "children": [],
+                "incarnation": "occurrence-session-pane",
+                "surface": "native-surface-incarnation",
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                }
+              },
+              {
+                "pane": "files-pane",
+                "content": "files",
+                "subject": "task_44444444444444444444444444444444",
+                "axis": null,
+                "ratio": null,
+                "children": [],
+                "incarnation": "occurrence-files-pane",
+                "surface": null,
+                "location": {
+                  "machine_id": "home_11111111111111111111111111111111",
+                  "worktree": "/repo.task"
+                }
+              }
+            ],
+            "incarnation": null,
+            "surface": null,
+            "location": null
+          },
+          "work": {
+            "repository": "repo_22222222222222222222222222222222",
+            "kind": "task",
+            "id": "task_44444444444444444444444444444444"
+          },
+          "title": "Fixture Task",
+          "is_open": true,
+          "selected": true
+        }
+      ],
+      "task": {
+        "id": "task_44444444444444444444444444444444",
+        "reading": "unavailable",
+        "reason": "Planning read failed",
+        "roadmap_generated_at": "2026-10-08T19:00:00Z",
+        "condition_observed_at": "2026-10-08T18:59:58Z",
+        "actions": null,
+        "run_control": null
+      },
+      "session": {
+        "id": "session-one",
+        "machine_id": "home_11111111111111111111111111111111",
+        "reading": "current",
+        "reason": null,
+        "observed_at": null,
+        "actions": [
+          {
+            "kind": "open",
+            "label": "Open here",
+            "help": "Open this Session in a terminal",
+            "unavailable_reason": "Session is active elsewhere; use Move here"
+          },
+          {
+            "kind": "move_here",
+            "label": "Move here",
+            "help": "Stop the other client and resume here; unsent text there is lost",
+            "unavailable_reason": null
+          }
+        ]
+      },
+      "opening": null
+    },
+    {
+      "repository": "repo_other",
+      "window": "other-window",
+      "path": "/repo",
+      "selection_kind": "task",
+      "selection_id": "task_44444444444444444444444444444444",
+      "reading": "current",
+      "reason": null,
+      "supported_operations": [
+        "list",
+        "hide",
+        "restore",
+        "focus",
+        "move",
+        "resize",
+        "zoom"
+      ],
+      "workspaces": [],
+      "task": {
+        "id": "task_44444444444444444444444444444444",
+        "reading": "current",
+        "reason": null,
+        "roadmap_generated_at": "2026-10-08T19:00:00Z",
+        "condition_observed_at": "2026-10-08T18:59:58Z",
+        "actions": {
+          "recommended": "resume",
+          "reason": "Inspect earlier Flows before continuing"
+        },
+        "run_control": {
+          "unavailable": "Task checkout is on another Machine"
+        }
+      },
+      "session": null,
+      "opening": null
+    }
+  ]
+}

@@ -88,6 +88,7 @@ pub enum WorkContent {
 /// `lf wave show --all` and `lf wave list --all --current`, read together.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningPart {
+    pub selections: Option<Vec<crate::work::selection::ViewPlan>>,
     pub roadmap: RoadmapSnapshot,
     pub waves: Vec<WaveSnapshot>,
 }
@@ -673,10 +674,24 @@ impl Reader {
         };
         self.runtime.block_on(async {
             Ok(match part {
-                Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
-                    roadmap: super::waves::roadmap_all(store).await?,
-                    waves: super::waves::wave_snapshots(store, true, true).await?,
-                }))),
+                Part::Planning => {
+                    let selections = match &self.scope.repo {
+                        Some(repo) => {
+                            let canonical = CanonicalRepo::discover(Path::new(repo))?;
+                            store
+                                .sqlite
+                                .repository_id(&canonical.to_string())?
+                                .map(|id| store.sqlite.selection_plans(&id))
+                                .transpose()?
+                        }
+                        None => None,
+                    };
+                    WorkContent::Planning(Some(Box::new(PlanningPart {
+                        selections,
+                        roadmap: super::waves::roadmap_all(store).await?,
+                        waves: super::waves::wave_snapshots(store, true, true).await?,
+                    })))
+                }
                 Part::PeerPlanning => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let root = CanonicalRepo::discover(Path::new(&repo))?;
@@ -778,6 +793,7 @@ impl Reader {
     fn absent(&self, part: Part) -> Result<WorkContent> {
         Ok(match part {
             Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
+                selections: None,
                 roadmap: RoadmapSnapshot {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,

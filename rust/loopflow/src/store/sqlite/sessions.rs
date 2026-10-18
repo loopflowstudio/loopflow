@@ -365,7 +365,7 @@ fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSes
     .transpose()
 }
 
-fn primary_session_in(
+pub(super) fn primary_session_in(
     conn: &rusqlite::Connection,
     scope: &PrimaryScope,
 ) -> StoreResult<Option<LfSession>> {
@@ -386,6 +386,21 @@ fn primary_session_in(
         PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string()),
         PrimaryScope::Task(task) => task_primary_in(conn, task),
     }
+}
+
+pub(super) fn session_summaries_in(
+    conn: &Connection,
+    filter: &crate::session::SessionFilter,
+    now: i64,
+    live_agents: &str,
+) -> StoreResult<Vec<crate::session::SessionSummary>> {
+    let mut labels = std::collections::HashMap::new();
+    let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, live_agents)?;
+    let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
+    let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
+        read_summary(conn, &mut labels, row)
+    })?;
+    rows.map(|row| row?).collect()
 }
 
 impl SqliteStore {
@@ -482,13 +497,7 @@ impl SqliteStore {
         let live_agents = self.live_agent_ids(filter.available)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        let mut labels = std::collections::HashMap::new();
-        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now, &live_agents)?;
-        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
-        let rows = query.query_map(rusqlite::params_from_iter(values), |row| {
-            read_summary(&conn, &mut labels, row)
-        })?;
-        rows.map(|row| row?).collect()
+        session_summaries_in(&conn, filter, now, &live_agents)
     }
 
     pub(crate) fn session_summary(

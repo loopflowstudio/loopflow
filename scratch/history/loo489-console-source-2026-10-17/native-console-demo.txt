@@ -1,0 +1,77 @@
+# Native Console demo — October 17, 2026
+
+Jack Heart requested the Swift app demo. Accepted contract:
+[navigation-implementation.md](navigation-implementation.md) and
+[keyboard-shortcuts.md](keyboard-shortcuts.md). Complete earlier observations:
+`9f4574310e03f73ae4d7b381ceac9da10e5251b5:scratch/native-console-demo.md`.
+
+## Current evidence and next review
+
+Operator owns packaging and the running demo; implementation does not replace it.
+Recorded demo app (predates recovery repair): `/tmp/loo-489-native-demo/Console Demo.app`, bundle
+`com.loopflow.mac.consolepreview`. Relaunch recipe:
+`uv run --no-sync python /tmp/loo-489-native-demo/launch-demo.py`.
+It uses synthetic Tasks in `/private/tmp/loo-489-native-demo/session-demo/real-home`
+and installed real providers. Existing account configuration is unchanged.
+
+- Jack Heart cut Open in editor. Operator's titlebar fixes built and a screenshot
+  showed the complete DEMO-1 title, compact repo controls and no duplicate label.
+- Real Codex answered; an unsent draft survived Cmd-K → DEMO-2 → Cmd-1 beside Files.
+- Refreshed the signed preview from the implement build (68 focused tests passed),
+  with its bundled CLI and 285 verified third-party files. Native resume now shows
+  Codex correctly. The recorded review left DEMO-1 with Brief beside the real conversation.
+- Native checks: Product shows all 3 started and 1 unstarted Tasks; opening DEMO-4
+  does not add a working row. Cmd-1/2 switches Tasks. Cmd-K puts working Tasks first.
+  Cmd-\\ hides/restores the sidebar. A Shell draft survived hide/show and Task
+  switching; Brief stayed beside Codex. The test draft was cleared without running it.
+- Real Codex → Claude reached first-run setup. Switching back before Claude had
+  created a transcript failed with the missing-transcript error; this is not solely
+  an offline fixture limitation. After fresh Claude produced a transcript, transfer
+  back to Codex worked. Claude is not logged in in this demo path; no login was tried.
+  Headless repair now checks history during requested-provider preparation, keeping
+  the terminal and Session on refusal; a CLI regression proves retry after the
+  transcript appears. Swift proves concurrent-update retention and observer restart;
+  Rust/Swift prove new-turn clearing and lost/recovered preview behavior. This does
+  not replace the recorded native failure or establish mounted UI acceptance.
+- Fixture limits: planned Tasks report invalid planning evidence and Waves have no
+  recorded objective. Missing sidebar IDs without issue URLs were a production
+  display gap, now repaired in source; this demo predates that repair. These
+  do not establish correct production planning/status behavior. Do not use this
+  synthetic data for publication, completion, or automation tests.
+
+Demo preparation is complete; this is not native product acceptance. Review in Light/Dark at narrow
+and wide widths; Wave objective/status/actions and Started/Not started inventory;
+passive unstarted Task preview; sidebar Cmd-F, Shift-F10 and focus restoration;
+Shell/Files tabs, drafts, caret/scroll through toggles and Task switching;
+filters/collapse/Back; two repository windows and Cmd-`; real provider transition,
+new-turn status and observation recovery. Restart retention belongs to LOO-416.
+
+## Screenshot comparison requested by Jack Heart
+
+October 17: Jack Heart supplied native/prototype screenshots and requested an
+intentionality review. These are findings/proposals, not new accepted direction.
+Intentional: real provider terminal, optional Shell/Files arrangement, compact
+pane identity when split, truthful summary fallback, optional Wave crumb, stable
+working set and direct Waves. Screen sizes/zoom and open tools differ.
+Drift: missing sidebar state edges; missing Waves label/working count; icon-only
+toolbar plus unrelated delivery automation; repeated Task/path labels; inherited
+rounded pane cards/gutters. Native metadata uses sans while the study uses mono.
+The screenshot predates current source's unlinked Task IDs and Files/actions.
+Demo descriptions are setup instructions, so identical Summary tails cannot judge
+real activity quality. Shortcut hints intentionally appear only on hover/held Cmd.
+Jack Heart accepted these recommendations except flattening: keep the existing
+rounded cards, borders, shadows and gutters. His Rex reference requires no lower
+content density. Restore labeled Shell/Files/actions, state edges and sidebar
+hierarchy; move delivery automation into Settings; remove repeated pane labels
+and consolidate tool controls. Preserve actual terminal content and capabilities.
+
+## Build boundary
+
+`scripts/test_desktop.sh` builds the app and runs production model/leaf tests
+with WindowServer denied; it cannot establish mounted terminal behavior.
+Build/package with `uv run python scripts/loopflow-dev.py build` and
+`cargo build -p loopflow --bin lf`. The candidate has `session_preview.sql`;
+use `docs/data-clones.md` for a supported private live-data clone. Copied Sessions
+have continuation limits; disposable native input proves retention separately.
+The installed store and installed app were untouched. Publication belongs to the
+Flow's delivery step; merge and Task completion remain excluded.

@@ -514,7 +514,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ConfigCommand,
     },
-    /// Open, inspect and control Loopflow Desktop (macOS only)
+    /// Select Work and control Loopflow Desktop
     Desktop {
         #[command(subcommand)]
         cmd: DesktopCommand,
@@ -597,6 +597,68 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Derive a passive Work view for external hosts; never opens Desktop
+    View {
+        /// wave/task/query/kind/state expression; omitted uses the repository default
+        expression: Option<String>,
+        #[arg(long, required = true)]
+        plan: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create or edit a Dashboard query with revision checking
+    Query {
+        container: String,
+        expression: String,
+        /// Last observed revision; omit only when creating a new Dashboard
+        #[arg(long)]
+        revision: Option<i64>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Pin a Dashboard in repository discovery
+    Pin {
+        query: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Unpin a Dashboard without changing its membership or arrangement
+    Unpin {
+        query: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rename a Dashboard or Task through its shared owner
+    Rename {
+        target: String,
+        name: String,
+        #[arg(long)]
+        revision: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace a Dashboard's retained arrangement from JSON on stdin
+    Arrange {
+        query: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read portable pane intent, or save a complete revision-checked record from stdin
+    Layout {
+        work: String,
+        #[arg(long)]
+        save: bool,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Open resolved Work in its retained repository window
     Open {
         /// Open this Task-associated Session without taking over another client
@@ -659,7 +721,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Add a shell on the recorded Machine beside a pane without changing selection
+    /// Add and select a shell tab at the Task’s recorded location
     Shell {
         #[arg(long)]
         pane: Option<String>,
@@ -677,15 +739,6 @@ pub enum DesktopCommand {
     FlowLog {
         #[arg(long)]
         pane: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Add a shell split beside an exact pane, retaining selection and clients
-    Split {
-        #[arg(long)]
-        pane: Option<String>,
-        #[arg(long, value_enum)]
-        axis: commands::desktop::DesktopSplitAxis,
         #[arg(long)]
         json: bool,
     },

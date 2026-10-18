@@ -17,7 +17,7 @@
 - Jack: Desktop control is macOS-only (LOO-426/427); Linux errors name a terminal
   alternative before launch or Work mutation. Ordinary lf remains cross-platform;
   displaying and execution machines differ.
-- LOO-416 owns saved per-Task panes and reattachment; LOO-426 owns Task/Session
+- LOO-497 owns saved pane records, LOO-489 native persistence and LOO-416 reattachment; LOO-426 owns Task/Session
   opening; LOO-402 owns Waiting navigation, including blocked shell panes through
   shared Swift while Session Waiting stays in Rust. LOO-403 owns shortcuts and
   palette, LOO-387 native draft preparation. Programmatic Desktop control must
@@ -147,8 +147,8 @@ October 13 replaced their visible strip with sidebar switching, retaining owners
 hide/reopen retains panes, drafts and zoom.
 `37fa81df13`: terminals retain captured locations; Files/logs prefer recorded
 owners, including unavailable ones. Pane moves preserve locations, not execution
-transfer. Bare navigation acquires nothing. Shell-default Split remains code,
-but October 16's arrangement contract below replaces it. Logs reuse the matching local stream or
+transfer. Bare navigation acquires nothing. LOO-497's local tab cut removes
+shell-default Split. Logs reuse the matching local stream or
 owner-pinned reads. Foreign physical Task IDs cannot disprove local correspondence;
 late preparation retains its original Work. Files refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
 this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
@@ -554,12 +554,10 @@ Repeated land preserves merged work. Busy checkouts cannot poison another waiter
 After sync with #1512, caller ancestry exempts waiting; live or unresolved
 Processes still block. Unanswered turns alone are history, not execution.
 
-Finite landing (#1382) provided continuation after caller exit; #1384 moved
-repair to the watcher. #1287 fixed repair permissions and locks retained across
-canceled waits. No record establishes a land crash caused the switch. Task run retries whole failed Flows three times while its
-carrier survives; held exit 3 now stays held. Jack requested failed-step retry
-as Infrastructure LOO-435. Local CLI/provider fixtures pass; live repair and
-crashed-runner recovery remain unproven. Evidence: `53be55c70:scratch/`.
+Earlier chronology:
+`refs/loopflow/evidence/loo-497-before-tab-memory` (this heading).
+Jack's failed-step retry request belongs to LOO-435. CLI/provider fixtures do not
+prove live repair or crashed-runner recovery; evidence: `53be55c70:scratch/`.
 
 ## Skill reduction decisions (2026-09-28)
 
@@ -619,7 +617,7 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (September 26–October 16)
+## Workspace redesign decisions (September 26–October 17)
 
 Jack Heart rejected September 26's composition despite structural fidelity:
 its warmth and chrome did not match the mocks. Full decisions, deferred owners
@@ -628,30 +626,38 @@ Retain serif repo/page/Task titles, sans Wave rows without decorative glyph/coun
 shared Work binding and native surface ownership. October 14's semantic roles
 cover both appearances, superseding the light-first emphasis.
 
-October 15, LOO-462: Jack selected Ink on Paper, one Work selection mirrored in
-Needs you, drill-in Repo/Wave/Task navigation and nested Work/pane layouts.
-Command-click adds adjacent Work; ordinary click replaces the focused slot;
-close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
-Back/Forward replace persistent adjacent columns and visible history buttons.
-Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
-Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
-acceptance. October 16's direction below adds cross-launch restoration.
+LOO-462's earlier appearance/sidebar decisions and native evidence limits:
+`69a1230fde:.lf/wave/product/MEMORY.md`, this heading. October 16 supersedes
+navigation, retaining Ink on Paper and pane/draft ownership.
 
-October 16, LOO-497/489/416: Jack Heart separated selection (membership) from
-arrangement (structure), with one Task layout projected by primary Session or
-explicit zoom, never focus. Defaults include child Waves and recursively started,
-unfinished Tasks, including paused/idle; empty Waves remain. Jack chose first-wins
-duplicates and authorized lfdb schema evolution. First-visible tree traversal is
-the implementation interpretation. Hidden members retain placement through edits.
-Incomplete evidence must retain order too: reordering can promote a duplicate.
+October 16–17, LOO-497/489/416: Jack Heart separated selection from arrangement.
+One Task layout projects primary Session or explicit zoom, never focus. Defaults
+retain child Waves (even empty) and descendant started unfinished Tasks, including
+paused/idle. Jack chose first-wins duplicates and lfdb persistence. First-visible
+tree traversal is the implementation interpretation; incomplete evidence retains
+geometry/order because reordering can promote duplicates. Hide preserves edits.
 
-497's foundations implement typed selection, retained trees and local saved
-intent; they do not establish live navigation, attention ordering or cross-machine
-restoration. Durable repository IDs differ from opening locators. 489 owns
-presentation, 416 native lifetime, 498 host consumption. Jack authorized foundation
-publication for review, not merge/completion; prototype grammar/UX remain draft.
-Saved intent never proves native surface or provider liveness. Split must group
-existing members; scoped shell selection owns creation.
+Jack accepted implementation/review publication, not merge/completion; Breadcrumbs,
+Attention first, arrivals At the end, Available and cross-repo Cmd K Find Work.
+Other repos open separate windows; Edit view is separate. Repo scope is implicit;
+backlog selection starts nothing. October 17: independent Dashboards reuse Task
+workspaces; repository/Wave defaults cannot be replaced. Work bindings were removed.
+
+497 implements passive plans, Dashboards and pane/draft records; 489 owns native
+presentation/persistence, 416 lifetime, 498 host consumption. Geometry keys by
+Dashboard and ordered expression, excluding clause IDs; distinct Dashboards need
+distinct occurrence roots. Draft recovery needs base text/revision. Records prove
+no restoration or liveness. Ended attention does not end a Task. Waiting's 2:1
+weight is provisional.
+
+Jack's October 17 tab decision: each Task has at most one Shell and one Files pane;
+shell tabs own independent processes, file tabs share Task/path documents. No
+tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
+arrangement groups existing panes. Shell identity is independent of pane/selection;
+empty Files retains location. Conversion tests prove no application recovery:
+restore reuses matching shells but replaces tabs/selection. Dirty-draft guards
+cannot fence late snapshots. Persistence callers and Process
+reattachment remain; intent proves no liveness.
 
 October 15, LOO-492: Jack Heart clarified that nested corner curves need even
 clearance; text padding alone does not satisfy the defect. The implementation
@@ -1116,13 +1122,12 @@ Workflow-loading landing hold survives; LOO-488 owns whole-app theming.
 
 ### Shared viewing boundary
 
-Native launch plus explicit Move here stays the main path. Optional
-simultaneous Warp/Loopflow viewing (second attachment view-only, explicit
-**Take control**) is unbuilt; compare an opt-in tmux configuration with a
-transparent PTY relay before changing the contract. The proof list and tmux
-findings are at `f8fe8aff0:wave/product/MEMORY.md` under this heading. Filed
-2026-09-22: LOO-280 build/resource parity; LOO-281 shell blocks and visual
-proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
+Jack Heart accepted per-conversation ownership October 16. LOO-416 integrated
+LOO-415's attach-only transport at `7bfa10fa72` October 17; Desktop adoption and
+combined continuity remain unproved. Viewer loss must not restart execution.
+Text-grid snapshots do not prove exact renderer restoration. Earlier tmux
+comparison and LOO-280–283 allocations: `f8fe8aff0:wave/product/MEMORY.md`, this
+heading.
 
 ## Learnings
 

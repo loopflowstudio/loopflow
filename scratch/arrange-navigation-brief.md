@@ -46,6 +46,11 @@ or live state. Borrow terminal polish; differentiate through knowing the Work.
 
 ## API boundary (original §1.4a governs)
 
+Historical boundary: October 17's accepted corrections in `design.md` replace
+repository shells and shell-per-pane creation with Task-only Shell/Files tabs,
+and replace custom default-view binding with independent Dashboards. The original
+proposal below remains dated context, not the current implementation contract.
+
 Arrangement: `split --pane <target> --axis v|h`, `move`, `swap`, `resize`,
 `zoom`/`unzoom`, `hide`/`restore`, direct/spatial `focus`, and `state --json`.
 Targets include `session:<id>`, `task:#N`, `wave:<name>`, `query:<id>` and raw

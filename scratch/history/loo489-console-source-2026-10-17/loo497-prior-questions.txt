@@ -1,0 +1,66 @@
+# LOO-497 direction — October 16, 2026
+
+Jack Heart accepted the prototype as good enough to build and requested a new
+pursue worker. This supersedes the foundations-only restriction. Publish for
+review; merge remains a separate decision.
+
+Repository scope is implicit. Cmd K is Find Work search across repositories;
+a cross-repository result opens a separate window. Edit view is separate.
+Unstarted Tasks may match explicit queries and show their brief without creating
+a Session. Defaults remain started unfinished Tasks; repository also shows Waves.
+LOO-489's accepted navigation choices and mock contract are copied into design.md.
+
+Coordinate shared native files and persistence callers with LOO-489 and LOO-416.
+Do not duplicate their navigation or lifecycle implementations. Independent
+shared model/store/CLI work may proceed while obtaining a supported handoff.
+Schema evolution is authorized, using this Task's existing draft migration.
+
+Implementation choices (October 16): keep the prototype's bounded grammar;
+AND intersects canonical Work and OR preserves authored occurrences. Reuse node
+IDs for unchanged clauses, including repeated clauses, when editing text.
+Unobservable provider identity remains unavailable evidence; complete reads with
+no current reports can prune old attention. No new idle-time heuristic is added.
+Live native integration still needs the supported LOO-489/416 handoff named in
+the design; independent shared query and passive-plan work proceeds here.
+
+Native boundary: October 16 sibling notes agree ownership: LOO-489 owns native
+navigation/save-restore callers, LOO-416 lifetime, LOO-497 shared records/APIs and
+query-editor UX. A combined code handoff is absent. Shared pane/draft records and independent Dashboards now exist (October 17). Native callers remain unfinished. Saved zoom in
+plans does not establish live native zoom or restoration.
+Automatic proportions use a reversible 2:1 weight for waiting members; Jack
+selected more space for waiting Tasks without specifying an exact factor.
+
+October 17 engineering choices: expression history is scoped to Dashboard ID
+and canonical ordered expression (authored IDs excluded). Whitespace-equivalent
+revisits recover the same arrangement; operand reordering remains meaningful for
+first-visible-wins. Portable
+file recovery stores base text alongside its disk revision so the existing native
+merge owner can reconcile edits on reopen. These are local records; no delivery
+or cross-machine transport is implied. Native adoption still requires the
+supported LOO-489/416 handoff; no new driver or sibling copy was started.
+
+October 17 Dashboard cut: Dashboard remains the provisional entity name. Preserve
+accepted `query:ID` reference syntax and `desktop query` as the Dashboard's query
+editor; rename the entity/identity and DTO plan field without adding command aliases
+or another type/store. Bare IDs and `query:ID` select the same Dashboard for edits.
+Repository/Wave defaults have no binding API or storage. Native naming/pinning UX
+awaits the existing navigation bridge, not a second standalone editor.
+
+October 17 tab implementation choices: shell tab ID is the terminal identity;
+input/read capture the tab incarnation independently of selection. `--pane shell:ID`
+(or the raw shell ID) addresses that exact tab. Creation receipts contain the
+owning `pane` and new `tab`; shell creation selects it. `desktop split`'s old
+shell allocator is removed; `move --axis` arranges existing panes. Saved shell
+intent restores unavailable until LOO-416 supplies attachment, never replaying a
+launch. File tab close retains its document/draft in the Task owner.
+
+Files location belongs to its one Task document store/tool, including before any
+file is open; tabs carry stable IDs and paths. This avoids deriving an empty tool's
+location from a nonexistent tab. Native application restore still needs the owning
+caller's policy for installing a snapshot over live edits; the conversion methods
+alone must not be mistaken for that integration.
+
+Explicit Shell creation is now Task-only. Existing Session launch still uses its
+shell-backed terminal path; changing Session creation remains outside Jack Heart's
+tab decision. Application persistence must normalize that Session through its
+existing owner rather than serializing a non-Task Shell tool.

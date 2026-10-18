@@ -23,7 +23,8 @@ struct TerminalPaneLayoutTests {
         let workspace = try #require(registry.selectedWork.flatMap { registry.retained($0) })
         workspace.presentation.content = .terminals
         let first = try #require(workspace.multiplexer.newShell(location: fixtureWorkspace("/repo")))
-        _ = try #require(workspace.multiplexer.split(first.id, axis: axis, location: fixtureWorkspace("/repo")))
+        let second = try #require(workspace.multiplexer.show(.session(id: "companion", location: fixtureWorkspace("/repo"))))
+        workspace.multiplexer.move(second.id, beside: first.id, axis: axis)
         // Prepared Sessions expose the production pane chrome without mounting
         // Ghostty or reading unmounted Observation environment objects.
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -92,76 +93,4 @@ struct TerminalPaneLayoutTests {
     }
 }
 
-#if canImport(GhosttyKit)
-import GhosttyKit
-
-@Suite("Terminal pane frames", .requiresDisplay, .serialized)
-@MainActor
-struct TerminalPaneFrameTests {
-    @Test("Native surfaces and columns fit inside split pane borders in both themes",
-          arguments: [SplitAxis.vertical, .horizontal], [false, true])
-    func splitClearance(axis: SplitAxis, dark: Bool) async throws {
-        _ = NSApplication.shared
-        let manager = GhosttyManager.shared
-        manager.initialize()
-        try #require(manager.state == .ready)
-        let previousTheme = manager.theme
-        let theme = dark ? ThemeDefinition.dark : .light
-        try manager.applyTheme(theme)
-        defer { try? manager.applyTheme(previousTheme) }
-        let query = RegistryQuery { args, _ in
-            throw RegistryQueryError("Layout proof must not launch commands: \(args)")
-        }
-        let path = NSTemporaryDirectory()
-        let model = WorkModel(query: query, repoPath: path)
-        model.confirmMachine(fixtureMachineId)
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsContentView(model: model, repoPath: path, workspaces: registry,
-                                      machineId: fixtureMachineId, repository: "repo", query: query)
-            .environment(\.theme, theme)
-            .environment(\.palette, theme.palette)
-            .environment(\.colorScheme, theme.colorScheme)
-        let workspace = try #require(registry.selectedWork.flatMap { registry.retained($0) })
-        workspace.presentation.content = .terminals
-        let store = workspace.multiplexer
-        let location = fixtureWorkspace(path)
-        let first = try #require(store.newShell(command: ["/bin/cat"], location: location))
-        let second = try #require(store.split(first.id, axis: axis, command: ["/bin/cat"], location: location))
-        let terminals = try [first, second].map { registry.surfaces.view(for: try #require($0.terminal)) }
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 800),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: view)
-        window.contentView = host
-        defer {
-            window.contentView = nil
-            for terminal in terminals { registry.surfaces.release(terminal.terminal) }
-        }
-        for focused in [first.id, second.id] {
-            store.setFocusedPane(focused)
-            host.layoutSubtreeIfNeeded()
-            try await Task.sleep(for: .milliseconds(100))
-            let frames = terminals.map { $0.convert($0.bounds, to: host) }
-            for (terminal, frame) in zip(terminals, frames) {
-                #expect(terminal.window === window)
-                // Even the surface itself, before Ghostty's internal padding,
-                // clears the left/right rounded edge of its enclosing pane.
-                let windowClearance = PaneGeometry.windowInset + PaneGeometry.spacing + PaneGeometry.cornerRadius
-                #expect(frame.minX >= windowClearance - 1)
-                #expect(host.bounds.width - frame.maxX >= windowClearance - 1)
-                let bottomClearance = host.isFlipped ? host.bounds.height - frame.maxY : frame.minY
-                #expect(bottomClearance >= windowClearance - 1)
-                let surface = try #require(terminal.surface)
-                let grid = ghostty_surface_size(surface)
-                let pixels = terminal.convertToBacking(terminal.bounds).width
-                #expect(abs(Double(grid.width_px) - pixels) <= 1)
-                #expect(Double(grid.columns) * Double(grid.cell_width_px) < pixels)
-            }
-            let gap = axis == .vertical
-                ? max(frames[0].minX, frames[1].minX) - min(frames[0].maxX, frames[1].maxX)
-                : max(frames[0].minY, frames[1].minY) - min(frames[0].maxY, frames[1].maxY)
-            #expect(gap >= PaneGeometry.spacing + 2 * PaneGeometry.cornerRadius - 1)
-        }
-    }
-}
-#endif
 #endif

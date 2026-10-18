@@ -115,6 +115,7 @@ public struct StoreRevisions: Decodable, Equatable, Sendable {
 /// wire type the one-shot `--json` read prints.
 public struct WorkFrame: Decodable, Sendable {
     public struct Planning: Decodable, Sendable {
+        public let selections: [WorkViewPlan]?
         public let roadmap: RoadmapSnapshot
         public let waves: [WaveSnapshot]
     }

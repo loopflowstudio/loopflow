@@ -369,7 +369,8 @@
             "status": "ready",
             "superseded_by_wave_id": null
           }
-        ]
+        ],
+        "selections": null
       },
       "home": "/tmp/.tmpFOdnl9",
       "part": "planning",
@@ -1918,7 +1919,8 @@
             "status": "ready",
             "superseded_by_wave_id": null
           }
-        ]
+        ],
+        "selections": null
       },
       "home": "/tmp/.tmpFOdnl9",
       "part": "planning",
@@ -3177,7 +3179,8 @@
             "status": "ready",
             "superseded_by_wave_id": null
           }
-        ]
+        ],
+        "selections": null
       },
       "home": "/tmp/.tmpFOdnl9",
       "part": "planning",

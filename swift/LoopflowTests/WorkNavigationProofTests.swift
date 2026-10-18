@@ -752,7 +752,7 @@ struct WorkNavigationProofTests {
         let workspace = fixtureWork(registry, fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)
         let sessionPane = workspace.multiplexer.focusedPaneId
-        _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
+        _ = workspace.multiplexer.newShell()
         workspace.multiplexer.newShell(location: workspace.location)
         let shellPane = workspace.multiplexer.focusedPaneId
         workspace.multiplexer.load(sessionId: "navigation-split", location: model.sessions.value?.first { $0.id == "navigation-split" }?.workspace?.identity)

@@ -145,6 +145,16 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         scroll.documentView = editor
     }
 
+    func restore(_ draft: WorkFileDraft, task: String) {
+        guard !dirty else { return }
+        snapshot = TaskFileSnapshot(recoveries: [], issueIdentifier: task, taskId: task, path: draft.path,
+            content: draft.baseContent, state: .text, revision: draft.baseRevision,
+            readOnlyReason: "Recovered draft; checking the current file", sizeBytes: UInt64(draft.baseContent.utf8.count))
+        applyIncoming(draft.text)
+        editor.isEditable = false
+        readOnlyReason = "Recovered draft; checking the current file"
+    }
+
     private func loadSnapshot(_ next: TaskFileSnapshot) {
         guard !dirty, !editor.hasMarkedText() else {
             external = next.revision != snapshot?.revision || next.state != snapshot?.state ? next : nil
@@ -314,7 +324,48 @@ final class TaskFilesStore {
     let issue: String
     let cwd: String
     let query: RegistryQuery
-    var selection: String?
+    private(set) var tabs: [WorkFileTab] = []
+    var selection: String? {
+        didSet {
+            if let path = selection, !tabs.contains(where: { $0.path == path }) {
+                tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
+            }
+        }
+    }
+
+    func closeTab(_ id: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let removed = tabs.remove(at: index)
+        if selection == removed.path {
+            selection = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].path
+        }
+        // Documents (including unsaved drafts and Undo) remain Task-owned.
+    }
+
+    func restoreTabs(_ retained: [WorkFileTab], selected: String?) {
+        tabs = retained
+        selection = retained.first { $0.id == selected }?.path
+    }
+
+    func restoreDrafts(_ drafts: [WorkFileDraft], location: WorkViewPlan.Location) {
+        for draft in drafts where draft.location == location {
+            document(draft.path).restore(draft, task: issue)
+        }
+    }
+
+    func paneIntent(location: WorkViewPlan.Location) -> WorkPaneIntent {
+        .files(location: location, tabs: tabs,
+               selected: tabs.first { $0.path == selection }?.id)
+    }
+
+    func drafts(location: WorkViewPlan.Location) -> [WorkFileDraft] {
+        documents.values.compactMap { document in
+            guard document.dirty, let base = document.snapshot?.content,
+                  let revision = document.snapshot?.revision else { return nil }
+            return WorkFileDraft(location: location, path: document.path,
+                                 baseRevision: revision, baseContent: base, text: document.text)
+        }.sorted { $0.path < $1.path }
+    }
     var mode = Mode.file
     private(set) var changes: TaskChangesSnapshot?
     private(set) var isRefreshingChanges = false

@@ -55,7 +55,7 @@ struct WorkDestinationTests {
         #expect(model.selection == .task(id: task.id))
         let entry = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
         entry.multiplexer.newShell(command: ["retained-shell"], location: record.workspace?.identity)
-        let files = entry.files(taskId: task.id, issue: task.task.identifier, cwd: "/fixture", query: query)
+        let files = entry.files(issue: task.task.identifier, cwd: "/fixture", query: query)
         let draft = files.document("retained.swift")
         draft.editor.string = "unsaved Task draft"
         let layout = entry.multiplexer.layout
@@ -380,7 +380,7 @@ struct WorkDestinationTests {
         let local = fixtureWork(registry, localIdentity)
         local.multiplexer.newShell(command: ["retained-local-shell"], location: local.location)
         let layout = local.multiplexer.layout
-        let files = local.files(taskId: task.id, issue: taskID, cwd: localIdentity.worktree, query: query)
+        let files = local.files(issue: taskID, cwd: localIdentity.worktree, query: query)
         let document = files.document("draft.txt")
         document.editor.string = "unfinished local draft"
         let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id, diff: true,
@@ -422,74 +422,21 @@ struct WorkDestinationTests {
             #expect(companion.query.remoteMachine == "peer")
             #expect(remote.multiplexer.layout.allPanes.count == 2)
             let targetPane = remote.multiplexer.focusedPane
-            let focus = remote.multiplexer.focusedPaneId
             remote.multiplexer.setZoom(targetPane.id, enabled: true)
             let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
-                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation)
+                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
             try registry.controlPane(.init(target: target, action: .shell), model: model)
-            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content == .shell(location: remoteIdentity, execution: request.location) })
-            let command = try #require(remote.multiplexer.shellCommands[shell.id])
+            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
+            let command = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command)
             #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repository",
                 "task", "shell", remoteID, "--checkout", remoteIdentity.worktree])
-            let splitID = try registry.controlPane(.init(target: target, action: .split(axis: .horizontal)), model: model)
-            #expect(remote.multiplexer.layout.pane(for: splitID)?.content == .shell(location: remoteIdentity, execution: request.location))
-            #expect(remote.multiplexer.shellCommands[splitID] == command)
+            let splitID = try registry.controlPane(.init(target: target, action: .shell), model: model)
+            #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
+            #expect(remote.multiplexer.layout.pane(for: splitID.pane)?.content.selectedShell?.command == command)
             #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
-            #expect(remote.multiplexer.focusedPaneId == focus)
-            #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
+            #expect(remote.multiplexer.focusedPaneId == shell.id)
+            #expect(remote.multiplexer.zoomedPaneId == nil)
             #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
-            // A second same-path owner must not redirect the first pane's shell.
-            // This process owns its lf fixture; constructing argv launches nothing.
-            do {
-                let workspace = fixtureWork(localIdentity)
-                let peer = WorkspaceIdentity(machineId: "peer", worktree: "/remote/task")
-                let first = TaskLocationObservation(request: "first", repositoryID: "repo-a", taskID: "plan-a",
-                    machineID: "peer", observedAt: 1, location: .recorded(taskID: "owner-a", checkout: peer.worktree))
-                let second = TaskLocationObservation(request: "second", repositoryID: "repo-b", taskID: "plan-b",
-                    machineID: "peer", observedAt: 2, location: .recorded(taskID: "owner-b", checkout: peer.worktree))
-                let store = workspace.multiplexer
-                store.load(sessionId: "first", location: peer)
-                store.updateSessionLocation("first", location: peer, execution: first)
-                let original = store.focusedPane
-                let shell = try #require(try workspace.split(original.id, axis: .vertical))
-                store.load(sessionId: "second", location: peer)
-                store.updateSessionLocation("second", location: peer, execution: second)
-                store.updateSessionLocation("first", location: peer) // An ordinary reading keeps the pinned owner.
-                #expect(store.layout.pane(for: original.id) == original)
-                let again = try #require(try workspace.split(shell.id, axis: .horizontal))
-                let command = try #require(store.shellCommands[again.id])
-                #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repository", "repo-a",
-                    "task", "shell", "owner-a", "--checkout", peer.worktree])
-                #expect(again.executionLocation == first)
-                store.close(again.id)
-                store.undoClose()
-                #expect(store.layout.pane(for: again.id)?.executionLocation == first)
-                #expect(store.shellCommands[again.id] == nil) // Undo cannot replay a launch.
-                let afterUndo = try #require(try workspace.split(again.id, axis: .vertical))
-                #expect(store.shellCommands[afterUndo.id] == command)
-
-                let files = try #require(store.show(.files(taskId: "plan-a", execution: first)))
-                let filesSplit = try #require(try workspace.split(files.id, axis: .vertical))
-                #expect(store.shellCommands[filesSplit.id] == command)
-                #expect(store.show(.files(taskId: "plan-a")) == files)
-                #expect(store.layout.allPanes.filter { if case .files = $0.content { true } else { false } }.count == 1)
-
-                store.updateSessionLocation("first", location: WorkspaceIdentity(machineId: "peer", worktree: "/moved"))
-                let changed = try #require(store.pane(forSessionId: "first"))
-                #expect(changed.incarnation != original.incarnation)
-                #expect(changed.executionLocation == nil)
-                let before = store.layout
-                #expect(throws: RegistryQueryError.self) { try workspace.split(changed.id, axis: .vertical) }
-                #expect(store.layout == before)
-                let unavailable = TaskLocationObservation(request: "offline", repositoryID: "repo-a", taskID: "plan-a",
-                    machineID: "peer", observedAt: 3, location: .unavailable(reason: "Offline"))
-                let unavailableFiles = try #require(store.show(.files(taskId: "plan-a", execution: unavailable)))
-                #expect(unavailableFiles.id == files.id)
-                #expect(unavailableFiles.incarnation != files.incarnation)
-                let unavailableLayout = store.layout
-                #expect(throws: RegistryQueryError.self) { try workspace.split(unavailableFiles.id, axis: .vertical) }
-                #expect(store.layout == unavailableLayout)
-            }
             remote.multiplexer.replace(targetPane.id, with: .session(id: "replacement"))
             let unchanged = remote.multiplexer.layout
             #expect(throws: RegistryQueryError.self) {
@@ -646,7 +593,7 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status != .usable) // placement is not native readiness
         let workspace = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
         let terminal = try #require(workspace.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
-        let files = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: identity.worktree, query: query)
+        let files = workspace.files(issue: task.task.identifier, cwd: identity.worktree, query: query)
         files.selection = "retained-draft.rs"
         await model.openTaskLink(try #require(link.url))
         #expect(workspace.multiplexer.layout.allPanes.count == 2)
@@ -672,7 +619,7 @@ struct WorkDestinationTests {
         let workspace = try #require(registry.selectedWork.flatMap(registry.retained))
         let store = registry.sessionStore(repository: "repo", repoPath: try #require(model.repoPath), query: query)
         let task = try #require(model.selection.flatMap { model.task(id: $0.id)?.task })
-        let files = workspace.files(taskId: task.id, issue: task.task.identifier,
+        let files = workspace.files(issue: task.task.identifier,
             cwd: try #require(record.workspace?.worktree), query: query)
         files.selection = "retained-draft.rs"
         if outcome != "connection", outcome != "comparison" {
@@ -914,7 +861,7 @@ struct WorkDestinationTests {
         let workspace = fixtureWork(registry, try #require(task.reference.workspace?.identity))
         workspace.multiplexer.newShell(command: ["local-server"], location: workspace.location)
         let layout = workspace.multiplexer.layout
-        let document = workspace.files(taskId: task.id, issue: task.task.identifier, cwd: wave.wave.repo,
+        let document = workspace.files(issue: task.task.identifier, cwd: wave.wave.repo,
                                        query: exactQuery).document("note.txt")
         document.editor.string = "unsaved draft"
         let retained = SessionsContentView(
@@ -1106,7 +1053,7 @@ struct WorkDestinationTests {
         let workspaces = SessionsWorkspaceRegistry()
         let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
         #expect(report.reading == "loading")
-        #expect(report.supportedOperations.contains("list"))
+        #expect(report.supportedOperations.contains("state"))
         #expect(report.supportedOperations.contains("read"))
         #expect(!report.supportedOperations.contains("inspect"))
         #expect(report.task?.reading == "current")
@@ -1281,7 +1228,7 @@ struct WorkDestinationTests {
         let window = UUID()
         var received: [TaskLink] = []
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { url in
             do { received.append(try TaskLink(url: url)) } catch { Issue.record(error) }
         }
         for machine in ["local-owner", "peer-owner"] {
@@ -1306,7 +1253,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
         _ = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in
             Issue.record("An open repository must reuse its window")
@@ -1336,10 +1283,10 @@ struct WorkDestinationTests {
         }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: "old-plan", focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.register(UUID(), repository: current.id, openingRequests: router.workspaceRequests(current.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1369,12 +1316,12 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .opening)
         let stale = UUID()
         router.register(stale, repository: workspace.id, openingRequests: oldRequests, focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.remove(stale, repository: workspace.id)
         _ = try await router.resolveWorkspace(workspace, query: query)
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .usable)
     }
 
@@ -1389,7 +1336,7 @@ struct WorkDestinationTests {
         let current = router.workspaceRequests(workspace.id)
         let id = UUID()
         router.register(id, repository: workspace.id, openingRequests: validated, focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings.first?.status == .opening)
         router.confirmRegisteredWorkspace(workspace.id, requests: validated)
         #expect(router.inspect().openings.first?.status == .opening)
@@ -1410,7 +1357,7 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings.first?.status == .failed)
         let receipt = router.inspect().openings
         router.register(UUID(), repository: workspace.id, openingRequests: router.workspaceRequests(workspace.id), focus: {}, inspect: windowInspection,
-                        controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                        controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().openings == receipt)
     }
 
@@ -1430,12 +1377,12 @@ struct WorkDestinationTests {
         let retained = registry.open(oldKey, title: "Repository", location: identity), store = retained.multiplexer
         store.newShell(command: ["retained-command"], location: identity)
         let pane = store.focusedPane
-        let document = retained.files(taskId: "task", issue: "TASK", cwd: path).document("note.txt")
+        let document = retained.files(issue: "TASK", cwd: path).document("note.txt")
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
         let layout = store.layout, focus = store.focusedPaneId
         #if canImport(GhosttyKit)
-        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
+        let terminal = try #require(pane.terminal)
         let view = registry.surfaces.view(for: terminal)
         defer { registry.surfaces.release(terminal) }
         #endif
@@ -1476,12 +1423,12 @@ struct WorkDestinationTests {
         #expect(document.editor.string == "unfinished draft")
         #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
         let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
-            work: oldKey, pane: pane.id, incarnation: pane.incarnation)
+            work: oldKey, pane: pane.id, incarnation: pane.incarnation, tab: nil)
         #expect(throws: RegistryQueryError.self) {
             try router.controlPane(.init(target: stale, action: .hide))
         }
         let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
-            work: retained.key, pane: pane.id, incarnation: pane.incarnation)
+            work: retained.key, pane: pane.id, incarnation: pane.incarnation, tab: nil)
         _ = try router.controlPane(.init(target: current, action: .hide))
         _ = try router.controlPane(.init(target: current, action: .restore))
         #expect(store.layout == layout)
@@ -1531,7 +1478,7 @@ struct WorkDestinationTests {
         #expect(try await router.resolveWorkspace(restoredAlias, query: after) == scene)
         let window = UUID()
         router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
-            inspect: windowInspection, controlPane: { $0.target.pane },
+            inspect: windowInspection, controlPane: { ($0.target.pane, $0.target.tab) },
             readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         #expect(router.inspect().windows.map(\.repository) == ["plan"])
         #expect(router.inspect().openings.first?.status == .usable)
@@ -1551,7 +1498,7 @@ struct WorkDestinationTests {
         let window = UUID()
         if registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         let validation = Task {
             try await router.resolveWorkspace(RepositoryWorkspace(id: "plan", path: path), query: RegistryQuery { _, _ in
@@ -1567,7 +1514,7 @@ struct WorkDestinationTests {
         #expect(try await validation.value == scene)
         if !registered {
             router.register(window, repository: scene.id, focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         }
         #expect(router.inspect().windows.map(\.repository) == ["old-plan"])
         #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
@@ -1590,7 +1537,7 @@ struct WorkDestinationTests {
         let register: (RepositoryWorkspace) -> Void = { scene in
             router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
                 focus: {}, inspect: windowInspection,
-                controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+                controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
         }
         if alreadyOpen {
             _ = try await router.openRepository(path: path, link: nil,
@@ -1642,7 +1589,7 @@ struct WorkDestinationTests {
         let workspace = try await router.openRepository(path: before.path, link: nil, query: query) { _ in }
         let window = UUID()
         router.register(window, repository: workspace.id, focus: {}, inspect: windowInspection,
-            controlPane: { $0.target.pane }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+            controlPane: { ($0.target.pane, $0.target.tab) }, readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         let store = registry.sessionStore(repository: workspace.id, repoPath: before.path, query: query)
         try FileManager.default.moveItem(at: before, to: after)

@@ -17,7 +17,6 @@ public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
     public private(set) var zoomedPaneId: String?
-    public private(set) var shellCommands: [String: [String]] = [:]
 
     public private(set) var collapsedPaneIds: Set<String> = []
     public var visibleLayout: LayoutNode? { layout.visible(excluding: collapsedPaneIds) }
@@ -105,11 +104,6 @@ public final class MultiplexerStore {
         if zoomedPaneId != nil { zoomedPaneId = paneId }
     }
 
-    @discardableResult
-    public func split(_ paneId: String, axis: SplitAxis, command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, focusNewPane: Bool = true) -> PaneState? {
-        _insert(.shell(location: location, execution: execution), beside: paneId, focus: focusNewPane, splitAxis: axis, shellCommand: command)
-    }
-
     /// Relocate the leaf itself, retaining content occurrence and surface keys.
     /// Never use close/load: those invalidate targets and may retire a shell.
     public func move(_ paneId: String, beside destination: String, axis: SplitAxis) {
@@ -127,8 +121,14 @@ public final class MultiplexerStore {
 
         // Undo restores this pane as a new occurrence, never reviving a stale
         // control target. Other panes retain their existing occurrences.
+        let undoContent: PaneContent
+        if case .shell(let tabs, let selected) = pane.content {
+            undoContent = .shell(tabs: tabs.map {
+                ShellTab(id: $0.id, location: $0.location, execution: $0.execution, command: nil, lfProcessID: $0.lfProcessID)
+            }, selected: selected)
+        } else { undoContent = pane.content }
         closedState = ClosedState(
-            layout: layout.replacingContent(of: paneId, with: pane.content),
+            layout: layout.replacingContent(of: paneId, with: undoContent),
             focusedPaneId: focusedPaneId,
             zoomedPaneId: zoomedPaneId,
             collapsedPaneIds: collapsedPaneIds
@@ -136,7 +136,6 @@ public final class MultiplexerStore {
         // Undo may restore a shell pane, but must never replay a completed or
         // interrupted conversation's initial launch command.
         collapsedPaneIds.remove(paneId)
-        shellCommands.removeValue(forKey: paneId)
         layout = remaining ?? .leaf(PaneState(id: paneId, content: .empty))
         if zoomedPaneId == paneId { zoomedPaneId = nil }
         if focusedPaneId == paneId, remaining != nil {
@@ -189,19 +188,51 @@ public final class MultiplexerStore {
     }
 
     /// Change this slot's content without disturbing its companions or split ratios.
-    public func replace(_ paneId: String, with content: PaneContent, shellCommand: [String]? = nil) {
+    public func replace(_ paneId: String, with content: PaneContent) {
         guard layout.pane(for: paneId) != nil else { return }
         layout = layout.replacingContent(of: paneId, with: content)
-        shellCommands.removeValue(forKey: paneId)
-        if case .shell = content { shellCommands[paneId] = shellCommand }
         collapsedPaneIds.remove(paneId)
         setFocusedPane(paneId)
         closedState = nil
     }
 
     @discardableResult
-    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
-        _insert(.shell(location: location, execution: execution), beside: paneId ?? focusedPaneId, focus: focus, shellCommand: command)
+    public func newShell(command: [String] = [], location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil) -> PaneState? {
+        let tab = ShellTab(location: location, execution: execution, command: command)
+        if let pane = shellPane, case .shell(let tabs, _) = pane.content {
+            layout = layout.updatingShellTabs(of: pane.id, tabs: tabs + [tab], selected: tab.id)
+            setFocusedPane(pane.id)
+            closedState = nil
+            return layout.pane(for: pane.id)
+        }
+        return _insert(.shell(tabs: [tab], selected: tab.id), beside: focusedPaneId)
+    }
+
+    public var shellPane: PaneState? {
+        layout.allPanes.first { if case .shell = $0.content { true } else { false } }
+    }
+
+    public func shell(_ id: String) -> ShellTab? {
+        guard let pane = shellPane, case .shell(let tabs, _) = pane.content else { return nil }
+        return tabs.first { $0.id == id }
+    }
+
+    public func selectShell(_ id: String) {
+        guard let pane = shellPane, case .shell(let tabs, _) = pane.content,
+              tabs.contains(where: { $0.id == id }) else { return }
+        layout = layout.updatingShellTabs(of: pane.id, tabs: tabs, selected: id)
+        setFocusedPane(pane.id)
+    }
+
+    public func closeShell(_ id: String) {
+        guard let pane = shellPane, case .shell(let tabs, let selected) = pane.content,
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        var remaining = tabs
+        remaining.remove(at: index)
+        guard !remaining.isEmpty else { close(pane.id); return }
+        let next = selected == id ? remaining[min(index, remaining.count - 1)].id : selected
+        layout = layout.updatingShellTabs(of: pane.id, tabs: remaining, selected: next)
+        closedState = nil
     }
 
     /// Reveal a Task's Flow process log or files beside existing terminals,
@@ -210,8 +241,9 @@ public final class MultiplexerStore {
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
         let existing = layout.allPanes.first { pane in
             switch (pane.content, content) {
-            case (.files(let current, _, _), .files(let requested, _, _)),
-                 (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
+            case (.files, .files): return true
+            case (.shell, .shell): return true
+            case (.flowLog(let current, _, _), .flowLog(let requested, _, _)):
                 return current == requested
             default: return pane.content == content
             }
@@ -219,7 +251,7 @@ public final class MultiplexerStore {
         if let pane = existing {
             // A fresh observation can replace the captured owner, but missing
             // evidence cannot discard the retained remote location or draft.
-            if content.executionLocation != nil || content.location != nil, pane.content != content {
+            if content.selectedShell == nil, content.executionLocation != nil || content.location != nil, pane.content != content {
                 layout = layout.replacingContent(of: pane.id, with: content)
                 closedState = nil
             }
@@ -231,19 +263,16 @@ public final class MultiplexerStore {
         }
     }
 
-    /// Fill empty targets unless an explicit split was requested. Update the
-    /// occurrence, launch command, focus and Undo together on MainActor.
+    /// Fill an empty slot or insert beside it, updating focus and Undo together.
     @discardableResult
     private func _insert(
         _ content: PaneContent,
         beside paneId: String,
-        focus: Bool = true,
-        splitAxis: SplitAxis? = nil,
-        shellCommand: [String]? = nil
+        focus: Bool = true
     ) -> PaneState? {
         guard let target = layout.pane(for: paneId) else { return nil }
-        let axis = splitAxis ?? (target.content == .empty ? nil :
-            (layout.allPanes.count.isMultiple(of: 2) ? .horizontal : .vertical))
+        let axis: SplitAxis? = target.content == .empty ? nil :
+            (layout.allPanes.count.isMultiple(of: 2) ? .horizontal : .vertical)
         let insertedId: String
         if let axis {
             let pane = PaneState(content: content)
@@ -257,13 +286,73 @@ public final class MultiplexerStore {
             layout = layout.replacingContent(of: paneId, with: content)
             collapsedPaneIds.remove(paneId)
         }
-        if let shellCommand { shellCommands[insertedId] = shellCommand }
         if focus {
             focusedPaneId = insertedId
             zoomedPaneId = axis == nil && zoomedPaneId != nil ? insertedId : nil
         }
         closedState = nil
         return layout.pane(for: insertedId)
+    }
+
+    public func paneLayout(work: WorkWorkspaceKey, revision: Int64,
+                           files: WorkPaneIntent?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
+        func tree(_ node: LayoutNode) -> WorkPaneTree {
+            switch node {
+            case .split(let axis, let first, let second, let ratio):
+                return .split(axis: axis, ratio: ratio,
+                              first: tree(first), second: tree(second))
+            case .leaf(let pane):
+                let location = pane.content.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) }
+                let intent: WorkPaneIntent
+                switch pane.content {
+                case .empty: intent = .empty
+                case .session(let id, _, _): intent = .session(id: id, location: location)
+                case .shell(let tabs, let selected):
+                    intent = .shell(tabs: tabs.map { tab in
+                        WorkShellTab(id: tab.id,
+                            location: tab.location.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) },
+                            lfProcessID: tab.lfProcessID)
+                    }, selected: selected)
+                case .files: intent = files ?? .files(location: location, tabs: [], selected: nil)
+                case .flowLog: intent = .log(location: location)
+                }
+                return .pane(id: pane.id, content: intent)
+            }
+        }
+        return WorkPaneLayout(work: work, revision: revision, tree: tree(layout), focused: focusedPaneId,
+                              zoomed: zoomedPaneId, hidden: collapsedPaneIds.sorted(), drafts: drafts)
+    }
+
+    /// Restore portable identity with fresh native occurrences. No command is replayed.
+    public func restore(_ saved: WorkPaneLayout) {
+        func location(_ value: WorkViewPlan.Location?) -> WorkspaceIdentity? {
+            value.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) }
+        }
+        func tree(_ node: WorkPaneTree) -> LayoutNode {
+            switch node {
+            case .split(let axis, let ratio, let first, let second):
+                return .split(axis,
+                              first: tree(first), second: tree(second), ratio: ratio)
+            case .pane(let id, let intent):
+                let content: PaneContent
+                switch intent {
+                case .empty: content = .empty
+                case .session(let session, let place): content = .session(id: session, location: location(place))
+                case .shell(let tabs, let selected):
+                    content = .shell(tabs: tabs.map { tab in
+                        self.shell(tab.id) ?? ShellTab(id: tab.id, location: location(tab.location), command: nil, lfProcessID: tab.lfProcessID)
+                    }, selected: selected)
+                case .files(let place, _, _): content = .files(taskId: saved.work.id, location: location(place))
+                case .log(let place): content = .flowLog(taskId: saved.work.id, location: location(place))
+                }
+                return .leaf(PaneState(id: id, content: content))
+            }
+        }
+        layout = saved.tree.map(tree) ?? .defaultLayout()
+        focusedPaneId = saved.focused ?? layout.firstPane.id
+        zoomedPaneId = saved.zoomed
+        collapsedPaneIds = Set(saved.hidden)
+        closedState = nil
     }
 
     /// Explicit arrangement changes visibility without selecting another Session.

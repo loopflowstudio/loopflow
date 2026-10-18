@@ -52,7 +52,9 @@
                 "location": {
                   "machine_id": "home_11111111111111111111111111111111",
                   "worktree": "/repo.task"
-                }
+                },
+                "tabs": [],
+                "selected_tab": null
               },
               {
                 "pane": "files-pane",
@@ -66,12 +68,16 @@
                 "location": {
                   "machine_id": "home_11111111111111111111111111111111",
                   "worktree": "/repo.task"
-                }
+                },
+                "tabs": [],
+                "selected_tab": null
               }
             ],
             "incarnation": null,
             "surface": null,
-            "location": null
+            "location": null,
+            "tabs": [],
+            "selected_tab": null
           },
           "work": {
             "repository": "repo_22222222222222222222222222222222",

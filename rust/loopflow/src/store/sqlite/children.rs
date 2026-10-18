@@ -232,13 +232,7 @@ impl SqliteStore {
     pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
-        conn.query_row(
-            &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
-            [task.as_str()],
-            |row| map_task_checkout(&conn, row),
-        )
-        .optional()
-        .map_err(Into::into)
+        task_checkout_in(&conn, task)
     }
 
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
@@ -1297,6 +1291,19 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
+pub(super) fn task_checkout_in(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskCheckout>> {
+    conn.query_row(
+        &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
+        [task.as_str()],
+        |row| map_task_checkout(conn, row),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
     FROM tasks WHERE worktree IS NOT NULL";
 
@@ -1317,7 +1324,7 @@ fn map_task_checkout(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Re
     })
 }
 
-const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
+pub(super) const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
 /// Present locally known Linear identity, otherwise the shortest unique local hex prefix.
 pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Option<String>> {

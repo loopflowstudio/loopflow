@@ -39,7 +39,7 @@ struct WorktreeWorkspaceTests {
         let filesPane = panes.focusedPaneId
         panes.setCollapsed(paneId: filesPane, collapsed: true)
         panes.toggleZoom(sessionPane)
-        let files = workspace.files(taskId: "task", issue: "TASK", cwd: "/repo")
+        let files = workspace.files(issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "unfinished draft"
         let layout = panes.layout
@@ -86,13 +86,13 @@ struct WorktreeWorkspaceTests {
         #expect(registry.openWork == keys)
         let first = try #require(registry.retained(keys[2]))
         let shell = try #require(try first.newShell())
-        let document = first.files(taskId: "one", issue: "ONE", cwd: "/repo").document("draft.md")
+        let document = first.files(issue: "ONE", cwd: "/repo").document("draft.md")
         document.editor.string = "unfinished draft"
         first.multiplexer.toggleZoom(shell.id)
         let layout = first.multiplexer.layout
         let selected = first.multiplexer.focusedPaneId
         #if GHOSTTY_ENABLED
-        let view = registry.surfaces.view(for: .shell(shell.id, machineId: fixtureMachineId))
+        let view = registry.surfaces.view(for: try #require(shell.terminal))
         #endif
         registry.hide(keys[2])
         #expect(!registry.openWork.contains(keys[2]))
@@ -105,13 +105,13 @@ struct WorktreeWorkspaceTests {
         #expect(first.multiplexer.zoomedPaneId == shell.id)
         #expect(document.editor.string == "unfinished draft")
         #if GHOSTTY_ENABLED
-        #expect(registry.surfaces.view(for: .shell(shell.id, machineId: fixtureMachineId)) === view)
+        #expect(registry.surfaces.view(for: try #require(shell.terminal)) === view)
         #endif
         for key in keys { registry.hide(key) }
         #expect(registry.selectedWork == nil)
         #expect(registry.openWork.isEmpty)
         #expect(first.multiplexer.layout == layout)
-        #expect(first.multiplexer.shellCommands[shell.id] == [])
+        #expect(first.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command == [])
         #expect(registry.inspect().allSatisfy { !$0.isOpen && !$0.selected })
     }
 
@@ -121,7 +121,7 @@ struct WorktreeWorkspaceTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "unplaced")
         let workspace = registry.open(key, title: "Unplaced", location: nil)
         let before = workspace.multiplexer.layout
-        #expect(throws: RegistryQueryError.self) { try workspace.split(workspace.multiplexer.focusedPaneId, axis: .vertical) }
+        #expect(throws: RegistryQueryError.self) { try workspace.newShell() }
         #expect(workspace.multiplexer.layout == before)
         #expect(registry.selectedWork == key)
     }
@@ -181,7 +181,7 @@ struct WorktreeWorkspaceTests {
         #expect(fixtureWork(registry, fixtureWorkspace("/repo.design")) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
-        #expect(registry.key(containingShell: focus, machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
+        #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell?.id ?? "", machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
     }
 
     @Test("A conversation launch does not replace a live shell or another conversation")
@@ -189,14 +189,16 @@ struct WorktreeWorkspaceTests {
         let store = MultiplexerStore()
         store.newShell()
         let shell = store.focusedPaneId
+        let first = store.focusedPane.content.selectedShell!
         store.newShell(command: ["lf", "--interactive", ":", "hello"])
-        #expect(store.layout.allPanes.count == 2)
-        #expect(store.layout.pane(for: shell)?.content == .shell(location: nil))
-        #expect(store.shellCommands[shell] == [])
-        #expect(store.shellCommands[store.focusedPaneId]?.last == "hello")
+        #expect(store.layout.allPanes.count == 1)
+        #expect(store.shell(first.id) == first)
+        #expect(store.layout.pane(for: shell)?.content.selectedShell != nil)
+        #expect(store.shell(first.id)?.command == [])
+        #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command?.last == "hello")
         store.close(store.focusedPaneId)
         store.undoClose()
-        #expect(store.shellCommands[store.focusedPaneId] == nil)
+        #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command == nil)
     }
 }
 

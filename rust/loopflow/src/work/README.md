@@ -1,5 +1,41 @@
 # Select and arrange Work
 
+```sh
+lf desktop view 'wave:product state:open or state:available' --plan
+lf desktop query attention 'state:available' --json
+lf desktop view 'query:attention' --plan
+lf desktop query attention 'state:available or state:blocked' --revision 1 --json
+```
+
+Plans read current Work and saved intent without opening Desktop, allocating a
+checkout or creating a Session. JSON includes canonical Work, source occurrences,
+retained and visible trees, duplicate winners, titles, states, primary Session,
+recorded Machine/cwd and an existing Session connect command. Missing primary or
+location remains explicit; no fallback shell is invented. These are host plans,
+not a reading of mounted native panes. Saved explicit zoom selects the tile face;
+ordinary focus leaves the primary Session as its face.
+
+Repository scope comes from the current repository or `--repo`/`--repository`.
+The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
+`state:open|available|running|blocked|paused|idle|backlog|done`. Whitespace means
+AND; OR and parentheses compose expressions. Quote values containing spaces.
+Repository is never a predicate. Task IDs, issue identifiers and unambiguous
+`task:#123` references resolve to canonical Work. Explicit queries can select
+unstarted or completed Tasks. Running/blocked/idle come from current reports;
+Available uses the shared Session reader's judgment.
+
+`query` atomically saves the expression and reconciled arrangement. Omit revision
+only when creating a Dashboard; stale edits fail. Unchanged clauses retain authored
+IDs, including when inserting a sibling next to a previously lone clause. A
+subsequent plan for `query:ID` uses its saved arrangement. Revisiting an earlier
+expression restores its authored occurrences, geometry and hidden members before
+reconciling current Work. Whitespace changes do not create another arrangement.
+These commands emit JSON;
+invalid syntax exits 2, missing/ambiguous selection exits 3, other failures exit 1.
+An empty complete result succeeds. No mutation is retried automatically.
+An ambiguous saved query can be repaired by editing its expression. Edits validate
+the replacement and its referenced queries; unrelated Dashboards do not block them.
+
 ```rust,ignore
 let selection = Selection {
     id: SelectionId::new(),
@@ -7,13 +43,13 @@ let selection = Selection {
 };
 let resolution = store.resolve_selection(&repository_id, &selection)?;
 let arrangement = Arrangement::automatic(&resolution.members);
-let saved = store.save_selection(
-    &repository_id, &QueryId::new(), None, &selection, &arrangement,
+let saved = store.save_dashboard(
+    &repository_id, &DashboardId::new(), None, &selection, &arrangement,
 )?;
 ```
 
 Typed selections contain repository/Wave defaults, explicit Work, ordered
-composition, and saved-query references. Defaults include started, unfinished
+composition, intersections, predicates and saved-query references. Defaults include started, unfinished
 Tasks and immediate child Waves; Task membership includes descendant Waves.
 Paused and idle Tasks remain. Explicit references also reach backlog and finished
 Tasks. Preserve authored node IDs across edits: occurrences use those source
@@ -21,20 +57,61 @@ paths and canonical Work keys, so sibling insertion does not change identity.
 
 `resolve_selection` reads Work and query definitions in one SQLite savepoint.
 Missing references are explicit unavailable evidence; database failures return
-errors. Neither is confirmed emptiness. `read_selection` returns saved intent,
+errors. Neither is confirmed emptiness. `read_dashboard` returns saved intent,
 current evidence, and a reconciled arrangement without writing it. Incomplete
 reads keep earlier members; complete departures can prune them.
 
 `Arrangement::replace` requires every retained member exactly once, including
 hidden members. Hide/restore changes visibility, preserving edits to the current
 tree. Projection suppresses later occurrences of the same Work in traversal order;
-hiding a winner promotes the next. Auto arrangements follow selection order;
+hiding a winner promotes the next. Automatic defaults put waiting Tasks first with twice the area, other Tasks next,
+then Waves. Incomplete observations preserve current geometry;
 structural edits mark them touched, preserving survivor geometry and appending
 arrivals. Focus, native surfaces and provider lifetime are outside this contract.
 
-Saved selections atomically own their typed expression and portable arrangement.
+Dashboards atomically own their typed expression and portable arrangement.
 Pass the last saved revision when editing or deleting; stale writes fail without
 mutation. lfdb stores authored references, ratios, hidden members and auto/touched
-intent. It stores no titles, query-result cache, native handles or attachment claims.
-Desktop's live pane and window layouts still belong to their existing Swift owners;
-query UI and command grammar will consume this shared contract separately.
+intent, plus Dashboard names and pinning. Work titles remain with their owners; there
+is no query-result cache, native handle or attachment claim.
+The existing Work observer publishes repository defaults, Wave defaults and saved
+plans in its planning frame; `RegistryQuery` decodes the same DTO as one-shot
+plans. Swift has no query evaluator. Desktop's live pane and window layouts still
+belong to their existing native owners; mounting plans, wiring native save/restore
+callers and transporting records across Machines remain integration work.
+
+```sh
+lf desktop pin attention --revision 2
+lf desktop rename query:attention Available --revision 3
+lf desktop arrange attention --revision 4 < arrangement.json
+lf desktop layout task:task_22222222222222222222222222222222 --json
+lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
+```
+
+A Dashboard has its own `DashboardId`, name, query and arrangement. Two Dashboards
+can select the same Tasks independently while reusing each Task's pane and draft
+record. `query:ID` references that Dashboard's selection, including in nested
+expressions. Repository and Wave defaults remain built in; Dashboard edits never
+replace them. Pane layout selectors use durable Work IDs (`repository`,
+`wave:ID`, `task:ID`).
+Pin/unpin and Dashboard rename require the current Dashboard revision. Task rename uses
+`task:ID` and the Task's revision, writing through the existing Task edit owner.
+Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
+
+`arrange` accepts a complete `Arrangement` JSON record, including hidden members,
+and marks it touched. `layout --save` accepts `WorkPaneLayout` JSON with revision
+zero on creation or the last returned revision on update. It preserves pane IDs,
+content locations, focus, zoom, hidden panes and file drafts together. A draft
+carries its recorded Machine/checkout, relative path, base revision, base text and
+edited text. Saving intent never writes that file or launches a process. Native
+restoration must compare the current file to the base before applying edits;
+unknown locations remain unavailable, never a local fallback.
+
+Observation publishes the saved pane revision and tile face. Draft bodies are
+returned only by the explicit layout read, avoiding repeated buffers in queries.
+
+Shell and Files intent uses one tool pane per Task with ordered, stable tab IDs
+and explicit selection. Shell tabs retain recorded locations and optional Process
+identity; these are not liveness or launch authority. File tabs reference the
+Task/location/path draft owner. Duplicate tools, duplicate documents, missing
+selected tabs and non-Task tools fail before a saved-layout write changes state.

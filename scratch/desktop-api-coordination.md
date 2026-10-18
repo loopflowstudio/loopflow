@@ -1,7 +1,28 @@
 # LOO-497 — Remaining Desktop integration
 
-Jack Heart authorized only the foundations slice in [design.md](design.md)
-while unavailable to review the query-view prototype. The full October 16 draft,
+## October 17 concept-review correction
+
+Jack Heart accepted tabs-only for shells and files: at most one Shell pane and
+one Files pane per Task workspace. Shell tabs retain independent processes and
+identities; file tabs reuse the Task/path document owner. No tab tear-out, extra
+tool panes or duplicate viewers. Shell creation is Task-only, excluding repository,
+Wave and Dashboard workspaces and superseding the original repo-shell exception.
+Adding a shell selects a new tab, with no split direction or anchor. Coordinate
+native tool tabs and persistence with LOO-489/416; preserve existing shell state
+and file drafts. This supersedes the earlier shell --split proposal.
+
+Jack Heart selected a distinct Dashboard type (name provisional) that references
+existing Task workspaces. Jack explicitly excluded replacing repository/Wave
+default views for now. This supersedes default-view binding requirements below:
+keep built-in defaults; custom selection and arrangement belong to separate
+Dashboards. Preserve Task panes/drafts and saved custom arrangements. The current
+design's accepted direction owns the correction; creation/pinning UX remains
+unresolved, while current shared command spellings are documented below.
+
+
+Jack Heart accepted the query-view prototype as good enough to build and
+requested a new pursue worker. [design.md](design.md) records that authorization
+and the accepted LOO-489 navigation/search contract. The full October 16 draft,
 including proposed grammar, commands, acceptance scenarios and source survey,
 is preserved at `refs/loopflow/evidence/loo-497-before-compress:desktop-api-coordination.md`
 (tree `a0a62123ff32addaf29cc11570b3263a5630fff1`). It is design history, not
@@ -9,19 +30,66 @@ additional authority. The accepted product direction remains in
 [arrange-navigation-brief.md](arrange-navigation-brief.md) and
 [layout-editing-direction.md](layout-editing-direction.md).
 
+## Shared contract now available — October 17
+
+`SqliteStore::view_plan` / `plan_selection` return `ViewPlan`; `selection_plans`
+feeds built-in repository/Wave defaults and Dashboard plans into
+`PlanningPart.selections`. `edit_dashboard` preserves clause IDs and checks the
+saved revision. CLI: `desktop view EXPRESSION --plan`,
+`desktop query ID EXPRESSION --revision N` (ID or `query:ID`). Swift
+`WorkViewPlan`, `Dashboard` and `RegistryQuery.editDashboardQuery` mirror the wire.
+Rust owns evaluation, current attention and first-wins projection.
+
+Dashboard identity (`DashboardId`) is separate from selection text. The existing
+schema draft owns `dashboards` and expression-keyed `dashboard_arrangements`.
+`set_dashboard_metadata` pins/names Dashboards; `save_dashboard` retains per-expression
+arrangements. `pane_layout` / `save_pane_layout` retain Work-owned pane IDs/content,
+locations, focus/zoom/hidden and file drafts (path/base revision/base text/edits).
+CLI `pin`, `unpin`, `rename`, `arrange` and `layout` expose those operations;
+Swift `RegistryQuery` supplies typed callers. All writes compare revisions.
+`ViewPlan.dashboard_id` identifies custom plans; it is absent on built-in defaults.
+Two Dashboards may independently select the same Task and read the same pane record.
+There is no binding/default-replacement command, DTO or storage table.
+
+October 17 tab cut: portable Shell now owns ordered `{id,location,lf_process_id}`
+tabs plus `selected`; Files owns `location`, ordered `{id,path}` tabs and optional
+`selected`. One tool of each kind per Task is validated atomically. Native
+`MultiplexerStore` and `TaskFilesStore` use this model; one Files document store
+handles Task aliases. Shell creation adds/selects a tab; file reopen reuses a tab.
+`ShellTab.id` is `TerminalIdentity.shell` identity. Inspection includes `tabs` and
+`selected_tab`; exact targets carry optional `tab` and its incarnation. Receipts
+return tool `pane` plus new `tab`. CLI `--pane shell:ID` addresses background tabs.
+Non-Task shell requests mutate nothing; the split-as-shell command is removed.
+
+Native conversion: `MultiplexerStore.paneLayout(work:revision:files:drafts:)` and
+`restore`, `TaskFilesStore.paneIntent(location:)`, `drafts(location:)`, `restoreTabs`
+and `restoreDrafts`. Cold-restored shells have no command and remain unattached;
+recovered documents stay read-only until disk reconciliation. These are the shared
+boundary for LOO-489 persistence callers and LOO-416 Process reattachment, not an
+application persistence loop or a replacement lifecycle owner. Existing native
+Session launch behavior remains outside the tab decision.
+
+The application persistence and live selection integration are still missing.
+LOO-489's renderer and LOO-416's attachment changes remain local work without a
+combined code handoff. No sibling dirty files were copied. Cold restore creates
+fresh native incarnations. Warm conversion reuses matching shell runtime objects
+and skips already-dirty documents, but replaces the tree, selection and file-tab
+list. Preserving newer tabs/selection during a delayed restore remains application
+work. Compare draft bases against current disk and retain
+unavailable locations without substituting a local shell. The schema and DTOs
+alone do not establish native restoration or cross-machine delivery.
+
 ## Remaining contract
 
-- Extend the Rust Work observation path and Swift `RegistryQuery` with the shared
-  selection result. No Swift membership evaluator or subprocess per tile.
-  Query text and repo/Wave defaults must use the same typed expressions.
-  Add attention facts and ordering through that shared path: open Tasks before
-  Waves, waiting Tasks first in automatic tiles. Current name/rank order is only
-  deterministic foundation input; it does not satisfy attention-first acceptance.
-- Add headless `view --plan` before the live macOS dispatch gate. Emit canonical
-  Work refs, title, attention, primary/zoom content, observed machine/location,
-  cwd and argv; report missing primary/location without inventing a shell.
-  Plans use current evidence plus saved intent, never claim live Desktop state,
-  ensure a primary Session, prepare a checkout or acquire a provider.
+- Adopt the implemented portable/native tab conversion boundary in application
+  save/restore and lifecycle reattachment. Combine new native state with saved
+  records without losing newer shells or drafts. Current tests prove local tab
+  identity, selected-tab recovery, draft reconciliation, exact background targeting,
+  duplicate-file reuse and non-Task rejection; no process-restart proof is claimed.
+- Consume shared selection plans in native WorkModel/navigation; observation,
+  current attention ordering and headless `view --plan` are implemented. Preserve
+  their passive contract and add explicit native zoom through the coordinated
+  pane-intent cut. No Swift membership evaluator or subprocess per tile.
 - Live `view/open/query` and UI/deep links converge on one selection entry point.
   Preserve exact Session/Changes intents, opening generations and readiness.
   Work navigation alone must not start a conversation. Repo selection targets
@@ -44,13 +112,12 @@ additional authority. The accepted product direction remains in
   after a lost Apple-event reply; inspect their effects first.
 - Persist portable intent through lfdb; save failures remain visible. Native
   handles, window incarnations, attachment claims and liveness are never saved.
-  The existing repository/query records need Work/default-view binding and
-  persistence callers, plus shared native pane intent (IDs, focus/zoom/hidden,
-  recorded content locations) and app-owned file draft recovery. LOO-416 supplies
-  continuity/recovery requirements; LOO-497 owns the record/API, LOO-489 its
-  save/restore callers. No launch argv or native liveness belongs in these records.
-  Cross-machine identity mapping and transport remain
-  unimplemented; local storage does not prove restoration on another Machine.
+  Independent Dashboards, per-expression arrangement recovery and portable
+  Work pane/draft records now exist. LOO-489's native save/restore callers and LOO-416's
+  continuity/reattachment remain required. Cross-machine identity mapping and
+  transport are unimplemented; local storage does not prove another Machine's
+  restoration. Work rename covers Tasks through their existing revisioned writer;
+  Wave rename retains `lf wave rename`, with native rename routing still pending.
 - Preserve the Task's scripting acceptance: JSON results, target resolution and
   exit statuses (0 success, 1 failure, 2 bad arguments, 3 missing/ambiguous,
   4 unreachable, 130 interrupted), scoped LF_TASK/LF_SESSION/LF_REPO context,
@@ -59,11 +126,14 @@ additional authority. The accepted product direction remains in
   readiness and process exit stay separate. This is remaining integration, not
   authority to duplicate those owners or infer attention from idle time.
 
-## Delete — do not maintain (later live-integration cut)
+## Delete — do not maintain during live integration
 
-- Shell-allocating `MultiplexerStore.split`, `SessionsWorkspace.split`, and their
-  exclusive shell-allocation assertions. Scoped shell selection retains location
-  and stale-target coverage; arrangement split only groups existing members.
+Removed in the tab cut: `MultiplexerStore.split`, `SessionsWorkspace.split`,
+`newShell(beside:focus:)`, pane-keyed shell commands, companion replacement's hidden
+shell cache, old portable Shell/Files payloads, split-as-shell CLI/action and
+exclusive shell-split fixtures. Tool moves and Session geometry tests retain
+arrangement coverage; exact tab targets retain input/read fences.
+
 - Membership cases in `DesktopPaneAction/controlPane`, replaced by selection
   commands while preserving input/text/read authority.
 - Leaf-dropping `SessionsWorkspaceRegistry.hide`, replaced by retained membership
@@ -75,33 +145,21 @@ additional authority. The accepted product direction remains in
   retain stale-opening tests, drafts, exact Session/Changes intents and identities.
 
 The `desktop list` → `state` cut is already in the foundations diff. Do not
-repair the predecessor paths above during foundations work.
+replay it; remove the predecessors above as the remaining integration replaces them.
 
-## Open design and coordination
+## Current integration ownership
 
-Prototype grammar/parser, sort syntax, layout density, inbox appearance and
-query pinning UI remain provisional. Review `query-view/` before production UX.
-The archived draft proposes AND before `or`, typed scope/state atoms, container
-query digests and revisioned plans; these are not accepted syntax or a mandate
-for a second identity layer. Current foundations use authored node paths and
-saved query IDs. Resolve that relationship during integration.
+`native-console-integration.md` supplies the materialized 489 source and order of
+work. 497 integrates its Dashboard/editor/persistence callers into that Console;
+489's ordinary navigation and 416's provider lifetime owners stay intact. The
+older unavailable-handoff readback is preserved in the local source snapshot's
+`loo497-before-continuation-desktop-api-coordination.md.txt`.
 
-LOO-489 owns navigation/presentation and persistence callers; LOO-416 owns
-provider/surface lifetime and capacity evidence. LOO-497 owns the shared model,
-CLI/DTOs and store contract; LOO-498 consumes plans in external hosts. LOO-453
-retains readiness/events, LOO-422/415 status transport and LOO-414 remote launch.
-No new daemon, duplicate driver or unrelated owner takeover is selected.
-
-Overlap includes `SessionsView.swift`, `WorkLayout.swift`, `WorkProjection.swift`
-and persistence types. Earlier steers to Sessions
-`session_17db296946474a3980a127d4fa838972` (489) and
-`session_df202fd5754c4954aa659e1158a414fd` (416) remain unacknowledged here.
-October 16 sibling reports now record LOO-489's shared renderer/projection and
-LOO-416's application-owned registry retention as locally implemented with
-focused tests. Neither proves combined native behavior or landed availability.
-Persistence callers/record shape and attach-only transport remain incomplete;
-earlier message acknowledgments are still unconfirmed. Project crumbs, literal
-Dock icons and the Rex chrome inventory remain navigation questions.
+416's transport stack includes merge `7bfa10fa72` / `2523534b29`: `session attach`
+(including observation/Machine routing), `transport start` and `transport attach`.
+Attach never starts/resumes a provider. Its local metadata-only admission and
+attach-if-free path still need a supported source handoff if this integration
+consumes them; do not infer cold Process continuity from portable records.
 
 ## Integration acceptance
 
@@ -115,6 +173,17 @@ atomicity, departure versus unavailable retention, reload, pin/rename propagatio
 and no read-time execution. Linux proves headless planning too. Mock external
 process/network effects only; use the candidate CLI and a private Machine.
 
-Native rendered continuity belongs to demo and LOO-416. The current pursue Flow
-may publish foundations and reach demo; full LOO-497 remains open, with no merge
-or completion before Jack's review and remaining integration.
+Native rendered continuity belongs to demo and LOO-416. The new pursue Flow
+implements the remaining accepted contract and publishes for demo review.
+No merge or Task completion is authorized by this launch.
+
+Production save/restore proof must include a saved two-shell/two-file Task,
+newer tabs/selection/drafts created while its read is pending, and a stale write
+rejected without replacing either live edits or newer durable state. Navigation
+between independent Dashboards and built-in defaults must retain the same Task
+owner. Cold shells restore without launch argv; only LOO-416's attach path can
+establish Process continuity. Direct conversion tests do not satisfy these cases.
+
+Current 489 source is materialized and verified; older statements requiring a
+combined commit are superseded. See `native-console-integration.md` for the
+precise source versions, current Console contract and accepted query correction.

@@ -395,9 +395,9 @@ fn _migration_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    // Saved selection intent is introduced by the current draft; older prefixes omit it.
-    let has_selections: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='saved_selections')",
+    // Dashboard intent is introduced by the current draft; older prefixes omit it.
+    let has_dashboards: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='dashboards')",
         [],
         |row| row.get(0),
     )?;
@@ -416,18 +416,23 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
     } else {
         Vec::new()
     };
-    if has_selections {
+    if has_dashboards {
         failures.extend(validate_json_column::<crate::work::selection::Selection>(
             conn,
-            "saved_selections",
-            "id",
+            "dashboard_arrangements",
+            "dashboard_id",
             "selection_json",
         )?);
         failures.extend(validate_json_column::<crate::work::selection::Arrangement>(
             conn,
-            "saved_selections",
-            "id",
+            "dashboard_arrangements",
+            "dashboard_id",
             "arrangement_json",
+        )?);
+        failures.extend(validate_json_column::<
+            crate::work::selection::WorkPaneLayout,
+        >(
+            conn, "work_pane_layouts", "work_id", "layout_json"
         )?);
     }
     if conn.query_row(

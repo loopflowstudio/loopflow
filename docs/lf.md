@@ -806,6 +806,8 @@ lf history show PROCESS_LFID --explain
 lf --task LOO-427 desktop open --diff --json  # conversation plus Changes
 lf desktop open --session SESSION_ID --diff  # exact Task-associated Session
 lf desktop state --json                       # read an already-running Mac app
+lf desktop view 'state:available' --plan       # derive Work without opening Desktop
+lf desktop query attention 'state:available'  # create a Dashboard; edits need --revision
 ```
 
 Explanation reads local records without allocating a checkout, creating a plan,
@@ -816,6 +818,16 @@ execution observation. The timestamp dates this read, not planning freshness or
 permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
+
+`desktop view --plan`, `query`, `pin`/`unpin`, `rename`, `arrange` and
+`layout` work without macOS. Plans contain
+shared selection/arrangement intent and current Work evidence, including explicit
+missing primary Sessions or locations. They acquire no client and do not describe
+native mounted panes. Query edits use the saved revision; `query:ID` reopens the
+Dashboard. Revisit restores the earlier expression’s arrangement. Dashboards
+have independent identities and arrangements; repository/Wave defaults remain
+built in. `layout` reads or saves the referenced Work’s portable pane/draft intent
+without mounting panes. See [query syntax and plan fields](../rust/loopflow/src/work/README.md).
 
 `desktop open` resolves Work before handing its repository-qualified link to the
 Mac app. Without a Task it opens the current repository. `--session` selects an
@@ -875,7 +887,9 @@ PTY selects that terminal within the chosen Work. Explicit `--pane` wins.
 Otherwise one eligible pane is selected; ambiguity lists choices and changes
 nothing. Redirected stdin, agent tool subprocesses without that PTY, and markers
 inherited across SSH do not establish caller identity: use `--pane` when needed.
-Selection never follows current focus. Text/key/read require an existing terminal surface. Restore without a pane
+Terminal targeting never follows current focus. Use `--pane shell:ID` or the raw shell ID
+to address a retained shell, including a background tab. State lists ordered `tabs`
+and `selected_tab` on each Shell pane. Text/key/read require an existing terminal surface. Restore without a pane
 selects a unique hidden pane. Wave and Task scope select their Work workspace;
 a repository without Task scope considers its retained workspaces. Unavailable Work
 or no matching pane produces an error without opening a window or preparing Work.
@@ -886,18 +900,22 @@ of following new focus. There is no public JSON target or surface-token argument
 
 ```sh
 lf --task LOO-427 desktop focus --pane "$pane"
-lf --task LOO-427 desktop split --pane "$pane" --axis vertical
 lf --task LOO-427 desktop move --pane "$pane" --destination "$other" --axis horizontal
 lf --task LOO-427 desktop resize --pane "$pane" --toward "$other" --ratio 0.6
 lf --task LOO-427 desktop zoom --pane "$pane"
 lf --task LOO-427 desktop zoom --pane "$pane" --off
 ```
 
-Split creates a shell beside the addressed pane on its execution Machine and checkout.
-It preserves the selected pane; a missing remote location refuses before changing layout.
+Each Task has one Shell pane. Creating a shell adds and selects a tab with its own
+identity and recorded Task location. Repository and Wave shell requests change nothing.
+Files reuse one Task pane and one document per path; reopening a file selects its tab
+and preserves its draft.
 
 ```sh
-pane=$(lf --task LOO-427 desktop shell --pane "$anchor" --json | jq -r .pane)
+receipt=$(lf --task LOO-427 desktop shell --json)
+pane=$(printf '%s' "$receipt" | jq -r .pane)
+shell=$(printf '%s' "$receipt" | jq -r .tab)
+lf --task LOO-427 desktop focus --pane "shell:$shell"
 lf --task LOO-427 desktop zoom --pane "$pane"
 lf help desktop shell --json          # installed arguments and JSON result schema
 lf help desktop --all --json          # all Desktop command contracts
@@ -912,12 +930,12 @@ before input, and do not repeat creation after a lost reply.
 
 Move and resize use two distinct panes in the same Machine/checkout. Vertical
 places a pane to the right; horizontal below. Resize gives the selected side its
-share (0.1–0.9). Split, move, resize, zoom, hide and restore retain drafts and
+share (0.1–0.9). Move, resize, zoom, hide and restore retain drafts and
 selection. Focus selects the addressed pane without changing Work or foregrounding
 a window. Closing a view does not end a Session. Mutations print the affected
-pane ID; `--json` adds its repository, window, Machine, checkout and observation
-time. Split returns the new pane; companions return the created or reused pane.
-A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; split is not safe to replay.
+pane ID; `--json` adds its repository, window, Work and observation time.
+Shell receipts identify the tool pane and newly selected tab separately.
+A receipt confirms the operation, not terminal readiness or usable rendering. Inspect after a lost reply; shell creation is not safe to replay.
 
 ```sh
 lf --task LOO-427 desktop shell --pane "$pane"

@@ -1,0 +1,104 @@
+# LOO-489 — Keyboard pass
+
+October 17, 2026. Jack Heart requested a top-down shortcut pass for the selected
+Console hybrid, matching Rex, Linear, Notion and Figma where their interactions
+fit. This is the accepted native binding map and acceptance checklist.
+The October 17 pursuit approval selected implementation; shortcut customization
+stays in LOO-452. Current verification is in navigation-implementation.md.
+
+Full dated research and source audit: `refs/loopflow/evidence/loo-489-before-console-implement:scratch/keyboard-shortcuts.md`.
+Exact modifiers and active focus scope apply throughout. Transient UI takes priority;
+reserved disabled shortcuts cannot fall through into a shell. The map is Loopflow’s
+synthesis, not a claim about competitors’ default bindings. The October 17 pursuit
+approval supersedes the earlier design hold. Rebinding remains LOO-452.
+
+## Window and application
+
+| Action | Binding | Scope and disposition |
+| --- | --- | --- |
+| Open repository | Shift-Cmd-O | Keep current Go command. Focus existing repository window when open. Remove duplicate Cmd-N assignment. |
+| Cycle repository windows | Cmd-` / Shift-Cmd-` | Native macOS window cycling, unchanged. Do not replace with a private repo switcher. |
+| Close window | Shift-Cmd-W | Explicit window command. Cmd-W retains pane close inside a Task workspace. |
+| Settings, hide, minimize, quit, full screen | Standard AppKit commands | Preserve normal OS bindings and enabled state; no local event-monitor duplication. |
+| Portfolio, Telemetry, Snapshot for Review | Menu/navigator, no default number chord | Remove Cmd-0 / Cmd-1 / Cmd-4 assignments. Those keys are valuable in the working surface. |
+| New Task | No new binding in this change | No existing New Task command was found in the inspected native views. Reserve Cmd-N; do not add a creation workflow merely to fill it. |
+
+## Work navigation
+
+| Action | Binding | Scope and behavior |
+| --- | --- | --- |
+| Navigate Tasks, Waves and repositories | Cmd-K | One navigator; working/recent Tasks first when empty, exact IDs ranked first. Available throughout the repository window. |
+| Task actions | Cmd-/ | Same Task-only menu as ••• or a row context click. No generic app commands and no second action-search palette. Disabled when no Task is targeted. |
+| Toggle sidebar | Cmd-\ | Replace native Control-Cmd-S; matches prototype and Notion. Restore width and scroll; hiding must not navigate or close Work. |
+| Back / Forward | Cmd-[ / Cmd-] | Visit history. Preserve Task, sidebar scope and scroll; distinguish from adjacent working-set navigation. |
+| Previous / next working Task | Ctrl-Shift-Tab / Ctrl-Tab | Cycle adjacent Tasks in stable working-set order, wrapping at ends. Supersedes the earlier Shift-Cmd-brackets proposal after Jack Heart’s final prototype request. No sidebar reordering. |
+| Working Task 1–9 | Cmd-1 through Cmd-9 | Stable working-set slots, not changing positions in a filtered list. Cmd-9 means ninth, not last. Missing slot is disabled/no-op. Reveal its row only if present in the current scope; retain the filter. |
+| Copy Work link | Menu/navigator initially | Avoid adding Cmd-L while terminal clear/input behavior is unresolved. Selection context menu can copy the focused row's link. |
+| Focus Sidebar / Focus Terminal | Native View menu | Keyboard access without stealing F6 or adding a global unmodified navigation mode. |
+
+Paused Tasks leave digit slots and adjacent-Task cycling; that explicit membership
+change may renumber slots, unlike attention/filter updates. Opening paused work
+never resumes it.
+
+Number hints replace the age in a reserved metadata slot on hover or held Cmd;
+they never overlap titles or shift the row. They also belong in native menus. Moving or filtering the list cannot silently change number targets.
+Switching Tasks returns focus to that Task's retained terminal/editor. Opening the
+navigator records prior focus; Escape cancels and restores it without navigation.
+Choosing a sidebar filter changes only membership and restores the previous focus.
+
+## Focused sidebar and navigator
+
+| Keys | Behavior |
+| --- | --- |
+| Up / Down | Move keyboard focus among rows/results without opening each Task. Active keyboard row and open Task selection are distinct. |
+| Home / End | First/last row while the list has focus. |
+| Return | Open focused Work or invoke selected action; focus the destination's retained input. |
+| Tab / Shift-Tab | Move among search, scope controls, results and other controls. No trapped keyboard focus. |
+| Escape | Close the frontmost transient UI and restore its caller. With sidebar focus, return to terminal. Never register a global Escape handler. |
+| Shift-F10 | Context menu for the keyboard-focused Task, when sidebar owns focus. Do not consume in a terminal. |
+| Cmd-F | With sidebar/list focus, open the existing navigator scoped to that list. Do not add a permanent second search field. |
+
+Typing belongs to the navigator input. Do not add Linear's global C, slash, G-I,
+O-I, or J/K commands. Do not give Space a global preview behavior: shell prompts
+and terminal editors own it. Arrow-key focus never launches or acquires a Session.
+
+## Existing panes and terminal
+
+These are existing single-Task pane operations, not LOO-497's multi-work grid.
+
+| Action | Binding | Disposition |
+| --- | --- | --- |
+| Toggle Task Shell tool | Ctrl-` | Current prototype binding; Task scope only, distinct from native Cmd-` window cycling. Hiding preserves shell tabs/clients. |
+| Toggle Task Files tool | Cmd-Shift-E | Current prototype binding; Task scope only. Brief and Changes are Files tabs. |
+| New shell tab | Cmd-T | Add inside the current Task’s Shell tool through the existing owner; show it if hidden. No repository/Wave shell or new Task/Conversation. |
+| Split right / down | Removed | The accepted shared tab model replaces shell-per-pane splitting with one Shell tool. Cmd-T adds a tab. |
+| Focus neighboring pane | Option-Cmd-arrows | Keep spatial pane navigation. Ordinary Option-arrows remain terminal input. |
+| Zoom focused pane | Shift-Cmd-Return | Keep existing binding. Rex's Cmd-E documentation is an example, not evidence to replace this. |
+| Close focused pane | Cmd-W | Keep existing close semantics; must not fall through to window close when pane close is unavailable. Never equate with completing/deleting a Task. Verify whether closing each pane type stops a process before changing semantics. |
+| Reopen closed pane | Shift-Cmd-T | Replace Cmd-Z. Same existing undoClose operation, not a new Session or restart. |
+| Find in focused content | Cmd-F | Terminal Find for terminal, document Find for editor. Navigator is Cmd-K. |
+| Next / previous Find result | Cmd-G / Shift-Cmd-G | Route to the active Find owner only. Check Ghostty's current handling before adding a second handler. |
+| Copy / paste | Cmd-C / Cmd-V | Keep responder-owned behavior, native selection and image-paste handling. |
+| Undo / redo | Cmd-Z / Shift-Cmd-Z | Focused editor/terminal owns them. Never reopen a pane. |
+| Terminal text larger / smaller / reset | Cmd-plus / Cmd-minus / Cmd-0 | Let the existing terminal renderer own scaling; verify its effective bindings. Remove Portfolio's Cmd-0 collision. No global web-style zoom. |
+| Previous / next shell prompt | Cmd-Up / Cmd-Down | Existing embedded Ghostty prompt navigation; keep distinct from pane focus. |
+| Choose file / pin file navigation / save | Cmd-P / Control-Cmd-B / Cmd-S | Keep existing Files-only scope. Do not add Cmd-P as a global navigator alias. |
+
+Ctrl-Tab / Ctrl-Shift-Tab are reserved for working-Task cycling; other Ctrl combinations are not.
+Ctrl-C/D/Z/L/R, Option editing keys, arrows, Tab, Return, Escape, slash and printable
+sequences pass to the terminal when it has focus and no app transient is open.
+Do not synthesize Enter when navigating. Shift-Return/Cmd-Return submission stays
+with the provider or editor; the HTML sample composer does not define native keys.
+App-level commands must not be delivered a second time to Ghostty. A global native
+monitor must not consume workspace operations while a sheet owns keyboard input.
+
+## Remaining native checks
+
+Sidebar Cmd-F now opens the same navigator restricted to visible sidebar Tasks
+and Waves; Search all Work widens it. Shift-F10 opens the focused Task's shared
+actions without selecting it. Headless verification covers membership and
+retention; demo still owns native responder delivery, modal/IME precedence,
+focus restoration, non-US layouts and one delivery to Ghostty. Gate owns the
+broader automated acceptance from navigation-implementation.md.
+
+Earlier full checklist: `9f4574310e03f73ae4d7b381ceac9da10e5251b5:scratch/keyboard-shortcuts.md`.

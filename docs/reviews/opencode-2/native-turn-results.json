@@ -1,0 +1,2294 @@
+{
+  "provider_version": "opencode v2.0.32",
+  "scenarios": {
+    "steer": {
+      "admissions": [
+        {
+          "id": "msg_14b9f2816001Mx27CH49j6MNJm",
+          "sessionID": "ses_eb460d95fffex5YhXc3HJY57ZG",
+          "time": {
+            "created": 1792270084297
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        },
+        {
+          "id": "msg_14b9f28de001hQiPmghW4BV7eL",
+          "sessionID": "ses_eb460d95fffex5YhXc3HJY57ZG",
+          "time": {
+            "created": 1792270084319
+          },
+          "type": "user",
+          "payload": {
+            "text": "MID_STEP_STEER"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460d95fffex5YhXc3HJY57ZG",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270084007,
+            "updated": 1792270084297
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": null,
+      "history": {
+        "info": {
+          "id": "ses_eb460d95fffex5YhXc3HJY57ZG",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 22,
+            "output": 14,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "succeeded",
+          "time": {
+            "created": 1792270084007,
+            "updated": 1792270084386,
+            "idle": 1792270084388
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f2816001Mx27CH49j6MNJm",
+            "time": {
+              "created": 1792270084307
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f28d7001apG7D5DfRD8nem",
+            "time": {
+              "created": 1792270084315,
+              "streamed": 1792270084357,
+              "completed": 1792270084373
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270084353,
+                  "ran": 1792270084356,
+                  "completed": 1792270084371
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f28de001hQiPmghW4BV7eL",
+            "time": {
+              "created": 1792270084376
+            },
+            "text": "MID_STEP_STEER",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f2919001J5F8g4OWW18I83",
+            "time": {
+              "created": 1792270084380,
+              "streamed": 1792270084386,
+              "completed": 1792270084386
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "answer-2"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f2924001AV6SRJlRr98Dth",
+            "time": {
+              "created": 1792270084388
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460d95fffex5YhXc3HJY57ZG",
+          "seq": 19
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true
+    },
+    "queue": {
+      "admissions": [
+        {
+          "id": "msg_14b9f2c48001R3Vat7KFQVkDt5",
+          "sessionID": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "time": {
+            "created": 1792270085368
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        },
+        {
+          "id": "msg_14b9f2d0e001hV5wdkWgdI1cxD",
+          "sessionID": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "time": {
+            "created": 1792270085390
+          },
+          "type": "user",
+          "payload": {
+            "text": "MID_STEP_STEER"
+          },
+          "delivery": "steer"
+        },
+        {
+          "id": "msg_14b9f2d1000188l5yO0y91489S",
+          "sessionID": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "time": {
+            "created": 1792270085393
+          },
+          "type": "user",
+          "payload": {
+            "text": "QUEUED_INPUT"
+          },
+          "delivery": "queue"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270085130,
+            "updated": 1792270085368
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": null,
+      "history": {
+        "info": {
+          "id": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 33,
+            "output": 21,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "succeeded",
+          "time": {
+            "created": 1792270085130,
+            "updated": 1792270085474,
+            "idle": 1792270085475
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f2c48001R3Vat7KFQVkDt5",
+            "time": {
+              "created": 1792270085378
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f2d06001vghYQlwvEPyXKU",
+            "time": {
+              "created": 1792270085387,
+              "streamed": 1792270085431,
+              "completed": 1792270085446
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270085428,
+                  "ran": 1792270085430,
+                  "completed": 1792270085445
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f2d0e001hV5wdkWgdI1cxD",
+            "time": {
+              "created": 1792270085450
+            },
+            "text": "MID_STEP_STEER",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f2d4c001HWSG96auYBVZFp",
+            "time": {
+              "created": 1792270085455,
+              "streamed": 1792270085460,
+              "completed": 1792270085460
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "answer-2"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f2d1000188l5yO0y91489S",
+            "time": {
+              "created": 1792270085463
+            },
+            "text": "QUEUED_INPUT",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f2d59001RqJZsk2aYZ0K1t",
+            "time": {
+              "created": 1792270085469,
+              "streamed": 1792270085473,
+              "completed": 1792270085474
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "answer-3"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f2d63002ISkNPWhUQ4dBdl",
+            "time": {
+              "created": 1792270085475
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460d45dffeSZDFh20t2yyj5W",
+          "seq": 26
+        }
+      ],
+      "model_requests": 3,
+      "replay_unchanged": true
+    },
+    "failure": {
+      "admissions": [
+        {
+          "id": "msg_14b9f308a001Unmk9qGWYLg022",
+          "sessionID": "ses_eb460d01dffe6225L0n2hH0CcX",
+          "time": {
+            "created": 1792270086453
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460d01dffe6225L0n2hH0CcX",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270086220,
+            "updated": 1792270086453
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": null,
+      "history": {
+        "info": {
+          "id": "ses_eb460d01dffe6225L0n2hH0CcX",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "failed",
+          "time": {
+            "created": 1792270086220,
+            "updated": 1792270086543,
+            "idle": 1792270086544
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f308a001Unmk9qGWYLg022",
+            "time": {
+              "created": 1792270086463
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f3142001eh9pjFCF6ZWfPI",
+            "time": {
+              "created": 1792270086471,
+              "streamed": 1792270086515,
+              "completed": 1792270086530
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270086511,
+                  "ran": 1792270086514,
+                  "completed": 1792270086529
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f3187001AaMTaTc8jI2oZ4",
+            "time": {
+              "created": 1792270086539,
+              "completed": 1792270086543
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "provider.invalid-request",
+              "message": "deterministic model failure",
+              "status": 400,
+              "response": {
+                "body": "{\"error\":{\"message\":\"deterministic model failure\",\"type\":\"invalid_request_error\"}}"
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f319000135XZpFacCDGKt9",
+            "time": {
+              "created": 1792270086544
+            },
+            "type": "idle",
+            "outcome": "failed",
+            "error": {
+              "type": "provider.invalid-request",
+              "message": "deterministic model failure",
+              "status": 400,
+              "response": {
+                "body": "{\"error\":{\"message\":\"deterministic model failure\",\"type\":\"invalid_request_error\"}}"
+              }
+            }
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460d01dffe6225L0n2hH0CcX",
+          "seq": 14
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true
+    },
+    "shutdown": {
+      "admissions": [
+        {
+          "id": "msg_14b9f34b1001eP2KOeNVUDbSVR",
+          "sessionID": "ses_eb460cbecffeKZyeQPYWYdncfl",
+          "time": {
+            "created": 1792270087514
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460cbecffeKZyeQPYWYdncfl",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270087287,
+            "updated": 1792270087514
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": {
+        "info": {
+          "id": "ses_eb460cbecffeKZyeQPYWYdncfl",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270087287,
+            "updated": 1792270087610
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f34b1001eP2KOeNVUDbSVR",
+            "time": {
+              "created": 1792270087525
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f35680010p2iIn7mhJC2K1",
+            "time": {
+              "created": 1792270087533,
+              "streamed": 1792270087573,
+              "completed": 1792270087588
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270087570,
+                  "ran": 1792270087573,
+                  "completed": 1792270087587
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f35a9001WxdAdAfd7DLiHr",
+            "time": {
+              "created": 1792270087597,
+              "completed": 1792270087610
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "history": {
+        "info": {
+          "id": "ses_eb460cbecffeKZyeQPYWYdncfl",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270087287,
+            "updated": 1792270087610
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f34b1001eP2KOeNVUDbSVR",
+            "time": {
+              "created": 1792270087525
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f35680010p2iIn7mhJC2K1",
+            "time": {
+              "created": 1792270087533,
+              "streamed": 1792270087573,
+              "completed": 1792270087588
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270087570,
+                  "ran": 1792270087573,
+                  "completed": 1792270087587
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f35a9001WxdAdAfd7DLiHr",
+            "time": {
+              "created": 1792270087597,
+              "completed": 1792270087610
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460cbecffeKZyeQPYWYdncfl",
+          "seq": 14
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true
+    },
+    "readmission": {
+      "admissions": [
+        {
+          "id": "msg_14b9f38d1001HueRNZ7kPuAlKe",
+          "sessionID": "ses_eb460c7d2ffeyteEHWgoN9UYMH",
+          "time": {
+            "created": 1792270088572
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460c7d2ffeyteEHWgoN9UYMH",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270088341,
+            "updated": 1792270088572
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": {
+        "info": {
+          "id": "ses_eb460c7d2ffeyteEHWgoN9UYMH",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270088341,
+            "updated": 1792270088667
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f38d1001HueRNZ7kPuAlKe",
+            "time": {
+              "created": 1792270088582
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f3989001jJC2SZDCvP21II",
+            "time": {
+              "created": 1792270088590,
+              "streamed": 1792270088631,
+              "completed": 1792270088646
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270088627,
+                  "ran": 1792270088630,
+                  "completed": 1792270088644
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f39ca001jSJuW00Orrr9Xs",
+            "time": {
+              "created": 1792270088654,
+              "completed": 1792270088667
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "history": {
+        "info": {
+          "id": "ses_eb460c7d2ffeyteEHWgoN9UYMH",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "succeeded",
+          "time": {
+            "created": 1792270088341,
+            "updated": 1792270088667,
+            "idle": 1792270088871
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f38d1001HueRNZ7kPuAlKe",
+            "time": {
+              "created": 1792270088582
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f3989001jJC2SZDCvP21II",
+            "time": {
+              "created": 1792270088590,
+              "streamed": 1792270088631,
+              "completed": 1792270088646
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270088627,
+                  "ran": 1792270088630,
+                  "completed": 1792270088644
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f39ca001jSJuW00Orrr9Xs",
+            "time": {
+              "created": 1792270088654,
+              "completed": 1792270088667
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          },
+          {
+            "id": "msg_14b9f3aa7001SsXcQFYq0r0SlX",
+            "time": {
+              "created": 1792270088871
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460c7d2ffeyteEHWgoN9UYMH",
+          "seq": 16
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true
+    },
+    "synthetic_resume": {
+      "admissions": [
+        {
+          "id": "msg_14b9f3cf2001K5Abx1l1P4aQmk",
+          "sessionID": "ses_eb460c3b1ffetTeukyI20FBa73",
+          "time": {
+            "created": 1792270089633
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb460c3b1ffetTeukyI20FBa73",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270089398,
+            "updated": 1792270089633
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": {
+        "info": {
+          "id": "ses_eb460c3b1ffetTeukyI20FBa73",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270089398,
+            "updated": 1792270089723
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f3cf2001K5Abx1l1P4aQmk",
+            "time": {
+              "created": 1792270089644
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f3daf001n0HBtZ4iAixYiU",
+            "time": {
+              "created": 1792270089652,
+              "streamed": 1792270089690,
+              "completed": 1792270089704
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270089687,
+                  "ran": 1792270089689,
+                  "completed": 1792270089703
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f3dec001uhWCpK5CAZsuIW",
+            "time": {
+              "created": 1792270089711,
+              "completed": 1792270089723
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "history": {
+        "info": {
+          "id": "ses_eb460c3b1ffetTeukyI20FBa73",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 22,
+            "output": 14,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "succeeded",
+          "time": {
+            "created": 1792270089398,
+            "updated": 1792270090136,
+            "idle": 1792270090137
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14b9f3cf2001K5Abx1l1P4aQmk",
+            "time": {
+              "created": 1792270089644
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14b9f3daf001n0HBtZ4iAixYiU",
+            "time": {
+              "created": 1792270089652,
+              "streamed": 1792270089690,
+              "completed": 1792270089704
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270089687,
+                  "ran": 1792270089689,
+                  "completed": 1792270089703
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f3dec001uhWCpK5CAZsuIW",
+            "time": {
+              "created": 1792270089711,
+              "completed": 1792270089723
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          },
+          {
+            "id": "msg_14b9f3ebf0017r1sN8w1Olsxsi",
+            "metadata": {
+              "notice": "restart"
+            },
+            "time": {
+              "created": 1792270090106
+            },
+            "text": "The server restarted while you were working. Continue from where you left off without repeating completed work.",
+            "description": "Continuing after restart",
+            "type": "synthetic"
+          },
+          {
+            "id": "msg_14b9f3f7e001qu4yZvsY1uu2Es",
+            "time": {
+              "created": 1792270090115,
+              "streamed": 1792270090135,
+              "completed": 1792270090136
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "answer-3"
+              }
+            ],
+            "finish": "stop",
+            "rawFinish": "stop",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14b9f3f99002IkqcbWVb6M5TPO",
+            "time": {
+              "created": 1792270090137
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb460c3b1ffetTeukyI20FBa73",
+          "seq": 23
+        }
+      ],
+      "model_requests": 3,
+      "replay_unchanged": true
+    },
+    "interrupt_resume": {
+      "admissions": [
+        {
+          "id": "msg_14ba78661001fFsrwnZzQEC6bx",
+          "sessionID": "ses_eb4587c34ffemgVyoeKUNnboMA",
+          "time": {
+            "created": 1792270632729
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb4587c34ffemgVyoeKUNnboMA",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270632138,
+            "updated": 1792270632729
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": {
+        "info": {
+          "id": "ses_eb4587c34ffemgVyoeKUNnboMA",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270632138,
+            "updated": 1792270632831
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14ba78661001fFsrwnZzQEC6bx",
+            "time": {
+              "created": 1792270632740
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14ba787270012u5StkHZJNGvJ3",
+            "time": {
+              "created": 1792270632747,
+              "streamed": 1792270632792,
+              "completed": 1792270632806
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270632789,
+                  "ran": 1792270632791,
+                  "completed": 1792270632805
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14ba7876b001uBo0ML8zOjQSWi",
+            "time": {
+              "created": 1792270632814,
+              "completed": 1792270632831
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "history": {
+        "info": {
+          "id": "ses_eb4587c34ffemgVyoeKUNnboMA",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270632138,
+            "updated": 1792270632831
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14ba78661001fFsrwnZzQEC6bx",
+            "time": {
+              "created": 1792270632740
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14ba787270012u5StkHZJNGvJ3",
+            "time": {
+              "created": 1792270632747,
+              "streamed": 1792270632792,
+              "completed": 1792270632806
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270632789,
+                  "ran": 1792270632791,
+                  "completed": 1792270632805
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14ba7876b001uBo0ML8zOjQSWi",
+            "time": {
+              "created": 1792270632814,
+              "completed": 1792270632831
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb4587c34ffemgVyoeKUNnboMA",
+          "seq": 14
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true,
+      "recovery_attempts": [
+        {
+          "attempt": 1,
+          "response": {
+            "interrupted": false
+          },
+          "idle_markers": [],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        },
+        {
+          "attempt": 2,
+          "response": {
+            "interrupted": false
+          },
+          "idle_markers": [],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        },
+        {
+          "attempt": 3,
+          "response": {
+            "interrupted": false
+          },
+          "idle_markers": [],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        }
+      ]
+    },
+    "repeated_readmission": {
+      "admissions": [
+        {
+          "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+          "sessionID": "ses_eb458735bffexoUqm8I54vnVgR",
+          "time": {
+            "created": 1792270634784
+          },
+          "type": "user",
+          "payload": {
+            "text": "Initiate native tool turn"
+          },
+          "delivery": "steer"
+        }
+      ],
+      "before_execution": {
+        "info": {
+          "id": "ses_eb458735bffexoUqm8I54vnVgR",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270634251,
+            "updated": 1792270634784
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": []
+      },
+      "after_restart": {
+        "info": {
+          "id": "ses_eb458735bffexoUqm8I54vnVgR",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "time": {
+            "created": 1792270634251,
+            "updated": 1792270634912
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+            "time": {
+              "created": 1792270634812
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14ba78f3f001Dfig7yU9qlo3x3",
+            "time": {
+              "created": 1792270634819,
+              "streamed": 1792270634878,
+              "completed": 1792270634893
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270634875,
+                  "ran": 1792270634877,
+                  "completed": 1792270634891
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14ba78f91001XAVW5M3yOdcz4N",
+            "time": {
+              "created": 1792270634900,
+              "completed": 1792270634912
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          }
+        ]
+      },
+      "history": {
+        "info": {
+          "id": "ses_eb458735bffexoUqm8I54vnVgR",
+          "projectID": "global",
+          "model": {
+            "id": "probe",
+            "providerID": "probe",
+            "variant": "default"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 11,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "outcome": "succeeded",
+          "time": {
+            "created": 1792270634251,
+            "updated": 1792270634912,
+            "idle": 1792270636063
+          },
+          "title": "Native attribution probe"
+        },
+        "messages": [
+          {
+            "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+            "time": {
+              "created": 1792270634812
+            },
+            "text": "Initiate native tool turn",
+            "type": "user"
+          },
+          {
+            "id": "msg_14ba78f3f001Dfig7yU9qlo3x3",
+            "time": {
+              "created": 1792270634819,
+              "streamed": 1792270634878,
+              "completed": 1792270634893
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [
+              {
+                "type": "tool",
+                "id": "call_probe",
+                "name": "shell",
+                "executed": false,
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "command": "printf native-tool-proof",
+                    "description": "Probe native tool"
+                  },
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "native-tool-proof"
+                    }
+                  ],
+                  "metadata": {
+                    "status": "completed",
+                    "truncated": false,
+                    "exit": 0
+                  }
+                },
+                "time": {
+                  "created": 1792270634875,
+                  "ran": 1792270634877,
+                  "completed": 1792270634891
+                }
+              }
+            ],
+            "finish": "tool-calls",
+            "rawFinish": "tool_calls",
+            "cost": 0,
+            "tokens": {
+              "input": 11,
+              "output": 7,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          {
+            "id": "msg_14ba78f91001XAVW5M3yOdcz4N",
+            "time": {
+              "created": 1792270634900,
+              "completed": 1792270634912
+            },
+            "type": "assistant",
+            "agent": "build",
+            "model": {
+              "id": "probe",
+              "providerID": "probe",
+              "variant": "default"
+            },
+            "content": [],
+            "finish": "error",
+            "error": {
+              "type": "aborted",
+              "message": "Step interrupted"
+            }
+          },
+          {
+            "id": "msg_14ba790930016uqaqrvFbpQJTh",
+            "time": {
+              "created": 1792270635155
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          },
+          {
+            "id": "msg_14ba79211001Mr637WO2Bx7Ry6",
+            "time": {
+              "created": 1792270635537
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          },
+          {
+            "id": "msg_14ba7941f001gxKbdTZFxaWL7N",
+            "time": {
+              "created": 1792270636063
+            },
+            "type": "idle",
+            "outcome": "succeeded"
+          }
+        ]
+      },
+      "log": [
+        {
+          "type": "log.synced",
+          "aggregateID": "ses_eb458735bffexoUqm8I54vnVgR",
+          "seq": 20
+        }
+      ],
+      "model_requests": 2,
+      "replay_unchanged": true,
+      "recovery_attempts": [
+        {
+          "attempt": 1,
+          "response": {
+            "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+            "sessionID": "ses_eb458735bffexoUqm8I54vnVgR",
+            "time": {
+              "created": 1792270634812
+            },
+            "type": "user",
+            "payload": {
+              "text": "Initiate native tool turn"
+            },
+            "delivery": "steer"
+          },
+          "idle_markers": [
+            {
+              "id": "msg_14ba790930016uqaqrvFbpQJTh",
+              "time": {
+                "created": 1792270635155
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            }
+          ],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        },
+        {
+          "attempt": 2,
+          "response": {
+            "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+            "sessionID": "ses_eb458735bffexoUqm8I54vnVgR",
+            "time": {
+              "created": 1792270634812
+            },
+            "type": "user",
+            "payload": {
+              "text": "Initiate native tool turn"
+            },
+            "delivery": "steer"
+          },
+          "idle_markers": [
+            {
+              "id": "msg_14ba790930016uqaqrvFbpQJTh",
+              "time": {
+                "created": 1792270635155
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            },
+            {
+              "id": "msg_14ba79211001Mr637WO2Bx7Ry6",
+              "time": {
+                "created": 1792270635537
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            }
+          ],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        },
+        {
+          "attempt": 3,
+          "response": {
+            "id": "msg_14ba78e6f001tDSbsT2bP4ISet",
+            "sessionID": "ses_eb458735bffexoUqm8I54vnVgR",
+            "time": {
+              "created": 1792270634812
+            },
+            "type": "user",
+            "payload": {
+              "text": "Initiate native tool turn"
+            },
+            "delivery": "steer"
+          },
+          "idle_markers": [
+            {
+              "id": "msg_14ba790930016uqaqrvFbpQJTh",
+              "time": {
+                "created": 1792270635155
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            },
+            {
+              "id": "msg_14ba79211001Mr637WO2Bx7Ry6",
+              "time": {
+                "created": 1792270635537
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            },
+            {
+              "id": "msg_14ba7941f001gxKbdTZFxaWL7N",
+              "time": {
+                "created": 1792270636063
+              },
+              "type": "idle",
+              "outcome": "succeeded"
+            }
+          ],
+          "model_requests": 2,
+          "transcript_and_usage_unchanged": true
+        }
+      ]
+    }
+  }
+}

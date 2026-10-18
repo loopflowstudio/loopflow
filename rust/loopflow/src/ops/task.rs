@@ -1510,10 +1510,11 @@ pub fn task_create(
         }
         let selected = select_task_creation_wave(&store, &main, wave).await?;
         let (creation_project, acquisition) = match selected {
-            Some(wave) => (
-                Some(super::project::current_project(&store, &wave)?.id),
-                Some(super::planning_sync::lock_wave_planning(&wave).await?),
-            ),
+            Some(wave) => {
+                let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+                let project = super::project::current_project(&store, &wave)?.id;
+                (Some(project), Some(acquisition))
+            }
             None => (None, None),
         };
         let repository_id = store

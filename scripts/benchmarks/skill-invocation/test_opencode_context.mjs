@@ -21,37 +21,42 @@ printf '{"hookSpecificOutput":{"additionalContext":"%s"}}' "$(cat '${contextFile
   ), "utf8");
   const path = join(root, "plugin.mjs");
   writeFileSync(path, `const spec = ${JSON.stringify(spec)}; const delivery = 'fixture';\n${source}`);
-  const plugin = await (await import(path)).default();
-  const user = () => ({
-    info: { role: "user", id: "msg1", sessionID: "main" },
-    parts: [{ type: "text", text: "REQUEST" }],
+  const plugin = (await import(path)).default;
+  const hooks = new Map();
+  const dispose = await plugin.setup({
+    session: { hook: async (name, callback) => { hooks.set(name, callback); } },
+    event: { subscribe: async function* ({ signal }) {
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+    } },
   });
-
-  let output = { messages: [user()] };
-  await plugin["chat.message"]({ sessionID: "main" });
-  await plugin["experimental.chat.messages.transform"]({}, output);
-  assert.equal(output.messages[0].parts[1].text, "ORIGINAL");
+  const context = (sessionID = "main") => ({
+    sessionID,
+    system: [{ type: "text", text: "NATIVE_BASE\nAGENTS_GUIDE" }],
+    messages: [{ role: "user", content: [{ type: "text", text: "REQUEST" }] }],
+  });
+  await hooks.get("prompt")({ sessionID: "main" });
+  let input = context();
+  const messages = structuredClone(input.messages);
+  await hooks.get("context")(input);
+  assert.deepEqual(input.system.map((part) => part.text), [
+    "NATIVE_BASE\nAGENTS_GUIDE", "FIXED_ADDITION", "ORIGINAL",
+  ]);
+  assert.deepEqual(input.messages, messages, "stored user content stays untouched");
   writeFileSync(contextFile, "REFRESHED");
-  output = { messages: [
-    { info: { role: "assistant", summary: true, id: "summary1" }, parts: [] },
-    user(),
-  ] };
-  await plugin["experimental.chat.messages.transform"]({}, output);
-  assert.equal(output.messages[1].parts[1].text, "REFRESHED");
-
-  let system = { system: ["NATIVE_BASE\nAGENTS_GUIDE\nFIXED_ADDITION"] };
-  await plugin["experimental.chat.system.transform"]({ sessionID: "main" }, system);
-  assert.equal(system.system.length, 1);
-  system = { system: ["NATIVE_BASE\nAGENTS_GUIDE"] };
-  await plugin["experimental.chat.system.transform"]({ sessionID: "main" }, system);
-  assert.deepEqual(system.system, ["NATIVE_BASE\nAGENTS_GUIDE", "FIXED_ADDITION"]);
-
-  const sibling = user();
-  sibling.info.sessionID = "sibling";
-  output = { messages: [sibling] };
-  await plugin["experimental.chat.messages.transform"]({}, output);
-  assert.equal(output.messages[0].parts.length, 1);
-  console.log("OpenCode plugin: refresh, native additions and sibling isolation pass");
+  await hooks.get("compaction")({ sessionID: "main" });
+  input = context();
+  await hooks.get("context")(input);
+  assert.deepEqual(input.system.map((part) => part.text), [
+    "NATIVE_BASE\nAGENTS_GUIDE", "FIXED_ADDITION", "REFRESHED",
+  ]);
+  assert.deepEqual(input.messages, messages);
+  const sibling = context("sibling");
+  const before = structuredClone(sibling);
+  await hooks.get("prompt")({ sessionID: "sibling" });
+  await hooks.get("context")(sibling);
+  assert.deepEqual(sibling, before);
+  await dispose();
+  console.log("OpenCode plugin: refresh after compaction, native additions and sibling isolation pass");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

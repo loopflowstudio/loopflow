@@ -65,6 +65,21 @@ evidence covers retries, resize/edit/submit, normal success and native identity;
 it proves neither paid-account access, screenshot version 1.18.33 nor delivery.
 Release's entry-point lesson applies: source tests miss competing terminal writers.
 
+## OpenCode protocol evidence (LOO-504, 2026-10-17)
+
+Jack Heart selected OpenCode 2 repair/delivery;
+automatic crash continuation is deferred. Candidate deterministic-native
+tool/context/Flow and configured-account launch/tool/resume passed.
+[Audit](../../../docs/reviews/opencode-2/README.md).
+
+No parent IDs or replayable events; steer/queue share idle.
+Readmission can emit empty success; managed recovery injects synthetic guidance
+with unaccepted at-least-once semantics. Native stability proves neither
+attribution nor deduplication. Preserve frozen capture/Process/Work,
+independent steers, separate queued results and LOO-415's owner. Release's lesson:
+candidate proof cannot bypass supported installation. Gate, broader native
+acceptance and delivery remain open.
+
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
@@ -393,24 +408,15 @@ retain no authority; emission is not confirmation.
 
 Claude 2.1.296's exclusive startup-hook/input cycle wrote only 512 of 131,133
 bytes in two seconds. Shared dispatch plus exclusive takeover resolves it.
-`0d04805ab3` preserves oversized launch/resume, handoff, replacement/child rejection
-and OpenCode retry protocol proofs, not configured model acceptance. Old injection
-paths are deleted; the withdrawn-cut feedback no longer describes current source.
-`27ce387bdc` removes unread subscription state. `cd2c38184f` reconciles membership
-on Session reads/callbacks, removing publication-time scans; cancelled mixed batches
-retain unaffected pending direction. `f96a7d2378` labels capabilities reserved,
-not installed. Release's operation-entry lesson applies: store proofs cannot
-replace public launch proofs; protocol stand-ins cannot prove model acceptance.
-The shared-dispatch counterexample and protocol limits remain in
-`0d04805ab35f2ba0ee4d72dec3cc9caa1d1aa051:scratch/session-steer-subscriptions.md`.
-Configured-provider acceptance remains unproved; current semantics and limitations
-live in `docs/architecture-reference.md` under Durable communication.
-Gate found missing planning revision triggers for saved steers; the same draft now
-adds them. Explicit delivery diagnostics do not drive workspace refreshes.
-The launch fixtures select hooks by moment and supply the native Session identity;
-the account fixture isolates native Claude state. Focused repairs, receipt/migration
-proofs, CLI/integration checks and 28 headless Swift DTO tests pass. The broader
-library run had 1,718 passes and 9 ignores; both failures passed focused repairs.
+Old injection paths are deleted. Membership reconciles on reads/callbacks;
+cancelled mixed batches retain unaffected direction. Reserved capabilities are not
+installed ones; explicit diagnostics do not drive workspace refreshes. Saved
+steers now trigger planning revisions. Historical fixture counts, branch cuts and
+the shared-dispatch counterexample remain at
+`28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
+this heading. These prove neither configured model acceptance nor OpenCode 2
+compatibility. Current semantics: `docs/architecture-reference.md`, Durable
+communication.
 
 ## Process-owned liveness (LOO-451, 2026-10-10)
 

@@ -54,8 +54,11 @@ lf repo-operate             # canonical name for the same skill
 lf --wave designer wave-operate  # operate one Wave
 ```
 
-OpenCode keeps errors and retries in its native terminal UI. Loopflow prints a
-diagnostic log path before launch; full stderr stays there without covering your input.
+`lf -a opencode` opens OpenCode 2's full-screen terminal against a private,
+authenticated server. Resume keeps the native conversation and refreshes Loopflow
+context. A diagnostic log path appears before launch; stderr stays there without
+covering your input. Interrupted OpenCode work requires explicit subsequent input;
+Loopflow never inserts an automatic continuation prompt.
 
 Give an external agent harness the Loopflow operating skill:
 

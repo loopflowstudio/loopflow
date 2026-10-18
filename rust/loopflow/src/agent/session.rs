@@ -22,7 +22,7 @@ pub(crate) enum ProviderInvocation<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
-    pub(crate) codex: Option<AgentConfig>,
+    pub(crate) launch: Option<AgentConfig>,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -53,7 +53,7 @@ pub(crate) fn native_connection_command(
         args.extend(["resume".into(), "--".into(), id.to_string()]);
     }
     SessionCommand {
-        codex: None,
+        launch: None,
         input: None,
         program: "codex".into(),
         args,
@@ -96,7 +96,7 @@ pub(crate) fn build_session_command(
         ),
         ProviderInvocation::ClaudeStream { .. } => (Vec::new(), None),
     };
-    let mut codex = None;
+    let mut native = None;
     let mut input = None;
     match harness.as_str() {
         "claude" => {
@@ -132,19 +132,18 @@ pub(crate) fn build_session_command(
                 input = prompt;
             }
         }
-        "codex" => {
+        "codex" | "opencode" => {
             let mut launch = config.clone();
-            if let Some(prompt) = prompt {
-                launch.task_prompt = prompt;
+            launch.task_prompt = prompt.unwrap_or_default();
+            if harness == "opencode" {
+                super::validate_terminal_turn(&launch.task_prompt)?;
+            } else if matches!(invocation, ProviderInvocation::Terminal { .. }) {
+                launch.skill_invocation = None;
             }
-            match invocation {
-                ProviderInvocation::Terminal { .. } => launch.skill_invocation = None,
-                ProviderInvocation::Resume { session_id } => {
-                    launch.resume_token = Some(session_id.clone());
-                }
-                _ => unreachable!("stream-json command syntax belongs to Claude"),
+            if let ProviderInvocation::Resume { session_id } = invocation {
+                launch.resume_token = Some(session_id.clone());
             }
-            codex = Some(launch);
+            native = Some(launch);
         }
         "pi" => {
             args.extend(crate::harness::pi::options(config, context_file)?);
@@ -157,23 +156,10 @@ pub(crate) fn build_session_command(
                 args.extend(["--".into(), prompt]);
             }
         }
-        "opencode" => {
-            args.insert(0, cwd.display().to_string());
-            if let Some(model) = model {
-                args.extend(["--model".into(), model]);
-            }
-            if let ProviderInvocation::Resume { session_id } = invocation {
-                args.extend(["--session".into(), session_id.to_string()]);
-            }
-            if let Some(prompt) = prompt {
-                super::validate_terminal_turn(&prompt)?;
-                args.extend(["--prompt".into(), prompt]);
-            }
-        }
         _ => bail!("unsupported agent provider: {harness}"),
     }
     Ok(SessionCommand {
-        codex,
+        launch: native,
         input,
         program: harness,
         args,
@@ -202,13 +188,30 @@ pub(crate) fn session_environment(
             bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
         }
         if config.write_scope == super::AgentWriteScope::Worktree {
-            settings["permission"] =
-                serde_json::json!({"*": "allow", "external_directory": "deny"});
+            settings["permissions"] = serde_json::json!([
+                {"action":"*","resource":"*","effect":"allow"},
+                {"action":"external_directory","resource":"*","effect":"deny"}
+            ]);
         } else if config.skip_permissions {
-            settings["permission"] = serde_json::json!({"*": "allow"});
+            settings["permissions"] =
+                serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
         }
-        if let Some(path) = context_file.filter(|_| config.conversation_context.is_none()) {
-            settings["instructions"] = serde_json::json!([path]);
+        if config.conversation_context.is_none() {
+            let instructions = if let Some(path) = context_file {
+                Some(path.to_owned())
+            } else {
+                super::write_system_prompt_file(config, "opencode")?
+            };
+            if let Some(path) = instructions {
+                settings
+                    .as_object_mut()
+                    .expect("configuration is an object")
+                    .entry("instructions")
+                    .or_insert_with(|| serde_json::json!([]))
+                    .as_array_mut()
+                    .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
+                    .push(serde_json::json!(path));
+            }
         }
         if let Some(context) = &config.conversation_context {
             crate::harness::context::add_opencode_context(
@@ -392,7 +395,7 @@ mod tests {
                         .any(|arg| arg.contains("failIfUnavailable")));
                 }
                 if provider == "codex" {
-                    let params = build_codex_thread_start_params(command.codex.as_ref().unwrap());
+                    let params = build_codex_thread_start_params(command.launch.as_ref().unwrap());
                     assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "never");
                 }
@@ -419,7 +422,10 @@ mod tests {
                 let environment = session_environment(&config, None).unwrap();
                 let settings: serde_json::Value =
                     serde_json::from_str(&environment["OPENCODE_CONFIG_CONTENT"]).unwrap();
-                assert_eq!(settings["permission"]["external_directory"], "deny");
+                assert_eq!(
+                    settings["permissions"][1],
+                    serde_json::json!({"action":"external_directory","resource":"*","effect":"deny"})
+                );
             }
         }
     }

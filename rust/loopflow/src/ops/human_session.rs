@@ -766,6 +766,26 @@ async fn transition_headless_to_native(
     if agent.interactive || agent.process.completed_at.is_some() {
         return Ok(());
     }
+    // A private server can die before creating a native conversation. Retire
+    // its stale attachment so the prepared input can start normally.
+    if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
+        == crate::journal::ProcessIdentityEvidence::Dead
+    {
+        anyhow::ensure!(
+            store.sqlite.settle_agent_process(&agent, || {
+                if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
+                    != crate::journal::ProcessIdentityEvidence::Dead
+                {
+                    return Err(crate::store::StoreError::InvalidAuthority(
+                        "AgentProcess death changed".into(),
+                    ));
+                }
+                Ok(())
+            })?,
+            "Session attachment changed before observing death"
+        );
+        return Ok(());
+    }
     let provider = provider.ok_or_else(|| {
         anyhow!(
             "Native conversation identity is unavailable; cannot stop and resume this headless run"
@@ -1420,7 +1440,17 @@ mod tests {
         std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::env::set_var("LF_BIN", &lf);
         let native = bin.join(&provider_name);
-        std::fs::write(&native, "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n").unwrap();
+        let mut script = "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n".to_owned();
+        if provider_name == "opencode" {
+            std::fs::write(
+                bin.join("opencode-server.py"),
+                include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
+            )
+            .unwrap();
+            std::fs::write(home.join("native-sessions.json"), r#"{"saved-thread":[]}"#).unwrap();
+            script.push_str("exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"\n");
+        }
+        std::fs::write(&native, script).unwrap();
         std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o755)).unwrap();
         let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));

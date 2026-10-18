@@ -26,7 +26,10 @@ impl Fixture {
         );
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
-            fs::write(&script, r#"#!/usr/bin/python3
+            let source = if harness == "opencode" {
+                include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+            } else {
+                r#"#!/usr/bin/python3
 import json, os, sys, runpy
 args = sys.argv[1:]
 if '--version' in args:
@@ -53,9 +56,9 @@ if stream:
 elif os.path.basename(sys.argv[0]) == 'codex':
     sys.path.insert(0, SUPPORT_DIRECTORY)
     runpy.run_path(SUPPORT_DIRECTORY+'/native_codex.py', run_name='__main__')
-elif os.path.basename(sys.argv[0]) == 'opencode':
-    print('timestamp=2026-10-09T00:00:00Z level=INFO run=tui message=created id=ses_fixture directory='+os.getcwd(), file=sys.stderr)
-"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())).unwrap();
+"#.replace("SUPPORT_DIRECTORY", &serde_json::to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support")).unwrap())
+            };
+            fs::write(&script, source).unwrap();
             fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
         }
         fixture
@@ -182,7 +185,7 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
         "opencode" => {
             let config: Value = serde_json::from_str(value["opencode"].as_str().unwrap()).unwrap();
             assert_eq!(
-                config["permission"]["*"].as_str() == Some("allow"),
+                config["permissions"][0]["effect"].as_str() == Some("allow"),
                 enabled,
                 "{value}"
             );
@@ -196,21 +199,16 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        r#"#!/usr/bin/python3
-import os, subprocess, sys
-if '--version' in sys.argv:
-    print('fixture'); sys.exit(0)
-if '--session' not in sys.argv:
-    os.write(2, b'level=INFO message=created id=ses_diagnostics\n')
-else:
-    assert sys.argv[sys.argv.index('--session') + 1] == 'ses_diagnostics'
-mode = 'resume' if '--session' in sys.argv else 'launch'
-os.write(1, b'native composer\n')
-for attempt in range(3):
-    os.write(2, f'level=ERROR message="stream error" mode={mode} attempt={attempt} error="Model access is disabled"\n'.encode())
-subprocess.run(['/bin/sh', '-c', 'printf "background diagnostic\\n" >&2'], check=True)
-os.write(2, b'non-UTF8: \xff\x1b[2Junterminated')
-"#,
+        include_str!("support/opencode_server.py").replace("__WAIT__", "False")
+            .replace("    _record_launch()\n    if False:", r#"    _record_launch()
+    mode = 'resume' if (HOME / 'opened').exists() else 'launch'
+    (HOME / 'opened').touch()
+    os.write(1, b'native composer\n')
+    for attempt in range(3):
+        os.write(2, f'level=ERROR message="stream error" mode={mode} attempt={attempt} error="Model access is disabled"\n'.encode())
+    subprocess.run(['/bin/sh', '-c', 'printf "background diagnostic\\n" >&2'], check=True)
+    os.write(2, b'non-UTF8: \xff\x1b[2Junterminated')
+    if False:"#),
     )
     .unwrap();
 
@@ -270,7 +268,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("OpenCode did not report a resumable session"),
+        stderr.contains("startup failure without a session"),
         "{stderr}"
     );
     let path = stderr
@@ -281,6 +279,49 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         fs::read(path).unwrap(),
         b"startup failure without a session\n"
     );
+}
+
+#[test]
+fn opencode_terminal_setup_failure_stops_the_private_server() {
+    let fixture = Fixture::new("opencode");
+    let source = include_str!("support/opencode_server.py")
+        .replace("__WAIT__", "False")
+        .replace(
+            "        if self.path == \"/api/event\":",
+            r#"        if self.path == "/api/event":
+            (HOME / 'server-port').write_text(str(self.server.server_port))
+            for path in Path(os.environ['LF_HOME']).glob('runs/*/*/opencode.stderr.log'):
+                path.unlink()
+                path.mkdir()"#,
+        );
+    fs::write(fixture.home.path().join("bin/opencode"), source).unwrap();
+    let mut child = fixture
+        .command()
+        .args(["-i", ":", "launch"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("terminal setup failure left the server worker waiting");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("open OpenCode diagnostics"),
+        "{output:?}"
+    );
+    let port: u16 = fs::read_to_string(fixture.home.path().join("server-port"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
 }
 
 #[test]
@@ -313,7 +354,12 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             let a = args(&first);
             a[a.iter().position(|a| *a == "--session-id").unwrap() + 1].to_string()
         } else if provider == "opencode" {
-            "ses_fixture".into()
+            args(&first)[args(&first)
+                .iter()
+                .position(|arg| *arg == "--session")
+                .unwrap()
+                + 1]
+            .to_owned()
         } else {
             first["token"].as_str().unwrap().to_string()
         };
@@ -333,6 +379,8 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert_eq!(resumed["params"]["model"], "current-model");
             assert_eq!(resumed["turns"].as_array().unwrap().len(), 2);
             assert!(!resumed["turns"][1].to_string().contains("--- keep spaces"));
+        } else if provider == "opencode" {
+            assert!(!args(&resumed).contains(&"--model"));
         } else {
             pair(&resumed, "--model", "current-model");
         }
@@ -878,13 +926,19 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
     fixture.create_wave();
     let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
         "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
-        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[2], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
+        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
     );
     fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
     fixture.settings("opencode:opencode/first-model", true, false);
     let first = fixture.run(&["-b", "--wave", "fixture", ":", "first turn"]);
-    assert_eq!(first["request"]["model"]["modelID"], "first-model");
-    assert_eq!(first["config"]["permission"]["*"], "allow");
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        )
+        .unwrap()["id"],
+        "first-model"
+    );
+    assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
     let session = fixture.session();
     fixture.settings("opencode:opencode/current-model", false, false);
     let resumed = fixture.run(&[
@@ -896,14 +950,18 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
         "next turn",
     ]);
     assert_eq!(resumed["session"], first["session"]);
-    assert_eq!(resumed["request"]["model"]["modelID"], "current-model");
-    assert!(resumed["config"]["permission"].is_null());
-    assert!(!resumed["request"]["parts"]
+    assert_eq!(
+        serde_json::from_slice::<Value>(
+            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
+        )
+        .unwrap()["id"],
+        "current-model"
+    );
+    assert!(resumed["config"]["permissions"].is_null());
+    assert!(!resumed["request"]["text"]
         .to_string()
         .contains("first turn"));
-    assert!(resumed["request"]["parts"]
-        .to_string()
-        .contains("next turn"));
+    assert!(resumed["request"]["text"].to_string().contains("next turn"));
 }
 
 #[test]

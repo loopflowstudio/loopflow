@@ -380,7 +380,7 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task create --wave <wave> --title "add retry to token refresh"
+lf task create --title "add retry to token refresh"
 pbpaste | lf task create --wave incidents
 lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
@@ -388,6 +388,9 @@ lf task run INF-123
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 incident
 ```
+
+Creation is standalone by default, even in a Wave-bound Session. Pass `--wave`
+to choose membership explicitly, or use `lf task move <task> --wave <wave>` later.
 
 Task Work owns one checkout and zero or one PR. Workflow selection follows
 Task → Wave → repository. Definitions live in `.lf/workflows/` or builtins. The Task moves through its

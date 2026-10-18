@@ -177,11 +177,11 @@ live migration or provider-account use is authorized.
 
 ## Optional Task membership (LOO-505, accepted 2026-10-17)
 
-Jack Heart approved implementation and publication through demo review, not landing:
-repository identity is required; Project membership is optional and supplies the
-Task's one derived Wave. Explicit `--no-wave` bypasses ambient ancestry; ordinary
-capture retains valid bound context and otherwise creates standalone work. No
-synthetic inbox, second Task or query-owned workspace. Existing ownership stays.
+Jack Heart approved shipping after required checks. His October 17 review correction
+makes creation standalone even in bound Sessions/checkouts: only explicit `--wave`
+selects membership; `--no-wave` equals omission. Repository identity is required;
+optional Project supplies the derived Wave. The read projection is validated on
+save, not a second owner. No synthetic inbox or query-owned workspace.
 
 Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
 default ownership, removing Project defaults/history. Repository `workflow:` uses
@@ -932,7 +932,7 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   observed conflicts. No file mirror or Desktop plan becomes another authority.
   Current reads expose one chapter and direct Tasks; historical Projects retain
   provenance.
-- PM writes resolve stable provider edges, not names or Issue prefixes. Wave-bound
+- PM writes resolve stable provider edges, not names or Issue prefixes. Explicit Wave
   creation selects its current Project; standalone creation has none. Ordinary
   Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
   repository configuration owns the Linear Team.

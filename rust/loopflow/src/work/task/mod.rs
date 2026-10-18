@@ -501,7 +501,7 @@ pub struct Task {
     /// Acquisition time of the retained Linear observation, never a write clock.
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: LinearWritebackState,
-    /// Optional Wave membership, derived through the Project.
+    /// Read projection from the Project join, validated against the Project on save.
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
     pub repository_id: crate::durable::RepositoryId,

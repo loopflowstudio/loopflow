@@ -4009,7 +4009,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
 }
 
 #[test]
-fn explicit_no_wave_bypasses_ambient_wave_context() {
+fn task_creation_defaults_to_standalone_in_bound_contexts() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let wave = lf(
@@ -4018,41 +4018,58 @@ fn explicit_no_wave_bypasses_ambient_wave_context() {
         &["wave", "ensure", "product", "--json"],
     );
     let wave_id = wave["wave_id"].as_str().unwrap();
-    for (no_wave, expected) in [(false, Some(wave_id)), (true, None)] {
-        let mut args = vec!["task", "create", "--title", "Capture", "--json"];
-        if no_wave {
-            args.push("--no-wave");
-        }
-        let output = command(repo.path(), home.path(), &args)
-            .env("LF_WAVE_ID", wave_id)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(task["wave_id"].as_str(), expected);
-    }
-    let output = command(
+    let parent = lf(
         repo.path(),
         home.path(),
         &[
-            "task",
-            "create",
-            "--no-wave",
-            "--title",
-            "Independent",
-            "--json",
+            "task", "create", "--wave", "product", "--title", "Parent", "--json",
         ],
-    )
-    .env("LF_WAVE_ID", "missing-wave")
-    .output()
-    .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
     );
+    let parent_id = parent["id"].as_str().unwrap();
+    let placed = lf(repo.path(), home.path(), &["checkout", parent_id, "--json"]);
+    let checkout = Path::new(placed["worktree"].as_str().unwrap());
+    let task_context = format!("task:{parent_id}");
+    let wave_context = format!("wave:{wave_id}");
+    for (cwd, declaration, inherited_wave) in [
+        (repo.path(), None, ""),
+        (repo.path(), Some(wave_context.as_str()), wave_id),
+        (repo.path(), Some(task_context.as_str()), wave_id),
+        (repo.path(), Some("wave:missing-wave"), "missing-wave"),
+        (repo.path(), Some("task:missing-task"), "missing-wave"),
+        (checkout, None, ""),
+        (checkout, Some(task_context.as_str()), wave_id),
+    ] {
+        for flags in [&[][..], &["--no-wave"][..], &["--wave", "product"][..]] {
+            let mut args = vec!["task", "create", "--title", "Capture", "--json"];
+            args.extend_from_slice(flags);
+            let mut invocation = command(cwd, home.path(), &args);
+            invocation.env("LF_WAVE_ID", inherited_wave);
+            if let Some(declaration) = declaration {
+                invocation.env("LF_AS", declaration);
+            }
+            let output = invocation.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(task["repository_id"], parent["repository_id"]);
+            if flags.first() == Some(&"--wave") {
+                assert_eq!(task["wave_id"], parent["wave_id"]);
+                assert_eq!(task["project_id"], parent["project_id"]);
+            } else {
+                assert!(task["wave_id"].is_null(), "{task}");
+                assert!(task["project_id"].is_null(), "{task}");
+            }
+            assert!(task["worktree"].is_null());
+        }
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let retained = store
+        .task(&crate::durable::TaskId::parse(parent_id).unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.wave_id.as_ref().unwrap().as_str(), wave_id);
+    assert_eq!(retained.worktree.as_deref(), Some(checkout));
 }

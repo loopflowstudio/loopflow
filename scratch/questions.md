@@ -11,5 +11,6 @@ position. Projects retain no historical workflow selections.
 
 The migration uses the existing `waves.current_project_id` pointer; no
 status-based election or historical fallback remains to decide. Live planning
-and other Task checkouts remain outside migration experiments. Gate and native
-demo evidence are tracked in the plan; demo review remains required before landing.
+and other Task checkouts remain outside migration experiments. Jack Heart's later
+overall PR approval authorizes shipping after required checks. Gate and unclaimed
+native demo evidence remain tracked in the plan; no product decision is pending.

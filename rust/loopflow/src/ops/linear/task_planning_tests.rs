@@ -3568,7 +3568,6 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
         let saved = crate::ops::task::task_create(
             repo,
             Some(wave.slug()),
-            false,
             Some("New Linear Task".into()),
             Some("Retain this work".into()),
         )

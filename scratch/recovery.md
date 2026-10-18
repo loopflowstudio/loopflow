@@ -26,8 +26,8 @@ and passed six focused tests, formatting and Clippy. After reading its completed
 final answer, the operator stopped the interactive carrier. Its Process records
 show interruption; the completed provider conclusion and edits remain retained.
 
-Recovery uses explicit headless execution without a PTY. Implementation,
-compression and reconciliation are complete; inspect the preserved results and
-do only concrete remaining repairs before publication for demo review. Do not
-repeat tests solely for lifecycle phases, broaden scope, or merge. Gate and
-native demo obligations remain as listed in the accepted design.
+Headless recovery subsequently completed and published PR #1589 at `56924dcd3d`.
+Jack Heart later corrected creation to default to standalone and approved overall
+shipping after required checks, superseding the historical landing hold above.
+Current scope and remaining evidence are in `keep-tasks-single-homed.md`;
+`direction.md` retains the dated decisions. These stopped Flows remain history.

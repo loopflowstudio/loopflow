@@ -240,8 +240,10 @@ a different commit. Without an explicit recovery commit, a lost started branch
 is not recreated from its old base.
 
 
-Without a selected Wave, creation makes a standalone repository Task. `--no-wave` bypasses ambient Wave context. A Task gets its
-identity before placement; creation starts no agent and requires no Linear login.
+Creation defaults to a standalone repository Task, including inside Wave/Task-bound
+Sessions and checkouts. Only explicit `--wave <wave>` selects membership;
+`--no-wave` is equivalent to omitting both flags. A Task gets its identity before
+placement; creation starts no agent and requires no Linear login.
 Projects and comments stay in SQLite; Wave goals and memory live in the checkout.
 Reads create nothing.
 

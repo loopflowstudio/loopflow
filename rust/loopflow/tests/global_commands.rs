@@ -2703,18 +2703,14 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
-    for (explicit, no_wave, declaration, source) in [
-        (true, false, "unknown", Some("explicit")),
-        (
-            false,
-            false,
-            selected.wave_id.as_str(),
-            Some("inherited_declaration"),
-        ),
-        (false, false, "", None),
-        (false, false, "  ", None),
-        (false, true, selected.wave_id.as_str(), None),
-        (false, true, "unknown", None),
+    for (explicit, no_wave, declaration) in [
+        (true, false, "unknown"),
+        (false, false, selected.wave_id.as_str()),
+        (false, false, "unknown"),
+        (false, false, ""),
+        (false, false, "  "),
+        (false, true, selected.wave_id.as_str()),
+        (false, true, "unknown"),
     ] {
         let mut invocation = command(
             home.path(),
@@ -2722,6 +2718,9 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
             &["task", "create", "--title", "New", "--explain", "--json"],
         );
         invocation.env("LF_WAVE_ID", declaration);
+        if !declaration.trim().is_empty() {
+            invocation.env("LF_AS", format!("wave:{declaration}"));
+        }
         if explicit {
             invocation.args(["--wave", "selected"]);
         }
@@ -2730,12 +2729,12 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
         }
         let preview: serde_json::Value =
             serde_json::from_str(&success(invocation.output().unwrap())).unwrap();
-        if let Some(source) = source {
+        if explicit {
             assert_eq!(
                 preview["resolution"]["wave"]["value"],
                 selected.wave_id.as_str()
             );
-            assert_eq!(preview["resolution"]["wave"]["source"], source);
+            assert_eq!(preview["resolution"]["wave"]["source"], "explicit");
             assert_eq!(preview["action"]["project"], selected.id.as_str());
         } else {
             assert_eq!(preview["resolution"]["wave"]["state"], "unbound");
@@ -2748,6 +2747,15 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
         }
         assert_eq!(preview["resolution"]["task"]["state"], "unbound");
         assert_eq!(preview["impediments"], serde_json::json!([]));
+        assert_eq!(
+            preview["unavailable"],
+            serde_json::json!(["Provider freshness, synchronization delivery and concurrent saves are not observed or reserved"])
+        );
+        assert_eq!(preview["resolution"]["repository"]["state"], "bound");
+        assert_eq!(
+            preview["resolution"]["repository_path"]["value"],
+            canonical.to_str().unwrap()
+        );
     }
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);

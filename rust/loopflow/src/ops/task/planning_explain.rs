@@ -11,7 +11,6 @@ use crate::work::task::TaskUpdate;
 #[derive(Debug)]
 pub enum TaskPlanningRequest<'a> {
     Create {
-        no_wave: bool,
         title: Option<&'a str>,
         notes: Option<&'a str>,
     },
@@ -158,12 +157,8 @@ async fn read_planning(
     report: &mut TaskPlanningExplanation,
 ) -> anyhow::Result<()> {
     match request {
-        TaskPlanningRequest::Create {
-            title,
-            notes,
-            no_wave,
-        } => {
-            read_creation(store, cwd, selection.wave, *no_wave, *title, *notes, report).await?;
+        TaskPlanningRequest::Create { title, notes } => {
+            read_creation(store, cwd, selection.wave, *title, *notes, report).await?;
         }
         TaskPlanningRequest::Edit(update) => {
             if let Err(error) = super::validate_task_edit_input(update) {
@@ -316,7 +311,6 @@ async fn read_creation(
     store: &SharedStore,
     cwd: &Path,
     wave_selector: Option<&str>,
-    no_wave: bool,
     title: Option<&str>,
     notes: Option<&str>,
     report: &mut TaskPlanningExplanation,
@@ -343,31 +337,28 @@ async fn read_creation(
     });
     report.effects.push("Save a new unstarted Task and pending planning mutations locally; attempt configured synchronization without allocating execution".into());
     let main = crate::git::worktrees::main_repo_root(cwd)?;
-    let selected = match if no_wave {
-        Ok(None)
-    } else {
-        super::select_task_creation_wave(store, &main, wave_selector).await
-    } {
-        Ok(selected) => selected,
+    report.resolution.repository_path = ContextFact::Bound {
+        value: main.display().to_string(),
+        source: "local_locator".into(),
+    };
+    report.resolution.repository = match store.repository_id(&main.to_string_lossy()).await? {
+        Some(id) => ContextFact::Bound {
+            value: id.to_string(),
+            source: "selected_plan".into(),
+        },
+        None => ContextFact::Unbound,
+    };
+    let wave = match super::select_task_creation_wave(store, &main, wave_selector).await {
+        Ok(Some(wave)) => wave,
+        Ok(None) => {
+            report.resolution.wave = ContextFact::Unbound;
+            return Ok(());
+        }
         Err(error) => {
             report.resolution.wave = ContextFact::Unavailable {
                 reason: error.to_string(),
             };
             anyhow::bail!("{error}; Wave registration/acquisition was not performed");
-        }
-    };
-    let (wave, source) = match selected {
-        Some(wave) => (
-            wave,
-            if wave_selector.is_some() {
-                "explicit"
-            } else {
-                "inherited_declaration"
-            },
-        ),
-        None => {
-            report.resolution.wave = ContextFact::Unbound;
-            return Ok(());
         }
     };
     report.resolution = crate::ops::context::explain_context(
@@ -385,7 +376,7 @@ async fn read_creation(
     report.resolution.execution_machine = ContextFact::Unbound;
     report.resolution.wave = ContextFact::Bound {
         value: wave.id().to_string(),
-        source: source.into(),
+        source: "explicit".into(),
     };
     let project = match crate::ops::project::current_project(store, &wave) {
         Ok(project) => project,
@@ -394,10 +385,6 @@ async fn read_creation(
             return Ok(());
         }
     };
-    let project = store
-        .get_project(&project.id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("selected Project is missing"))?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..
     }) = &mut report.action

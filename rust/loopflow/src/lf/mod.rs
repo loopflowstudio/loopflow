@@ -1257,9 +1257,10 @@ pub enum TaskCommand {
     },
     /// Create a planning Task without allocating a checkout or starting work
     Create {
+        /// Create without a Wave (the default)
         #[arg(long, conflicts_with = "wave")]
         no_wave: bool,
-        /// Wave name; defaults to the bound Wave
+        /// Explicit Wave membership; omitted creates a standalone Task
         #[arg(long)]
         wave: Option<String>,
         /// Task title; omitted when stdin supplies the report and first line

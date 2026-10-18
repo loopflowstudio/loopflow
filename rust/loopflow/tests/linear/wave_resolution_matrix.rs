@@ -234,13 +234,17 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
+    // Creation ignores ambient context and may register an explicit destination.
+    if cmd.id == "task create" {
+        return Outcome::Resolved;
+    }
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && matches!(cmd.id, "repo connect" | "task create") {
+    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
         return Outcome::Resolved;
     }
 
     if env.id == "absent" {
-        if cmd.global_default || cmd.id == "task create" {
+        if cmd.global_default {
             return Outcome::Resolved;
         }
         return Outcome::NoContext;
@@ -446,15 +450,7 @@ fn matrix_every_command_every_environment() {
             let output = run_lf(&home, &repo, cmd, &env);
             std::fs::remove_dir_all(&cell).unwrap();
             let outcome = classify(&output);
-            let expected = if cmd.id == "task create"
-                && matches!(
-                    env.default_expected,
-                    Outcome::NoContext | Outcome::UnknownExplicit
-                ) {
-                Outcome::Resolved
-            } else {
-                expected_outcome(cmd, &env)
-            };
+            let expected = expected_outcome(cmd, &env);
             if outcome != expected {
                 failures.push(format!(
                     "  `{}` in `{}` → {:?} (expected {:?})\n    exit: {}\n    stdout: {}\n    stderr: {}",

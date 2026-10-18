@@ -1471,25 +1471,18 @@ pub(crate) async fn select_task_creation_wave(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<Option<Wave>> {
-    let selected = match crate::work::wave::context::resolve_managed_wave(
-        Some(store),
-        Some(repo),
-        wave,
-        std::env::var("LF_WAVE_ID").ok().as_deref(),
-    )
-    .await
-    {
-        Ok(wave) => Some(wave),
-        Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => None,
-        Err(error) => return Err(task_error(error)),
+    let Some(wave) = wave else {
+        return Ok(None);
     };
-    Ok(selected)
+    crate::work::wave::context::resolve_managed_wave(Some(store), Some(repo), Some(wave), None)
+        .await
+        .map(Some)
+        .map_err(task_error)
 }
 
 pub fn task_create(
     repo: &Path,
     wave: Option<&str>,
-    no_wave: bool,
     title: Option<String>,
     report: Option<String>,
 ) -> OpsResult<Task> {
@@ -1515,11 +1508,7 @@ pub fn task_create(
                 super::project::ensure(repo, name).await?;
             }
         }
-        let selected = if no_wave {
-            None
-        } else {
-            select_task_creation_wave(&store, &main, wave).await?
-        };
+        let selected = select_task_creation_wave(&store, &main, wave).await?;
         let (creation_project, acquisition) = match selected {
             Some(wave) => (
                 Some(super::project::current_project(&store, &wave)?.id),

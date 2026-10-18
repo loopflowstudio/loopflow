@@ -1,11 +1,12 @@
 # LOO-505 — Tasks with an optional Wave
 
-Status: **Approved for implementation through demo review**, 2026-10-17.
+Status: **Accepted; shipping approved, required checks pending**, 2026-10-17.
 Jack Heart approved the design in the Task conversation (“lg2m”) after selecting
 repository defaults, **Task → Wave → repository** workflow precedence, direct
 Wave ownership of defaults, and renaming membership `refile` to `move`.
-Implementation and the feature workflow's publication for demo review are
-approved; landing remains subject to the later review. Baseline: `28dc141671`.
+Jack Heart subsequently approved the overall PR review after requesting the
+standalone-default correction; `direction.md` retains that approval. Required
+ship checks and the evidence limits below remain. Baseline: `28dc141671`.
 The accepted outcome in [LOO-505](https://linear.app/loopflow/issue/LOO-505) is
 singular ownership, optional Wave membership, and usable standalone Tasks.
 Decisions are retained in `scratch/direction.md`.
@@ -24,9 +25,10 @@ through conversation, checkout, workflow, delivery, recovery and completion.
 **Demo:** in a configured disposable repository, run these implemented commands:
 
 ```sh
-lf task create --no-wave --title 'Fix preview refresh' --json
+lf task create --title 'Fix preview refresh' --json
 lf task list --json
 lf checkout <task> --json
+lf --task <task> connect --prepare --json
 lf task run <task>
 lf task move <task> --wave product
 lf task status <task> --json
@@ -47,7 +49,7 @@ These commands describe the approved interaction. The configured CLI/Desktop dem
 review evidence; unattended tests below prove the mechanics without a display or
 real provider account.
 
-## Accepted contract — implemented, acceptance still pending
+## Accepted contract — implemented, combined verification still pending
 
 ### Repository identity is required; planning ancestry is optional
 
@@ -89,14 +91,15 @@ Machine as the existing root default when no ancestor supplies one.
 
 ### Creation and discovery
 
-Add mutually exclusive `--wave <wave>` and `--no-wave` to Task creation.
-Omitting both retains a **valid explicit/bound Wave** when available. With no
-Wave context, create standalone; delete the implicit `inbox` creation path.
-`--no-wave` deliberately bypasses ambient Wave/Task ancestry, including creation
-from a Wave-bound conversation, but keeps the selected repository. An unreadable,
-stale or invalid ambient binding is an error, not proof of no context. Explicit
-`--no-wave` does not need an ambient ownership read to choose its destination.
-No inferred Wave from an unrelated repository.
+Task creation defaults to standalone membership. Only an explicit `--wave <wave>`
+selects a Wave; omitted selection and explicit `--no-wave` are equivalent,
+including inside Wave/Task-bound conversations and checkouts. Ambient or inherited
+Wave context neither selects membership nor blocks standalone creation. Explicit
+Wave selection still validates its destination. Preserve repository selection;
+never manufacture an inbox Wave. The two explicit flags remain mutually exclusive.
+This is Jack Heart's October 17 PR-review correction and supersedes the earlier
+ambient-Wave inheritance proposal. Creation explanations and examples must use
+the same default.
 
 Add `lf task list` scoped to the selected repository, with an optional Wave
 filter. Reuse the existing Task projection and evidence types. Extend the
@@ -298,7 +301,8 @@ shape, same-repository moves during live execution, and repository defaults.
 Workflow precedence and direct Wave ownership supersede the initial Project
 selection proposal. Membership uses `task move`; Workflow position uses
 `task workflow move`. Wave derivation through Project is preserved existing
-behavior. Demo review and landing approval remain separate.
+behavior. Jack's subsequent overall PR approval authorizes shipping after required
+checks; it does not establish native hands-on evidence.
 
 ## Implementation and deletion status — 2026-10-17
 
@@ -320,8 +324,15 @@ later turns use the Task's current membership.
 ### Delete — do not maintain
 
 - Implicit inbox creation and its explanation, including `default_inbox`
-  expectations in `global_commands.rs`. Preserve explicit/bound selection and
+  expectations in `global_commands.rs`. Preserve explicit selection and
   distinguish known standalone creation from unavailable ownership evidence.
+- Ambient creation selection in `select_task_creation_wave` and inherited
+  provenance in `read_creation`, including bound-default test expectations.
+  Preserve explicit destinations and repository identity; omitted selection and
+  `--no-wave` both remain standalone despite bound or stale context.
+- Redundant `no_wave` parameters in `task_create`, `TaskPlanningRequest::Create`
+  and `read_creation`. Normalize CLI flags to one optional destination; retain
+  the public flag and its conflict with `--wave`.
 - `refile`, `refile_unplaced_task`, and recorded-work refusal, including the
   preview test's refusal expectations. Preserve read-only previews, same-repo
   membership validation, and execution identity regardless of placement.
@@ -377,8 +388,9 @@ or external-repository progress KRs.
 ## Done when
 
 1. A no-Wave repository capture creates exactly one Task, zero Waves and zero
-   Projects. The same holds with `--no-wave` inside a Wave-bound Session. A normal
-   bound capture retains its selected Wave. List, status, stream and Desktop
+   Projects. Omitted selection and `--no-wave` both do so inside Wave/Task-bound
+   Sessions and checkouts, including stale inherited context. Only explicit
+   `--wave` selects membership. List, status, stream and Desktop
    agree on identity and known-null ancestry without fallback names.
 2. One standalone Task opens its conversation, prepares a checkout, takes up its
    repository default Workflow, runs, recovers and completes. Explicit selection
@@ -464,24 +476,32 @@ it is not an unattended gate requirement.
    use and completion, plus the normal PR/recovery path. Headless workspace/file
    draft retention is useful evidence, not provider-input or visual acceptance.
    A second Task must stay standalone throughout completion as designed.
-4. Publication for demo review remains authorized; landing awaits Jack Heart's
-   review. No unanswered product decision blocks the accepted implementation.
+4. Jack Heart approved the overall PR review after requesting the standalone
+   default. The correction is implemented; delivery and required ship checks
+   remain with the authored Flow. Native hands-on evidence is still unclaimed.
 
-The design baseline remains `28dc141671`; checkout HEAD, local `main` and
-`origin/main` now resolve to `070e5bb6a4` (#1586, inspected without fetching).
-That integrated change removes elapsed-time cutoffs from waited landing/repair
+The design baseline remains `28dc141671`. Merge `2e137c1201` incorporates
+`40a9a697f0` (#1585), including #1586 (`070e5bb6a4`). #1586 removes elapsed-time
+cutoffs from waited landing/repair
 and adds `remove_landing_timeouts.sql`. Its Task completion tests share the
 updated Task fixture, and its migration remains separate from this Task's draft.
 Gate's existing combined migration and Task/delivery coverage includes this
 integration; earlier focused passes are not a new combined-suite pass.
 Standalone PR/recovery behavior uses that existing waiter, retaining cancellation,
 concrete failures and verified-merge completion rules. No additional delivery
-mechanism or landing authorization follows. Retained-repository upgrade and
-Session reattachment remain the restoration and attachment owners.
+mechanism follows. #1585 unifies conversation opening under `connect`/`resume`;
+preparation uses `connect --prepare` instead of `session ensure`. The combined
+source retains the repository join for standalone Task selectors while adding
+case-insensitive tickets; Desktop navigation fixtures use the new preparation
+path. Gate's Session, selector and navigation coverage must evaluate this combined
+source; earlier passes are not a combined acceptance claim. Retained-repository
+upgrade and Session reattachment remain the restoration and attachment owners.
 LOO-489's query UI and LOO-416's retention scope remain separate. Product has no
 immediate child directories/memories in this checkout; its complete goal and
-memory were read. Memory's old Project-default and Wave-required guidance is
-superseded by Jack Heart's October 17 decisions, not a new design proposal.
+memory were read. Product memory now records explicit-only creation membership
+and Jack Heart's shipping approval. Infrastructure's LOO-499 entry supplies
+conversation-opening lessons; its older publication status is superseded by
+merged #1585. Neither merge nor approval establishes configured native continuity.
 
 Prior implementation/compression evidence records focused Rust lifecycle,
 workflow, capture/dispatch, migration, exchange, Linear null/adoption/export and
@@ -490,6 +510,8 @@ CLI-stream, editor, Work model and leaf-view passes; Desktop build, formatting
 and Clippy passes. These are retained results, not a fresh full-matrix claim.
 No production code changed during reconciliation.
 
+Check: 2026-10-17 publication — `TMPDIR=/private/tmp uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(task_creation_defaults_to_standalone_in_bound_contexts) | test(task_planning_explain) | test(local_planning::waveless_task_lifecycle)' --no-tests fail < /dev/null` passed 8/8 on the combined post-merge source; `cargo fmt --check` and `git diff --check` passed. Full affected suites, disposable upgrade and native evidence retain the owners and limits above.
+
 Retained focused results: compression's Rust batches passed 18/18 across ordering,
 membership, Workflow defaults, CLI sync/selectors and adoption after fixture
 repairs, including `legacy_project_adoption_preserves_plans_across_lost_responses`.
@@ -497,4 +519,15 @@ Swift destination/incomplete-planning filters passed 4 tests/12 cases;
 `task_planning_explain` passed 6/6, with `global_commands`, formatting and Clippy
 also recorded passing. Reconciliation changes prose only and does not rerun them.
 
-Check: 2026-10-17 — `git diff --check` passed; `lf context` fits memory/scratch token and byte limits; combined suites remain with Gate and configured native proof with demo review.
+October 17 correction: creation and its explanation now choose membership only
+from an explicit Wave. Focused coverage preserves repository identity, parent
+checkout/membership, read-only previews, and explicit destination registration;
+it covers omitted/explicit standalone flags with inherited Wave/Task declarations,
+stale declarations and an existing Task checkout. CLI help and guides match.
+Compression keeps the CLI's two flags at the boundary and passes one optional
+Wave through creation and preview. The preview matches selection once and uses
+the Project already returned by `current_project`, avoiding a duplicate read.
+The provenance test derives its expected source from explicit selection rather
+than carrying the same choice twice.
+
+Check: 2026-10-17 — prose-only realignment: `git diff --check` passed; `lf context` within both budgets. Reused compression's `TMPDIR=/private/tmp uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(task_creation_defaults_to_standalone_in_bound_contexts) | test(task_planning_explain) | test(task_create_in_linear_repository_returns_published_task_without_execution)' --no-tests fail < /dev/null` (8/8), formatting and Clippy; earlier Wave-resolution matrix evidence retained. Combined acceptance belongs to Gate; native proof remains unclaimed.

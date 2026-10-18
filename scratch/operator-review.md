@@ -17,3 +17,10 @@ recorded-work refusal assertions. Creation now distinguishes known absence
 from failed selection; the preview tests cover ambient bypass, attach/detach
 with a checkout, remote destination placement, and unchanged storage. No
 remaining finding from this operator review.
+
+The standalone-default correction removes ambient selection from the shared
+creation resolver. Review found that a stale inherited binding also left the
+preview's repository unavailable after its Task/Wave facts were cleared. The
+preview now reads the creation repository independently; explicit destinations
+retain their existing validation. `Task.wave_id` documents its Project-derived
+read projection and save validation without adding another accessor or owner.

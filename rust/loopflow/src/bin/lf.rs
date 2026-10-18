@@ -1043,8 +1043,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             };
             let issue = loopflow::ops::task::task_create(
                 repo,
-                wave.as_deref(),
-                *no_wave,
+                if *no_wave { None } else { wave.as_deref() },
                 title.clone(),
                 report,
             )?;
@@ -1955,9 +1954,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 None
             };
             Some((
-                wave.as_deref().or(cli.wave.as_deref()),
+                if *no_wave {
+                    None
+                } else {
+                    wave.as_deref().or(cli.wave.as_deref())
+                },
                 loopflow::ops::task::TaskPlanningRequest::Create {
-                    no_wave: *no_wave,
                     title: title.as_deref(),
                     notes: notes.as_deref().or(piped_notes.as_deref()),
                 },

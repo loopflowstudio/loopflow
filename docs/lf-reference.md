@@ -1755,8 +1755,8 @@ Create a planning Task without allocating a checkout or starting work
 
 | Argument | What it does |
 |---|---|
-| `--no-wave` | no wave Default: false. |
-| `--wave` | Wave name; defaults to the bound Wave |
+| `--no-wave` | Create without a Wave (the default) Default: false. |
+| `--wave` | Explicit Wave membership; omitted creates a standalone Task |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
 | `--json` | json Default: false. |

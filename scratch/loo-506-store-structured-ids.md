@@ -400,4 +400,4 @@ the original digest and ignores unrelated metric evidence before hashing.
 Migration preflight reuses `id::canonical_uuid` so its change detection cannot
 drift from the retained punctuation/non-UUID policy.
 
-Check result (2026-10-18, pass 6): focused `canonical_ids` 26/26 plus history/session/project/wave/linear/workflow subsets PASS; Swift `DTOFixtureTests|MultiplexerStoreTests|WorkNavigationTests|WorkCLISubscriptionTests|canonical_ids` 111/111 PASS with materialized CLI; clippy and `check_migrations.py` PASS. Gate owns the full matrix; CI owns installation.
+Check result (2026-10-18, pass 6, `1a810652cb`): focused `canonical_ids` plus receipt/trace/journal/prune/launch-budget 113/113 PASS; earlier PR/task/fixture/comment (1393/1395, both failures since fixed), history/session/project/wave/linear/workflow subsets PASS; Swift identity suites 111/111 PASS; fmt, clippy, `check_migrations.py` PASS. Gate owns the full matrix; CI owns installation.

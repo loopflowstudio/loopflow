@@ -669,7 +669,7 @@ mod tests {
         command.env_clear();
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.clone(), attachment.clone()),
+            &(store.clone(), session.id.to_string(), attachment.clone()),
         )
         .unwrap();
         child.wait().unwrap();
@@ -720,7 +720,7 @@ mod tests {
         command.env_clear().arg("60");
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.clone(), attachment.clone()),
+            &(store.clone(), session.id.to_string(), attachment.clone()),
         )
         .unwrap();
         store
@@ -878,7 +878,7 @@ mod tests {
             command.env_clear();
             let mut child = super::spawn_native(
                 command,
-                &(store.clone(), session.id.clone(), attachment.clone()),
+                &(store.clone(), session.id.to_string(), attachment.clone()),
             )
             .unwrap();
             child.wait().unwrap();
@@ -918,7 +918,7 @@ mod tests {
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
-        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let command = || {
             let mut command = Command::new("/bin/sleep");
             command.env_clear().arg("60");
@@ -935,7 +935,7 @@ mod tests {
         let next = store
             .prepare_session_agent_process(&session.id, &first)
             .unwrap();
-        let next_owner = (store.clone(), session.id.clone(), next.clone());
+        let next_owner = (store.clone(), session.id.to_string(), next.clone());
         let mut provider = super::spawn_native(command(), &next_owner).unwrap();
         let recorded = store.process(&next.agent_process_id).unwrap().unwrap();
         // Reusing the current attachment is not permission for a second spawn.
@@ -971,7 +971,7 @@ mod tests {
         let first = store
             .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
             .unwrap();
-        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
         let mut child = super::spawn_native(command, &first_owner).unwrap();
@@ -981,7 +981,11 @@ mod tests {
         let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
         let alive = child.try_wait().unwrap().is_none();
         let unchanged = store.process(&first.agent_process_id).unwrap().unwrap();
-        super::stop_native(&mut child, Some(&(store.clone(), session.id, next.clone()))).unwrap();
+        super::stop_native(
+            &mut child,
+            Some(&(store.clone(), session.id.to_string(), next.clone())),
+        )
+        .unwrap();
         assert_eq!(first.agent_process_id, next.agent_process_id);
         assert!(refused && alive);
         assert!(unchanged.completed_at.is_none());
@@ -995,7 +999,7 @@ mod tests {
         let attachment = store
             .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
             .unwrap();
-        let owner = (store.clone(), session.id.clone(), attachment.clone());
+        let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn_native(command, &owner).unwrap();
@@ -1024,7 +1028,7 @@ mod tests {
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
-        let owner = |attachment| (store.clone(), session.id.clone(), attachment);
+        let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
@@ -1088,7 +1092,7 @@ mod tests {
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
-        let owner = (store.clone(), session.id.clone(), first.clone());
+        let owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn_native(command, &owner).unwrap();
@@ -1114,7 +1118,7 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
-        let owner = (store.clone(), session.id.clone(), next.clone());
+        let owner = (store.clone(), session.id.to_string(), next.clone());
         let error =
             super::spawn_native(Command::new(home.path().join("absent")), &owner).unwrap_err();
         assert_eq!(

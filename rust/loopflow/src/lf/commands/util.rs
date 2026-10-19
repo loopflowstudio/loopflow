@@ -235,7 +235,7 @@ fn native_provider_attachment(
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     if attachment.lf_process_id.as_ref() != Some(&process)
-        || attachment.caller(session.clone()) != caller
+        || attachment.caller(session.clone().into()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
     }
@@ -326,11 +326,11 @@ fn session_command_status_with_env(
             );
             crate::session_record::register_session_attachment_interrupt(
                 &store,
-                session.id.clone(),
+                session.id.to_string(),
                 attachment.clone(),
             );
-            command.attachment = Some((session.id.clone(), attachment.clone()));
-            Some((store, session.id, attachment))
+            command.attachment = Some((session.id.to_string(), attachment.clone()));
+            Some((store, session.id.to_string(), attachment))
         } else {
             None
         };
@@ -826,7 +826,7 @@ async fn serve_codex_native(
     let (store, session, attachment) = &owner;
     let mut connection = CodexConnection {
         store: store.clone(),
-        session_id: session.clone(),
+        session_id: session.clone().into(),
         thread_id: launch
             .resume_token
             .clone()
@@ -1293,7 +1293,7 @@ mod tests {
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
-                &(store.clone(), session.id.clone(), original.clone()),
+                &(store.clone(), session.id.to_string(), original.clone()),
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1320,7 +1320,7 @@ mod tests {
                 args: vec![],
                 cwd: home.into(),
                 context: None,
-                attachment: Some((session.id.clone(), attached.clone())),
+                attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(NativeConnection {
                     relay: home.join("relay.sock"),
                     upstream: endpoint.clone(),
@@ -1342,7 +1342,7 @@ mod tests {
                 session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
             crate::harness::agent_process::stop_native(
                 &mut provider,
-                Some(&(store, session.id, attached)),
+                Some(&(store, session.id.to_string(), attached)),
             )?;
             assert!(result?.status.success());
             assert!(alive && unchanged);

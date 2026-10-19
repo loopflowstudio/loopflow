@@ -54,7 +54,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .step:
             self = .step(
                 flow: try container.decode(String.self, forKey: .flow),
-                flowLfProcessId: try container.decode(String.self, forKey: .flowLfProcessId),
+                flowLfProcessId: StructuredIdentity.uuid(try container.decode(String.self, forKey: .flowLfProcessId)),
                 step: try container.decode(String.self, forKey: .step),
                 node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
@@ -146,6 +146,16 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
         case worktree, unavailable
         case machineId = "machine_id"
         case taskId = "task_id"
+    }
+}
+
+extension SessionWorkspace {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        machineId = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .machineId), "home_")
+        worktree = try values.decode(String.self, forKey: .worktree)
+        taskId = (try values.decodeIfPresent(String.self, forKey: .taskId)).map { StructuredIdentity.prefixed($0, "task_") }
+        unavailable = try values.decodeIfPresent(String.self, forKey: .unavailable)
     }
 }
 
@@ -247,4 +257,34 @@ public struct TaskSessionGroups: Sendable, Equatable {
 public struct SessionPage: Codable, Sendable, Hashable {
     public let entries: [SessionRecord]
     public let next: String?
+}
+
+extension SessionRecord {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
+        primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
+        attention = try values.decodeIfPresent(SessionAttention.self, forKey: .attention)
+        programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
+        agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
+        taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
+        taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
+        id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
+        interactive = try values.decode(Bool.self, forKey: .interactive)
+        work = try values.decodeIfPresent(WorkReference.self, forKey: .work)
+        workspace = try values.decodeIfPresent(SessionWorkspace.self, forKey: .workspace)
+        waveId = (try values.decodeIfPresent(String.self, forKey: .waveId)).map { StructuredIdentity.uuid($0) }
+        workPath = try values.decodeIfPresent(String.self, forKey: .workPath)
+        actions = try values.decode([SessionAction].self, forKey: .actions)
+        title = try values.decode(String.self, forKey: .title)
+        titleSource = try values.decode(SessionTitleSource.self, forKey: .titleSource)
+        flowMembership = try values.decode(SessionFlowMembership.self, forKey: .flowMembership)
+        detail = try values.decode(String.self, forKey: .detail)
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        cwd = try values.decode(String.self, forKey: .cwd)
+        state = try values.decode(SessionState.self, forKey: .state)
+        readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
+        openArgv = try values.decode([String].self, forKey: .openArgv)
+        terminalIds = try values.decode([String].self, forKey: .terminalIds)
+    }
 }

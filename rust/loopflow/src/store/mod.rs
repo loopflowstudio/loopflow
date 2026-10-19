@@ -9,6 +9,7 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+mod canonical_ids;
 pub(crate) mod changes;
 mod chapters;
 mod children;

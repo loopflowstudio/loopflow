@@ -26,6 +26,8 @@ pub(crate) fn read_project_binding(
 
 // Selection accepts exact saved identities; display names and slugs never select a plan.
 fn resolve_project_id(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
+    let canonical = crate::id::canonical_prefixed(&crate::id::canonical_uuid(project), "proj_");
+    let project = canonical.as_str();
     let id: Option<String> = conn
         .query_row(
             "SELECT id FROM projects WHERE wave_id=?1 AND (id=?2 OR external_project_id=?2)",

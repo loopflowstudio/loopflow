@@ -40,16 +40,16 @@ pub struct WorkActivityEntry {
 pub enum WorkActivityFact {
     WorkCreated,
     InputCaptured {
-        session_id: String,
+        session_id: crate::id::LfSessionId,
         captured: i64,
     },
     InputCompletionRecorded {
-        session_id: String,
+        session_id: crate::id::LfSessionId,
         captured: i64,
         status: String,
     },
     ProviderHistoryRecorded {
-        session_id: String,
+        session_id: crate::id::LfSessionId,
         captured: Option<i64>,
         reference: crate::session_record::ProviderHistoryReference,
         lf_process_id: Option<crate::id::LfProcessId>,

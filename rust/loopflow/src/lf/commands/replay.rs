@@ -276,7 +276,7 @@ for line in sys.stdin:
             .session_for_artifact(&source_id)
             .unwrap()
             .unwrap();
-        assert_ne!(session.id, source_id);
+        assert_ne!(session.id.as_str(), source_id);
         // The replaying invocation and its capture share this fixture's store.
         let child_id = crate::journal::with_test_ledger(registry.clone(), || {
             replay_at(home.path(), &session.id)

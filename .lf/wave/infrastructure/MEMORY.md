@@ -64,20 +64,30 @@ startup also waits without a cutoff; viewer and release publication policies sta
 
 ## Native terminal diagnostics (LOO-501/508, 2026-10-18)
 
-Jack Heart authorized repair/delivery preserving editing, diagnostics and native
-history; account changes remain outside scope. OpenCode's private provider stderr
-log remains intact. LOO-501 evidence and limits: `036008ec26:.lf/wave/infrastructure/MEMORY.md`,
-this heading.
+Jack Heart authorized repair/delivery preserving editing, diagnostics and history;
+account changes remain outside scope. LOO-501 evidence:
+`036008ec26:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 LOO-508 reproduced raw Loopflow output across a Codex draft, not destroyed input.
 Tracing alone misses direct writes, inherited helpers and waiting launchers.
-The candidate saves native descriptors and scopes parent output to announced
-private Process logs, restoring ordinary output afterward. Transport uses saved
-descriptors. Real Codex/local-model PTY evidence covers launch/reconnect, warning,
-Unicode editing/submission, resize, history and cleanup; Claude/OpenCode coverage
-uses stand-ins. This proves no installed repair or account access. Broader gate,
-Linux and delivery remain open in `scratch/loo-508.md`. Release's entry-point
-lesson applies to every waiting launcher.
+Merged #1595 (`e204ce6072`) scopes parent output to announced private Process logs;
+transport retains native descriptors and OpenCode its provider stderr log.
+Codex/local-model PTY evidence covers launch/reconnect, warning, Unicode editing,
+submission, resize, history and cleanup; Claude/OpenCode coverage
+uses stand-ins. Linux's 39 checks and Clippy passed; macOS pending-request and
+title/reconnect startup remained unresolved in branch evidence. Installed repair
+and account access remain unproved.
+
+LOO-516 (2026-10-18): Jack Heart requested durable private relay-failure evidence,
+not attribution of an unobserved cause. The working change retains bounded
+observed Session events with the original AgentProcess, operation and direction;
+unexpected renderer resets remain evidence even when disconnect handling returns
+success. Explicit client close stays quiet. Observations neither claim attachment
+nor settle turns; store failure must not end reconnect or reach the renderer.
+Keep observed-event identity independent of a native started turn: startup may
+fail before one exists. Real-Codex disposable startup faults and history reads
+prove retention, not the original installed reset's cause. Gate, CI and delivery
+remain open; Release's entry-point lesson applies.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -275,21 +285,13 @@ Original design: `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
-publication and review, later superseded by the landing request below. A machine
-is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
-opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
-Jack chose to discard version-1 Desktop caches. Jack Heart's October 7 LOO-401
-steer supersedes `installation` with `self` for install, doctor and skill export;
-`config user` reads the display name. Root `open` replaces desktop; screenshot
-and its supervisor are removed. The GUI-browser capture prohibition and independent
-Desktop snapshot remain. No aliases; short install/doctor/user commands stay.
-Jack Heart accepted PR #1494 and advancement through shipping. LOO-401 supplies
-LOO-397's command map. Released gates,
-receipts and jobs pin `~/.lf-machine/install` and the promotion lock path; no
-relocation is proved. Recovery uses `install` for retained binaries. Cron reads
-released JSON keys; historical payloads survive.
-Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
+Jack Heart accepted #1494's rename/shipping and discarded version-1 Desktop caches.
+A Machine is one OS user/data directory; Home/provider paths, cron, selection keys
+and released JSON retain their bytes. LOO-401 owns the command map, with no aliases;
+GUI-browser capture remains prohibited and independent Desktop snapshots remain.
+Gate/lock relocation is unproved. Superseded command/rename details:
+`888509b3ff71f1afbeea3bf951bf1bd588bc11eb:.lf/wave/infrastructure/MEMORY.md`,
+this heading, and `06e88761d:wave/infrastructure/MEMORY.md`.
 
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report
@@ -301,12 +303,9 @@ added machines may receive foreground credentials.
 OpenSSH owns destination syntax. Exact-frontier fixtures seed released
 SQL. Local source proofs establish no installed migration or configured remote
 continuity. Release schedules retain original ownership and activation.
-Release's operation-entry lesson also applies to command removal: reject the retired
-option beneath a valid current owner; an unknown owner can produce a false pass.
-Root words may resolve to authored skills; public lookup proves builtin removal.
-After #1489, Machine discovery covers id/add/list/status/rename/remove; Flow
-normalization must not restore the removed SSH owner path.
-Renamed installation entry proofs passed in disposable Linux OS accounts.
+Test retired options beneath valid owners; root words may resolve to skills.
+Flow normalization must not restore SSH ownership. Disposable Linux accounts
+prove renamed installation entry only.
 
 Jack Heart's PR #1489 review permits private OpenSSH sharing, a default-yes
 first-install offer and recovery hints. Existing lf is never replaced; status,
@@ -454,13 +453,15 @@ Superseded migration/receipt cutover details and prior proof references remain a
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 Five Python gate cases await CI; installation remains unproved.
 
-## Terminal conversation recovery (curated 2026-10-17)
+## Terminal conversation recovery (curated 2026-10-18)
 
-Jack Heart authorized both repairs through landing. LOO-409's discarded receipt,
-lf-8fed729's launch/retry invariants, implementation choices and stand-in proofs:
+Jack Heart authorized landing. LOO-409/lf-8fed729 evidence:
 `28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
-this heading. LOO-499 supersedes the ensure/replace entry points. Installed recovery
-of the two reported Sessions and real Codex interaction remain unproved.
+this heading. LOO-499 supersedes ensure/replace.
+LOO-512: fenced captured-input receipts and drained startup replies prevent replay.
+Candidate, 0.14.5 and 0.14.6 PTY faults preserve exact drafts/history, proving no
+original-reset repair. Incident records lack its initiating error; installed
+recovery remains unproved.
 Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)

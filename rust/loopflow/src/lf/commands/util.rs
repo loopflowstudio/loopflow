@@ -93,7 +93,9 @@ pub(crate) fn resume_session_with_env(
         config.agent(),
     );
     if let Some(provider) = provider_session {
-        config.task_prompt.clear();
+        if session.provider.as_deref() != Some("codex") {
+            config.task_prompt.clear();
+        }
         config.provider_account_id = provider.account_id.clone().or(config.provider_account_id);
     }
     config.env.extend(extra_environment.clone());
@@ -818,12 +820,26 @@ async fn serve_codex_native(
     closed_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<()> {
     use crate::harness::{
-        codex::CodexHarness, codex_connection::CodexConnection, ApprovalPolicy, Harness,
+        codex::CodexHarness,
+        codex_connection::{CodexConnection, NativeInput, NativeSubmission},
+        ApprovalPolicy, Harness,
     };
 
+    let (store, session, attachment) = &owner;
+    let mut connection = CodexConnection {
+        store: store.clone(),
+        session_id: session.clone(),
+        thread_id: launch
+            .resume_token
+            .clone()
+            .or(store.session_thread(session)?),
+        attachment: Some(attachment.clone()),
+        account_id: launch.provider_account_id.clone(),
+    };
+    connection.ensure_thread_resolved()?;
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
-    harness.set_agent_session(launch.resume_token.clone());
+    harness.set_agent_session(connection.thread_id.clone());
     harness.set_provider_account_id(launch.provider_account_id.clone());
     // No turn is sent on this bootstrap connection. Close it before
     // the UI connects so it cannot answer the UI's approvals.
@@ -840,14 +856,8 @@ async fn serve_codex_native(
         .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
     let thread = params["threadId"].as_str().map(AgentSessionId::from);
     harness.stop().await?;
-    let (store, session, attachment) = &owner;
-    let connection = CodexConnection {
-        store: store.clone(),
-        session_id: session.clone(),
-        thread_id: thread.clone(),
-        attachment: Some(attachment.clone()),
-        account_id: account.clone(),
-    };
+    connection.thread_id = thread.clone();
+    connection.account_id = account.clone();
     // Recover saved history before opening the UI, without replaying its input.
     if thread.is_some() {
         tokio::time::timeout(
@@ -857,14 +867,11 @@ async fn serve_codex_native(
         .await
         .context("Codex native history recovery timed out")??;
     }
-    let initial = std::sync::Arc::new(tokio::sync::Mutex::new(
-        crate::harness::codex_connection::NativeInput {
-            params: Some(params),
-            text: (thread.is_none() && !launch.task_prompt.is_empty())
-                .then(|| launch.task_prompt.clone()),
-            context: launch.conversation_context.clone(),
-        },
-    ));
+    let initial = std::sync::Arc::new(tokio::sync::Mutex::new(NativeInput {
+        params: Some(params),
+        text: connection.recover_input(&launch.task_prompt)?,
+        context: launch.conversation_context.clone(),
+    }));
     let directory = tempfile::tempdir()?;
     let relay = directory.path().join("client.sock");
     let listener = tokio::net::UnixListener::bind(&relay)?;
@@ -893,9 +900,15 @@ async fn serve_codex_native(
                 });
             }
             result = clients.join_next(), if !clients.is_empty() => {
-                if let Some(result) = result { result?.context("Codex native terminal connection failed")?; }
+                // Each connection retains its own diagnostic. Failure never closes
+                // the listener needed by the native client's reconnect.
+                let _ = result.expect("client set is nonempty");
             }
         }
+    }
+    connection.ensure_thread_resolved()?;
+    if connection.submission()? == Some(NativeSubmission::InputDispatched) {
+        bail!("Codex initial input was dispatched without acknowledgement; resume saved history before sending again");
     }
     if initial.lock().await.text.is_some() {
         bail!(

@@ -448,6 +448,11 @@ lf context --task EXP-12 --json     # effective context limits, sources and usag
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
 
+`lf history show SESSION` also prints private Codex relay failures with their
+AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
+the first 16 failures per captured input, with each error capped at 2048 bytes;
+explicit client closes stay quiet. These observations never settle a turn.
+
 `lf connect` opens the repository, Wave or Task's ongoing conversation for this
 checkout, creating one when absent. `resume` is an exact alias. Explicit `--repo`,
 `--wave`, `--task`, or a Session ID overrides the checkout's scope. Unassociated

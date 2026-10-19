@@ -1,7 +1,6 @@
 # Agreed UX changes — October 18 (evening)
 
 Jack Heart asked a pursue worker to make the UX changes agreed in this review.
-Source statements are quoted in `questions.md` and `dashboard-continuity-review.md`.
 
 ## 1. Unstarted Task tiles offer Start
 
@@ -11,7 +10,7 @@ click to start the system”.
 
 - Where a started Task shows its primary Session (Dashboard tile or zoomed Task
   workspace), an unstarted Task shows a start offer in that same slot, styled like
-  LOO-491's “move this conversation here” offer. Reuse that view; don't build a
+  LOO-491's move-here offer. Reuse that view; don't build a
   second one.
 - Clicking it starts the Task through the existing start path (the same one the
   CLI/Desktop already uses to start Work). Selection, query membership and opening

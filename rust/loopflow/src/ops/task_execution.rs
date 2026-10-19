@@ -44,7 +44,15 @@ pub(crate) async fn task_execution_and_flow(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<(TaskExecutionSnapshot, Option<FlowProcessDetail>)> {
-    let Some(flow) = store.sqlite.task_flows(task_id)?.pop() else {
+    execution_of_latest_flow(store, store.sqlite.task_flows(task_id)?.pop()).await
+}
+
+/// Execution and the Flow record of a Task whose latest Flow is already read.
+pub(crate) async fn execution_of_latest_flow(
+    store: &SharedStore,
+    flow: Option<FlowProcess>,
+) -> StoreResult<(TaskExecutionSnapshot, Option<FlowProcessDetail>)> {
+    let Some(flow) = flow else {
         return Ok((
             TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,

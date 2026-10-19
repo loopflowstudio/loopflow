@@ -903,6 +903,7 @@ struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     machines: Vec<crate::durable::Machine>,
     local_machine: crate::durable::MachineId,
+    latest_flows: HashMap<crate::durable::TaskId, crate::ops::flow_process::FlowProcess>,
 }
 
 impl SharedTaskReads {
@@ -914,6 +915,7 @@ impl SharedTaskReads {
             checkouts,
             machines: store.machines().await?,
             local_machine,
+            latest_flows: store.sqlite.latest_task_flows()?,
         })
     }
 }
@@ -1310,8 +1312,11 @@ async fn snapshot_task_detail(
     let pr = store.active_task_pr(&task.id).await?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, flow_record) =
-        crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
+    let (execution, flow_record) = crate::ops::task_execution::execution_of_latest_flow(
+        store,
+        shared.latest_flows.get(&task.id).cloned(),
+    )
+    .await?;
     let status = store.task_state(&task.id).await?;
     let pending = crate::ops::task::completion_pending(store, task)?;
     let started = store.task_started(&task.id).await?

@@ -19,9 +19,15 @@ Accepted by Jack Heart on October 18:
 
 - Ordinary navigation addresses Work: `loopflow://loopflow/task/LOO-507`, without
   an absolute repository path or Session identity.
-- Prefer installed Loopflow Desktop, then another terminal/workspace in the
-  current cmux, hrdr/Herder or Rex host, then a plain terminal. Explicit host
-  selection wins. Desktop launch/control is macOS-only; generic opening is not.
+- Open where Jack is (revised by Jack Heart in concept review, October 18,
+  superseding the earlier Desktop-first order): when the caller is inside cmux,
+  Herdr or Rex, open beside it in that host; otherwise Loopflow Desktop when
+  installed, then a plain terminal. Agent commands from a cmux conversation open
+  in cmux; Herdr clicks open in Herdr; a conversation in Desktop opens in
+  Desktop (Jack Heart: "also desktop if you're in desktop"); OS-dispatched
+  clicks and headless runs go to Desktop. Explicit `--host` wins
+  (`--host desktop` for dogfooding or parity from a cmux shell). Desktop
+  launch/control is macOS-only; generic opening is not.
 - Keep `[LOO-489 · Enable the multitask navigation experience](destination)` as
   one clickable label. Disposition and an optional PR link sit beside it.
   Provider issue navigation remains a separate action.
@@ -540,8 +546,9 @@ The same clean Work URL is used for display, activation and copying. The
 registered handler delegates to the shared opener, which detects the local OS,
 Desktop installation and available host evidence at opening time. This makes the
 same address useful on different machines without embedding the producing
-Process or host. Explicit CLI host selection still wins; automatic order remains
-Desktop when supported/installed, identified current host, then plain terminal.
+Process or host. Explicit CLI host selection still wins; automatic order is the
+identified current host, then Desktop when supported/installed, then a plain
+terminal.
 
 Use two entry paths to that one dispatcher. A host-native click callback or
 `lf open URL` can supply caller/terminal context directly. The OS URL receiver
@@ -701,6 +708,25 @@ Desktop launch, or a local fallback when the execution owner is unavailable.
 
 ## Remaining implementation — one complete delivery
 
+**Accepted, not built (concept review, October 18).** Jack Heart chose
+"where you are" over "installed preference": reorder `route()` in `open.rs` so
+Herdr/cmux context precedes Desktop. Cut over together: the `--host` help text,
+`docs/lf.md`/`lf-reference.md` examples, the skills' destination wording, and
+`work_open_tests` (a cmux caller with Desktop present opens in cmux; an OS
+click with host context stripped still reaches Desktop). The link receiver and
+Desktop's scheme ownership are unchanged. Desktop becomes a detected current
+host: its terminals carry a Desktop marker and also drop inherited `HERDR_*`
+(today only `CMUX_*` is stripped in `ProcessEnvironment.swift`, so a Desktop
+launched from Herdr would route its conversations to Herdr). Test: a Desktop
+terminal with inherited Herdr variables opens in Desktop. Linux (Jack Heart asked, October 18): Herdr is
+detected the same way there, since `in_herdr()` reads only `HERDR_*` and has no
+platform gate, and `install_herdr` runs on every OS; add a Linux test where a
+Herdr caller opens in Herdr. cmux is macOS-only, so Linux needs no cmux branch.
+Linux order: the Herdr you're in, then a plain terminal (in place when typing). Clicks are unchanged: a click without per-activation
+context has no "where", so it goes to Desktop. Tradeoff accepted: Desktop gets
+fewer automatic opens from cmux sessions, which the Desktop KR must earn
+through `--host desktop` or by working in Desktop.
+
 Built in the first pass (October 18):
 
 - `work/link.rs`: the one Work address parser/formatter (URI component
@@ -790,14 +816,13 @@ draft, correct owner, truthful receipt, at most one focus; qualified links pick
 one repository, ambiguous links change nothing; same-Session, other-Session-on-
 same-Task and missing-caller relations.
 
-Covered (October 18): `work_open_tests` (10) — folder-name links, ambiguity,
+Covered (October 18): `work_open_tests` (11) — folder-name links, Wave-less standalone Task, ambiguity,
 cmux/Herdr dispatch, refused host, Linux auto, available-without-question and
 running tool, live-workspace reopen, race/repeat, conversation relations,
 unreachable owner; `WorkOpeningCLITests` — ambiguity and Task/Wave delivery
-through Swift routing. Not yet a test: CI-running-while-available (needs a
-GitHub checks stand-in; the opener reads no Task conditions, so this holds
-structurally) and a Wave-less standalone Task by short name. Gate adds them or
-records the gap.
+through Swift routing. Gap (gate, accepted): CI-running-while-available has no
+test — it needs a GitHub checks stand-in, and the opener reads no Task
+conditions, so it holds structurally.
 
 Gate commands (new test module/suite names are implementation targets):
 

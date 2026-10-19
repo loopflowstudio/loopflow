@@ -347,10 +347,22 @@ Implemented (checkpoint `6fddd0a021` plus pass 6):
 Remaining: gate's full matrix below; CI's disposable-install and Linux
 case-sensitive runs. Wave memory note proposed in `questions.md`.
 
-Risk to watch: 137 enforcement triggers run on every write to hot tables
-(`session_events`, `processes`). Each evaluates a ≤10-row CTE; expected cost is
-microseconds per insert. If gate's suite slows measurably, narrow enforcement to
-primary/reference columns rather than dropping it.
+Storage enforcement (narrowed 2026-10-18): every store open validates the full
+product schema, so each added schema object costs launch rows. The agent-startup
+launch budget (25,000 rows; main 22,212) failed at 31,166. Two causes, both fixed:
+`create_process_context` opened an extra ledger per lf process for the Trace
+locator (now only for an inherited Trace whose canonical directory is absent,
+reusing the open ledger), and 117 added schema objects. Enforcement now omits
+what other guards already cover: columns whose only structured values are FK
+references (the store's foreign keys match canonical owners exactly), update
+triggers whose remaining columns are primary-key members, update triggers on
+tables the runtime never updates (`task_events`, `project_events`,
+`task_deletions`, `task_issue_identities`, `tool_responses`,
+`planning_peer_changes`) or that released guards make immutable
+(`task_admissions`), and the duplicate Session-ID pair. 63 objects remain; the
+launch reads 24,903 rows. That margin is thin: a further schema object costs
+about 42 launch rows. Legacy PID-named receipts again prune through their
+recorded Process when no retained locator owns the file.
 
 ## Done when
 

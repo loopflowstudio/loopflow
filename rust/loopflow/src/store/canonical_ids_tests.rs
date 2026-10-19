@@ -904,6 +904,13 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         .to_string()
         .contains("canonical identity"));
     assert!(conn.execute("UPDATE tasks SET admission_authority=json_set(admission_authority,'$.machine_id',upper(json_extract(admission_authority,'$.machine_id')))",[]).unwrap_err().to_string().contains("canonical identity"));
+    // References need no trigger: the store's foreign keys match canonical owners exactly.
+    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    assert!(conn
+        .execute("UPDATE task_workflows SET task_id=upper(task_id)", [])
+        .unwrap_err()
+        .to_string()
+        .contains("FOREIGN KEY"));
 }
 
 #[test]

@@ -802,10 +802,19 @@ fn create_process_context(
             })
             .and_then(|root| {
                 ensure_journal_ignored(&root)?;
-                let retained = open_ledger()
-                    .and_then(|store| store.journal_trace_locator(&trace_id))
-                    .map_err(std::io::Error::other)?;
-                let dir = traces_root(&root).join(retained.as_deref().unwrap_or(trace_id.as_str()));
+                let mut dir = traces_root(&root).join(trace_id.as_str());
+                // Only an inherited Trace from before canonical storage can retain
+                // another directory name; a minted or already-present one cannot.
+                if !minted_trace_id && !dir.is_dir() {
+                    let retained = ledger
+                        .clone()
+                        .map_or_else(open_ledger, Ok)
+                        .and_then(|store| store.journal_trace_locator(&trace_id))
+                        .map_err(std::io::Error::other)?;
+                    if let Some(retained) = retained {
+                        dir = traces_root(&root).join(retained);
+                    }
+                }
                 fs::create_dir_all(&dir)?;
                 Ok(dir)
             }) {
@@ -1240,12 +1249,20 @@ pub(crate) fn prune_process_receipts_at(
         {
             continue;
         }
-        let Some(locator) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
+        let retained = match path.file_stem().and_then(|stem| stem.to_str()) {
+            Some(locator) => store
+                .process_for_receipt(locator)
+                .map_err(std::io::Error::other)?,
+            None => None,
         };
-        let record = store
-            .process_for_receipt(locator)
-            .map_err(std::io::Error::other)?;
+        // Earlier receipts were named by PID; their recorded Process owns them.
+        let record = match retained {
+            Some(record) => Some(record),
+            None => match LfProcessId::parse(&receipt.lf_process_id) {
+                Ok(id) => store.process(&id).map_err(std::io::Error::other)?,
+                Err(_) => None,
+            },
+        };
         if !record.is_some_and(|record| {
             receipt.matches_process(record.id.as_str(), record.trace_id.as_str())
                 && record.completed_at.is_some()

@@ -1,6 +1,6 @@
 # Store structured IDs canonically and accept any casing
 
-Status: accepted outcome; implementation incomplete, reconciled 2026-10-17. Jack Heart's product direction remains accepted. The metric evidence representation is implemented: the released-fixture proof separates original hashed evidence from canonical Work association without changing wire shapes or reminting observations. The filesystem slice and metric/Wave relational slice remain internal; constructors, complete SQL/JSON conversion, CLI/remote and Swift consumers are unfinished. This branch is not ready for publication. No product decision is outstanding.
+Status: accepted outcome; implementation incomplete, reconciled 2026-10-18. Jack Heart's product direction remains accepted. The autonomous Flow `14b66dc9` died in implement pass 5 without an exit record; checkpoint `6fddd0a021` preserves its work and Jack Heart directed continuing the remaining cut from that checkpoint. Implemented: filesystem authority, metric evidence, one prefixed-ID mechanism with normalizing constructors/serde, `LfSessionId` on `LfSession`, the complete relational and declared-JSON conversion draft with storage-enforcement triggers, planning-peer collision checks, and Swift identity helpers. Unfinished: one failing command proof, Session/Linear string propagation, selector patch removal, remote/Desktop acceptance, docs and isolated installation. This branch is not ready for publication. No product decision is outstanding.
 
 During LOO-499 review on October 17, Jack Heart requested case-invariant IDs everywhere, including Linear IDs and normalized storage. Later that day Jack Heart authorized autonomous planning, implementation, verification, publication and landing, superseding the earlier design/demo/merge review boundary. The selected Flow is kickoff → pursue → ship.
 
@@ -304,7 +304,7 @@ Affected consumers include store readers/writers, CLI selectors/history, Task re
 
 Delete — do not maintain:
 
-* Duplicate normalization in `durable_id!`/`prefixed_uuid_id!`; preserve public domain types/error contracts around one implementation.
+* Removed: `durable.rs::durable_id!` and `child.rs::prefixed_uuid_id!`; `id.rs::prefixed_uuid_id!` is the one implementation, preserving each domain's error type.
 * Removed from metric evidence: shared raw `MetricIdentity` hash/Work representation and direct Wave field construction. Preserve the original `MetricObservationIdentity` hash input and canonical contract association.
 * Removed `metrics.rs::select_current` and separate history scans: `MetricObservationEvidence::from_history` selects by `(source_time, original_digest)` while collecting instrument/qualification evidence. Preserve ordering, qualification and released reimport tests on this path.
 * Unnormalized `from_raw` and derived serde escape paths. Remove redundant constructors or route required adapters through the domain owner.
@@ -316,13 +316,60 @@ Excluded: changing names/slugs/paths, UUID punctuation, legacy prefixes, provide
 
 ## Internal sequence and remaining work
 
-One indivisible delivery. Filesystem authority and metric evidence have focused proofs; full canonical identity behavior remains unfinished. No separate publication of these slices. Main #1586 is integrated. Scalar, historical JSON and collision inventories above specify the remaining cut; their implementation and full conversion acceptance are outstanding.
+One indivisible delivery; no separate publication of slices. Main #1586 is integrated.
 
-1. Preserve the implemented filesystem cut and its passing Trace collision, real-claim dispatch, receipt mismatch and guard-failure proofs. Extend the fixture with the actual final SQL conversion. In-flight provider transport across upgrade and isolated installation remain required; do not reintroduce identity-derived file lookups.
-2. **Close construction and storage together:** consolidate normalization; cut over constructors/serde/SQL and Session/Linear/planning string boundaries; author the single draft and populated released fixture. Include trigger restoration, collision rollback, peer reimport, opaque tokens and active-claim counterexamples. Focused new test prefix: `canonical_ids`.
-3. Cut over shared selectors, local/remote ingress, history and authored/import boundaries; remove comparison patches. Add real-command/remote scenarios against the migrated fixture. Preserve CLI shapes and LOO-499 connect behavior.
-4. Cut over Swift identity/cache boundaries and shared fixtures. Verify selection/panes and opaque bytes through real CLI transport. Update user/API documentation.
-5. Run acceptance and review every inventory entry. Unresolved noncanonical consumers remain unfinished, not exemptions.
+State at checkpoint `6fddd0a021` (inspected 2026-10-18):
+
+* **Done.** `id.rs` owns `canonical_uuid`, `canonical_prefixed`, `canonical_session`,
+  `canonical_task_identifier`, `canonical_task_selector`, serde helpers and the single
+  `prefixed_uuid_id!`; `durable_id!` and `child.rs`'s copy are deleted. Typed
+  constructors, `from_raw` and deserialization normalize; historical non-UUID
+  strings keep bytes. `LfSessionId` exists and types `LfSession.id`.
+* **Done.** The draft (≈5.2k lines) copies every inventoried owner into temp tables,
+  maps values per domain (`uuid`, prefixes, `session`, `label`, `task_or_uuid`,
+  `project_or_uuid`), checks collisions into `canonical_identity_conflicts`, updates
+  owners and declared JSON paths, restores guards, then installs 137 per-table
+  insert/update `canonical identity required: <table>` triggers. The SQL was
+  generated by a script that was not retained: edits must stay consistent across
+  every trigger by hand; compress may factor repeated `CASE` text but each trigger
+  must remain self-contained SQL (no Rust SQL function — schema generation and
+  older readers run plain SQL).
+* **Done.** `planning_exchange.rs` rejects normalized key/predecessor collisions and
+  changed winners; peer reimport keeps original mutations. Swift
+  `StructuredIdentity` mirrors the Rust domains for workspace/multiplexer keys.
+* **Remaining**, in order:
+
+1. Repair `canonical_ids_commands_read_the_upgraded_work_and_native_history`: its
+   fixture `tasks` row omits `issue_description`, nullable since `0.11.036` but read
+   as `String`; set it in `canonical_ids_work.sql` (production writers always set
+   it, so this is a fixture gap, not a reader change). Extend that test to the full
+   demo: uppercased Linear UUID selector, uppercased Session ID for `session
+   history`, and a Process/Flow selector, each emitting canonical IDs.
+2. **Session and Linear string boundaries.** Propagate `LfSessionId` through
+   `session.rs`/`session_record.rs` `session_id: String` fields, Process/Session event
+   references and store readers; route Linear Initiative/Team/comment/attachment/
+   assignee strings through `canonical_uuid` at response, binding and persistence
+   boundaries. Audit the 85 `from_raw` call sites: each either becomes `parse` or
+   is a store read that the triggers already guarantee canonical.
+3. **Selectors.** `children.rs::resolve_task_id_in` canonicalizes then still
+   strips exact `lf-`/`task_` and lowercases again; collapse to one domain call.
+   Same for Session lookup in `sessions.rs`/`human_session.rs`: canonical Session
+   first, original selector to native fallback. Remote Task routing
+   (`ops/task/remote.rs`) and history/project/wave selectors go through the same
+   helpers. Preserve ambiguity and LOO-499 connect behavior.
+4. **Swift.** Add the shared DTO fixture case (mixed-case IDs decode to canonical,
+   native IDs byte-exact) and the CLI-transport scenario using
+   `LOOPFLOW_TEST_LF`; re-key dictionaries without dropping panes.
+5. **Docs and installation.** `docs/architecture-reference.md` and the relevant
+   CLI README state canonical forms and opaque exceptions; add the
+   noncanonical-live-owner case to `scripts/test_task_installation.py` (CI owned).
+6. Review every inventory row against the draft and triggers. A noncanonical
+   consumer still found is unfinished work, not an exemption.
+
+Risk to watch: 137 enforcement triggers run on every write to hot tables
+(`session_events`, `processes`). Each evaluates a ≤10-row CTE; expected cost is
+microseconds per insert. If gate's suite slows measurably, narrow enforcement to
+primary/reference columns rather than dropping it.
 
 ## Done when
 
@@ -360,4 +407,4 @@ the original digest and ignores unrelated metric evidence before hashing.
 Migration preflight reuses `id::canonical_uuid` so its change detection cannot
 drift from the retained punctuation/non-UUID policy.
 
-Check result (2026-10-17): `uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(canonical_ids) | test(metrics)' --no-tests fail < /dev/null` — prior PASS (49 tests after reduction); prior `cargo fmt` and `cargo clippy --all-targets -- -D warnings` PASS retained; reconciliation changed prose only, with `git diff --check` PASS and `lf context` within both limits. Gate owns broader regression and isolated installation after full conversion.
+Check result (2026-10-18, `6fddd0a021`): `cargo check -p loopflow --all-targets` PASS; focused `canonical_ids` proof 24/25 PASS, FAIL `canonical_ids_commands_read_the_upgraded_work_and_native_history` (`issue_description` NULL in fixture; remaining item 1). Gate owns broader regression and isolated installation.

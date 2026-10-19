@@ -14,8 +14,8 @@ to the released `session_<32 hex>` and bare 32-hex forms; other historical Sessi
 strings retain bytes. These decisions and remaining conversion work live in the
 [design](loo-506-store-structured-ids.md#filesystem-authority-and-evidence).
 
-The design owns the current implementation, historical JSON/collision inventory
-and remaining acceptance. Filesystem fixture rewrites prove no full conversion;
-metric tests exercise actual Wave relational conversion while retaining hashed
-evidence. Constructors, full storage conversion and consumers remain one unfinished
-cut. Main #1586 is integrated at `4ab8b24bbb`.
+The design owns the current implementation, inventory and remaining acceptance.
+October 18: pass 5's checkpoint `6fddd0a021` carries constructors and the full
+conversion draft; its generator script was not retained, so the draft is edited
+directly. Consumers (Session/Linear strings, selectors, remote, Swift, docs) remain.
+Main #1586 is integrated at `4ab8b24bbb`.

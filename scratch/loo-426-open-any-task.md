@@ -4,9 +4,9 @@ Status: design accepted, 2026-10-18; implementation built. Jack Heart
 accepted the product direction, the full vocabulary/availability
 recommendations, the public Work URI shape, the simplicity/integration boundary
 and agent-initiated opening below, then closed design review and authorized
-implementation through `pursue`. Three implementation passes (October 18) built
-everything under Remaining implementation; no build items remain. Rendered
-activation and the parity exercise remain demo evidence.
+implementation through `pursue`. Three passes (October 18) built everything
+planned; two acceptance tests remain. Rendered activation and the parity
+exercise remain demo evidence.
 
 ## Problem and accepted direction
 
@@ -675,10 +675,6 @@ timeouts, or polished links that the renderer cannot click. The plan deliberatel
 keeps selection and attachment in Rust, makes host observations non-authoritative,
 and carries rendered proof separately from fixture results.
 
-Review finding: Task dependency conditions and conversation availability are
-independent; next-action ownership must not drive this command. Another finding: pure URL parsing tests cannot
-prove dispatch from a terminal; the install/receiver boundary is required scope.
-
 ## Delete — do not maintain
 
 - Done: remove `DesktopCommand::Open` and its dispatch/explanation-only wrappers;
@@ -780,23 +776,28 @@ Built in the third pass (October 18):
 
 Compress (fifth): dropped unused `WorkUrl::kind`, narrowed module-only `pub`; `--lib work::link` 11 pass, clippy clean.
 
-Remaining: none planned. "Question" has no shared reader, so titles do not say it.
+Remaining build: none. "Question" has no shared reader, so titles do not say it.
+Remaining tests: two acceptance cases under Done when.
 
 ## Done when and gate checks
 
-Add a composed fixture using the built CLI and isolated Machine stores: two
-repositories share a folder name; one has a standalone Task, one Task executes
-on a simulated peer, three conversations are available (one with no question
-or review), and another has a running tool. Include a Task whose CI is running
-while its conversation is available. Seed an existing primary and active
-attachment. The real Rust resolver emits a Work URL consumed
-by production Swift routing; a host stand-in observes the terminal dispatch.
-Repeat and race opening. Assert one primary/worker, one retained Work destination,
-unchanged draft, correct execution owner, truthful receipt, no inference from CI
-status alone and at most one focus. Qualified links select exactly one repository; ambiguous
-links change nothing. Include same-Session, other-Session-on-same-Task and missing
-caller cases. Stand-ins isolate host/network effects; assertions concern resulting
-Work/Session state, displayed selection and draft, not just mock call sequences.
+Acceptance scenario, isolated Machine stores and the built CLI: same-named
+repositories, a standalone Task, a Task owned by an unreachable peer, three
+available conversations (one with no question), a running tool, a Task whose CI
+runs while its conversation is available, an existing primary and attachment.
+Repeat and race opening; assert one primary/worker, one destination, unchanged
+draft, correct owner, truthful receipt, at most one focus; qualified links pick
+one repository, ambiguous links change nothing; same-Session, other-Session-on-
+same-Task and missing-caller relations.
+
+Covered (October 18): `work_open_tests` (10) — folder-name links, ambiguity,
+cmux/Herdr dispatch, refused host, Linux auto, available-without-question and
+running tool, live-workspace reopen, race/repeat, conversation relations,
+unreachable owner; `WorkOpeningCLITests` — ambiguity and Task/Wave delivery
+through Swift routing. Not yet a test: CI-running-while-available (needs a
+GitHub checks stand-in; the opener reads no Task conditions, so this holds
+structurally) and a Wave-less standalone Task by short name. Gate adds them or
+records the gap.
 
 Gate commands (new test module/suite names are implementation targets):
 
@@ -828,4 +829,4 @@ checks remain demo/review evidence. The generic opener may report opening before
 input readiness; only owner/readiness evidence permits usable. No task completion,
 Workflow move or extra Flow follows merely from opening.
 
-Check (fourth pass): `work_open_tests::` 10, `--lib work::` 53, `terminal_title::` 3 pass with `LF_*` unset; clippy/fmt clean. Gate owns the full matrix.
+Check: fourth-pass `work_open_tests::` 10, `--lib work::` 53, `terminal_title::` 3 pass (`LF_*` unset); realign added none. Gate owns the matrix.

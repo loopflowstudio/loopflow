@@ -964,7 +964,15 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
             "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             "--json",
         ],
+        vec![
+            "task",
+            "status",
+            "FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF",
+            "--json",
+        ],
         vec!["session", "history", SESSION, "--json"],
+        vec!["history", "show", SESSION, "--json"],
+        vec!["history", "show", PROCESS, "--json"],
     ] {
         let mut command = std::process::Command::new(binary);
         for (name, _) in std::env::vars_os() {
@@ -993,7 +1001,16 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
             !json.contains("TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
             "{json}"
         );
+        assert!(!json.contains(PROCESS), "{json}");
+        if args[1] == "show" {
+            let canonical = args[2].to_ascii_lowercase();
+            assert!(json.contains(&canonical), "{json}");
+        }
         if args[0] == "task" {
+            assert!(
+                json.contains("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+                "{json}"
+            );
             assert!(
                 json.contains("task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 "{json}"

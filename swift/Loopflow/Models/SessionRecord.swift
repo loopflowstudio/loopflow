@@ -54,7 +54,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .step:
             self = .step(
                 flow: try container.decode(String.self, forKey: .flow),
-                flowLfProcessId: try container.decode(String.self, forKey: .flowLfProcessId),
+                flowLfProcessId: StructuredIdentity.uuid(try container.decode(String.self, forKey: .flowLfProcessId)),
                 step: try container.decode(String.self, forKey: .step),
                 node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
@@ -146,6 +146,16 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
         case worktree, unavailable
         case machineId = "machine_id"
         case taskId = "task_id"
+    }
+}
+
+extension SessionWorkspace {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        machineId = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .machineId), "home_")
+        worktree = try values.decode(String.self, forKey: .worktree)
+        taskId = (try values.decodeIfPresent(String.self, forKey: .taskId)).map { StructuredIdentity.prefixed($0, "task_") }
+        unavailable = try values.decodeIfPresent(String.self, forKey: .unavailable)
     }
 }
 
@@ -252,6 +262,7 @@ public struct SessionPage: Codable, Sendable, Hashable {
 extension SessionRecord {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
         attention = try values.decodeIfPresent(SessionAttention.self, forKey: .attention)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)

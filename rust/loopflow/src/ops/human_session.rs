@@ -310,6 +310,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         flow_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
@@ -1904,6 +1905,41 @@ mod tests {
             value.as_object_mut().unwrap().remove("id");
             assert!(serde_json::from_value::<super::SessionRecord>(value).is_err());
         }
+    }
+
+    #[test]
+    fn canonical_ids_session_wire_decodes_structured_ids_and_keeps_native_bytes() {
+        let fixture = include_str!("../../../../tests/fixtures/dto/canonical_ids_session.json");
+        let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
+        let wire = serde_json::to_value(&session).unwrap();
+        assert_eq!(
+            wire["open_argv"][3], "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "argv is opaque"
+        );
+        let mut fields = wire.clone();
+        fields.as_object_mut().unwrap().remove("open_argv");
+        let wire = fields.to_string();
+        for structured in [
+            "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "TASK_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC",
+            "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD",
+            "HOME_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+            "FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF",
+        ] {
+            assert!(!wire.contains(structured), "{structured}: {wire}");
+            assert!(wire.contains(&structured.to_ascii_lowercase()), "{wire}");
+        }
+        for opaque in [
+            "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+            "Turn-A",
+            "/Case/Worktree",
+        ] {
+            assert!(wire.contains(opaque), "{opaque}: {wire}");
+        }
+        let again: super::SessionRecord =
+            serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+        assert_eq!(again, session);
     }
 
     #[tokio::test]

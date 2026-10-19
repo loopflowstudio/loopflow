@@ -828,4 +828,4 @@ checks remain demo/review evidence. The generic opener may report opening before
 input readiness; only owner/readiness evidence permits usable. No task completion,
 Workflow move or extra Flow follows merely from opening.
 
-Check (2026-10-18, fourth pass, no code change): `work_open_tests::` 10 passed; `--lib work::` 53 and `terminal_title::` 3 passed with `LF_*` unset (earlier terminal_title failure was inherited env); clippy/fmt clean. Gate owns the full matrix.
+Check (fourth pass): `work_open_tests::` 10, `--lib work::` 53, `terminal_title::` 3 pass with `LF_*` unset; clippy/fmt clean. Gate owns the full matrix.

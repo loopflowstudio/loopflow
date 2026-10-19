@@ -75,51 +75,33 @@ struct LoopflowApp: App {
             .task { openCaptureViewIfNeeded() }
         }
         .windowStyle(.automatic)
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 800)
         .commands {
+            ConsoleCommands()
             CommandGroup(replacing: .appInfo) {
                 Button("About Loopflow") { openWindow(id: "about-loopflow") }
             }
 
             CommandGroup(replacing: .newItem) {
                 Button("Open Repo…") { openRepoPanel() }
-                    .keyboardShortcut("n", modifiers: .command)
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
             }
-            CommandGroup(after: .appSettings) {
-                Toggle("Autosave Task Files", isOn: $taskFilesAutosave)
-                Menu("Appearance") {
-                    ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
-                        Button { appearance.applyMode(mode) } label: {
-                            if appearance.selection.mode == mode {
-                                Label(mode.menuTitle, systemImage: "checkmark")
-                            } else { Text(mode.menuTitle) }
-                        }
-                    }
-                    Divider()
-                    Button("Choose Theme…") {
-                        appearance.beginPreview()
-                        openWindow(id: "appearance")
-                    }
-                }
-            }
-
-            CommandGroup(after: .saveItem) {
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts") { openWindow(id: "keyboard-shortcuts") }
                 Button("Snapshot for Review") {
                     snapshotCurrentWindow()
                 }
-                .keyboardShortcut("4", modifiers: [.command])
             }
 
             CommandMenu("Go") {
                 Button("Portfolio") {
                     openWindow(id: "portfolio")
                 }
-                .keyboardShortcut("0", modifiers: .command)
 
                 Button("Telemetry") {
                     openWindow(id: "telemetry")
                 }
-                .keyboardShortcut("1", modifiers: .command)
 
                 if !portfolioService.repos.isEmpty {
                     Menu("Move to Repo") {
@@ -133,10 +115,6 @@ struct LoopflowApp: App {
                     }
                 }
 
-                Button("Open Repo…") {
-                    openRepoPanel()
-                }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
 
@@ -166,11 +144,18 @@ struct LoopflowApp: App {
         }
         .defaultSize(width: 480, height: 240)
 
-        Window("Appearance", id: "appearance") {
-            ThemeChooser(appearance: appearance)
-                .modifier(AppAppearance(appearance: appearance))
+        Settings {
+            TabView {
+                ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
+                Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
+                    .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
+                DeliverySettingsView(query: registryQuery, portfolio: portfolioService)
+                    .tabItem { Label("Delivery", systemImage: "checkmark.circle") }
+                KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
+            }.modifier(AppAppearance(appearance: appearance))
         }
-        .defaultSize(width: 620, height: 560)
+        Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }
+            .defaultSize(width: 540, height: 480)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
@@ -290,7 +275,7 @@ struct LoopflowApp: App {
 /// Resolve every window from the app-owned theme, including native controls.
 struct AppAppearance: ViewModifier {
     let appearance: AppearanceStore
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     func body(content: Content) -> some View {
         let theme = appearance.effectiveTheme
@@ -308,7 +293,7 @@ struct AppAppearance: ViewModifier {
                         Text(notice).font(.caption)
                         Button("Choose Theme…") {
                             appearance.beginPreview()
-                            openWindow(id: "appearance")
+                            openSettings()
                         }
                     }
                     .padding(8).foregroundStyle(theme.palette.text)

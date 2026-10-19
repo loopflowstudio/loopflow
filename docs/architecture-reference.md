@@ -249,6 +249,12 @@ reviews, interactive and headless work. Default views select interactive
 conversations. `lf session list --available` selects conversations Available for a
 person, using the same Rust projection as Desktop. `session_activity` holds both
 the attached LfProcess's latest stream reading and an optional terminal-reported snapshot.
+Its optional preview carries bounded provider text, native thread/turn identity,
+source and observation time. Only the current live AgentProcess and attachment
+can project it. Provider selection changes clear it; a new Codex turn clears the
+previous excerpt before output arrives. Desktop applies a 30-second working-text
+lifetime without changing execution state; current Available results retain their
+source age. Missing or disconnected evidence uses a labeled summary.
 A recorded AgentProcess alone decides whether its Session is active: completed
 means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.

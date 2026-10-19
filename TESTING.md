@@ -566,12 +566,20 @@ For async model readers, keep generic values crossing actor boundaries
 `Sendable`. A newer local Swift compiler can accept code rejected by CI's
 toolchain; record `swift --version` with compile evidence when investigating
 concurrency diagnostics.
+Work stream fixtures must await the fields they consume: selection membership
+can arrive before planning supplies a Task's checkout.
 
 Keep native code compatible with CI's Xcode toolchain in both SwiftPM and Xcode
 builds. In particular, `isolated deinit` requires Swift 6.2; CI's Xcode 16.4
 cannot enable it even with an experimental feature flag. Put teardown that can
 run off-actor in a resource owner and exercise release from outside the main
 actor. A newer local compiler's pass does not establish older-toolchain support.
+Runtime `#available` checks do not make new SDK symbols compile on older Xcode.
+Gate macOS 26 toolbar APIs behind the matching compiler condition as well;
+CI's SwiftPM and Xcode builds verify the older-SDK path.
+Keep Mac-only view tests in whole-file platform-gated suites, then run
+`uv run python scripts/check_swift_multiplatform_boundaries.py`; a focused
+Swift test pass does not check source boundaries.
 
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
@@ -1226,6 +1234,11 @@ turns, provider cleanup, and preserved user settings. Provider output alone is
 not hook evidence: untrusted hooks do not run.
 It uses no account or login. This proves protocol
 launch composition; actual cmux tab tracking remains a separate acceptance check.
+On reconnect, the fixture types a Unicode draft, fails a stand-in cmux title
+refresh, resizes the PTY, edits and submits the draft. It checks the native model
+request and retained diagnostic file, and rejects raw Loopflow warnings in the
+terminal. `session_launch_contract` covers the same output boundary with
+deterministic Claude, Codex and OpenCode stand-ins.
 
 ### Released capture-history preservation
 

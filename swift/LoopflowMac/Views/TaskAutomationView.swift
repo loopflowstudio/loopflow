@@ -1,6 +1,36 @@
 import Loopflow
 import SwiftUI
 
+struct DeliverySettingsView: View {
+    let query: RegistryQuery
+    let portfolio: PortfolioService
+    @State private var repo = ""
+
+    private var paths: [String] {
+        Array(Set(portfolio.repos.map(\.path) + (repo.isEmpty ? [] : [repo]))).sorted()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !paths.isEmpty {
+                Picker("Repository", selection: $repo) {
+                    ForEach(paths, id: \.self) { path in
+                        Text(URL(fileURLWithPath: path).lastPathComponent).tag(path)
+                    }
+                }.padding(.horizontal, 20)
+                TaskAutomationView(query: query, repo: repo).id(repo)
+            } else {
+                Text("Open a repository to configure delivery checks.").padding(20)
+            }
+        }.padding(.vertical, 20)
+        .task {
+            repo = loadLoopflowState()?.selectedRepoPath ?? ""
+            await portfolio.refresh()
+            if repo.isEmpty { repo = portfolio.repos.first?.path ?? "" }
+        }
+    }
+}
+
 struct TaskAutomationView: View {
     let query: RegistryQuery
     let repo: String

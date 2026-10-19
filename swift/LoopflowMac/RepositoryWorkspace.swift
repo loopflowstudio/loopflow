@@ -118,7 +118,7 @@ final class WorkLinkRouter {
             openingScenes[path] = workspace.id
             openingScenes[workspace.path] = workspace.id
             var destination = link
-            if let link {
+            if let link, link.host == "task" {
                 let target = try TaskLink(url: link)
                 destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff, machine: target.machine, repository: target.repository).url
             }

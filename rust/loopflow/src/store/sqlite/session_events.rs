@@ -102,15 +102,15 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id)
-             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id,preview)
+             SELECT ?1,?2,?3,?4,?5,?6,?7,?8 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
              ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
                 program_status=CASE WHEN session_activity.agent_process_id IS excluded.agent_process_id THEN session_activity.program_status END,
-                agent_process_id=excluded.agent_process_id",
+                agent_process_id=excluded.agent_process_id,preview=excluded.preview",
             params![session, attachment.token, activity.observed_at,
-                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id],
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id, activity.preview.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         Ok(())
     }

@@ -1924,6 +1924,7 @@ mod attachment_tests {
         );
 
         let current = SessionActivity {
+            preview: None,
             observed_at: 100,
             open_tools: 1,
             pending_input: 0,
@@ -1955,6 +1956,7 @@ mod attachment_tests {
                     "conversation",
                     stale,
                     &SessionActivity {
+                        preview: None,
                         observed_at: 200,
                         pending_input: 1,
                         ..current.clone()

@@ -102,7 +102,7 @@ struct WorkspaceRetentionTests {
             throw RegistryQueryError("Unexpected operation")
         }
         _ = registry.sessionStore(repository: scene.id, repoPath: scene.path, query: noLaunch)
-        let draft = workspace.files(taskId: key.id, issue: key.id, cwd: scene.path, query: noLaunch)
+        let draft = workspace.files(issue: key.id, cwd: scene.path, query: noLaunch)
             .document("notes.md")
         draft.editor.string = "Unsubmitted text"
         let before = registry.inspect()
@@ -203,7 +203,7 @@ struct WorkspaceRetentionTests {
                 workspace.multiplexer.setCollapsed(paneId: filesPane.id, collapsed: true)
                 workspace.presentation.selectedSessionId = "session-\(index)"
                 workspace.presentation.content = .terminals
-                let files = workspace.files(taskId: key.id, issue: key.id, cwd: location.worktree, query: query)
+                let files = workspace.files(issue: key.id, cwd: location.worktree, query: query)
                 files.document("notes.md").editor.string = "Unsubmitted draft \(index)"
                 workspaces.append(workspace)
             }
@@ -224,7 +224,7 @@ struct WorkspaceRetentionTests {
         #expect(nextWindow.navigation.selectedSessionId == "session-11")
         for (index, workspace) in workspaces.enumerated() {
             #expect(reopened.retained(workspace.key) === workspace)
-            let files = workspace.files(taskId: workspace.key.id, issue: workspace.key.id,
+            let files = workspace.files(issue: workspace.key.id,
                                         cwd: "/checkout/\(index)", query: query)
             #expect(files.document("notes.md").editor.string == "Unsubmitted draft \(index)")
             nextWindow.select(workspace.key.reference)

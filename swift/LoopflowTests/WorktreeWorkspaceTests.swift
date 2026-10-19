@@ -39,7 +39,7 @@ struct WorktreeWorkspaceTests {
         let filesPane = panes.focusedPaneId
         panes.setCollapsed(paneId: filesPane, collapsed: true)
         panes.toggleZoom(sessionPane)
-        let files = workspace.files(taskId: "task", issue: "TASK", cwd: "/repo")
+        let files = workspace.files(issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "unfinished draft"
         let layout = panes.layout
@@ -86,13 +86,13 @@ struct WorktreeWorkspaceTests {
         #expect(registry.openWork == keys)
         let first = try #require(registry.retained(keys[2]))
         let shell = try #require(try first.newShell())
-        let document = first.files(taskId: "one", issue: "ONE", cwd: "/repo").document("draft.md")
+        let document = first.files(issue: "ONE", cwd: "/repo").document("draft.md")
         document.editor.string = "unfinished draft"
         first.multiplexer.toggleZoom(shell.id)
         let layout = first.multiplexer.layout
         let selected = first.multiplexer.focusedPaneId
         #if GHOSTTY_ENABLED
-        let view = registry.surfaces.view(for: .shell(shell.id, machineId: fixtureMachineId))
+        let view = registry.surfaces.view(for: shell.terminal!)
         #endif
         registry.hide(keys[2])
         #expect(!registry.openWork.contains(keys[2]))
@@ -105,13 +105,13 @@ struct WorktreeWorkspaceTests {
         #expect(first.multiplexer.zoomedPaneId == shell.id)
         #expect(document.editor.string == "unfinished draft")
         #if GHOSTTY_ENABLED
-        #expect(registry.surfaces.view(for: .shell(shell.id, machineId: fixtureMachineId)) === view)
+        #expect(registry.surfaces.view(for: shell.terminal!) === view)
         #endif
         for key in keys { registry.hide(key) }
         #expect(registry.selectedWork == nil)
         #expect(registry.openWork.isEmpty)
         #expect(first.multiplexer.layout == layout)
-        #expect(first.multiplexer.shellCommands[shell.id] == [])
+        #expect(first.multiplexer.layout.pane(for: shell.id)?.content.selectedShell?.command == [])
         #expect(registry.inspect().allSatisfy { !$0.isOpen && !$0.selected })
     }
 
@@ -121,7 +121,7 @@ struct WorktreeWorkspaceTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "unplaced")
         let workspace = registry.open(key, title: "Unplaced", location: nil)
         let before = workspace.multiplexer.layout
-        #expect(throws: RegistryQueryError.self) { try workspace.split(workspace.multiplexer.focusedPaneId, axis: .vertical) }
+        #expect(throws: RegistryQueryError.self) { try workspace.newShell() }
         #expect(workspace.multiplexer.layout == before)
         #expect(registry.selectedWork == key)
     }
@@ -181,45 +181,36 @@ struct WorktreeWorkspaceTests {
         #expect(fixtureWork(registry, fixtureWorkspace("/repo.design")) === design)
         #expect(design.multiplexer.layout == original)
         #expect(design.multiplexer.focusedPaneId == focus)
-        #expect(registry.key(containingShell: focus, machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
+        #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell!.id, machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
     }
 
-    @Test("A conversation launch does not replace a live shell or another conversation")
-    func launchingPreservesExistingPanes() {
+    @Test("Conversation launch adds a tab and undo never replays its command")
+    func launchingPreservesExistingPanes() throws {
         let store = MultiplexerStore()
         store.newShell()
-        let shell = store.focusedPaneId
+        let original = try #require(store.focusedPane.content.selectedShell)
         store.newShell(command: ["lf", "--interactive", ":", "hello"])
-        #expect(store.layout.allPanes.count == 2)
-        #expect(store.layout.pane(for: shell)?.content == .shell(location: nil))
-        #expect(store.shellCommands[shell] == [])
-        #expect(store.shellCommands[store.focusedPaneId]?.last == "hello")
-        store.close(store.focusedPaneId)
+        #expect(store.layout.allPanes.count == 1)
+        #expect(store.shell(original.id) == original)
+        #expect(store.focusedPane.content.selectedShell?.command?.last == "hello")
+        let pane = store.focusedPaneId
+        store.close(pane)
         store.undoClose()
-        #expect(store.shellCommands[store.focusedPaneId] == nil)
+        #expect(store.focusedPane.content.selectedShell?.command == nil)
     }
+
 }
 
-@Suite("Scope-aware conversations")
-struct ConversationLaunchTests {
-    @Test("Each zoom level binds its subject and keeps the configured destination")
-    func scopeDefaults() {
-        let cases: [(ConversationScope, [String], String)] = [
-            (.repo("/repo"), [], "repository"),
-            (.wave(repo: "/repo", id: "product"), ["--wave", "product"], "Wave"),
-            (.task(repo: "/repo.task", id: "LOO-123"), ["--task", "LOO-123"], "Task"),
-        ]
-        for (scope, binding, subject) in cases {
-            let launch = ConversationLaunch(scope: scope)
-            let command = launch.arguments(lf: "/App/lf")
-            #expect(Array(command.dropFirst(2).dropLast(2)) == binding)
-            #expect(command.last?.contains(subject) == true)
-            #expect(command.contains("--interactive"))
-            #expect(!command.contains("tui"))
-            #expect(!command.contains("ide"))
-            #expect(!command.contains("wave/operate"))
-            #expect(!command.contains("project/operate"))
-        }
+@Suite("Independent Task conversations")
+struct TaskConversationLaunchTests {
+    @Test("New conversation binds the Task without selecting an operating skill")
+    func taskContext() {
+        let launch = TaskConversationLaunch(task: "LOO-123")
+        #expect(launch.arguments(lf: "/App/lf") == [
+            "/App/lf", "--interactive", "--task", "LOO-123", ":", launch.prompt,
+        ])
+        #expect(launch.prompt.contains("Task"))
+        #expect(launch.prompt.contains("does not request an autonomous operating pass"))
     }
 }
 #endif

@@ -254,6 +254,7 @@ pub struct SessionPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
+    pub preview: Option<crate::session::SessionPreview>,
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
@@ -485,6 +486,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let provider = session.provider.clone().unwrap_or_default();
     SessionRecord {
+        preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
         program_status: session.program_status.clone(),
@@ -567,6 +569,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await?);
+    let _output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
     let mut child = spawn_session_process(&mut command, session.input_key()?).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
@@ -670,21 +673,25 @@ pub(crate) async fn open(
         Some(key) => store.sqlite.input_provider_session(key)?,
         None => None,
     };
-    if resume && provider_session.is_some() {
+    if provider_session.is_some() {
         if let Some(provider) = session.provider.as_deref() {
             if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
                 provider,
                 session.model.as_deref(),
                 crate::config::agent_override().as_deref(),
             ) {
-                mode.require_action(surface(store, session).await?.state)?;
-                drop(progress);
-                import(store, &session.id, &agent).await?;
-                let session = store
-                    .session(&session.id)
-                    .await?
-                    .ok_or_else(|| session_not_found(&session.id))?;
-                return surface(store, &session).await;
+                if !resume {
+                    conversation_log::read(&store.sqlite, session)?;
+                } else {
+                    mode.require_action(surface(store, session).await?.state)?;
+                    drop(progress);
+                    import(store, &session.id, &agent).await?;
+                    let session = store
+                        .session(&session.id)
+                        .await?
+                        .ok_or_else(|| session_not_found(&session.id))?;
+                    return surface(store, &session).await;
+                }
             }
         }
     }
@@ -1003,6 +1010,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         },
     };
     let mut reading = SessionRecord {
+        preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
         program_status: metadata.program_status.clone(),
@@ -1609,6 +1617,23 @@ mod tests {
     }
 
     #[test]
+    fn session_preview_preserves_native_provenance() {
+        let sessions: Vec<super::SessionRecord> =
+            serde_json::from_str(include_str!("../../../../tests/fixtures/dto/sessions.json"))
+                .unwrap();
+        let preview = sessions[0].preview.as_ref().unwrap();
+        assert_eq!(preview.provider_turn, "turn-fixture");
+        assert_eq!(preview.observed_at, 1700000000);
+        assert_eq!(
+            serde_json::from_value::<Vec<super::SessionRecord>>(
+                serde_json::to_value(&sessions).unwrap()
+            )
+            .unwrap(),
+            sessions
+        );
+    }
+
+    #[test]
     fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
         let session: super::SessionRecord = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/session_metadata.json"
@@ -1642,6 +1667,7 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            preview: None,
             program_status: None,
             agent_process_id: None,
             primary_scope: None,

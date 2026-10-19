@@ -302,10 +302,6 @@ public struct RegistryQuery: Sendable {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
-        _ = try await run(["wave", "workflow", "set", name, wave], cwd)
-    }
-
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust takes the Task's edge or its Project's workflow.
     public func runTask(issue: String, flow: String?, cwd: String?) async throws {
@@ -321,6 +317,11 @@ public struct RegistryQuery: Sendable {
     /// Put the Task at a node of its Workflow without running anything.
     public func moveTask(issue: String, node: String, cwd: String?) async throws {
         _ = try await run(["task", "workflow", "move", issue, node], cwd)
+    }
+
+    public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
+        let destination = wave.map { ["--wave", $0] } ?? ["--no-wave"]
+        _ = try await run(["task", "move", issue] + destination, cwd)
     }
 
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
@@ -441,7 +442,7 @@ public struct RegistryQuery: Sendable {
     /// choice is remembered as the Task's primary. External ownership is returned
     /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "ensure", "--task", issue, "--json"], cwd)
+        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -455,9 +456,11 @@ public struct RegistryQuery: Sendable {
     public func prepareSession(
         id: String,
         takeover: Bool = false,
+        agent: String? = nil,
         cwd: String? = nil
     ) async throws -> SessionRecord {
         let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
+            + (agent.map { ["--agent", $0] } ?? [])
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }

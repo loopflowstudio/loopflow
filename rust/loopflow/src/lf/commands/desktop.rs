@@ -51,20 +51,7 @@ pub struct DesktopSessionInspection {
     pub actions: Option<Vec<SessionAction>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkWorkspaceKind {
-    Repository,
-    Wave,
-    Task,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct WorkWorkspaceKey {
-    pub repository: String,
-    pub kind: WorkWorkspaceKind,
-    pub id: String,
-}
+pub use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DesktopContentLocation {
@@ -143,9 +130,6 @@ pub enum DesktopPaneAction {
     },
     FlowLog {
         task: String,
-    },
-    Split {
-        axis: DesktopSplitAxis,
     },
     Move {
         destination: DesktopPaneTarget,
@@ -273,8 +257,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "list"] => Some(schema::<DesktopInspection>()),
         ["desktop", "open"] => Some(schema::<DesktopOpening>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),
-        ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log"
-        | "split" | "move" | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
+        ["desktop", "text" | "key" | "hide" | "restore" | "focus" | "shell" | "files" | "flow-log" | "move"
+        | "resize" | "zoom"] => Some(schema::<DesktopPaneReceipt>()),
         _ => None,
     }
 }
@@ -632,9 +616,6 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
             },
             json,
         ),
-        DesktopCommand::Split { axis, json, .. } => {
-            (DesktopPaneAction::Split { axis: *axis }, json)
-        }
         DesktopCommand::Move {
             destination,
             axis,
@@ -720,7 +701,6 @@ impl DesktopInspection {
             | DesktopCommand::Shell { pane, .. }
             | DesktopCommand::Files { pane, .. }
             | DesktopCommand::FlowLog { pane, .. }
-            | DesktopCommand::Split { pane, .. }
             | DesktopCommand::Zoom { pane, .. } => (pane, false, None),
             DesktopCommand::Open { .. } | DesktopCommand::List { .. } => {
                 bail!("This command does not address a pane")
@@ -944,7 +924,7 @@ fn contact(request: Option<&str>, text_read: bool) -> Result<Vec<u8>> {
         .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
         // A lost reply does not prove the command had no effect. In particular,
-        // repeating a split allocates another pane; inspect before retrying.
+        // repeating shell creation allocates another tab; inspect before retrying.
         bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(output.stdout)

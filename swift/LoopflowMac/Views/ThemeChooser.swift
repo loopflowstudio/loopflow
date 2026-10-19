@@ -83,8 +83,9 @@ struct ThemeChooser: View {
                 if editing, appearance.selectedSource == .yours {
                     Button("Done Editing") { editing = false }
                 }
-                Text("Apply writes theme: in \(appearance.paths.config.path)")
-                    .font(.caption).foregroundStyle(palette.textSecondary).lineLimit(1).truncationMode(.middle)
+                DisclosureGroup("Advanced") {
+                    Text(appearance.paths.config.path).font(.caption).textSelection(.enabled)
+                }
                 Spacer()
                 Button("Cancel") { appearance.cancel() }.keyboardShortcut(.cancelAction)
                 Button("Apply") { appearance.apply() }.keyboardShortcut(.defaultAction)
@@ -183,5 +184,26 @@ struct ThemeChooser: View {
             guard response == .OK, let url = panel.url else { return }
             appearance.importTheme(url)
         }
+    }
+}
+
+struct KeyboardShortcutsView: View {
+    private let shortcuts = [
+        ("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"),
+        ("Working Task 1–9", "⌘1…9"), ("Next / previous Task", "⌃Tab / ⌃⇧Tab"),
+        ("Back / Forward", "⌘[ / ⌘]"), ("Task actions", "⌘/"),
+        ("Show / hide Shell", "⌃`"), ("Show / hide Files", "⇧⌘E"),
+        ("New shell tab", "⌘T"), ("Close pane / shell tab", "⌘W"),
+        ("Reopen pane", "⇧⌘T"), ("Choose Task file", "⌘P"), ("Save Task file", "⌘S"),
+        ("Open repository", "⇧⌘O"), ("Settings", "⌘,")
+    ]
+    var body: some View {
+        ScrollView {
+            Grid(alignment: .leading, horizontalSpacing: 32, verticalSpacing: 12) {
+                ForEach(shortcuts, id: \.0) { item in
+                    GridRow { Text(item.0); Text(item.1).monospaced() }
+                }
+            }.padding(24)
+        }.frame(minWidth: 500, minHeight: 440)
     }
 }

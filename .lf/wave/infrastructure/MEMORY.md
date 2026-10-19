@@ -62,17 +62,22 @@ Merge cannot invent completion intent. Release's entry-point lesson still applie
 configured GitHub delivery and installed upgrade remain unproved. Native repair
 startup also waits without a cutoff; viewer and release publication policies stay separate.
 
-## Native terminal diagnostics (LOO-501, 2026-10-17)
+## Native terminal diagnostics (LOO-501/508, 2026-10-18)
 
-Jack Heart authorized repair/delivery preserving input, diagnostics and native
-history; model-access denial grants no account changes. Loopflow's ERROR echo
-overlaid OpenCode's composer. Launch/resume now retain byte-exact stderr in an
-announced private capture log; the native renderer owns display. Resume retains
-the supplied native identity.
-Installed OpenCode 1.19.3 with lf 0.14.4 reproduced it. Candidate local-API PTY
-evidence covers retries, resize/edit/submit, normal success and native identity;
-it proves neither paid-account access, screenshot version 1.18.33 nor delivery.
-Release's entry-point lesson applies: source tests miss competing terminal writers.
+Jack Heart authorized repair/delivery preserving editing, diagnostics and native
+history; account changes remain outside scope. OpenCode's private provider stderr
+log remains intact. LOO-501 evidence and limits: `036008ec26:.lf/wave/infrastructure/MEMORY.md`,
+this heading.
+
+LOO-508 reproduced raw Loopflow output across a Codex draft, not destroyed input.
+Tracing alone misses direct writes, inherited helpers and waiting launchers.
+The candidate saves native descriptors and scopes parent output to announced
+private Process logs, restoring ordinary output afterward. Transport uses saved
+descriptors. Real Codex/local-model PTY evidence covers launch/reconnect, warning,
+Unicode editing/submission, resize, history and cleanup; Claude/OpenCode coverage
+uses stand-ins. This proves no installed repair or account access. Broader gate,
+Linux and delivery remain open in `scratch/loo-508.md`. Release's entry-point
+lesson applies to every waiting launcher.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 

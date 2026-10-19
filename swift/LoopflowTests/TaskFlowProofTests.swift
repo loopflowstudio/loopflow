@@ -213,7 +213,7 @@ struct TaskFlowTests {
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
-            case ("session", "ensure") where args.contains("--task"):
+            case ("session", "connect") where args.contains("--task"):
                 return try await reader.ensure(issue: args[3])
             case ("session", "attach"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
@@ -262,26 +262,28 @@ struct TaskFlowTests {
         let panes = registry.workspace(for: key, title: task.task.name, location: identity).multiplexer
         try await settle()
         #expect(panes.focusedPane.sessionId == nil)
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "ensure", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
 
         // A separate explicit link opens the known conversation, not bare navigation.
         let record = try JSONDecoder().decode(SessionRecord.self, from: Data(reader.ensure(issue: task.task.identifier).utf8))
         let link = try #require(TaskLink(issue: task.task.identifier, repo: repo, session: record.id).url)
         await model.openTaskLink(link)
         try await eventually("the explicitly addressed Session opens") { panes.focusedPane.sessionId == record.id }
-        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "ensure", "--task"]) })
+        #expect(await calls.calls.allSatisfy { !$0.starts(with: ["session", "connect", "--task"]) })
 
         // Task chrome leaves the Workflow out; the companion starts on Files.
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
         let header = drawn()
-        #expect(try find("task-lifecycle-menu").accessibilityValue().string() == "Collapsed")
+        #expect((try? find("task-lifecycle-menu")) == nil)
         #expect(!header.contains("task-workflow"))
         #expect(!header.contains("work-task-details"))
         #expect(panes.layout.allPanes.count == 2)
 
-        // One menu adds the Flow process log as a pane beside the Session.
-        try find("work-add-flow-log").button().tap()
+        // The navigator opens the Flow process log beside the retained Session.
+        model.navigation.palette = .search
+        let content = try view.inspect().find(SessionsContentView.self).actualView()
+        content.navigate(.flowLog(task.id))
         try await settle()
         #expect(panes.focusedPane.content == .flowLog(taskId: task.id, location: task.reference.workspace?.identity))
         #expect(panes.layout.allPanes.count == 3)
@@ -297,10 +299,13 @@ struct TaskFlowTests {
         #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-id-\(runId)").text().string() == runId)
         #expect(drawn().isSuperset(of: ["task-flow-processes", "flow-process-status-\(runId)"]))
 
-        // The same menu adds the Task's files as a pane.
-        try find("work-add-files").button().tap()
+        // Files remains the same tool when hidden and shown through the View command.
+        let workspace = try #require(registry.retained(key))
+        let filesPane = try #require(workspace.filesPane)
+        workspace.toggleFiles()
+        workspace.toggleFiles()
         try await settle()
-        #expect(panes.focusedPane.content == .files(taskId: task.id, location: task.reference.workspace?.identity))
+        #expect(panes.focusedPane == filesPane)
         panes.close(panes.focusedPaneId)
         try await settle()
 
@@ -338,7 +343,7 @@ private final class ScriptedReader {
         }, cancel: { continuation.finish() })
     }
 
-    /// `lf session ensure --task`: the Task gets one conversation, its primary.
+    /// `lf session connect --task --prepare`: the Task gets one conversation, its primary.
     func ensure(issue: String) throws -> String {
         let roadmap = try JSONDecoder().decode(
             RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: try #require(planning["roadmap"])))
@@ -348,7 +353,7 @@ private final class ScriptedReader {
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("ensured-\(issue)", title: "task-conversation", work: work))) as? [String: Any])
         session["task_primary"] = true
-        session["workspace"] = ["machine_id": workspace.machineId, "worktree": workspace.worktree,
+        session["workspace"] = ["machine_id": try #require(workspace.machineId), "worktree": workspace.worktree,
                                 "task_id": task.id, "unavailable": NSNull()]
         sessions = [session]
         return String(decoding: try JSONSerialization.data(withJSONObject: session), as: UTF8.self)
@@ -397,7 +402,7 @@ struct TaskFlowProofTests {
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {
             workspace.multiplexer.newShell(location: workspace.location)
-            let pane = workspace.multiplexer.focusedPaneId
+            let pane = workspace.multiplexer.focusedPane.content.selectedShell!.id
             let terminal = registry.surfaces.view(for: .shell(pane, machineId: fixtureMachineId))
             terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
             terminal.workingDirectory = NSTemporaryDirectory()
@@ -546,10 +551,10 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "template inspection never starts work")
         #expect(surfaces.map(terminalText) == inputBeforeInspection, "disclosure keys never reach a PTY")
 
-        // The Session's Task has compact lifecycle controls without a Workflow bar.
+        // Task controls stay out of the header; no Workflow bar is introduced.
         model.select(.task(id: "issue-review"))
         try await settle(window)
-        _ = try find("task-lifecycle-menu")
+        #expect((try? find("task-lifecycle-menu")) == nil)
         #expect((try? find("task-flow-start")) == nil)
         #expect((try? find("work-materials")) == nil)
         try captureIfRequested(window, name: "task-workspace-native")

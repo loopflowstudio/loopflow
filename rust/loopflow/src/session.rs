@@ -128,10 +128,21 @@ pub struct SessionBind {
 /// on a person. A long silent provider step can read as Available.
 pub(crate) const AVAILABILITY_QUIET_SECONDS: i64 = 120;
 
+/// Bounded provider text observed on the current native turn. Display evidence only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionPreview {
+    pub provider_thread: AgentSessionId,
+    pub provider_turn: String,
+    pub observed_at: i64,
+    pub source: String,
+    pub text: String,
+}
+
 /// What a Session's attached LfProcess last read from its provider's own stream. One row
 /// per Session, replaced by whichever attachment currently owns that stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionActivity {
+    pub preview: Option<SessionPreview>,
     pub observed_at: i64,
     /// Tool calls started and not yet answered.
     pub open_tools: usize,
@@ -215,6 +226,7 @@ impl Default for SessionFilter {
 /// validation belong to exact detail/actions, never to this row projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionSummary {
+    pub preview: Option<SessionPreview>,
     pub terminal_id: Option<String>,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::journal::ProcessIdentityEvidence,

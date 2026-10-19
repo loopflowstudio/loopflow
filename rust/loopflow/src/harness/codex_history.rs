@@ -17,6 +17,7 @@ use crate::store::StoreResult;
 #[derive(Debug, Default)]
 pub(super) struct History {
     sequence: u64,
+    active_turn: Option<String>,
     turns: HashMap<String, Turn>,
     requests: HashMap<String, (u64, Option<SessionTurnOrigin>)>,
     attention: super::attention::Attention,
@@ -59,6 +60,16 @@ impl History {
     ) -> StoreResult<()> {
         self.attention.apply(super::attention::codex(rpc, true));
         if rpc["method"] == "turn/start" && !rpc["id"].is_null() {
+            self.active_turn = None;
+            self.attention.preview = None;
+            if let Some((store, session, attachment)) = owner {
+                self.attention.record(
+                    store,
+                    session,
+                    attachment,
+                    vec![super::attention::Signal::Working],
+                );
+            }
             let origin = owner
                 .map(|(store, session, attachment)| store.session_turn_origin(session, attachment))
                 .transpose()?;
@@ -85,14 +96,6 @@ impl History {
         rpc: &Value,
     ) -> StoreResult<()> {
         self.sequence += 1;
-        if let Some(attachment) = attachment {
-            self.attention.record(
-                store,
-                session,
-                attachment,
-                super::attention::codex(rpc, false),
-            );
-        }
         let request = if rpc.get("method").is_none() {
             self.requests.remove(&rpc["id"].to_string())
         } else {
@@ -102,15 +105,6 @@ impl History {
             .get("method")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if !matches!(
-            method,
-            "turn/started" | "turn/completed" | "thread/tokenUsage/updated" | "item/completed"
-        ) && rpc.pointer("/result/turn").is_none()
-            && rpc.pointer("/result/thread/turns").is_none()
-            && rpc.pointer("/result/data").is_none()
-        {
-            return Ok(());
-        }
         let params = &rpc["params"];
         let result = &rpc["result"];
         let stored_thread = if expected_thread.is_none() {
@@ -133,6 +127,39 @@ impl History {
             return Ok(());
         }
         let turn = super::codex_mapping::extract_turn_id(params);
+        if let Some(attachment) = attachment {
+            if method == "turn/started" {
+                if let Some(turn) = turn
+                    .as_ref()
+                    .filter(|turn| !self.turns.get(*turn).is_some_and(|seen| seen.started))
+                {
+                    self.active_turn = Some(turn.clone());
+                    self.attention.preview = None;
+                }
+            }
+            // Late turn events still enter history, but cannot replace current activity.
+            if turn.is_none() || turn == self.active_turn {
+                let mut signals = super::attention::codex(rpc, false);
+                if let Some(turn) = turn.as_ref().filter(|_| {
+                    method == "item/completed" && params["item"]["type"] == "agentMessage"
+                }) {
+                    if let Some(text) = params["item"]["text"]
+                        .as_str()
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        self.attention.preview = Some(crate::session::SessionPreview {
+                            provider_thread: thread.clone(),
+                            provider_turn: turn.clone(),
+                            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                            source: "codex".into(),
+                            text: text.chars().take(2048).collect(),
+                        });
+                    }
+                    signals = vec![super::attention::Signal::Working];
+                }
+                self.attention.record(store, session, attachment, signals);
+            }
+        }
         if let Some(turn) = turn {
             let observed = self.observe(&turn);
             match method {
@@ -248,6 +275,109 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn preview_belongs_to_current_turn_thread_and_attachment() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("history.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let process = LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&process],
+        )
+        .unwrap();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &process, false)
+            .unwrap();
+        let mut history = History::default();
+        let thread = "thread".into();
+        store
+            .record_session_agent_session(&session.id, &attachment, &thread)
+            .unwrap();
+        store
+            .record_agent_process_identity(
+                &session.id,
+                &attachment,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        let preview = || -> Option<crate::session::SessionPreview> {
+            let value: Option<String> = sql
+                .query_row(
+                    "SELECT preview FROM session_activity WHERE session_id='conversation'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            value.map(|value| serde_json::from_str(&value).unwrap())
+        };
+        for turn in ["first", "second"] {
+            history
+                .request(
+                    &json!({"id":turn,"method":"turn/start"}),
+                    Some((&store, &session.id, &attachment)),
+                )
+                .unwrap();
+            assert_eq!(preview(), None);
+            // Old output cannot return while the next turn is still starting.
+            history.record(&store, &session.id, Some(&attachment), Some(&thread),
+                &json!({"method":"item/completed","params":{"threadId":"thread","turnId":"first","item":{"type":"agentMessage","text":"late"}}})).unwrap();
+            assert_eq!(preview(), None);
+            history.record(&store, &session.id, Some(&attachment), Some(&thread),
+                &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":turn}}})).unwrap();
+            assert_eq!(preview(), None);
+            history.record(&store, &session.id, Some(&attachment), Some(&thread),
+                &json!({"method":"item/completed","params":{"threadId":"thread","turnId":turn,"item":{"type":"agentMessage","phase":"commentary","text":turn}}})).unwrap();
+            let reading = preview().unwrap();
+            assert_eq!(reading.provider_turn, turn);
+            assert_eq!(reading.text, turn);
+            assert_eq!(
+                store
+                    .session_summary(&session.id, 1000)
+                    .unwrap()
+                    .unwrap()
+                    .preview,
+                Some(reading)
+            );
+        }
+        let current = preview();
+        for (provider_thread, turn) in [("thread", "first"), ("other", "second")] {
+            history.record(&store, &session.id, Some(&attachment), Some(&thread),
+                &json!({"method":"item/completed","params":{"threadId":provider_thread,"turnId":turn,"item":{"type":"agentMessage","text":"late"}}})).unwrap();
+            assert_eq!(preview(), current);
+        }
+        store
+            .record_session_agent_session(&session.id, &attachment, &"replacement".into())
+            .unwrap();
+        assert_eq!(
+            store
+                .session_summary(&session.id, 1000)
+                .unwrap()
+                .unwrap()
+                .preview,
+            None
+        );
+        store
+            .record_session_agent_session(&session.id, &attachment, &thread)
+            .unwrap();
+        assert_eq!(preview(), None);
+        let replacement = store
+            .claim_session_attachment(&session.id, Some(&attachment), &process, false)
+            .unwrap();
+        history.record(&store, &session.id, Some(&attachment), Some(&thread),
+            &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"stale-owner"}}})).unwrap();
+        history.record(&store, &session.id, Some(&attachment), Some(&thread),
+            &json!({"method":"item/completed","params":{"threadId":"thread","turnId":"stale-owner","item":{"type":"agentMessage","text":"stale owner"}}})).unwrap();
+        assert_eq!(preview(), None);
+        assert_ne!(replacement.token, attachment.token);
+    }
 
     #[test]
     fn delayed_start_keeps_request_capture_across_a_b_a_takeover() {

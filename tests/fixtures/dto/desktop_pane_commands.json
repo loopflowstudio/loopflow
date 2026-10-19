@@ -60,23 +60,6 @@
       }
     },
     "action": {
-      "kind": "split",
-      "axis": "horizontal"
-    }
-  },
-  {
-    "target": {
-      "repository": "repo_22222222222222222222222222222222",
-      "window": "55555555-5555-5555-5555-555555555555",
-      "pane": "session-pane",
-      "incarnation": "occurrence-session-pane",
-      "work": {
-        "repository": "repo_22222222222222222222222222222222",
-        "kind": "task",
-        "id": "task_44444444444444444444444444444444"
-      }
-    },
-    "action": {
       "kind": "move",
       "destination": {
         "repository": "repo_22222222222222222222222222222222",

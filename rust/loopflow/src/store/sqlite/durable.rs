@@ -1840,7 +1840,6 @@ mod durable_store_tests {
             [other_wave.as_str()],
         )
         .unwrap();
-        let before = crate::store::rows::now_unix();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
@@ -1873,9 +1872,15 @@ mod durable_store_tests {
             )
             .unwrap()
         };
-        let assigned = started(&conn, &task_id).unwrap();
-        assert!((before..=crate::store::rows::now_unix()).contains(&assigned));
-        assert_ne!(assigned, reserved.created_at);
+        // Started is when the reserved input was captured.
+        let captured_at: i64 = conn
+            .query_row(
+                "SELECT observed_at FROM session_events WHERE seq=?1",
+                [reserved.captured.unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(started(&conn, &task_id), Some(captured_at));
         assert_eq!(started(&conn, &bound_task), None);
         let before_bind = crate::store::rows::now_unix();
         conn.execute(

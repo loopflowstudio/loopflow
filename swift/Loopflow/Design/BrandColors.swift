@@ -51,6 +51,10 @@ public struct LoopflowPalette: Sendable {
     public let definition: PaletteDefinition
     public init(_ definition: PaletteDefinition) { self.definition = definition }
     public var isDark: Bool { definition.isDark }
+    public var titlebarColorScheme: ColorScheme { definition.accent.prefersLightText ? .dark : .light }
+    public var titlebarBackground: Color {
+        (isDark ? definition.accent.mixed(with: definition.background, amount: 0.65) : definition.accent).color
+    }
     public var background: Color { definition.background.color }
     public var surface: Color { definition.surface.color }
     public var surfaceMuted: Color { definition.surfaceMuted.color }
@@ -116,7 +120,8 @@ extension PaletteDefinition {
                         waitingTone.inkRGB, failureTone.inkRGB, successTone.inkRGB] {
                 check("text", ink, on: base)
             }
-            check("Work selection", workSelectedFill, on: base, ratio: 3)
+            // The neutral selection fill is bounded by selectionEdge (textSecondary).
+            check("Work selection edge", textSecondary, on: base, ratio: 3)
         }
         check("selected text", workSelectedText, on: workSelectedFill)
         check("selected secondary text", workSelectedSecondaryText, on: workSelectedFill)

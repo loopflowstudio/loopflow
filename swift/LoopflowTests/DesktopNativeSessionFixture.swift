@@ -214,7 +214,7 @@ struct DesktopNativeSessionTests {
         workspace.multiplexer.load(sessionId: fixture.sessionId, location: owned.workspace?.identity)
         workspace.multiplexer.newShell(location: workspace.location)
         let layout = workspace.multiplexer.layout
-        let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
+        let files = workspace.files(issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
         files.selection = "notes.txt"
         await files.loadFile()

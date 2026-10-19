@@ -34,9 +34,8 @@ enum Entry {
     },
 }
 
-/// Log the Session's current native conversation beside its capture and
-/// return the first turn that hands it to another provider.
-pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> {
+/// Read the history before preparing a provider change or releasing its terminal.
+pub(super) fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
     let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
     let reference = store
@@ -54,13 +53,20 @@ pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<S
             let source = conversation_home(store, provider, &reference)?
                 .and_then(|home| transcript(provider, &home, thread))
                 .ok_or_else(|| {
-                    anyhow!("The {from} transcript of Session {id} ({thread}) was not found")
+                    anyhow!("The {from} transcript of Session {id} ({thread}) was not found. Keep this conversation open and retry after {from} saves its first turn.")
                 })?;
             transcript_entries(provider, &source)?
         }
         _ => bail!("Session {id} has no {from} history another provider can read"),
     };
-    let log = render(&entries);
+    Ok(render(&entries))
+}
+
+/// Save the current conversation and return the first turn for another provider.
+pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> {
+    let id = &session.id;
+    let from = session.provider.as_deref().unwrap_or_default();
+    let log = read(store, session)?;
     let path = super::local_capture_dir(session.input_key()?)
         .ok_or_else(|| anyhow!("Session {id} has an invalid capture reference"))?
         .join("conversation.md");

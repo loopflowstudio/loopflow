@@ -72,6 +72,16 @@ pub(crate) async fn ensure_task(
         .expect("explicit Task selection includes its Task");
     let scope = PrimaryScope::Task(task.id.clone());
     let _lock = lock_scope(&scope).await?;
+    if task.worktree.as_deref().is_some_and(|path| !path.exists()) {
+        // Reuse Task preparation's recorded placement and restoration checks.
+        // Opening a conversation does not invent a checkout or start a Flow.
+        let repo = repo.to_path_buf();
+        let id = task.id.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::ops::task::task_checkout(&repo, &id, Default::default())
+        })
+        .await??;
+    }
     let chosen = if fresh {
         None
     } else {

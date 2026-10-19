@@ -293,20 +293,6 @@ Gate/lock relocation is unproved. Superseded command/rename details:
 `888509b3ff71f1afbeea3bf951bf1bd588bc11eb:.lf/wave/infrastructure/MEMORY.md`,
 this heading, and `06e88761d:wave/infrastructure/MEMORY.md`.
 
-October 17 LOO-506: Jack Heart selected canonical structured storage and
-case-invariant input, including Linear IDs and `home_` casing; retain prefixes,
-punctuation and opaque bytes. Session fences, receipts and Trace directories depend
-on spelling. Retain owner locators and nonblocking fences through commit/rollback;
-SQLite exclusivity alone is insufficient. Unknown receipts never age into permission;
-Trace locator collisions must fail without choosing history.
-
-Metric hashes include Wave spelling. Canonicalize association; retain payloads and
-digests, including equal-time ordering. Released-fixture validation/reimport passes;
-full conversion and upgrade/dispatch/installation acceptance remain unfinished.
-Proof limits:
-`3623eae49e:scratch/loo-506-store-structured-ids.md`, Filesystem authority and
-evidence / Content-addressed evidence revision.
-
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report
 differences and the update command without a version gate. Named connections live

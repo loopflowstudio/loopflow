@@ -13,10 +13,31 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{
-    accept_async, client_async,
-    tungstenite::{error::ProtocolError, Error, Message},
+    accept_async_with_config, client_async_with_config,
+    tungstenite::{error::ProtocolError, protocol::WebSocketConfig, Error, Message},
     WebSocketStream,
 };
+
+// Codex sends single frames larger than tungstenite's defaults (skills/list
+// exceeded 16 MiB). The relay forwards between two Codex endpoints and
+// imposes no limit of its own.
+fn relay_config() -> Option<WebSocketConfig> {
+    Some(
+        WebSocketConfig::default()
+            .max_message_size(None)
+            .max_frame_size(None),
+    )
+}
+
+pub(super) async fn connect_upstream(
+    socket: UnixStream,
+) -> Result<WebSocketStream<UnixStream>, Error> {
+    Ok(
+        client_async_with_config("ws://localhost", socket, relay_config())
+            .await?
+            .0,
+    )
+}
 
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -64,7 +85,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
         }
         Err(error) => return Err(error.into()),
     };
-    let (mut upstream, _) = client_async("ws://localhost", socket).await?;
+    let mut upstream = connect_upstream(socket).await?;
     rpc_request(
         &mut upstream,
         "initialize",
@@ -146,8 +167,7 @@ impl CodexConnection {
             .thread_id
             .as_ref()
             .ok_or_else(|| anyhow!("Conversation has no native history yet"))?;
-        let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
+        let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
         rpc_request(
             &mut upstream,
             "initialize",
@@ -212,9 +232,8 @@ impl CodexConnection {
         endpoint: &Path,
         initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
     ) -> Result<()> {
-        let mut client = accept_async(client).await?;
-        let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
+        let mut client = accept_async_with_config(client, relay_config()).await?;
+        let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
         let mut history = super::codex_history::History::default();
         let mut resume_request = None;
         let mut bind_thread = false;

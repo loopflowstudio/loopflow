@@ -257,14 +257,19 @@ One integrated LOO-416 outcome; serialization alone cannot complete it.
    transition and retained Work state. Native proof checks input echo, scroll
    position, same surface incarnation, unsent text and tile→Task→tile mounting.
 4. **Leaving a Session says the lf thing, on every harness.** (Jack, October 18.)
-   Codex prints its own remote-mode exit text naming the per-client relay
-   (`util.rs` tempdir `client.sock`), which is deleted when the client exits, so
-   "To reconnect" and "Stop the current turn" are dead commands. Replace that
-   text with one short lf line (return with `lf resume`; how to stop) on Claude, Codex,
-   OpenCode and Pi; no socket paths. Proof per harness through the real path:
-   detach, interrupt mid-turn, return, stop, pasted commands work. Needs `lf sync`
-   for OpenCode 2 (#1590) and Pi (#1591). Related, untested: raw `codex resume`
-   while lf's app-server holds the same thread.
+   Implemented: the transport owner withholds what a native client prints after
+   restoring cooked mode and replaces it with `Left “<title>”. Continue with: lf
+   resume <id>`; Ctrl+] prints `Detached from “<title>”; it keeps running. Return
+   with: lf resume <id>` (`transport/native.rs`). `serve_locked` now hands its
+   transport to the launch, removing a nested owner. Leaving ends the invocation
+   and its AgentProcess on all four harnesses, Codex included, so Codex's "work
+   continues" was also false. Relay frames above 16 MiB (Codex `skills/list`)
+   dropped the connection; relay limits are lifted. Proof (disposable home, real
+   providers): exit, detach, reattach without relaunch, pasted command works, no
+   native text leaks — Claude, Codex, OpenCode, Pi. Open: a dropped partial
+   final frame when a client's last frame and exit text share one read; `lf
+   resume` takes only full ids; repeated `Loopflow diagnostics:` startup lines
+   (#1595); raw `codex resume` while lf's app-server holds the thread untested.
 
 **Verification:** build changed code and run focused behavioral suites. Gate owns
 affected Desktop/session/control/file/DTO suites plus the candidate CLI transport

@@ -962,23 +962,49 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     ))
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();
+    // A resolved path, so the Git locator check runs wherever temp dirs are symlinked.
+    let repo_path = repo.path().canonicalize().unwrap();
+    let repo_path = repo_path.to_str().unwrap();
     conn.execute_batch(&format!(
-        "UPDATE waves SET repo='{0}'; UPDATE repository_plans SET repo='{0}';",
-        repo.path().display()
+        "UPDATE waves SET repo='{repo_path}'; UPDATE repository_plans SET repo='{repo_path}';"
     ))
     .unwrap();
-    conn.execute(
-        "UPDATE tasks SET worktree=?1",
-        [repo.path().to_str().unwrap()],
-    )
-    .unwrap();
-    conn.execute(
-        "UPDATE agent_sessions SET repo=?1,cwd=?1",
-        [repo.path().to_str().unwrap()],
-    )
-    .unwrap();
+    conn.execute("UPDATE tasks SET worktree=?1", [repo_path])
+        .unwrap();
+    conn.execute("UPDATE agent_sessions SET repo=?1,cwd=?1", [repo_path])
+        .unwrap();
     apply_sqlite(&conn).unwrap();
     let binary = loopflow_test_support::lf_binary();
+    let lf = |args: &[&str]| {
+        let mut command = std::process::Command::new(binary);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_")
+                || name.to_string_lossy().starts_with("LOOPFLOW_")
+            {
+                command.env_remove(name);
+            }
+        }
+        command
+            .args(args)
+            .current_dir(repo_path)
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", binary)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    // The released checkout predates Git locators; establish it as the original.
+    let bound = lf(&[
+        "repo",
+        "identity",
+        "--bind",
+        "REPO_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    ]);
+    assert!(
+        bound.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bound.stderr)
+    );
     for args in [
         vec!["task", "status", "lOo-506", "--json"],
         vec![
@@ -997,22 +1023,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         vec!["history", "show", SESSION, "--json"],
         vec!["history", "show", PROCESS, "--json"],
     ] {
-        let mut command = std::process::Command::new(binary);
-        for (name, _) in std::env::vars_os() {
-            if name.to_string_lossy().starts_with("LF_")
-                || name.to_string_lossy().starts_with("LOOPFLOW_")
-            {
-                command.env_remove(name);
-            }
-        }
-        let output = command
-            .args(&args)
-            .current_dir(repo.path())
-            .env("LF_HOME", home.path())
-            .env("LF_BIN", binary)
-            .stdin(std::process::Stdio::null())
-            .output()
-            .unwrap();
+        let output = lf(&args);
         assert!(
             output.status.success(),
             "{args:?}: {}",

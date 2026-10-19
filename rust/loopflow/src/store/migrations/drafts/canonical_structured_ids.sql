@@ -47,6 +47,26 @@ BEGIN
     SELECT RAISE(ABORT, 'Process filesystem locators are immutable');
 END;
 
+-- Filling a new row's locators completes its insert; it is not another write.
+DROP TRIGGER store_revision_agent_sessions_update;
+CREATE TRIGGER store_revision_agent_sessions_update AFTER UPDATE ON agent_sessions
+WHEN OLD.fence_locator IS NOT NULL
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+DROP TRIGGER store_revision_processes_update;
+CREATE TRIGGER store_revision_processes_update AFTER UPDATE ON processes
+WHEN OLD.receipt_locator IS NOT NULL
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'processes';
+END;
+DROP TRIGGER store_revision_agent_process_update;
+CREATE TRIGGER store_revision_agent_process_update AFTER UPDATE ON processes
+WHEN NEW.kind='agent' AND OLD.receipt_locator IS NOT NULL
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+
 -- A stale waiter may still hold the original inode after commit. It must re-read
 -- attachment authority, and cannot recreate an owner using its old spelling.
 -- Released Session identities are bare hex or session_<hex>; other historical

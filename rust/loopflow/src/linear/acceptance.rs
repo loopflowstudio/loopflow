@@ -91,7 +91,7 @@ pub(crate) fn accept_linear_project_in(
         )));
     }
     validate_project_membership(&conn, &repo, project)?;
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     put_project(&tx, &repo, observed_at, project)?;
     associate_project(&tx, &repo, &project.id, wave, initiative)?;
     project_accepted_planning(
@@ -124,7 +124,7 @@ pub(crate) fn reconcile_linear_project_teams_in(
             project.id
         )));
     }
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let previous: Option<String> = tx
         .query_row(
             "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
@@ -176,7 +176,7 @@ pub(crate) fn accept_linear_issue_in(
     if let Some(project) = project {
         validate_project_membership(&conn, repo, project)?;
     }
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let mut item = issue.clone();
     // Detail queries do not observe relative list order.
     if let Some(rank) = tx.query_row(
@@ -229,7 +229,7 @@ pub(crate) fn accept_linear_inventory_in(
     for project in projects {
         validate_project_membership(&conn, &repo, project)?;
     }
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let known = {
         let mut query = tx.prepare(
             "SELECT m.project_id FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
@@ -298,7 +298,7 @@ pub(crate) fn accept_linear_project_order_in(
     items: &[LinearIssue],
 ) -> StoreResult<bool> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
-    let tx = conn.transaction()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = crate::store::rows::now_unix();
     for item in items {
         put_item(&tx, repo, now, item)?;

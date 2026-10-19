@@ -209,7 +209,7 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
-fn task_creation_commits_its_conversation_without_starting_work() {
+fn task_conversation_starts_at_launch_not_creation() {
     for headless in [false, true] {
         let fixture = Fixture::new(false);
         std::fs::create_dir_all(fixture.repo.path().join(".lf")).unwrap();
@@ -228,7 +228,7 @@ fn task_creation_commits_its_conversation_without_starting_work() {
             std::fs::write(
                 &binary,
                 support::codex_app_server_script(
-                    "Started the admitted conversation",
+                    "Started the Task conversation",
                     r#"printf '%s\n' "$LF_CAPTURE_KEY" >> "$HOME/launched""#,
                 ),
             )
@@ -252,57 +252,47 @@ fn task_creation_commits_its_conversation_without_starting_work() {
         let task: Value = serde_json::from_slice(&output.stdout).unwrap();
         let id = task["id"].as_str().unwrap();
         let db = fixture.db();
-        let session: String = db
+        let stored: (Option<String>, Option<String>, Option<i64>) = db
+            .query_row(
+                "SELECT primary_session_id,worktree,started_at FROM tasks WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, (None, None, None));
+        assert_eq!(
+            fixture.count("agent_sessions"),
+            0,
+            "creating a Task makes no conversation"
+        );
+        assert!(fixture.launches().is_empty());
+        let ensured = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                fixture.json(&["session", "connect", "--prepare", "--task", id, "--json"])
+            });
+            let second = scope.spawn(|| {
+                fixture.json(&["session", "connect", "--prepare", "--task", id, "--json"])
+            });
+            let first = first.join().unwrap();
+            assert_eq!(first["id"], second.join().unwrap()["id"]);
+            first
+        });
+        let session = ensured["id"].as_str().unwrap().to_owned();
+        let primary: String = db
             .query_row(
                 "SELECT primary_session_id FROM tasks WHERE id=?1",
                 [id],
                 |row| row.get(0),
             )
             .unwrap();
-        let stored: (Option<String>, Option<i64>, bool) = db.query_row(
-        "SELECT t.worktree,t.started_at,s.input_published FROM tasks t JOIN agent_sessions s ON s.id=t.primary_session_id WHERE t.id=?1",
-        [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
-        assert!(stored.0.is_none());
-        assert!(stored.1.is_none());
-        assert!(!stored.2);
+        assert_eq!(primary, session);
+        assert_eq!(ensured["workspace"]["task_id"], id);
+        assert_ne!(
+            ensured["cwd"],
+            fixture.repo.path().to_string_lossy().as_ref()
+        );
         assert!(fixture.launches().is_empty());
-        let inventory = fixture.json(&["session", "list", "--all", "--json"]);
-        let entry = inventory
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|entry| entry["id"] == session)
-            .unwrap();
-        assert_eq!(entry["task_primary"], true);
-        assert!(
-            entry["workspace"].is_null(),
-            "unplaced Task must not borrow its repository checkout"
-        );
-        assert_eq!(
-            inventory.as_array().unwrap().len(),
-            3,
-            "repository, Wave and Task share admission"
-        );
-        if !headless {
-            let ensured = std::thread::scope(|scope| {
-                let first = scope.spawn(|| {
-                    fixture.json(&["session", "connect", "--prepare", "--task", id, "--json"])
-                });
-                let second = scope.spawn(|| {
-                    fixture.json(&["session", "connect", "--prepare", "--task", id, "--json"])
-                });
-                let first = first.join().unwrap();
-                assert_eq!(first["id"], second.join().unwrap()["id"]);
-                first
-            });
-            assert_eq!(ensured["id"], session);
-            assert_eq!(ensured["workspace"]["task_id"], id);
-            assert_ne!(
-                ensured["cwd"],
-                fixture.repo.path().to_string_lossy().as_ref()
-            );
-            assert!(fixture.launches().is_empty());
-        }
+        let prepared = fixture.count("agent_sessions");
         assert_eq!(fixture.captures(), 0);
         let started: Option<i64> = db
             .query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |row| {
@@ -317,7 +307,7 @@ fn task_creation_commits_its_conversation_without_starting_work() {
                 "connect",
                 &session,
                 "--message",
-                "Start the admitted conversation",
+                "Start the Task conversation",
             ])
         } else {
             fixture.run(&["session", "connect", &session])
@@ -325,8 +315,8 @@ fn task_creation_commits_its_conversation_without_starting_work() {
         assert!(opened.status.success(), "{opened:?}");
         assert_eq!(
             fixture.count("agent_sessions"),
-            3,
-            "first start reused the admitted Session"
+            prepared,
+            "first start reused the prepared Session"
         );
         assert_eq!(fixture.captures(), 1);
         let native: String = db.query_row(
@@ -334,7 +324,7 @@ fn task_creation_commits_its_conversation_without_starting_work() {
             [&session], |row| row.get(0)).unwrap();
         assert!(
             !native.is_empty(),
-            "the admitted Session owns native history"
+            "the prepared Session owns native history"
         );
         if !headless {
             assert_eq!(
@@ -545,20 +535,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .success());
     let task = fixture.json(&["task", "create", "--title", "Native local work", "--json"]);
     let task_id = task["id"].as_str().unwrap();
-    // Creation admits the Task conversation and its repository primary, without input.
-    let admitted = fixture.count("agent_sessions");
-    assert_eq!(admitted, 2);
-    assert_eq!(
-        fixture
-            .db()
-            .query_row(
-                "SELECT count(*) FROM agent_sessions WHERE current_capture IS NOT NULL",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        0
-    );
+    assert_eq!(fixture.count("agent_sessions"), 0);
     let placed = fixture.json(&["task", "checkout", task_id, "--json"]);
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
     let launch = fixture
@@ -611,7 +588,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .output()
         .unwrap();
     assert!(resumed.status.success(), "{resumed:?}");
-    assert_eq!(fixture.count("agent_sessions"), admitted + 1);
+    assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(
         fixture
             .db()
@@ -632,7 +609,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     assert!(run.status.success(), "{run:?}");
     let final_status = fixture.json(&["task", "status", task_id, "--json"]);
     assert_eq!(final_status["execution"]["status"], "active");
-    assert_eq!(fixture.count("agent_sessions"), admitted + 2);
+    assert_eq!(fixture.count("agent_sessions"), 2);
     let flows = support::recorded_flows(fixture.home.path());
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
@@ -660,11 +637,11 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         String::from_utf8_lossy(&refused.stderr).contains("deleted"),
         "{refused:?}"
     );
-    assert_eq!(fixture.count("agent_sessions"), admitted + 2);
+    assert_eq!(fixture.count("agent_sessions"), 2);
     fixture.json(&["task", "abandon", task_id, "--json"]);
     let terminal = fixture.run(&["-b", "--agent", "codex", "task", "run", task_id]);
     assert!(!terminal.status.success());
-    assert_eq!(fixture.count("agent_sessions"), admitted + 2);
+    assert_eq!(fixture.count("agent_sessions"), 2);
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["task", "status", task_id, "--json"]);
@@ -679,7 +656,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         .output()
         .unwrap();
     assert!(!refused.status.success());
-    assert_eq!(fixture.count("agent_sessions"), admitted + 2);
+    assert_eq!(fixture.count("agent_sessions"), 2);
     if worktree.exists() {
         std::fs::remove_dir_all(worktree).unwrap();
     }
@@ -2456,8 +2433,6 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let identity = fixture.json(&["repo", "identity", "--json"]);
     let task = fixture.json(&["task", "create", "--title", "Retained checkout", "--json"]);
     let task_id = task["id"].as_str().unwrap();
-    // Creation admits the Task conversation and its repository primary.
-    let admitted = fixture.count("agent_sessions");
     fixture.json(&["task", "checkout", task_id, "--json"]);
     let launch = fixture.run(&[
         "--task",
@@ -2471,12 +2446,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     assert!(launch.status.success(), "{launch:?}");
     let session: String = fixture
         .db()
-        // Task creation also admitted conversations without input.
-        .query_row(
-            "SELECT id FROM agent_sessions WHERE current_capture IS NOT NULL",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
     let native = || {
         fixture.db().query_row(
@@ -2499,7 +2469,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     std::fs::remove_file(&locator).unwrap();
     let resumed = fixture.run(&["session", "connect", &session]);
     assert!(resumed.status.success(), "{resumed:?}");
-    assert_eq!(fixture.count("agent_sessions"), admitted + 1);
+    assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(native(), before);
     assert_eq!(
         std::fs::read_to_string(locator).unwrap().trim(),
@@ -2517,7 +2487,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
         .output()
         .unwrap();
     assert!(resumed.status.success(), "{resumed:?}");
-    assert_eq!(fixture.count("agent_sessions"), admitted + 1);
+    assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(native(), before);
     let output = fixture
         .command(&["repo", "identity", "--json"])

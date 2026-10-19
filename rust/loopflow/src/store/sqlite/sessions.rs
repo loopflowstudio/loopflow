@@ -7,7 +7,7 @@ use std::path::Path;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::TaskId;
-use crate::session::{conversation, LfSession, PrimaryScope, TitleSource, WorkSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -416,77 +416,6 @@ fn ensure_primary_session_in(
         )?,
     };
     Ok(session)
-}
-
-/// Explicit Work creation reserves conversations in the same commit. No checkout,
-/// prepared prompt, provider or viewer is created by admission.
-pub(super) fn admit_work_conversation_in(
-    conn: &Connection,
-    scope: &PrimaryScope,
-) -> StoreResult<LfSession> {
-    if let Some(current) = primary_session_in(conn, scope)? {
-        return Ok(current);
-    }
-    let session = match scope {
-        PrimaryScope::Repository(repo) => {
-            let title = repo
-                .as_path()
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| repo.to_string());
-            LfSession {
-                repo: Some(repo.to_string()),
-                ..conversation(repo.as_path(), None, "repo-session", title)
-            }
-        }
-        PrimaryScope::Wave(wave) => {
-            let (repo, name): (String, String) = conn.query_row(
-                "SELECT repo,slug FROM wave_addresses WHERE id=?1",
-                [wave],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            let canonical = crate::repository::CanonicalRepo::from_recorded(repo.clone().into());
-            admit_work_conversation_in(conn, &PrimaryScope::Repository(canonical))?;
-            let agent = crate::work::wave::config::read_wave_config(Path::new(&repo), &name)
-                .and_then(|config| config.agent);
-            LfSession {
-                repo: Some(repo.clone()),
-                wave_id: Some(wave.clone()),
-                work_source: Some(WorkSource::Declared),
-                ..conversation(Path::new(&repo), agent.as_deref(), "wave-session", name)
-            }
-        }
-        PrimaryScope::Task(task) => {
-            let task = super::children::task_on(conn, task)?.ok_or(StoreError::NotFound)?;
-            let repo: String = conn.query_row(
-                "SELECT repo FROM repository_plans WHERE id=?1",
-                [task.repository_id.as_str()],
-                |row| row.get(0),
-            )?;
-            let parent = match &task.wave_id {
-                Some(wave) => PrimaryScope::Wave(wave.clone()),
-                None => PrimaryScope::Repository(crate::repository::CanonicalRepo::from_recorded(
-                    repo.clone().into(),
-                )),
-            };
-            admit_work_conversation_in(conn, &parent)?;
-            let cwd = task.worktree.as_deref().unwrap_or(Path::new(&repo));
-            LfSession {
-                repo: Some(repo.clone()),
-                wave_id: task.wave_id,
-                task_id: Some(task.id),
-                work_source: Some(WorkSource::Declared),
-                ..conversation(cwd, task.agent.as_deref(), "task-session", task.title)
-            }
-        }
-    };
-    ensure_primary_session_in(
-        conn,
-        scope,
-        None,
-        session,
-        crate::journal::current_lf_process_id().as_ref(),
-    )
 }
 
 impl SqliteStore {

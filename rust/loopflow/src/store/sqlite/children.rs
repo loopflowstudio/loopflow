@@ -62,10 +62,6 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
                 "creation identity already belongs to a different request".into(),
             ));
         }
-        super::sessions::admit_work_conversation_in(
-            conn,
-            &crate::session::PrimaryScope::Task(input.id.clone()),
-        )?;
         return task_on(conn, &input.id)?.ok_or(StoreError::NotFound);
     }
     if input.title.trim().is_empty() {
@@ -145,10 +141,6 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
             input.due_date,
             input.repository_id.as_str()
         ],
-    )?;
-    super::sessions::admit_work_conversation_in(
-        conn,
-        &crate::session::PrimaryScope::Task(task.id.clone()),
     )?;
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }

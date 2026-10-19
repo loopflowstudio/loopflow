@@ -20,8 +20,7 @@ Complete pre-compression notes are preserved at
 `refs/loopflow/evidence/loo-497-before-intent-compress:scratch/design.md`
 (tree `bbb68ebbc97d0b304806aa564333651d77629a2d`).
 
-Pre-cut code, complete design, contrary evidence and earlier check commands are
-preserved at `refs/loopflow/evidence/loo-497-before-dashboard-cut` (tree
+Pre-cut code, design and evidence: `refs/loopflow/evidence/loo-497-before-dashboard-cut` (tree
 `d68851b7807858609266546ea8d459a4ebf7fc17`). Earlier foundations design remains at
 `refs/loopflow/evidence/loo-497-foundations-design` (blob
 `e737550f687c0d5f17c363e1ebe2c00a31f8fcde`). Historical proposals there do not
@@ -184,20 +183,23 @@ occurrences. Opening generations fence late reads. Named plans refresh through
 the planning frame; unsaved queries re-read the shared planner when it changes.
 The CLI result schema includes passive plans and live opening receipts.
 
-## Reconciliation — October 18
+## Reconciliation — October 19
 
-Baseline `2839e623d9` (v0.14.6, LOO-505 optional Task membership). Saved panes
-follow the Task's repository. Product memory's upstream LOO-505/LOO-503 sections
-were restored. The anonymous-query save-before-arrange choice in `questions.md`
-remains an implementation assumption, not accepted removal of arrangement parity.
+Baseline `a572d1788c` (Codex transport; no Dashboard overlap).
+Saved panes follow the Task's repository (LOO-505). Anonymous-query
+save-before-arrange (`questions.md`) remains an assumption, not accepted removal
+of arrangement parity.
+
+Linear LOO-497 is retitled for Dashboards, but its acceptance body still lists
+scripting parity and `open` beside, which Jack Heart's October 18 decisions moved
+to LOO-519 and removed; the body needs rewriting before review.
 
 ## Remaining implementation, verification and transport
 
 - Demo preparation: see [desktop-dashboard-demo.md](desktop-dashboard-demo.md) for
   the clone temp-path/disk-budget repair and candidate CLI↔native targeting gap.
-- Scripting parity stays with existing owners: readiness/events and wait/run-wait
-  with LOO-453 (and the new scripting Task, `questions.md`); LOO-498 owns external
-  hosts. Opening receipts report launch acceptance, not provider readiness or exit.
+- Scripting parity: readback oracle, exit statuses and scoped context with LOO-519;
+  readiness/events and wait/run-wait with LOO-453; LOO-498 owns external hosts. Opening receipts report launch acceptance, not provider readiness or exit.
 - LOO-416 cold Shell attachment: native launches record no `lf_process_id` on the
   Shell tab and restore has no admission handle, so restored shells stay unattached.
   No provider launch, lifetime registry or saved attachment authority was added.
@@ -223,7 +225,6 @@ Check (October 19, implement): `scripts/test_desktop.sh --filter 'WorkNavigation
 
 ## Handoff status
 
-Earlier design/readback: `8d4f2d8ea1:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
-October 17: Jack Heart rejected the prototype's invisible aliases
-(`query:product or query:available`); the study uses direct predicates. This sets
-no production query-reference syntax.
+Earlier: `8d4f2d8ea1:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
+October 17: Jack Heart rejected the prototype's invisible aliases; this sets no
+production query-reference syntax.

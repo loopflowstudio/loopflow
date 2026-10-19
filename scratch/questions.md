@@ -35,11 +35,11 @@ offer replaces the exclude-unstarted leaning.
 
 October 18 (evening), scope: Jack Heart agreed LOO-497 becomes the Dashboards
 outcome (demo, review and merge on PR #1580). The scripting-API acceptance from the
-original brief (state readback oracle, exit statuses, scoped context) moves to a new
-Task coordinated with LOO-453 (readiness wait/events).
+original brief (state readback oracle, exit statuses, scoped context) moves to
+LOO-519, coordinated with LOO-453 (readiness wait/events).
 
 October 19 implementation assumptions (agreed-UX pass): the jump bar's machine crumb
 reads “This Mac” and does not navigate (no machines destination exists); a Dashboard
 crumb keeps `/` before its Task because B puts › only after repository and Wave
-levels. `TaskWorkflowHeader` (the old Workflow Start header) has no production caller
-— only tests mount it; deleting it was left out of this pass's scope.
+levels. `TaskWorkflowHeader` has no production caller on `main` either (only tests mount
+it); its deletion belongs to whoever owns that header, not this Task.

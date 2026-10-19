@@ -317,6 +317,7 @@ impl SqliteStore {
         scope: (Option<&str>, Option<&str>, Option<&str>),
         orphaned: Option<(Option<&AgentSessionId>, Option<&str>)>,
     ) -> StoreResult<Vec<SessionEvent>> {
+        let task = scope.2.map(crate::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
@@ -327,7 +328,7 @@ impl SqliteStore {
              FROM session_events e LEFT JOIN session_events origin
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
-             WHERE e.session_id=?1 AND e.seq>?2
+             WHERE e.session_id=?11 AND e.seq>?2
              AND (NOT ?8 OR (e.kind IN ('started','usage','completed','output') AND origin.captured_event IS NULL
                   AND e.provider_thread IS ?9 AND e.provider_turn IS ?10))
              AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
@@ -339,12 +340,12 @@ impl SqliteStore {
                  ELSE 1 END)
              AND ((e.kind='observed' AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json')) OR (
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
-                     IN (SELECT id FROM wave_addresses WHERE id=?5 OR slug=?5))
+                     IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
                  AND (?6 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
                      IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                         WHERE p.id=?6 OR p.project_slug=?6 OR p.external_project_id=?6))
+                         WHERE p.id=?13 OR p.project_slug=?6 OR p.external_project_id=?14))
                  AND (?7 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT id FROM tasks WHERE id=?7 OR issue_identifier=?7 OR external_issue_id=?7))))
+                     IN (SELECT id FROM tasks WHERE id=?15 OR issue_identifier=?16 OR external_issue_id=?17))))
              ORDER BY e.seq LIMIT ?3",
         )?;
         let rows = query.query_map(
@@ -358,7 +359,16 @@ impl SqliteStore {
                 scope.2,
                 orphaned.is_some(),
                 orphaned.and_then(|(thread, _)| thread),
-                orphaned.and_then(|(_, turn)| turn)
+                orphaned.and_then(|(_, turn)| turn),
+                crate::id::canonical_session(session),
+                scope.0.map(crate::id::canonical_uuid),
+                scope
+                    .1
+                    .map(|project| crate::id::canonical_prefixed(project, "proj_")),
+                scope.1.map(crate::id::canonical_uuid),
+                task.as_ref().map(|task| &task.id),
+                task.as_ref().map(|task| &task.label),
+                task.as_ref().map(|task| &task.external),
             ],
             |row| {
                 Ok((

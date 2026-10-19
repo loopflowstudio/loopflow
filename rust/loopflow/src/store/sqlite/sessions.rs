@@ -704,21 +704,21 @@ impl SqliteStore {
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
-                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)
+                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
-                        AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)))
+                        AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                    WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2)
+                    WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                            WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2)))
+                            WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
                 AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)))
-                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?4))
+                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
@@ -729,6 +729,7 @@ impl SqliteStore {
                 FROM eligible JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
+            // Names, slugs and capture locators keep their bytes; identities are canonical.
             let mut rows = query.query(params![
                 wave,
                 project,
@@ -737,7 +738,11 @@ impl SqliteStore {
                 window.0,
                 window.1,
                 input,
-                window.2.map(|n| n as i64)
+                window.2.map(|n| n as i64),
+                wave.map(crate::id::canonical_uuid),
+                project.map(|project| crate::id::canonical_prefixed(project, "proj_")),
+                project.map(crate::id::canonical_uuid),
+                caller.map(crate::id::canonical_session),
             ])?;
             let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();

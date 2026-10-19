@@ -968,12 +968,16 @@ impl SqliteStore {
         }
         let query = format!(
             "{PROJECT_COLUMNS}
-             WHERE external_project_id=?1 OR project_slug=?1
-             ORDER BY (external_project_id=?1) DESC, created_at DESC, id DESC
+             WHERE external_project_id=?2 OR project_slug=?1
+             ORDER BY (external_project_id=?2) DESC, created_at DESC, id DESC
              LIMIT 1"
         );
         snapshot
-            .query_row(&query, params![project], map_project_row)
+            .query_row(
+                &query,
+                params![project, crate::id::canonical_uuid(project)],
+                map_project_row,
+            )
             .optional()
             .map_err(StoreError::from)
     }

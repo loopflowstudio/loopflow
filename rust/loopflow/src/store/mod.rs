@@ -1297,11 +1297,12 @@ mod tests {
         Wave::new(id.clone(), format!("wave-{id}"), repo.to_string())
     }
 
-    fn make_task(wave: &Wave, project: &Project) -> Task {
+    fn make_task(store: &crate::store::Store, wave: &Wave, project: &Project) -> Task {
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .expect("current unix time");
         let id = TaskId::new();
         Task {
+            repository_id: store.sqlite.ensure_repository(wave.repo()).unwrap(),
             id: id.clone(),
 
             revision: 0,
@@ -1312,8 +1313,8 @@ mod tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
+            wave_id: Some(wave.id().clone()),
+            project_id: Some(project.id.clone()),
             worktree: Some(PathBuf::from("/repo.inf-123")),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
             branch: format!("jack/task-{}", &id.as_str()[3..11]),
@@ -1377,7 +1378,6 @@ mod tests {
             id: ProjectId::new(),
 
             summary: String::new(),
-            workflow: "feature".into(),
             status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "developer-efficiency".to_string(),
@@ -1448,7 +1448,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let mut task = make_task(&wave, &project);
+            let mut task = make_task(&store, &wave, &project);
             task.worktree = Some(directory.path().join("checkout"));
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
@@ -1515,7 +1515,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let task = make_task(&wave, &project);
+            let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.snapshot.projects[0].krs = vec![crate::work::project::ProjectKR {
                 text: "Work remains readable".into(),
@@ -1546,7 +1546,7 @@ mod tests {
             assert_eq!(
                 store
                     .sqlite
-                    .project(&record.project_id)
+                    .project(record.project_id.as_ref().unwrap())
                     .unwrap()
                     .unwrap()
                     .krs,
@@ -1640,7 +1640,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let task = make_task(&wave, &project);
+            let task = make_task(&store, &wave, &project);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
@@ -1650,10 +1650,9 @@ mod tests {
             }];
             store
                 .sqlite
-                .update_project_content(&project.id, "saved-workflow", &krs, &[])
+                .update_project_content(&project.id, &krs, &[])
                 .unwrap();
             let mut expected = store.get_project(&project.id).await.unwrap().unwrap();
-            assert_eq!(expected.workflow, "saved-workflow");
             assert_eq!(expected.krs, krs);
             // The provider body still contains the previous content.
             assert_eq!(
@@ -1720,7 +1719,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let task = make_task(&wave, &project);
+            let task = make_task(&store, &wave, &project);
             let snapshot = task_planning_snapshot(&wave, &project, &task);
             store.seed_inventory(snapshot.clone(), None).await.unwrap();
             let saved = store.get_project(&project.id).await.unwrap().unwrap();
@@ -1747,7 +1746,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         store
             .seed_inventory(task_planning_snapshot(&wave, &project, &task), None)
             .await
@@ -1775,7 +1774,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let mut task = make_task(&wave, &project);
+            let mut task = make_task(&store, &wave, &project);
             task.worktree = Some(directory.path().join("checkout"));
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.snapshot.items[0].state = Some("unstarted".into());
@@ -1831,7 +1830,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let mut task = make_task(&wave, &project);
+        let mut task = make_task(&store, &wave, &project);
         task.worktree = Some(directory.path().join("checkout"));
         task.updated_at -= time::Duration::days(1);
         store.sqlite.seed_unplaced_task(&task);
@@ -1874,7 +1873,7 @@ mod tests {
                 let project = make_project(&wave);
                 store.create_project(&project).await.unwrap();
                 select_project(&store, &project);
-                let task = make_task(&wave, &project);
+                let task = make_task(&store, &wave, &project);
                 let mut snapshot = task_planning_snapshot(&wave, &project, &task);
                 snapshot.snapshot.items[0].completed = false;
                 snapshot.snapshot.items[0].completed_at = None;
@@ -1893,9 +1892,15 @@ mod tests {
                 store
                     .sqlite
                     .create_task(&crate::work::task::NewTask {
+                        repository_id: store
+                            .sqlite
+                            .ensure_repository(
+                                directory.path().canonicalize().unwrap().to_str().unwrap(),
+                            )
+                            .unwrap(),
                         due_date: None,
                         id: TaskId::new(),
-                        project_id: project.id,
+                        project_id: Some(project.id),
                         title: "Retain this plan".into(),
                         description: "Saved before placement".into(),
                     })
@@ -1953,7 +1958,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let mut task = make_task(&wave, &project);
+        let mut task = make_task(&store, &wave, &project);
         task.worktree = Some(directory.path().join("checkout"));
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2011,7 +2016,7 @@ mod tests {
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
             select_project(&store, &project);
-            let mut task = make_task(&wave, &project);
+            let mut task = make_task(&store, &wave, &project);
             task.worktree = Some(directory.path().join("checkout"));
             if mapped {
                 let mut snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2096,7 +2101,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let mut task = make_task(&wave, &project);
+        let mut task = make_task(&store, &wave, &project);
         task.pm_snapshot_synced_at = Some(1);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
@@ -2150,12 +2155,12 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
-        let mut other = make_task(&wave, &project);
+        let mut other = make_task(&store, &wave, &project);
         other.linear_id = Some(LinearIssueId::new("unobserved-issue").unwrap());
         other.identifier = "INF-124".into();
         other.worktree = Some(PathBuf::from("/repo.inf-124"));
@@ -2210,7 +2215,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2267,7 +2272,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
@@ -2287,7 +2292,7 @@ mod tests {
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
-        let task = make_task(&wave, &predecessor);
+        let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let old = task_planning_snapshot(&wave, &predecessor, &task);
@@ -2319,14 +2324,14 @@ mod tests {
             .await
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_ne!(transferred.project_id, predecessor.id);
+        assert_ne!(transferred.project_id, Some(predecessor.id));
         assert_eq!(
             store.placement(&predecessor_work).await.unwrap().machine_id,
             next_home
         );
         // A new Project inherits its Wave's assignment without allocating execution.
         let inherited = store
-            .placement(&WorkRef::Project(transferred.project_id.clone()))
+            .placement(&WorkRef::Project(transferred.project_id.clone().unwrap()))
             .await
             .unwrap();
         assert_eq!(inherited.machine_id, next_home);
@@ -2354,7 +2359,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         let task = store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2393,7 +2398,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         let task = store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2440,7 +2445,7 @@ mod tests {
     async fn stale_project_readback_cannot_assign_newer_membership_to_a_wave() {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         let old = snapshot.snapshot.projects[0].clone();
         let mut current = old.clone();
@@ -2495,13 +2500,12 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         store.seed_inventory(snapshot.clone(), None).await.unwrap();
         let mut confirmed = snapshot.snapshot.projects[0].clone();
         confirmed.name = "Ordinary work".into();
         confirmed.slug = "ordinary-work".into();
-        confirmed.workflow.clear();
         confirmed.krs.push(crate::work::project::ProjectKR {
             text: "Preserve the authored proof".into(),
             holds: false,
@@ -2578,7 +2582,7 @@ mod tests {
         let mut successor = make_project(&wave);
         successor.linear_id =
             Some(crate::linear::LinearProjectId::new("successor-project").unwrap());
-        let task = make_task(&wave, &predecessor);
+        let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         store.create_project(&successor).await.unwrap();
@@ -2606,7 +2610,7 @@ mod tests {
             .await
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(transferred.project_id, successor.id);
+        assert_eq!(transferred.project_id, Some(successor.id));
         // A delayed response cannot reverse the confirmed revision.
         store.seed_inventory(response, None).await.unwrap();
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
@@ -2629,7 +2633,7 @@ mod tests {
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
         select_project(&store, &predecessor);
-        let task = make_task(&wave, &predecessor);
+        let task = make_task(&store, &wave, &predecessor);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         // An operation step run in the checkout is started work.
@@ -2649,7 +2653,7 @@ mod tests {
         let response = task_planning_snapshot(&wave, &successor, &task);
         store.seed_inventory(response, None).await.unwrap();
         let moved = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(moved.project_id, successor.id);
+        assert_eq!(moved.project_id, Some(successor.id));
         assert_eq!(moved.worktree, task.worktree);
         assert_eq!(moved.linear_id, task.linear_id);
         assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flows);
@@ -2683,7 +2687,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let target = ChildRef::Task(task.id.clone());
         let work = store.work_for_child(&target).await.unwrap();
@@ -2760,7 +2764,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let observed_at = task.created_at - time::Duration::SECOND;
         let settled_at = task.created_at + time::Duration::SECOND;
@@ -2863,7 +2867,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let work = WorkRef::Task(task.id.clone());
 
@@ -2899,7 +2903,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         let task = store.seed_task(&task, &pr).await.unwrap();
         assert!(!store.sqlite.task_deleted(&task).unwrap());
@@ -2934,7 +2938,7 @@ mod tests {
             .place_work(&WorkRef::Project(project.id.clone()), &home)
             .await
             .unwrap();
-        let mut task = make_task(&wave, &project);
+        let mut task = make_task(&store, &wave, &project);
         task.worktree = Some(directory.path().join("uncreated-child-worktree"));
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.snapshot.items[0].completed = false;
@@ -3032,7 +3036,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let target = make_task(&wave, &project);
+        let target = make_task(&store, &wave, &project);
         store
             .seed_task(&target, &make_task_pr(&target))
             .await
@@ -3041,7 +3045,7 @@ mod tests {
         let target_status = store.work_status(&target_work).await.unwrap();
         let target_prs = store.task_prs(&target.id).await.unwrap();
 
-        let mut sibling = make_task(&wave, &project);
+        let mut sibling = make_task(&store, &wave, &project);
         sibling.linear_id = Some(LinearIssueId::new("sibling-issue-uuid").unwrap());
         sibling.identifier = "INF-124".to_string();
         sibling.worktree = Some(PathBuf::from("/repo.inf-124"));
@@ -3079,7 +3083,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         // Separate creation from the edit without depending on a wall-clock tick.
         rusqlite::Connection::open(&database)
@@ -3149,12 +3153,11 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let task = store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
 
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
-        observed.workflow = "incident".into();
         observed.status = crate::work::project::ProjectStatus::Completed;
         crate::linear::acceptance::accept_linear_project_in(
             &store.sqlite,
@@ -3167,7 +3170,6 @@ mod tests {
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(stored_project.workflow, observed.workflow);
         assert_eq!(stored_project.status, observed.status);
         assert_eq!(stored_project.pm_snapshot_synced_at, Some(10));
         assert_eq!(wave_refresh_at(dir.path(), &wave), None);
@@ -3180,7 +3182,7 @@ mod tests {
             stored_task.pm_snapshot_synced_at,
             task.pm_snapshot_synced_at
         );
-        assert_eq!(stored_task.project_id, stored_project.id);
+        assert_eq!(stored_task.project_id, Some(stored_project.id));
     }
 
     #[tokio::test]
@@ -3196,7 +3198,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let mut pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
 
@@ -3254,7 +3256,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let mut pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
 
@@ -3296,7 +3298,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let mut pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
 
@@ -3330,7 +3332,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let parent_task = make_task(&wave, &project);
+        let parent_task = make_task(&store, &wave, &project);
         let mut parent = make_task_pr(&parent_task);
         store.seed_task(&parent_task, &parent).await.unwrap();
 
@@ -3347,7 +3349,7 @@ mod tests {
         });
         store.update_task_pr(&parent).await.unwrap();
 
-        let mut child = make_task(&wave, &project);
+        let mut child = make_task(&store, &wave, &project);
         child.linear_id = Some(LinearIssueId::new("issue-child").unwrap());
         child.identifier = "INF-124".to_string();
         child.worktree = Some(PathBuf::from("/repo.child-task"));
@@ -3430,7 +3432,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let mut pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
 
@@ -3471,7 +3473,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let mut task = make_task(&wave, &project);
+        let mut task = make_task(&store, &wave, &project);
         let mut initial = task_planning_snapshot(&wave, &project, &task);
         initial.snapshot.items[0].completed = false;
         initial.snapshot.items[0].completed_at = None;
@@ -3926,7 +3928,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let task = make_task(&wave, &project);
+        let task = make_task(&store, &wave, &project);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         store.sqlite.test_flow(

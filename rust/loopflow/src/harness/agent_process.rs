@@ -16,6 +16,23 @@ use std::collections::{HashMap, HashSet};
 /// writes under.
 pub(crate) type AttachmentOwner = (SqliteStore, String, SessionAttachment);
 
+/// Admit cleanup while the provider still owns this detached tool group.
+/// The watchdog remains a member, so its group identity cannot be recycled.
+pub fn guard_tool_lifeline(path: &std::path::Path, provider_pid: u32) -> Result<()> {
+    let group = crate::os_process::current_process_group_id()
+        .ok_or_else(|| anyhow!("tool process group is unavailable"))?;
+    let provider = OsProcess::read(provider_pid)?
+        .ok_or_else(|| anyhow!("tool provider exited before lifeline admission"))?;
+    let leader = OsProcess::read(group)?
+        .ok_or_else(|| anyhow!("tool group leader exited before lifeline admission"))?;
+    anyhow::ensure!(
+        group != provider.pgid && leader.ppid == provider.pid,
+        "tool does not belong to a detached group created by its provider"
+    );
+    crate::os_process::watch_tool_lifeline(path)?;
+    Ok(())
+}
+
 /// Open the invocation's attachment without refreshing its authority from the
 /// store. A launch without one is refused: every AgentProcess is recorded.
 pub(super) fn open_owner(
@@ -553,6 +570,15 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     match provider {
         Some("codex") => program("codex") && has("app-server") && has("--listen"),
         Some("opencode") => program("opencode") && has("serve"),
+        Some("pi") => {
+            (program("pi")
+                || process
+                    .command
+                    .split_whitespace()
+                    .any(|part| part.contains("/pi-coding-agent/") && part.ends_with("/cli.js")))
+                && has("--mode")
+                && has("rpc")
+        }
         // Headless Claude has no subcommand to match; identity and group carry it.
         Some("claude") => program("claude"),
         _ => false,
@@ -622,6 +648,14 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn tool_lifeline_refuses_the_providers_own_group() {
+        let error =
+            super::guard_tool_lifeline(std::path::Path::new("unused-lifeline"), std::process::id())
+                .unwrap_err();
+        assert!(error.to_string().contains("detached group"));
+    }
 
     #[test]
     fn move_after_agent_death_preserves_unknown_outcome() {

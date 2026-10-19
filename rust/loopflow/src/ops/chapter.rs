@@ -50,7 +50,6 @@ pub struct WaveChapterPlan {
     pub successor_id: String,
     pub create: bool,
     pub project_name: String,
-    pub workflow: String,
     pub krs: Vec<crate::work::project::ProjectKR>,
     pub metric_targets: Vec<crate::work::wave::metrics::MetricTarget>,
 }
@@ -339,7 +338,7 @@ async fn prepare_rotation(
         .map_err(error)?;
     let mut tasks = Vec::new();
     for task in store.list_tasks(Some(wave.id())).await.map_err(error)? {
-        if task.project_id.as_str() != predecessor_id.as_deref().unwrap_or("")
+        if task.project_id.as_ref().map(|id| id.as_str()) != predecessor_id.as_deref()
             && !retained.iter().any(|id| id == task.id.as_str())
         {
             continue;

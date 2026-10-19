@@ -506,9 +506,9 @@ pub(super) fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Pla
                 [id.as_str()],
                 |row| {
                     Ok((
-                        Some(WorkRef::Project(ProjectId::from_raw(
-                            row.get::<_, String>(0)?,
-                        ))),
+                        row.get::<_, Option<String>>(0)?
+                            .map(ProjectId::from_raw)
+                            .map(WorkRef::Project),
                         row.get::<_, i64>(1)?,
                     ))
                 },
@@ -647,7 +647,7 @@ pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) ->
     let WorkRef::Task(task) = work else {
         return Ok(());
     };
-    let (project, started): (String, bool) = conn.query_row(
+    let (project, started): (Option<String>, bool) = conn.query_row(
         "SELECT project_id, started_at IS NOT NULL FROM tasks WHERE id=?1",
         [task.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
@@ -655,7 +655,10 @@ pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) ->
     if started {
         return Ok(());
     }
-    require_selected_project(conn, &ProjectId::from_raw(project))
+    if let Some(project) = project {
+        require_selected_project(conn, &ProjectId::from_raw(project))?;
+    }
+    Ok(())
 }
 
 pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
@@ -686,16 +689,17 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
     }
 }
 
-pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<WaveId> {
-    let wave: String = conn
+pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<WaveId>> {
+    let wave: Option<String> = conn
         .query_row(
-            "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+            "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
         .optional()?
         .ok_or_else(|| invalid_durable(format!("Task {task} does not exist")))?;
-    WaveId::parse(&wave).map_err(invalid_durable)
+    wave.map(|wave| WaveId::parse(&wave).map_err(invalid_durable))
+        .transpose()
 }
 
 fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
@@ -828,7 +832,6 @@ mod durable_store_tests {
             id: project_id.clone(),
 
             summary: String::new(),
-            workflow: "feature".into(),
             status: crate::work::project::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
             slug: "probe".to_string(),
@@ -853,6 +856,7 @@ mod durable_store_tests {
         )
         .unwrap();
         let task = Task {
+            repository_id: store.ensure_repository("/repo").unwrap(),
             id: task_id.clone(),
 
             revision: 0,
@@ -863,8 +867,8 @@ mod durable_store_tests {
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id,
-            project_id,
+            wave_id: Some(wave_id),
+            project_id: Some(project_id),
             worktree: Some(PathBuf::from("/repo.probe")),
             workspace_slug: "probe".to_string(),
             branch: "probe".to_string(),
@@ -910,14 +914,17 @@ mod durable_store_tests {
         use crate::durable::TaskExecutionSource::{EffectiveDelegation, RecordedCheckout};
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let wave = store.get_wave(&task.wave_id).unwrap().unwrap();
+        let wave = store
+            .get_wave(task.wave_id.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
         let repository = store.ensure_repository(wave.repo()).unwrap();
         let local = store.local_machine().unwrap().id;
         let remote = crate::durable::MachineId::new();
         let saved_machine = store
             .add_machine(&remote, "worker", "worker", "/saved/default")
             .unwrap();
-        let work = WorkRef::Wave(task.wave_id.clone());
+        let work = WorkRef::Wave(task.wave_id.clone().unwrap());
         store.place_work(&work, &remote).unwrap();
         let route = store.task_execution_route(&task_id).unwrap();
         assert_eq!(route.machine_id, local);
@@ -999,8 +1006,8 @@ mod durable_store_tests {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let work = WorkRef::Task(task_id.clone());
-        let wave = WorkRef::Wave(task.wave_id.clone());
-        let project = WorkRef::Project(task.project_id.clone());
+        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
+        let project = WorkRef::Project(task.project_id.clone().unwrap());
         let local = store.local_machine().unwrap().id;
         let remote = MachineId::new();
         store
@@ -1043,7 +1050,7 @@ mod durable_store_tests {
         store.ensure_repository("/repo").unwrap();
         let before = store.task_execution_route(&task_id).unwrap();
         let task = store.task(&task_id).unwrap().unwrap();
-        let wave = WorkRef::Wave(task.wave_id.clone());
+        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
         let remote = MachineId::new();
         store
             .add_machine(&remote, "worker", "worker", "/repo")
@@ -1060,7 +1067,7 @@ mod durable_store_tests {
         let parents = snapshot
             .heads()
             .filter(|(_, change)| {
-                change.edit.target == task.wave_id.as_str()
+                change.edit.target == task.wave_id.as_ref().unwrap().as_str()
                     && change.edit.change.field() == "wave_delegation"
             })
             .map(|(id, _)| id.to_owned())
@@ -1076,7 +1083,7 @@ mod durable_store_tests {
             "remote-reset".into(),
             PlanningMutation {
                 edit: WorkEdit {
-                    target: task.wave_id.to_string(),
+                    target: task.wave_id.as_ref().unwrap().to_string(),
                     change: WorkValue::WaveDelegation(None),
                 },
                 clock,
@@ -1118,7 +1125,7 @@ mod durable_store_tests {
             .add_machine(&remote, "worker", "worker", "/repo")
             .unwrap();
         store
-            .place_work(&WorkRef::Wave(task.wave_id), &remote)
+            .place_work(&WorkRef::Wave(task.wave_id.clone().unwrap()), &remote)
             .unwrap();
         let legacy = store.placement(&work).unwrap();
         assert_eq!(legacy.machine_id, local);
@@ -1144,7 +1151,7 @@ mod durable_store_tests {
             .unwrap();
             conn.execute(
                 "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
-                rusqlite::params![task.wave_id.as_str(), ancestor.as_str()],
+                rusqlite::params![task.wave_id.as_ref().unwrap().as_str(), ancestor.as_str()],
             )
             .unwrap();
         }
@@ -1170,7 +1177,7 @@ mod durable_store_tests {
             .unwrap();
             conn.execute(
                 "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
-                rusqlite::params![ancestor.as_str(), task.wave_id.as_str()],
+                rusqlite::params![ancestor.as_str(), task.wave_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
         }
@@ -1186,7 +1193,10 @@ mod durable_store_tests {
     fn configured_project_admission_preserves_started_continuation() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let mut other = store.project(&task.project_id).unwrap().unwrap();
+        let mut other = store
+            .project(task.project_id.as_ref().unwrap())
+            .unwrap()
+            .unwrap();
         other.id = ProjectId::new();
         other.linear_id =
             Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
@@ -1204,7 +1214,7 @@ mod durable_store_tests {
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
         crate::store::sqlite::project_selection::write_project_binding(
             &store,
-            &task.wave_id,
+            task.wave_id.as_ref().unwrap(),
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
             other.linear_id.as_ref().unwrap().as_str(),
             &guard,
@@ -1239,7 +1249,7 @@ mod durable_store_tests {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "UPDATE projects SET status='completed' WHERE id=?1",
-                [task.project_id.as_str()],
+                [task.project_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
         }
@@ -1272,7 +1282,7 @@ mod durable_store_tests {
             .unwrap()
             .execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                rusqlite::params![task.wave_id, task.project_id.as_str()],
+                rusqlite::params![task.wave_id, task.project_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
         for status in ["backlog", "planned", "paused", "completed", "canceled"] {
@@ -1282,7 +1292,7 @@ mod durable_store_tests {
                 .unwrap()
                 .execute(
                     "UPDATE projects SET status=?2 WHERE id=?1",
-                    rusqlite::params![task.project_id.as_str(), status],
+                    rusqlite::params![task.project_id.as_ref().unwrap().as_str(), status],
                 )
                 .unwrap();
             assert!(store.require_task_launch(&task_id).is_err());
@@ -1292,8 +1302,8 @@ mod durable_store_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE projects SET status='started', workflow='' WHERE id=?1",
-                [task.project_id.as_str()],
+                "UPDATE projects SET status='started' WHERE id=?1",
+                [task.project_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
         store.require_task_launch(&task_id).unwrap();
@@ -1360,8 +1370,8 @@ mod durable_store_tests {
         )
         .unwrap();
         let other_task = TaskId::new();
-        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-            SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
+        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+            SELECT ?1,repository_id,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
             rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
@@ -1377,14 +1387,14 @@ mod durable_store_tests {
                 Some(task_id.clone()),
                 None,
                 Some(task_id.clone()),
-                Some(task.wave_id.clone()),
+                Some(task.wave_id.clone().unwrap()),
             ),
             (
                 None,
                 Some(task_id.clone()),
-                Some(task.wave_id.clone()),
+                Some(task.wave_id.clone().unwrap()),
                 Some(task_id.clone()),
-                Some(task.wave_id.clone()),
+                Some(task.wave_id.clone().unwrap()),
             ),
         ] {
             let tx = conn
@@ -1441,7 +1451,10 @@ mod durable_store_tests {
         assert!(conn
             .execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![other_wave.as_str(), task.project_id.as_str()]
+                rusqlite::params![
+                    other_wave.as_str(),
+                    task.project_id.as_ref().unwrap().as_str()
+                ]
             )
             .is_err());
     }
@@ -1472,7 +1485,7 @@ mod durable_store_tests {
             writer_barrier.wait();
             conn.execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
-                rusqlite::params![other_wave.as_str(), project_id.as_str()],
+                rusqlite::params![other_wave.as_str(), project_id.as_ref().unwrap().as_str()],
             )
         });
         barrier.wait();
@@ -1492,7 +1505,7 @@ mod durable_store_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(run_wave, task.wave_id.as_str());
+        assert_eq!(run_wave, task.wave_id.as_ref().unwrap().as_str());
         assert_eq!(run_wave, project_wave);
     }
 
@@ -1678,7 +1691,7 @@ mod durable_store_tests {
         let successor = ProjectId::new();
         store.conn.lock().unwrap().execute(
             "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
-            rusqlite::params![successor.as_str(), task.wave_id.as_str()],
+            rusqlite::params![successor.as_str(), task.wave_id.as_ref().unwrap().as_str()],
         ).unwrap();
         store
             .conn
@@ -1691,7 +1704,7 @@ mod durable_store_tests {
             .unwrap();
 
         let retained = store.task(&task_id).unwrap().unwrap();
-        assert_eq!(retained.project_id, successor);
+        assert_eq!(retained.project_id, Some(successor));
         assert_eq!(retained.worktree, task.worktree);
         let after = store.task_work(&task_id).unwrap();
         assert_eq!(after.sessions, before.sessions);
@@ -1783,7 +1796,7 @@ mod durable_store_tests {
             .unwrap()
             .execute(
                 "UPDATE projects SET status='completed' WHERE id=?1",
-                [task.project_id.as_str()],
+                [task.project_id.as_ref().unwrap().as_str()],
             )
             .unwrap();
         let bound = store
@@ -1810,9 +1823,10 @@ mod durable_store_tests {
         let bound_task = TaskId::new();
         let losing_task = TaskId::new();
         for id in [&bound_task, &losing_task] {
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                VALUES(?1,?2,?1,?1,?1,1)",
-                rusqlite::params![id.as_str(), task.project_id.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?1,?1,?1,1)",
+                rusqlite::params![id.as_str(), task.project_id.as_ref().unwrap().as_str()]).unwrap();
         }
         // A done Task is still a valid assignment target.
         conn.execute(
@@ -1840,7 +1854,7 @@ mod durable_store_tests {
             reserve_session_in(&tx, unpublished_conversation(None, None, 2), None).unwrap();
         let wave_only = reserve_session_in(
             &tx,
-            unpublished_conversation(None, Some(task.wave_id.clone()), 3),
+            unpublished_conversation(None, Some(task.wave_id.clone().unwrap()), 3),
             None,
         )
         .unwrap();
@@ -1869,7 +1883,7 @@ mod durable_store_tests {
             rusqlite::params![
                 orphan.id.as_str(),
                 bound_task.as_str(),
-                task.wave_id.as_str()
+                task.wave_id.as_ref().unwrap().as_str()
             ],
         )
         .unwrap();
@@ -1899,7 +1913,7 @@ mod durable_store_tests {
                 rusqlite::params![
                     later_bind.id.as_str(),
                     bound_task.as_str(),
-                    task.wave_id.as_str()
+                    task.wave_id.as_ref().unwrap().as_str()
                 ],
             )
             .unwrap();
@@ -1910,13 +1924,17 @@ mod durable_store_tests {
             (
                 &orphan.id,
                 Some(losing_task.as_str()),
-                Some(task.wave_id.as_str()),
+                Some(task.wave_id.as_ref().unwrap().as_str()),
             ),
-            (&orphan.id, None, Some(task.wave_id.as_str())),
+            (
+                &orphan.id,
+                None,
+                Some(task.wave_id.as_ref().unwrap().as_str()),
+            ),
             (
                 &conflicting.id,
                 Some(losing_task.as_str()),
-                Some(task.wave_id.as_str()),
+                Some(task.wave_id.as_ref().unwrap().as_str()),
             ),
             (&conflicting.id, None, None),
         ] {
@@ -2073,7 +2091,7 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(bound.artifact_key, replacement.artifact_key);
         assert_eq!(bound.task_id, Some(task_id.clone()));
-        assert_eq!(bound.wave_id, Some(task.wave_id.clone()));
+        assert_eq!(bound.wave_id, task.wave_id.clone());
         assert!(bound.bound_at.is_some());
         let binds = store.bound_sessions().unwrap();
         assert_eq!(binds.len(), 1);
@@ -2176,8 +2194,8 @@ mod durable_store_tests {
             .unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                SELECT ?1,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
+            conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
+                SELECT ?1,repository_id,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
                 rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
         }
         let barrier = Arc::new(Barrier::new(2));
@@ -2194,7 +2212,11 @@ mod durable_store_tests {
                 barrier.wait();
                 let result = conn.execute(
                     "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                    rusqlite::params![session.as_str(), target.as_str(), wave.as_str()],
+                    rusqlite::params![
+                        session.as_str(),
+                        target.as_str(),
+                        wave.as_ref().unwrap().as_str()
+                    ],
                 );
                 (target, result)
             })

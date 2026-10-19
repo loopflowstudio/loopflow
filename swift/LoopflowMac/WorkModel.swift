@@ -111,6 +111,30 @@ final class WorkModel {
     @ObservationIgnored private var workspaceRegistry: SessionsWorkspaceRegistry?
     @ObservationIgnored private var workspaceRepository: String?
 
+    private var selectionReadings: [RepositoryReadingKey: WorkReading<[ViewPlan]>] = [:]
+    private(set) var selectionPlans: WorkReading<[ViewPlan]> {
+        get { selectionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
+    }
+
+    func applySelectionPlans(_ plans: [ViewPlan]?, reason: String) {
+        guard let plans else {
+            selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
+            return
+        }
+        selectionPlans = .available(plans)
+        reconcileSelectionRepository()
+    }
+
+    private func reconcileSelectionRepository() {
+        guard let registry = workspaceRegistry else { return }
+        if let repository = selectionPlans.value?.first?.owner.repository,
+           let previous = workspaceRepository, previous != repository {
+            registry.reassociateRepository(from: previous, to: repository)
+            workspaceRepository = repository
+        }
+    }
+
     func workspaceKey(for reference: WorkReference?, repository requestedRepository: String) -> WorkWorkspaceKey {
         let repository = workspaceRepository ?? requestedRepository
         guard let reference else { return WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
@@ -126,10 +150,11 @@ final class WorkModel {
     }
 
     func workspaceTitle(_ key: WorkWorkspaceKey) -> String {
+        let memberTitle = selectionPlans.value?.lazy.flatMap(\.members).first { $0.work == key }?.title
         switch key.kind {
         case .repository: return repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository unavailable"
-        case .wave: return visibleRoadmaps.first { $0.wave.id == key.id }?.wave.name ?? workspaceRegistry?.retained(key)?.title ?? "Wave unavailable"
-        case .task: return task(id: key.id)?.task.task.name ?? workspaceRegistry?.retained(key)?.title ?? "Task unavailable"
+        case .wave: return visibleRoadmaps.first { $0.wave.id == key.id }?.wave.name ?? memberTitle ?? workspaceRegistry?.retained(key)?.title ?? "Wave unavailable"
+        case .task: return task(id: key.id)?.task.task.name ?? memberTitle ?? workspaceRegistry?.retained(key)?.title ?? "Task unavailable"
         }
     }
 
@@ -137,6 +162,10 @@ final class WorkModel {
         guard workspaceRegistry !== registry else { return }
         workspaceRegistry = registry
         workspaceRepository = repository
+        reconcileSelectionRepository()
+        for key in registry.openWork where key.kind == .task {
+            retainWorkingTask(key.reference)
+        }
         openSelectedWorkspace()
     }
 
@@ -152,6 +181,21 @@ final class WorkModel {
         let workspace = registry.open(key, title: workspaceTitle(key), location: location, besideFocused: besideFocused)
         navigation.workspacePresentation = workspace.presentation
         navigation.selectedSessionId = workspace.presentation.selectedSessionId
+        revealPrimaryConversation()
+    }
+
+    /// Observation can display an existing conversation without acquiring its provider.
+    func revealPrimaryConversation() {
+        guard let registry = workspaceRegistry, let key = registry.selectedWork,
+              key.kind != .task, let workspace = registry.retained(key),
+              workspace.multiplexer.focusedPane.content == .empty,
+              let record = sessions.value?.first(where: {
+                  key.kind == .repository ? $0.primaryScope == "repository"
+                      : $0.primaryScope == "wave" && $0.waveId == key.id
+              }) else { return }
+        registry.revealSession(record, in: workspace)
+        workspace.presentation.selectedSessionId = record.id
+        workspace.presentation.content = .terminals
     }
 
     @ObservationIgnored var openRepository: ((String, URL?) -> Void)?
@@ -191,10 +235,10 @@ final class WorkModel {
             taskLinkReading = .loading
             let result = try await query.taskDestination(issue: link.issue, repo: link.repo)
             guard !Task.isCancelled, destinationGeneration == generation else { return }
-            let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }
-            let unavailable = result.waves.contains { $0.tasks.unavailableReason != nil }
+            let matches = result.tasks.items.map { task in (result.waves.first { $0.wave.id == task.task.waveId }, task) }
+            let unavailable = result.tasks.unavailableReason != nil
             if let expectedTaskID {
-                guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.0.wave.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
+                guard matches.allSatisfy({ $0.1.id == expectedTaskID && $0.1.task.repo.normalizedFilePath == link.repo?.normalizedFilePath }) else {
                     throw RegistryQueryError("The recent Task no longer resolves to its recorded identity.")
                 }
                 if matches.isEmpty, !unavailable {
@@ -223,7 +267,7 @@ final class WorkModel {
         if linkedTaskPage != nil { linkedTaskPage = nil }
     }
 
-    func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
+    func chooseLinkedTask(wave: WaveRoadmap?, task: RoadmapTask) async {
         guard let taskLinkURL else { return }
         dismissTaskLink()
         let generation = destinationGeneration
@@ -250,18 +294,18 @@ final class WorkModel {
     }
 
     /// The one Task a repository-qualified link names in planning this window holds.
-    private func loadedTask(_ link: TaskLink) -> (wave: WaveRoadmap, task: RoadmapTask)? {
+    private func loadedTask(_ link: TaskLink) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         guard let repo = link.repo?.normalizedFilePath else { return nil }
         guard case .available(let snapshot) = roadmap else { return nil }
-        let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }.flatMap { wave in
-            wave.tasks.items.filter { $0.task.identifier == link.issue || $0.id == link.issue || $0.runtime?.workId == link.issue }.map { (wave, $0) }
-        }
+        let matches = snapshot.tasks.items.filter {
+            $0.task.repo.normalizedFilePath == repo && ($0.task.identifier == link.issue || $0.id == link.issue || $0.runtime?.workId == link.issue)
+        }.map { task in (snapshot.waves.first { $0.wave.id == task.task.waveId }, task) }
         return matches.count == 1 ? matches[0] : nil
     }
 
-    private func openLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+    private func openLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
         let opensConversation = link.session != nil || link.diff || taskLinkConversation
-        let isLocalRepository = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
+        let isLocalRepository = repoPath?.normalizedFilePath == task.task.repo.normalizedFilePath
         if opensConversation, isLocalRepository {
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
             navigation.content = .terminals
@@ -280,12 +324,12 @@ final class WorkModel {
         }
     }
 
-    private func prepareLinkedTask(wave: WaveRoadmap, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
+    private func prepareLinkedTask(wave: WaveRoadmap?, task: RoadmapTask, link: TaskLink, generation: Int) async throws {
         try Task.checkCancellation()
         guard destinationGeneration == generation else { return }
         var task = task
-        if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
-            openRepository(wave.wave.repo, taskLinkURL)
+        if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
+            openRepository(task.task.repo, taskLinkURL)
             return
         }
         var location: TaskLocationObservation?
@@ -293,7 +337,7 @@ final class WorkModel {
         var executionTask = task.runtime?.workId ?? task.id
         var executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
         if let machine = link.machine, let repository = link.repository {
-            let identity = try await query.repositoryIdentity(cwd: wave.wave.repo)
+            let identity = try await query.repositoryIdentity(cwd: task.task.repo)
             guard identity.locators.contains(repository) else {
                 throw RegistryQueryError("The repository identity changed; nothing was opened.")
             }
@@ -312,10 +356,10 @@ final class WorkModel {
                 navigation.preparedTaskWorktrees[task.id] = executionIdentity
             }
             openTaskDestination(wave: wave, task: task, preservingOpening: true)
-            linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: wave.wave.repo.normalizedFilePath)
+            linkedTaskPage = LinkedTaskPage(generation: generation, taskID: task.id, repo: task.task.repo.normalizedFilePath)
             return
         }
-        let sameRepo = repoPath?.normalizedFilePath == wave.wave.repo.normalizedFilePath
+        let sameRepo = repoPath?.normalizedFilePath == task.task.repo.normalizedFilePath
         let retainedRecords = sameRepo && location == nil ? sessions.value ?? [] : []
         let sessionID: String
         var preparation: SessionRecord?
@@ -325,7 +369,7 @@ final class WorkModel {
             // Reuse the primary-Session owner rather than creating another
             // conversation or replaying a retained terminal's launch command.
             Perf.agentInput("primary_begin", task: task.id)
-            let record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: wave.wave.repo)
+            let record = try await executionQuery.prepareTaskSession(issue: executionTask, cwd: task.task.repo)
             Perf.agentInput("primary_returned", task: task.id, session: record.id, detail: "provider=\(record.provider ?? "unknown")")
             guard !Task.isCancelled, destinationGeneration == generation else { return }
             sessionID = record.id
@@ -333,9 +377,9 @@ final class WorkModel {
             // Preparation may have supplied a checkout/runtime absent from the
             // planning read. Refresh this exact Task, never the current selection.
             if location == nil {
-                let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: wave.wave.repo)
+                let refreshed = try await query.taskDestination(issue: task.task.identifier, repo: task.task.repo)
                 guard !Task.isCancelled, destinationGeneration == generation else { return }
-                guard let current = refreshed.waves.flatMap({ $0.tasks.items }).first(where: { $0.id == task.id }) else {
+                guard let current = refreshed.tasks.items.first(where: { $0.id == task.id }) else {
                     throw RegistryQueryError("The prepared Task is no longer available; its Session was not retargeted.")
                 }
                 task = current
@@ -355,7 +399,7 @@ final class WorkModel {
             // lookup evidence; publish its inventory only after the last page.
             var after: String?
             repeat {
-                let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: wave.wave.repo)
+                let page = try await executionQuery.sessionPage(includingHeadless: true, after: after, cwd: task.task.repo)
                 guard !Task.isCancelled, destinationGeneration == generation else { return }
                 records += page.entries
                 after = page.next
@@ -391,7 +435,7 @@ final class WorkModel {
             sessions = .available(records)
         }
         let destination = LinkedSession(generation: generation, record: record, task: task, showsChanges: link.diff, location: location, prepared: preparation != nil)
-        try await installConversation(destination, repository: wave.wave.repo)
+        try await installConversation(destination, repository: task.task.repo)
     }
 
     /// Install the record and pane synchronously, before preparation can end.
@@ -550,16 +594,16 @@ final class WorkModel {
         }
     }
 
-    func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
+    func openTaskDestination(wave: WaveRoadmap?, task: RoadmapTask) {
         openTaskDestination(wave: wave, task: task, preservingOpening: false)
     }
 
-    private func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask, preservingOpening: Bool) {
-        if let openRepository, repoPath?.normalizedFilePath != wave.wave.repo.normalizedFilePath {
-            openRepository(wave.wave.repo, TaskLink(issue: task.task.identifier, repo: wave.wave.repo).url)
+    private func openTaskDestination(wave: WaveRoadmap?, task: RoadmapTask, preservingOpening: Bool) {
+        if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
+            openRepository(task.task.repo, TaskLink(issue: task.task.identifier, repo: task.task.repo).url)
             return
         }
-        setRepoPath(wave.wave.repo, preservingOpening: preservingOpening)
+        setRepoPath(task.task.repo, preservingOpening: preservingOpening)
         if navigation.selectedTaskEvidence.map({ $0.wave != wave || $0.task != task }) ?? true {
             navigation.selectedTaskEvidence = (wave, task)
         }
@@ -578,8 +622,12 @@ final class WorkModel {
     }
 
     func openTaskConversation(_ id: String) async {
-        guard let found = task(id: id),
-              let url = TaskLink(issue: found.task.task.identifier, repo: found.wave.wave.repo).url else { return }
+        guard let found = task(id: id) else {
+            guard let repoPath, let url = TaskLink(issue: id, repo: repoPath).url else { return }
+            await openTaskLink(url, conversation: true)
+            return
+        }
+        guard let url = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo).url else { return }
         let key = workspaceKey(for: .task(id: id), repository: workspaceRepository ?? "")
         let retainedConversation = workspaceRegistry?.retained(key)?.multiplexer.layout.allPanes.contains {
             $0.sessionId != nil
@@ -594,15 +642,42 @@ final class WorkModel {
         }
     }
 
+    func openPaletteWave(_ id: String) {
+        guard let wave = wave(id: id)?.wave else { return }
+        if let openRepository, repoPath?.normalizedFilePath != wave.repo.normalizedFilePath {
+            var link = URLComponents()
+            link.scheme = "loopflow"; link.host = "open"
+            link.queryItems = [URLQueryItem(name: "repo", value: wave.repo), URLQueryItem(name: "wave", value: id)]
+            openRepository(wave.repo, link.url)
+        } else { select(.wave(id: id)) }
+    }
+
+    func receiveWorkLink(_ url: URL) async {
+        if url.host == "open" {
+            let wave = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "wave" }?.value
+            if let wave {
+                if self.wave(id: wave) == nil { await refresh() }
+                select(.wave(id: wave))
+            }
+            else { select(nil) }
+        } else { await openTaskLink(url) }
+    }
+
     func openPaletteTask(_ id: String) async {
+        if let task = roadmap.value?.tasks.items.first(where: { $0.id == id }),
+           repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
+            let wave = roadmap.value?.waves.first { $0.wave.id == task.task.waveId }
+            openTaskDestination(wave: wave, task: task)
+            return
+        }
         if let found = task(id: id) {
-            await openTaskConversation(found.task.id)
+            openTaskDestination(wave: found.wave, task: found.task)
             return
         }
         guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
               let repoPath else { return }
         guard let url = TaskLink(issue: recent.key, repo: repoPath).url else { return }
-        await openTaskLink(url, expectedTaskID: id, conversation: true)
+        await openTaskLink(url, expectedTaskID: id)
     }
 
     func retryTaskLink() async {
@@ -626,7 +701,7 @@ final class WorkModel {
             path: repoPath, selectionKind: workspaces.selectedWork?.kind.rawValue, selectionId: workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
+            supportedOperations: ["list", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), opening: taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {
@@ -671,8 +746,6 @@ final class WorkModel {
             reading: state, reason: reason, observedAt: nil, actions: state == "current" ? record?.actions : nil)
     }
 
-    var taskHistoryFilters: [String: TaskHistoryFilter] = [:]
-    var taskHistoryNow = Date()
     var historyWave: WaveSnapshot?
     var historyReference: String?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
@@ -689,7 +762,7 @@ final class WorkModel {
     }
 
     var projection: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, sessions: sessions.value ?? [])
+        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
     }
     var breadcrumb: WorkBreadcrumb? {
         if let current = projection.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {
@@ -697,7 +770,7 @@ final class WorkModel {
         }
         guard let retained = navigation.selectedTaskEvidence, selection == .task(id: retained.task.id) else { return nil }
         // Exact lookup evidence supports inspection without joining the current plan.
-        return WorkProjection(roadmaps: [retained.wave], sessions: sessions.value ?? [])
+        return WorkProjection(roadmaps: [retained.wave].compactMap { $0 }, inventory: [retained.task], sessions: sessions.value ?? [])
             .breadcrumb(selection: selection, sessionId: navigation.selectedSessionId)
     }
 
@@ -711,20 +784,20 @@ final class WorkModel {
     }
 
     var visibleWork: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, sessions: visibleSessions)
+        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
     }
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
         didSet {
-            taskHistoryNow = Date()
             // Retain the latest observed Task across temporary chapter membership
             // gaps, including selections saved in another repository.
-            for navigation in navigationByRepo.values {
+            for (repo, navigation) in navigationByRepo {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
-                for wave in roadmap.value?.waves ?? [] {
-                    if let task = wave.tasks.items.first(where: { $0.id == selection.id }) {
-                        navigation.selectedTaskEvidence = (wave, task)
-                        break
+                if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
+                    navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
+                    if task.runtime?.started == true, task.runtime?.status != .paused {
+                        navigation.retainWorkingTask(task.id, aliases: [task.runtime?.workId].compactMap { $0 })
+                        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repo)
                     }
                 }
             }
@@ -875,12 +948,6 @@ final class WorkModel {
         return showsSavedWork ? .updating : .current
     }
 
-    /// Start the repository conversation once current workspace data is available.
-    var repositoryEntryReady: Bool {
-        guard repoPath != nil, workStatus == .current, case .available = waves else { return false }
-        return true
-    }
-
     /// Whether any part shown is saved text instead of a read from this launch.
     var showsSavedWork: Bool {
         showsSavedPlanning || savedSessionRepos.contains(repositoryReadingKey(repoPath ?? ""))
@@ -897,6 +964,9 @@ final class WorkModel {
             waves = .available(value.map { $0.toWave() })
         }
         for (repo, entry) in saved.repositories {
+            let state = navigationByRepo[repo] ?? WorkNavigation()
+            for id in entry.workingTaskIDs ?? [] { state.retainWorkingTask(id) }
+            navigationByRepo[repo] = state
             if let pages = entry.sessionPages,
                let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
                 sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
@@ -1146,6 +1216,7 @@ final class WorkModel {
         peerPlanningReadings = peerPlanningReadings.mapValues {
             .unavailable(lastGood: $0.value, reason: reason)
         }
+        if repoPath != nil { applySelectionPlans(nil, reason: reason) }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
         taskDiagnostics.values = taskDiagnostics.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
@@ -1189,6 +1260,12 @@ final class WorkModel {
             peerPlanningGeneration &+= 1
             let next = WorkReading.available(body.destinations)
             if peerPlanning != next { peerPlanning = next }
+        case .selections(let body):
+            guard answers >= scopeFloor, let repoPath else { return }
+            if let body {
+                guard body.repo.normalizedFilePath == repoPath.normalizedFilePath else { return }
+                applySelectionPlans(body.plans, reason: reason)
+            } else { applySelectionPlans(nil, reason: reason) }
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -1272,7 +1349,6 @@ final class WorkModel {
     }
 
     private func applyPlanning(_ body: WorkFrame.Planning?, wire: WorkFrame.Wire?, reason: String) async {
-        taskHistoryNow = Date()
         // Failed stream readings supersede older one-shot requests too.
         roadmapGeneration &+= 1
         guard let body else {
@@ -1282,6 +1358,7 @@ final class WorkModel {
         await Self.resolveRepoOrigins(body.waves.map(\.repo))
         let reportsLaunch = showsSavedPlanning || roadmapGeneration == 1
         guard publishRoadmap(.success((body.roadmap, wire?.roadmap)), lastGood: roadmap.value) else { return }
+        reconcileSelectionRepository()
         let nextWaves = WorkReading.available(body.waves.map { $0.toWave() })
         if waves != nextWaves { waves = nextWaves }
         if reportsLaunch {
@@ -1301,6 +1378,8 @@ final class WorkModel {
     }
 
     private func dropMachineContent() {
+        applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
+        selectionReadings = [:]
         definitionRevision = nil
         workflowCatalogRevisions = [:]
         workflowCatalogRequests = [:]
@@ -1351,7 +1430,6 @@ final class WorkModel {
     }
 
     func refreshPlanning() async {
-        taskHistoryNow = Date()
         guard !usesFixedFixture else { return }
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -1448,7 +1526,7 @@ final class WorkModel {
     }
 
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
-        if navigation.palette == .search { navigation.palette = nil }
+        if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
@@ -1470,9 +1548,9 @@ final class WorkModel {
     }
 
 
-    func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
+    func updateTaskDirective(task: RoadmapTask, text: String) async throws {
         let home = workDataDirectory
-        try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
+        try await query.updateTaskDirective(id: task.id, text: text, cwd: task.task.repo)
         let observed: WorkReading<RoadmapSnapshot>
         if query.streamsWork {
             try await confirmWorkUpdate(after: home)
@@ -1488,15 +1566,69 @@ final class WorkModel {
         if let reason = observed.errorMessage {
             throw RegistryQueryError("Update accepted, but planning refresh failed: \(reason)")
         }
-        guard observed.value?.waves.contains(where: { row in
-            row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
-        }) == true else {
+        guard observed.value?.tasks.items.contains(where: { $0.id == task.id }) == true else {
             throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
         }
     }
 
     func select(_ requested: WorkReference?, besideFocused: Bool = false) {
         select(requested, preservingOpening: false, besideFocused: besideFocused)
+    }
+
+    /// Unknown retained Work stays reachable; explicit pause only hides its slot.
+    var workingTaskIDs: [String] {
+        navigation.workingTaskIDs.filter { task(id: $0)?.task.runtime?.status != .paused }
+    }
+
+    var sidebarTaskIDs: [String] {
+        workingTaskIDs.filter { id in
+            switch navigation.sidebarFilter {
+            case .working: return true
+            case .available:
+                guard sessions.errorMessage == nil else { return false }
+                return taskSessions(id).contains { $0.attention == .available && $0.state != .closed }
+            case .running:
+                if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
+                return false
+            }
+        }
+    }
+
+    func taskSessions(_ id: String) -> [SessionRecord] {
+        let runtimeID = task(id: id)?.task.runtime?.workId ?? id
+        return (sessions.value ?? []).filter {
+            $0.taskIds.contains(runtimeID) || $0.workspace?.taskId == runtimeID
+        }
+    }
+
+    func openPrimaryConversation(in workspace: SessionsWorkspace, wave: String?, store: SessionsStore) async {
+        guard let workspaceRegistry else { return }
+        await workspace.openPrimaryConversation(wave: wave, store: store, registry: workspaceRegistry)
+    }
+
+    func selectWorkingTask(slot: Int) {
+        guard workingTaskIDs.indices.contains(slot) else { return }
+        select(.task(id: workingTaskIDs[slot]))
+    }
+
+    func cycleWorkingTask(_ offset: Int) {
+        let ids = workingTaskIDs
+        guard !ids.isEmpty else { return }
+        let index = ids.firstIndex { isSelected(.task(id: $0)) }
+        let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
+        select(.task(id: ids[next]))
+    }
+
+    private func retainWorkingTask(_ reference: WorkReference?) {
+        guard let reference, reference.kind == .task else { return }
+        let found = task(id: reference.id)?.task
+        let started = found?.runtime?.started ?? selectionPlans.value?.contains { plan in
+            plan.members.contains { $0.work.reference == reference }
+        } ?? false
+        guard started, found?.runtime?.status != .paused else { return }
+        navigation.retainWorkingTask(found?.id ?? reference.id,
+                                     aliases: [reference.id, found?.runtime?.workId].compactMap { $0 })
+        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repoPath ?? "")
     }
 
     func goBack() {
@@ -1518,17 +1650,6 @@ final class WorkModel {
         if wasSelected, let next = registry.selectedWork { select(next.reference) }
     }
 
-    /// The sidebar represents the selected conversation once, even when its
-    /// retained surface lives in another Work's pane layout.
-    var navigatorSelection: WorkReference? {
-        let work = visibleWork
-        if let sessionID = navigation.selectedSessionId,
-           let item = work.attention(unavailable: sessions.errorMessage).first(where: { $0.session.id == sessionID }) {
-            return item.work
-        }
-        return work.breadcrumb(selection: selection, sessionId: nil)?.task?.id.work ?? selection
-    }
-
     func isSelected(_ reference: WorkReference) -> Bool {
         if selection == reference { return true }
         guard let selection, selection.kind == .task, reference.kind == .task else { return false }
@@ -1536,12 +1657,8 @@ final class WorkModel {
             && task(id: selection.id) != nil
     }
 
-    func isSelected(_ attention: WorkAttentionItem) -> Bool {
-        isSelected(attention.work) || navigation.selectedSessionId == attention.session.id
-    }
-
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true, besideFocused: Bool = false) {
-        if navigation.palette == .search { navigation.palette = nil }
+        if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
@@ -1569,12 +1686,7 @@ final class WorkModel {
             navigation.content = selection == nil ? .overview : .details
         }
         setSelection(selection)
-        if let crumb = visibleWork.breadcrumb(selection: selection, sessionId: nil), let wave = crumb.wave {
-            let inAvailable = crumb.task.map { task in
-                visibleWork.attention(unavailable: sessions.errorMessage).contains { $0.work == task.id.work }
-            } ?? false
-            if !inAvailable { navigation.expandedWaves.insert(wave.id) }
-        }
+        retainWorkingTask(selection)
         clearSelectionIfOutsideScope()
         openSelectedWorkspace(besideFocused: besideFocused)
     }
@@ -1689,21 +1801,21 @@ final class WorkModel {
     }
 
     /// Read one Task's thread.
-    func loadComments(task: RoadmapTask, wave: WaveSnapshot) async {
+    func loadComments(task: RoadmapTask) async {
         await loadTaskReading(\.comments, task: task.id) { [query] in
-            try await query.taskComments(id: task.id, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.taskComments(id: task.id, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func loadSessionHistory(task: RoadmapTask, wave: WaveSnapshot) async {
+    func loadSessionHistory(task: RoadmapTask) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
-            try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func loadTaskContext(task: RoadmapTask, wave: WaveSnapshot) async {
+    func loadTaskContext(task: RoadmapTask) async {
         await loadTaskReading(\.taskContext, task: task.id) { [query] in
-            try await query.taskContext(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.taskContext(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
@@ -1772,21 +1884,6 @@ final class WorkModel {
         if !query.streamsWork { await loadWorkflowCatalog(force: true) }
     }
 
-    /// Why a Wave's last workflow or source change was refused, by Wave.
-    private(set) var workflowErrors: [String: String] = [:]
-
-    /// Make `name` the workflow of the Wave's current chapter and confirm its observation.
-    func setWorkflow(_ name: String, wave: WaveSnapshot) async {
-        let home = workDataDirectory
-        do {
-            try await query.setWorkflow(name, wave: wave.id, cwd: WaveOrigin.resolve(wave.repo))
-            workflowErrors[wave.id] = nil
-            try await confirmWorkUpdate(after: home)
-        } catch {
-            workflowErrors[wave.id] = error.localizedDescription
-        }
-    }
-
     func definitionSource(_ entry: FlowCatalogEntry) async throws -> URL {
         let path = try await query.customizeFlow(entry.name, cwd: repoPath)
         await loadFlowCatalog(force: true)
@@ -1794,45 +1891,52 @@ final class WorkModel {
     }
 
     /// Launch a fresh Flow for the Task, then confirm its subscription update.
-    /// Without `flow`, Rust takes up the Project's workflow or the only edge.
+    /// Without `flow`, Rust selects the Task's Workflow through its Wave or repository default.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
+    func startTask(_ flow: String?, task: RoadmapTask) async {
         await performTaskAction(task.id) {
-            try await query.runTask(issue: task.task.identifier, flow: flow, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.runTask(issue: task.task.identifier, flow: flow, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
     /// Put the Task at a node of its Workflow, then confirm its subscription
     /// update. A refusal is kept on that Task's draft.
-    func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
+    func moveTask(to node: String, task: RoadmapTask) async {
         await performTaskAction(task.id) {
             try await query.moveTask(
-                issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(wave.repo))
+                issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func pauseTask(_ task: RoadmapTask, wave: WaveSnapshot, paused: Bool) async {
+    func pauseTask(_ task: RoadmapTask, paused: Bool) async {
         await performTaskAction(task.id) {
-            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.pauseTask(issue: task.task.identifier, paused: paused, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func completeTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+    func moveTask(_ task: RoadmapTask, toWave wave: String?) async {
         await performTaskAction(task.id) {
-            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.moveTask(issue: task.task.identifier, wave: wave,
+                                    cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func reopenTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+    func completeTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
-            try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
-    func abandonTask(_ task: RoadmapTask, wave: WaveSnapshot) async {
+    func reopenTask(_ task: RoadmapTask) async {
         await performTaskAction(task.id) {
-            try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+    }
+
+    func abandonTask(_ task: RoadmapTask) async {
+        await performTaskAction(task.id) {
+            try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
@@ -1966,23 +2070,21 @@ final class WorkModel {
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
-    private func currentTask(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
-        for wave in visibleRoadmaps {
-            if let task = wave.tasks.items.first(where: { $0.id == id || $0.runtime?.workId == id || $0.task.identifier == id }) {
-                return (wave, task)
-            }
-        }
-        return nil
+    var visibleTasks: [RoadmapTask] {
+        let tasks = roadmap.value?.tasks.items ?? []
+        guard let repoPath else { return tasks }
+        let repository = repoIdentity(repoPath)
+        return tasks.filter { repoIdentity($0.task.repo) == repository }
     }
 
-    func task(id: String) -> (wave: WaveRoadmap, task: RoadmapTask)? {
+    private func currentTask(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
+        guard let task = visibleTasks.first(where: { $0.id == id || $0.runtime?.workId == id || $0.task.identifier == id }) else { return nil }
+        return (visibleRoadmaps.first { $0.wave.id == task.task.waveId }, task)
+    }
+
+    func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
-        if let retained = navigation.selectedTaskEvidence, (retained.task.id == id || retained.task.runtime?.workId == id) {
-            if let current = wave(id: retained.wave.wave.id) {
-                return (current, retained.task)
-            }
-            return retained
-        }
+        if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
         return nil
     }
 
@@ -1993,12 +2095,15 @@ final class WorkModel {
         case .project:
             waveForChapter(projectId: work.id)?.wave.id
         case .task:
-            task(id: work.id)?.wave.wave.id
+            task(id: work.id)?.task.task.waveId
         }
     }
 
     func clearSelectionIfOutsideScope() {
         guard let selection else { return }
+        if selectionPlans.value?.contains(where: { plan in
+            plan.owner.reference == selection || plan.members.contains { $0.work.reference == selection }
+        }) == true { return }
         if let repository = workspaceRepository,
            workspaceRegistry?.retained(workspaceKey(for: selection, repository: repository)) != nil { return }
         if selection.kind == .task, navigation.selectedTaskEvidence?.task.id == selection.id { return }
@@ -2107,7 +2212,7 @@ final class WorkModel {
         case .task:
             guard let selected = task(id: selection.id) else { return nil }
             return WorkActivityScope(
-                wave: selected.wave.wave.name,
+                wave: selected.wave?.wave.name,
                 project: nil,
                 task: selected.task.task.identifier
             )
@@ -2159,6 +2264,8 @@ final class WorkModel {
     /// Do not replace previously readable planning with a failed partial frame.
     /// An already unavailable Wave must not prevent other Waves from refreshing.
     private func planningFailure(_ snapshot: RoadmapSnapshot, replacing previous: RoadmapSnapshot?) -> String? {
+        if let reason = snapshot.tasks.unavailableReason { return reason }
+        if case .available(_, true) = snapshot.tasks { return "Task reading is incomplete" }
         for wave in snapshot.waves {
             guard let old = previous?.waves.first(where: { $0.wave.id == wave.wave.id }) else { continue }
             if case .available = old.projects {

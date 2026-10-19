@@ -93,6 +93,37 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Keep initiating failures without unbounded growth during reconnect storms.
+    pub(crate) fn retain_codex_relay_failure(
+        &self,
+        input: &str,
+        attachment: Option<&crate::process::SessionAttachment>,
+        payload: &Value,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let captured = super::sessions::capture_seq_in(&tx, input)?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM session_events WHERE captured_event=?1 AND kind='observed'
+             AND json_extract(payload,'$.source')='codex_relay'",
+            [captured],
+            |row| row.get(0),
+        )?;
+        if count < 16 {
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,agent_process_id,lf_process_id,
+                 task_id,wave_id,observed_at,payload,captured_event)
+                 SELECT session_id,'observed',?2,?3,?4,task_id,wave_id,?5,?6,seq
+                 FROM session_events WHERE seq=?1",
+                params![captured,format!("{input}:codex_relay:{count}"),
+                    attachment.map(|a| &a.agent_process_id),attachment.and_then(|a| a.lf_process_id.as_ref()),
+                    time::OffsetDateTime::now_utc().unix_timestamp(),serde_json::to_string(payload)?],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Replace the Session's reading with its current attachment's.
     pub(crate) fn record_session_activity(
         &self,
@@ -102,15 +133,15 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id)
-             SELECT ?1,?2,?3,?4,?5,?6,?7 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id,preview)
+             SELECT ?1,?2,?3,?4,?5,?6,?7,?8 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
              ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
                 program_status=CASE WHEN session_activity.agent_process_id IS excluded.agent_process_id THEN session_activity.program_status END,
-                agent_process_id=excluded.agent_process_id",
+                agent_process_id=excluded.agent_process_id,preview=excluded.preview",
             params![session, attachment.token, activity.observed_at,
-                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id],
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id, activity.preview.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         Ok(())
     }
@@ -250,7 +281,7 @@ impl SqliteStore {
     }
 
     /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
-    pub(super) fn summary_for_input(
+    pub(crate) fn summary_for_input(
         &self,
         session: &str,
         input: &str,
@@ -289,7 +320,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    origin.agent_process_id,CASE WHEN e.kind='captured' THEN e.lf_process_id ELSE origin.lf_process_id END,
+                    CASE WHEN e.kind IN ('observed','captured') THEN e.agent_process_id ELSE origin.agent_process_id END,
+                    CASE WHEN e.kind IN ('observed','captured') THEN e.lf_process_id ELSE origin.lf_process_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
              FROM session_events e LEFT JOIN session_events origin
@@ -481,7 +513,8 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES(?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,worktree,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',NULL,1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         let attachment = store
             .claim_session_attachment(&session.id, None, &process, false)
@@ -521,6 +554,26 @@ mod tests {
         assert_eq!(late.wave_id, None);
         assert_eq!(new.task_id.as_deref(), Some(task.as_str()));
         assert_eq!(new.wave_id.as_deref(), Some(wave.as_str()));
+        store.move_task(&task, Some(&project), None).unwrap();
+        let detached = store.session_turn_origin(&session.id, &attachment).unwrap();
+        store
+            .record_session_turn_origin(&"thread".into(), "dispatched-before-move", &after)
+            .unwrap();
+        store
+            .record_session_turn_origin(&"thread".into(), "dispatched-after-move", &detached)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let before_move = history
+            .iter()
+            .find(|event| event.provider_turn.as_deref() == Some("dispatched-before-move"))
+            .unwrap();
+        let after_move = history
+            .iter()
+            .find(|event| event.provider_turn.as_deref() == Some("dispatched-after-move"))
+            .unwrap();
+        assert_eq!(before_move.wave_id.as_deref(), Some(wave.as_str()));
+        assert_eq!(after_move.wave_id, None);
+        assert_eq!(after_move.task_id.as_deref(), Some(task.as_str()));
     }
 
     #[test]
@@ -1188,8 +1241,9 @@ mod tests {
                 "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project-proof',1)",
                 rusqlite::params![project.as_str(), wave],
             ).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute(
-                "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at) VALUES(?1,?2,'issue-proof','PROOF-1',1)",
+                "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue-proof','PROOF-1',1)",
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }

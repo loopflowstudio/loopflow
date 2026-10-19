@@ -252,7 +252,8 @@ final class GhosttySurfacePool {
                 if let record = records.first(where: {
                     $0.id == id && $0.workspace?.machineId == view.terminal.machineId
                 }) {
-                    view.programStatus.associate(sessionId: id, terminalId: marker, provider: SessionProviderReading(agentProcessId: record.agentProcessId))
+                    view.programStatus.associate(sessionId: id, terminalId: marker,
+                        provider: SessionProviderReading(record: record, terminal: marker))
                 }
                 continue
             }

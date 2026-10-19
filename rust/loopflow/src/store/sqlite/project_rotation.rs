@@ -34,7 +34,7 @@ impl SqliteStore {
             let original = serde_json::json!({
                 "wave_id": input.wave_id, "successor_id": input.successor_id,
                 "create": input.create, "project_name": input.project_name,
-                "content": {"workflow": input.workflow, "krs": input.krs,
+                "content": {"krs": input.krs,
                             "metric_targets": input.metric_targets}
             });
             let settled: Option<(Option<String>, bool, Option<String>)> = tx
@@ -88,7 +88,6 @@ impl SqliteStore {
                             Edit::ProjectSlug(Some(input.project_name.clone())),
                             Edit::ProjectName(Some(input.project_name.clone())),
                             Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-                            Edit::Workflow(input.workflow.clone()),
                             Edit::Krs(input.krs.clone()),
                             Edit::MetricTargets(input.metric_targets.clone()),
                             Edit::ProjectTeams(serde_json::from_str(&teams)?),
@@ -108,7 +107,6 @@ impl SqliteStore {
                     &[
                         Edit::ProjectName(Some(input.project_name.clone())),
                         Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-                        Edit::Workflow(input.workflow.clone()),
                         Edit::Krs(input.krs.clone()),
                         Edit::MetricTargets(input.metric_targets.clone()),
                     ],
@@ -145,7 +143,7 @@ impl SqliteStore {
                     ));
                 }
                 PlanningChanges::Task(task_id)
-                    .save(&tx, &[Edit::TaskProject(successor.to_string())])?;
+                    .save(&tx, &[Edit::TaskProject(Some(successor.to_string()))])?;
                 tx.execute(
                     "INSERT INTO project_transition_items(wave_id,successor_id,issue_id)
                      VALUES(?1,?2,?3)",

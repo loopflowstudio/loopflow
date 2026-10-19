@@ -85,7 +85,7 @@ struct DTOFixtureTests {
         #expect(reports[3].action == .comment(message: nil, steer: false, refresh: true))
         #expect(reports[4].action == nil)
         #expect(!reports[4].impediments.isEmpty)
-        #expect(reports[5].action == .refile(wave: "destination-wave", project: "destination-project", previousProject: "source-project"))
+        #expect(reports[5].action == .move(wave: "destination-wave", project: "destination-project", previousProject: "source-project"))
         #expect(reports[6].action == .save(path: "scratch/note.md", revision: "observed-file-revision", draftBytes: 42))
         #expect(try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONEncoder().encode(reports)) == reports)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
@@ -525,7 +525,6 @@ struct DTOFixtureTests {
         root["projects"] = projects
         let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
         #expect(status.currentProject?.id == "configured-project")
-        #expect(status.currentProject?.workflow == "")
         #expect(status.projects.items.count == 2)
         selected.removeValue(forKey: "current")
         projects["items"] = [selected]
@@ -543,7 +542,6 @@ struct DTOFixtureTests {
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.currentProject?.workflow == "task-design")
         #expect(plan.currentProject?.current == true)
         #expect(plan.currentProject?.krs.count == 1)
     }
@@ -604,7 +602,6 @@ struct DTOFixtureTests {
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.currentProject?.workflow == "task-design")
         #expect(detail.currentProject?.sync.changes[1].field == "task_order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
@@ -656,7 +653,6 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-        #expect(product.currentProject?.workflow == "feature")
 
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 
@@ -748,6 +744,8 @@ struct DTOFixtureTests {
             id: "task_00000000000000000000000000000001"
         ))
         #expect(session.title == "Simplify cross-Work questions")
+        #expect(session.preview?.providerTurn == "turn-fixture")
+        #expect(session.preview?.observedAt == 1700000000)
         #expect(session.titleSource == .human)
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
@@ -882,8 +880,8 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history", "selections"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
         guard case .taskHistory(let history?) = frames[9].content else {
             Issue.record("diagnostic history frame missing")
             return
@@ -895,6 +893,10 @@ struct DTOFixtureTests {
         }
         #expect(peers.repo == "/src/loopflow")
         #expect(peers.destinations.isEmpty)
+        guard case .selections(let selections?) = frames[10].content else {
+            Issue.record("selection plans frame missing"); return
+        }
+        #expect(selections.plans[0].members[0].title == "Retained work")
         #expect(frames[0].answers == nil)
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)

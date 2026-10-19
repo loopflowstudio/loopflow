@@ -21,7 +21,6 @@
         "hide",
         "restore",
         "focus",
-        "split",
         "move",
         "resize",
         "zoom"
@@ -128,7 +127,6 @@
         "hide",
         "restore",
         "focus",
-        "split",
         "move",
         "resize",
         "zoom"

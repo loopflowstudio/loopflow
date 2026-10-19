@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "c087decfed0329b964a54bb7d5c4dab2c1a5b9e85b4f53241fd728fd91becc77",
+    "Cargo.lock": "906d0f4d4c78384caf14dbfde5ffd2d2a806c2e9580ef8bceb6603632d13cc7c",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -26,8 +26,8 @@
     "swift/Loopflow/Themes/Catalogue/Gruvbox Light": "785a8ba8a4ff2c337b4beee27fae5839b8c4f986243f798f1346f9c8becffe3f",
     "swift/Loopflow/Themes/Catalogue/Hearth": "a5e6a42ef28918059f6c5963e74d1c44bbabc0e548af16d6770e2d4f08d6c441",
     "swift/Loopflow/Themes/Catalogue/Linen": "c14c28c106676d73f87a6fddd8d1b35c810699763f911ea91e948fbb7dc0b3a7",
-    "swift/Loopflow/Themes/Catalogue/Loopflow Dark": "eb1ec512bff6cdc92894d5cd8f2567ac534e24a124d297c5d81efae28edf0077",
-    "swift/Loopflow/Themes/Catalogue/Loopflow Light": "a8ee70f06f187703424d77af8a675d05f1f3f6e9fb15628f5a1aa75c5df711e6",
+    "swift/Loopflow/Themes/Catalogue/Loopflow Dark": "0ad289ac7d61dc95103aa1771ff41c5eed8a6909c0184e8155c8a9e9e7865dc4",
+    "swift/Loopflow/Themes/Catalogue/Loopflow Light": "51e957c7c3c48c40431f2419ad9aa9e9bd9802e5ed1a9057b7d9d09c86c1cc4c",
     "swift/Loopflow/Themes/Catalogue/Moss": "9c442d897b6259d5b07593ea9c959a2f78dc79fa4ec3bdd85cf186e538e83bdb",
     "swift/Loopflow/Themes/Catalogue/Night Owl": "2d917223de74170c8714870e3c095585fd61a1e8dbf0059321d715afd4f82a9c",
     "swift/Loopflow/Themes/Catalogue/Noctis Lilac": "a2309315c8ab08645ba83c4c82a5772713dfc2a186b7f222f8900a3d095cc3d2",

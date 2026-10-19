@@ -98,7 +98,7 @@ impl Machine {
         let payload = serde_json::json!({
             "projects": [{
                 "id": PROJECT, "slug": "reactive", "name": "Reactive", "summary": "",
-                "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
+                "metric_targets": [], "status": "started", "krs": [],
                 "initiative_ids": ["initiative-product"], "team_ids": ["team-product"]
             }],
             "items": items

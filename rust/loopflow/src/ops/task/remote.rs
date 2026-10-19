@@ -18,6 +18,7 @@ pub(crate) struct TaskSource {
     pub task_id: crate::durable::TaskId,
     #[serde(deserialize_with = "crate::id::deserialize_task_identifier")]
     pub identifier: String,
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub issue_id: Option<String>,
 }
 
@@ -66,9 +67,8 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     let Some(value) = std::env::var_os(crate::lf::TASK_SOURCE_ENV) else {
         return Ok(None);
     };
-    let mut source: TaskSource = serde_json::from_str(&value.to_string_lossy())
+    let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    source.issue_id = source.issue_id.map(|id| crate::id::canonical_uuid(&id));
     let canonical = crate::id::canonical_task_selector(issue);
     let issue = canonical.as_str();
     Ok((source.identifier == issue

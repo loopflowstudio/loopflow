@@ -22,7 +22,11 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         Self {
-            home: tempfile::tempdir_in("/tmp").unwrap(),
+            // An OSC opcode in an ordinary path is not terminal status.
+            home: tempfile::Builder::new()
+                .prefix("lf-7501-")
+                .tempdir_in("/tmp")
+                .unwrap(),
             repo: TestRepo::new(),
         }
     }
@@ -533,8 +537,8 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert!(terminal.contains("/step:state=clear\x1b\\"), "{terminal}");
     let injected: i64 = sql
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%7501%'",
-            [&session],
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND instr(payload, ?2)>0",
+            [session.as_str(), r"\u001b]7501;"],
             |r| r.get(0),
         )
         .unwrap();
@@ -558,6 +562,7 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let bin = fixture.home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     support::install_native_codex(&bin);
+    let path = format!("{}:/usr/bin:/bin", bin.display());
     std::fs::write(fixture.home.path().join("wait-approval"), "").unwrap();
     // The ordinary interactive CLI is the creator/viewer. Give it a real tty,
     // then kill it only after the original protocol request is pending.
@@ -582,14 +587,7 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     let terminal_input = unsafe { std::fs::File::from_raw_fd(slave) };
     let mut creator = fixture
         .command(&["-i", "--agent", "codex", ":", "Original input"])
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
+        .env("PATH", &path)
         .stdin(terminal_input.try_clone().unwrap())
         .stdout(terminal_input.try_clone().unwrap())
         .stderr(terminal_input)
@@ -624,7 +622,8 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
     assert_eq!(retained, identity, "viewers transferred provider ownership");
     drop(replacement);
     let mut resumed = fixture
-        .command(&["resume"])
+        .command(&["resume", &session])
+        .env("PATH", &path)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -710,9 +709,10 @@ fn headless_flow(resume: bool) {
     assert!(outcome.is_none(), "viewer death settled the execution");
     if resume {
         // Replace only the next native executable, leaving the running server intact.
+        std::fs::copy(&provider, bin.join("opencode-server.py")).unwrap();
         std::fs::write(
             &provider,
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
+            "#!/bin/sh\nif [ \"$1\" = serve ]; then exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"; fi\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
         )
         .unwrap();
         let output = fixture

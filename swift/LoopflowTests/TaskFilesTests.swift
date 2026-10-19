@@ -45,9 +45,9 @@ struct TaskFilesTests {
         document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 0))
         let draft = document.text
         #expect(document.dirty)
-        // The shell beside Files follows its content, never the enclosing Work.
-        let shell = try #require(try workspace.split(pane.id, axis: .vertical))
-        #expect(shell.content.location == location)
+        // A new shell uses its Task location; the file draft retains its own location.
+        let shell = try #require(try workspace.newShell())
+        #expect(shell.content.location == workspace.location)
         workspace.multiplexer.close(pane.id)
         workspace.multiplexer.undoClose()
         let reopened = try #require(workspace.multiplexer.layout.pane(for: pane.id))
@@ -431,9 +431,13 @@ struct TaskFilesTests {
         try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
         #expect(store.navigator == .dropdown)
         #expect(store.selection == "draft.txt")
+        store.navigator = .pinned
         store.page = .task
-        store.page = .files
-        #expect(store.navigator == .dropdown)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(store.page == .files)
+        #expect(store.navigator == .pinned)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "files-toggle-navigator").button().tap()
+        #expect(store.navigator == .closed)
         #expect(store.selection == "draft.txt")
     }
 
@@ -642,7 +646,7 @@ struct TaskFilesTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = fixtureWork(registry, fixtureWorkspace(NSTemporaryDirectory()))
         workspace.multiplexer.newShell(location: workspace.location)
-        let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId, machineId: fixtureMachineId)
+        let identity = try #require(workspace.multiplexer.focusedPane.terminal)
         let terminal = registry.surfaces.view(for: identity)
         terminal.frame = CGRect(x: 0, y: 0, width: 400, height: 350)
         terminal.workingDirectory = NSTemporaryDirectory()
@@ -650,7 +654,7 @@ struct TaskFilesTests {
         terminal.createSurface(manager: GhosttyManager.shared)
         defer { registry.surfaces.release(identity) }
         let surface = try #require(terminal.surface)
-        let store = workspace.files(taskId: "task-files", issue: "TEST-1", cwd: NSTemporaryDirectory(),
+        let store = workspace.files(issue: "TEST-1", cwd: NSTemporaryDirectory(),
                                     query: RegistryQuery { _, _ in throw RegistryQueryError("Fixture is offline") })
         let original = try fixture().file
         let document = store.document(original.path)
@@ -697,7 +701,7 @@ struct TaskFilesTests {
             browser.layoutSubtreeIfNeeded()
             browser.removeFromSuperview()
         }
-        #expect(workspace.files(taskId: "task-files", issue: "TEST-1", cwd: NSTemporaryDirectory()) === store)
+        #expect(workspace.files(issue: "TEST-1", cwd: NSTemporaryDirectory()) === store)
         #expect(store.document(original.path) === document)
         #expect(document.text == edited)
         #expect(registry.surfaces.view(for: identity) === terminal)

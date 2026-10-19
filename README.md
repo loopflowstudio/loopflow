@@ -26,10 +26,14 @@ Run `lf install` from any checkout, including a Task checkout. Promotion checks
 the candidate release against the installed database before changing it.
 Use `lf sync` inside a repository to update its checkout.
 
+Session launches retain the installed entry for later commands and hooks. Existing
+processes keep running and may fail if they cannot use the upgraded database.
+
 Requires macOS or Linux and one of
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-[Codex](https://github.com/openai/codex), or
-[OpenCode](https://github.com/anomalyco/opencode). Default install location is
+[Codex](https://github.com/openai/codex),
+[OpenCode](https://github.com/anomalyco/opencode), or
+[Pi](https://github.com/earendil-works/pi) (1.3+). Default install location is
 `~/.local/bin` (`LF_INSTALL_DIR` overrides). Or install with cargo:
 
 ```bash
@@ -50,8 +54,11 @@ lf repo-operate             # canonical name for the same skill
 lf --wave designer wave-operate  # operate one Wave
 ```
 
-OpenCode keeps errors and retries in its native terminal UI. Loopflow prints a
-diagnostic log path before launch; full stderr stays there without covering your input.
+`lf -a opencode` opens OpenCode 2's full-screen terminal against a private,
+authenticated server. Resume keeps the native conversation and refreshes Loopflow
+context. A diagnostic log path appears before launch; stderr stays there without
+covering your input. Interrupted OpenCode work requires explicit subsequent input;
+Loopflow never inserts an automatic continuation prompt.
 
 Give an external agent harness the Loopflow operating skill:
 
@@ -137,7 +144,7 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
 lf --wave designer wave-operate "ship the button audit first"
-lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
+lf connect --wave designer             # the Wave's ongoing conversation, applying that pass on every return
 ```
 
 Edit `.lf/wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -212,7 +219,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 
 ```bash
 lf session list
-lf resume                         # relevant conversation for this checkout
+lf connect                        # this scope's ongoing conversation
 lf connect SESSION                # Loopflow, Claude, or Codex ID
 lf session attach SESSION         # existing execution; Ctrl+] detaches
 lf -b connect SESSION --message "Continue"    # headless turn in the saved Session workspace
@@ -231,6 +238,11 @@ its input. [Transport details and restoration limits](rust/loopflow/src/transpor
 Codex terminal Sessions receive context and the first message through the provider
 protocol. Claude loads context from a system instructions file and the first
 message from stdin. Large requests stay out of terminal command-line arguments.
+Codex reconnects select the Session's saved thread. Saved initial input survives
+terminal exit and can retry an explicit rejection. Unacknowledged input is not replayed.
+Relay failures stay in private Session history: `lf history show SESSION` prints
+their operation and AgentProcess; `--events` includes diagnostic JSON. The native
+terminal stays clear and its reconnect listener stays available.
 Startup, resume and compaction hooks refresh reference context from the Session's
 saved launch sources. Hook declarations stay identical across Tasks and Sessions
 for the same lf executable and Machine. Each native launch gets its own context
@@ -269,16 +281,21 @@ across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
-`lf resume` is short for `lf session resume`. It selects the active Task’s conversation,
-or the most recent interactive Session in this worktree. From the main checkout,
-it searches all worktrees of the repository. `--task ISSUE` or `--wave NAME`
-overrides discovery. Recency uses native human input, falling back to last opening.
-Assistant output and background work do not change that order. A Flow is never
-resumed; `lf task run ISSUE` runs a fresh one.
+`lf connect` opens this scope's ongoing conversation, creating one when absent.
+From the canonical checkout or the repository's persistent checkout it opens the
+repository primary; Task and persistent Wave checkouts open their own primary.
+`lf resume` is an exact alias, including all flags. An unassociated linked checkout
+requires an explicit target; ordinary `lf` starts a new conversation there.
 
-`lf connect --wave NAME` and `lf connect --task ISSUE` find or prepare the Work’s
-primary conversation and open it in its checkout. `--prepare` returns the terminal
-command without launching; `--json` changes output format only.
+`lf --repo NAME connect`, `lf connect --wave NAME`, and `lf connect --task ISSUE`
+select an explicit scope. `lf connect SESSION` opens the exact retained conversation.
+`--fresh` creates a new primary without stopping the previous client or losing its
+history. Ordinary connect recovers the current primary after a lost reply; each
+explicit `--fresh` creates another. `--prepare` returns connection data without
+launching or taking over a client; `--json` changes only the output format.
+First creation uses the matching repository, Wave or Task session skill;
+reconnection retains its instructions and history.
+
 Headless continuation reads the saved workspace's context and native history,
 even from another directory, without re-running the original skill.
 
@@ -292,7 +309,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `.lf/wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
+| **Project** | Holds one Wave's plan, Tasks, KRs and targets | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |

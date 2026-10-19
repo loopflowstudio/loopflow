@@ -33,6 +33,7 @@ pub(super) struct Attention {
     yielded: bool,
     failed: bool,
     saved: Option<SessionActivity>,
+    pub(super) preview: Option<crate::session::SessionPreview>,
 }
 
 impl Attention {
@@ -72,6 +73,7 @@ impl Attention {
     /// The reading to save, when it changed or the saved one has aged.
     pub(super) fn reading(&mut self, now: i64) -> Option<SessionActivity> {
         let reading = SessionActivity {
+            preview: self.preview.clone(),
             observed_at: now,
             open_tools: self.open_tools.len(),
             pending_input: self.pending_input.len(),
@@ -230,45 +232,31 @@ pub(super) fn codex(rpc: &Value, from_client: bool) -> Vec<Signal> {
 /// every conversation on one stream. A permission request is answered by its
 /// attached LfProcess and is not a question for a person.
 pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
-    let properties = &event["properties"];
-    let id = |value: &Value| value.as_str().map(str::to_owned);
-    let owner = properties["sessionID"]
-        .as_str()
-        .or(properties["part"]["sessionID"].as_str());
-    if owner != Some(thread) {
+    let data = if event["type"] == "form.created" {
+        &event["data"]["form"]
+    } else {
+        &event["data"]
+    };
+    if data["sessionID"] != thread {
         return Vec::new();
     }
+    let id = |key: &str| data[key].as_str().map(str::to_owned);
     match event["type"].as_str() {
-        Some("message.part.updated") => {
-            let part = &properties["part"];
-            if part["type"] != "tool" {
-                return vec![Signal::Working];
-            }
-            let Some(call) = id(&part["callID"]).or_else(|| id(&part["id"])) else {
-                return Vec::new();
-            };
-            match part["state"]["status"].as_str() {
-                Some("pending" | "running") => vec![Signal::ToolStarted(call)],
-                Some("completed" | "error") => vec![Signal::ToolResolved(call)],
-                _ => Vec::new(),
-            }
+        Some("session.execution.started" | "session.text.delta" | "session.reasoning.delta") => {
+            vec![Signal::Working]
         }
-        Some("message.part.delta") => vec![Signal::Working],
-        Some("question.asked") => id(&properties["id"])
-            .map(Signal::InputRequested)
-            .into_iter()
-            .collect(),
-        Some("question.replied" | "question.rejected") => id(&properties["requestID"])
-            .map(Signal::InputResolved)
-            .into_iter()
-            .collect(),
-        Some("session.error") => vec![Signal::Yielded(false)],
-        Some("session.idle") => vec![Signal::Yielded(true)],
-        Some("session.status") => match properties["status"]["type"].as_str() {
-            Some("idle") => vec![Signal::Yielded(true)],
-            Some("busy") => vec![Signal::Working],
-            _ => Vec::new(),
-        },
+        Some("session.tool.called") => id("id").map(Signal::ToolStarted).into_iter().collect(),
+        Some("session.tool.success" | "session.tool.failed") => {
+            id("id").map(Signal::ToolResolved).into_iter().collect()
+        }
+        Some("form.created") => id("id").map(Signal::InputRequested).into_iter().collect(),
+        Some("form.replied" | "form.cancelled") => {
+            id("id").map(Signal::InputResolved).into_iter().collect()
+        }
+        Some("session.execution.succeeded") => vec![Signal::Yielded(true)],
+        Some("session.execution.failed" | "session.execution.interrupted") => {
+            vec![Signal::Yielded(false)]
+        }
         _ => Vec::new(),
     }
 }
@@ -502,13 +490,15 @@ mod tests {
         // A permission the attached LfProcess answers itself is no question, and the tool
         // it guards is still open.
         assert_eq!(at("permission.asked"), (false, false));
-        assert_eq!(at("question.asked"), (true, true));
-        assert_eq!(at("question.replied"), (false, false), "its tool is open");
-        assert_eq!(at("session.idle"), (true, true));
+        assert_eq!(at("form.created"), (true, true));
+        assert_eq!(at("form.replied"), (false, false), "its tool is open");
+        assert_eq!(at("session.execution.succeeded"), (true, true));
         // Another conversation going idle on the shared stream neither answers
         // the question nor hands this turn back.
-        let other = seen.iter().position(|(kind, _, _)| kind == "session.idle");
-        assert_eq!(seen[other.unwrap() + 1].0, "question.replied");
+        let other = seen
+            .iter()
+            .position(|(kind, _, _)| kind == "session.execution.succeeded");
+        assert_eq!(seen[other.unwrap() + 1].0, "form.replied");
     }
 
     #[test]

@@ -33,7 +33,8 @@ pub struct TaskUpdate {
 pub struct NewTask {
     pub due_date: Option<String>,
     pub id: crate::durable::TaskId,
-    pub project_id: crate::durable::ProjectId,
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<crate::durable::ProjectId>,
     pub title: String,
     pub description: String,
 }
@@ -506,11 +507,11 @@ pub struct Task {
     /// Acquisition time of the retained Linear observation, never a write clock.
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: LinearWritebackState,
-    /// Root ownership. Wave name and checkout are resolved from this id.
-    pub wave_id: WaveId,
-    /// Required runtime parent. Every Task reports through one durable Project
-    /// Work; its Wave retains root inspection and override authority.
-    pub project_id: ProjectId,
+    /// Read projection from the Project join, validated against the Project on save.
+    pub wave_id: Option<WaveId>,
+    /// Stable repository identity, independent of planning membership.
+    pub repository_id: crate::durable::RepositoryId,
+    pub project_id: Option<ProjectId>,
     pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
     pub branch: String,
@@ -729,6 +730,7 @@ mod tests {
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
+            repository_id: crate::durable::RepositoryId::new(),
             id: TaskId::new(),
 
             revision: 0,
@@ -739,8 +741,8 @@ mod tests {
             pm_snapshot_synced_at: Some(1),
 
             pm_writeback: LinearWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: crate::work::project::ProjectId::new(),
+            wave_id: Some(crate::id::WaveId::new()),
+            project_id: Some(crate::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),

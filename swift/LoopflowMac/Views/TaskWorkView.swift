@@ -6,7 +6,6 @@ import SwiftUI
 struct TaskWorkflowHeader: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
     let work: WorkReading<TaskOverview>
     var workspaceActions: AnyView? = nil
@@ -37,7 +36,7 @@ struct TaskWorkflowHeader: View {
                     ForEach(workflow.outgoing, id: \.self) { index in
                         if workflow.edges.indices.contains(index) {
                             let edge = workflow.edges[index]
-                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task, wave: wave) } }
+                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
                                 .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                                 .disabled(unavailable != nil)
                                 .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
@@ -48,19 +47,25 @@ struct TaskWorkflowHeader: View {
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
                         ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
-                            Button(node) { Task { await model.moveTask(to: node, task: task, wave: wave) } }
+                            Button(node) { Task { await model.moveTask(to: node, task: task) } }
                                 .accessibilityIdentifier("task-workflow-move-\(node)")
                         }
                     }
                     .fixedSize()
                     .disabled(acting || readingUnavailable != nil)
-                    .help("lf task move \(task.task.identifier) <node>")
+                    .help("lf task workflow move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
 
                 } else if work.value != nil, work.errorMessage == nil {
-                    // A Task takes up its Project's workflow on its first run.
-                    Text("No workflow yet").foregroundStyle(palette.textSecondary)
-                    Button("Start") { Task { await model.startTask(nil, task: task, wave: wave) } }
+                    // The shared resolver reports the first-run default and its owner.
+                    Text(task.workflowName.map { "\($0) · \(task.workflowSource ?? "")" } ?? "No workflow selected")
+                        .foregroundStyle(palette.textSecondary)
+                    Menu("Choose workflow") {
+                        ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
+                            Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
+                        }
+                    }.task { await model.loadWorkflowCatalog() }
+                    Button("Start") { Task { await model.startTask(nil, task: task) } }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
@@ -73,15 +78,15 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 }
                 if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
+                    Button("Reopen") { Task { await model.reopenTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-reopen")
                 } else {
-                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
+                    Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
                     Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
+                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
                     }
                     .disabled(acting || readingUnavailable != nil)
                     .accessibilityIdentifier("task-pause-resume")
@@ -121,7 +126,7 @@ struct TaskWorkflowHeader: View {
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task, wave: wave) } })
+                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -139,7 +144,7 @@ struct TaskWorkflowHeader: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-completion-pending")
                     Button("Retry completion") {
-                        Task { await model.completeTask(task, wave: wave) }
+                        Task { await model.completeTask(task) }
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting || readingUnavailable != nil)
@@ -159,7 +164,7 @@ struct TaskWorkflowHeader: View {
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task, wave: wave) }
+                Task { await model.abandonTask(task) }
             }
         } message: {
             Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
@@ -215,63 +220,66 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// One compact control; hover or click reveals the Task's lifecycle actions.
-struct TaskLifecycleActions: View {
+/// Shared Task actions for keyboard access and sidebar context menus.
+struct TaskActionItems: View {
     let model: WorkModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
-    let work: WorkReading<TaskOverview>
-    @State private var hovering = false
-    @State private var expanded = false
-    @State private var confirmingAbandon = false
+    let wave: WaveSnapshot?
+    var newConversation: (() -> Void)?
+    var openSession: ((SessionRecord) -> Void)?
+    @State private var copied: String?
 
     private var unavailable: Bool {
-        model.navigation.taskRunDrafts[task.id]?.acting == true
-            || work.errorMessage != nil || model.roadmap.errorMessage != nil || model.showsSavedPlanning
+        model.navigation.taskRunDrafts[task.id]?.acting == true || model.roadmap.errorMessage != nil || model.showsSavedPlanning
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button { expanded.toggle() } label: {
-                Label("Task", systemImage: "ellipsis.circle")
+        Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
+        Menu("Move to Wave") {
+            Button("No Wave") { Task { await model.moveTask(task, toWave: nil) } }
+                .disabled(task.task.waveId == nil)
+            ForEach(model.visibleRoadmaps.filter { $0.wave.repo == task.task.repo }, id: \.wave.id) { destination in
+                Button(destination.wave.displayName) {
+                    Task { await model.moveTask(task, toWave: destination.wave.id) }
+                }.disabled(destination.wave.id == task.task.waveId)
             }
-            .help("Complete, pause, or abandon this Task")
-            .accessibilityIdentifier("task-lifecycle-menu")
-            .accessibilityValue(expanded || hovering ? "Expanded" : "Collapsed")
-            if let error = model.navigation.taskRunDrafts[task.id]?.error ?? task.runtime?.completionPending {
-                Image(systemName: "exclamationmark.triangle")
-                    .foregroundStyle(.red).help(error).accessibilityLabel(error)
+        }.disabled(unavailable).accessibilityIdentifier("task-move-wave")
+        if task.task.isTerminal || task.runtime?.status.isTerminal == true {
+            Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
+        } else {
+            Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
+            Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
+                Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+            }.disabled(unavailable)
+        }
+        if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
+        Divider()
+        Button(copied == "id" ? "Copied Task ID" : "Copy Task ID") { copy(task.task.identifier, key: "id") }
+        if let url = task.reference.issueUrl {
+            Button(copied == "link" ? "Copied Task link" : "Copy Task link") { copy(url.absoluteString, key: "link") }
+        }
+        if let branch = task.reference.workspace?.branch {
+            Button(copied == "branch" ? "Copied branch" : "Copy branch") { copy(branch, key: "branch") }
+        }
+        if let pr = task.pr?.publication?.github { Link("Open PR #\(pr.number)", destination: pr.url) }
+        ForEach(model.taskSessions(task.id)) { session in
+            Button("Open \(session.title)") { openSession?(session) }.disabled(openSession == nil)
+            if !session.taskPrimary, session.titleSource != .unavailable {
+                Button("Rename \(session.title)…") { model.beginSessionRename(session) }
             }
-            if expanded || hovering {
-                if task.task.isTerminal || task.runtime?.status.isTerminal == true {
-                    Button("Reopen") { Task { await model.reopenTask(task, wave: wave) } }
-                        .accessibilityIdentifier("task-reopen")
-                } else {
-                    Button(task.runtime?.completionPending == nil ? "Complete" : "Retry completion") { Task { await model.completeTask(task, wave: wave) } }
-                        .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, wave: wave, paused: task.runtime?.status != .paused) }
-                    }
-                    .accessibilityIdentifier("task-pause-resume")
-                    Button("Abandon…", role: .destructive) { confirmingAbandon = true }
-                        .accessibilityIdentifier("task-abandon")
-                }
+            if session.work?.kind != .task {
+                Button("Bind \(session.title) to Task…") { model.beginSessionBinding(session) }
             }
         }
-        .disabled(unavailable)
-        .font(Typography.body(11))
-        .fixedSize()
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
-            Button("Abandon Task", role: .destructive) {
-                Task { await model.abandonTask(task, wave: wave) }
-            }
-        } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
-        }
+        if let error = model.navigation.taskRunDrafts[task.id]?.error { Text(error) }
+    }
+
+    private func copy(_ value: String, key: String) {
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(value, forType: .string) { copied = key }
     }
 }
+
 
 /// The Task due date stays beside the conversation and in Task details.
 struct TaskDueDateView: View {

@@ -22,7 +22,8 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         WorkValue::WaveDelegation(_)
         | WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
-        | WorkValue::WaveProject(_) => "waves",
+        | WorkValue::WaveProject(_)
+        | WorkValue::WaveWorkflow(_) => "waves",
         WorkValue::ProjectDelegation(_)
         | WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
@@ -34,7 +35,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::ProjectRank(_)
         | WorkValue::ProjectInitiatives(_)
         | WorkValue::ProjectTeams(_)
-        | WorkValue::Workflow(_)
+        | WorkValue::HistoricalProjectWorkflow(_)
         | WorkValue::Krs(_)
         | WorkValue::MetricTargets(_) => "projects",
         WorkValue::TaskDelegation(_)
@@ -66,6 +67,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveProject(_) => "current_project_id",
+        WorkValue::WaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -90,7 +92,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
         WorkValue::CommentTask(_) => "task_id",
-        WorkValue::Workflow(_) => "workflow",
+        WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
         WorkValue::MetricTargets(_) => "metric_targets",
         WorkValue::Disposition(_) => "disposition",
@@ -107,7 +109,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::WaveProject(row.get(2)?),
                     ])
         }),
-        "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,workflow,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
+        "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::ProjectWave(row.get(0)?),
                         WorkValue::ProjectLinearId(row.get(1)?),
@@ -123,9 +125,8 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                             &row.get::<_, String>(8)?,
                         )?),
                         WorkValue::ProjectTeams(serde_json::from_str(&row.get::<_, String>(9)?)?),
-                        WorkValue::Workflow(row.get(10)?),
-                        WorkValue::Krs(serde_json::from_str(&row.get::<_, String>(11)?)?),
-                        WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(12)?)?),
+                        WorkValue::Krs(serde_json::from_str(&row.get::<_, String>(10)?)?),
+                        WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(11)?)?),
                     ])
         }),
         "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at FROM tasks WHERE id=?1", id, |row| {
@@ -201,6 +202,20 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         let authority: Option<String> = conn.query_row("SELECT admission_authority FROM tasks WHERE id=?1", [id], |row| row.get(0))?;
         values.push(WorkValue::TaskAdmissionAuthority(authority.map(|v| serde_json::from_str(&v)).transpose()?));
     }
+    // Released migrations seed this writer before the Wave default column exists.
+    if table == "waves"
+        && conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('waves') WHERE name='workflow')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?
+    {
+        values.push(WorkValue::WaveWorkflow(conn.query_row(
+            "SELECT workflow FROM waves WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?));
+    }
     for value in &values {
         value.validate()?;
     }
@@ -239,6 +254,9 @@ fn write_record(
     let mut delegated = false;
     for edit in edits {
         let edit = &edit.change;
+        if matches!(edit, WorkValue::HistoricalProjectWorkflow(_)) {
+            continue;
+        }
         edit.validate()?;
         if let WorkValue::WaveProject(Some(project)) = edit {
             let owner: Option<String> = conn
@@ -487,7 +505,8 @@ pub(crate) fn ensure_record(
                     _ => None,
                 })
                 .ok_or_else(missing)?;
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'')",params![id,project,identifier])?;
+            let repository = super::repositories::ensure_repository_in(conn, repo)?;
+            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug,repository_id) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'',?4)",params![id,project,identifier,repository.as_str()])?;
         }
         "task_comments" => {
             let task = edits
@@ -625,14 +644,94 @@ mod tests {
         let id = TaskId::new();
         store
             .create_task(&NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
                 id: id.clone(),
-                project_id: project,
+                project_id: Some(project),
                 title: "Original".into(),
                 description: "Brief".into(),
                 due_date: None,
             })
             .unwrap();
         id
+    }
+
+    #[test]
+    fn standalone_task_exchange_preserves_membership_comments_and_admission() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
+        let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let canonical = repo.path().canonicalize().unwrap();
+        let path = canonical.to_str().unwrap();
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        a.bind_peer_planning(path, &route).unwrap();
+        b.bind_peer_planning(path, &route).unwrap();
+        let task = a
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                repository_id: a.ensure_repository(path).unwrap(),
+                project_id: None,
+                title: "Before filing".into(),
+                description: "Keep the same Work".into(),
+                due_date: None,
+            })
+            .unwrap();
+        a.append_task_comment(
+            &task.id,
+            &crate::work::task::comment::TaskComment {
+                id: "standalone-comment".into(),
+                body: "Retain direction".into(),
+                author: crate::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: Some("2026-10-17T00:00:00Z".into()),
+            },
+        )
+        .unwrap();
+        let journal = a.export_peer_planning(path, &route.id()).unwrap();
+        b.import_peer_planning(path, &route.id(), "first", &journal)
+            .unwrap();
+        let imported = b.task(&task.id).unwrap().unwrap();
+        assert!(imported.project_id.is_none());
+        assert_ne!(imported.repository_id, task.repository_id);
+        assert_eq!(
+            b.repository_path(&imported.repository_id)
+                .unwrap()
+                .as_deref(),
+            Some(path)
+        );
+        assert_eq!(
+            crate::store::sqlite::task_admission::authority_in(&a.conn.lock().unwrap(), &task.id)
+                .unwrap(),
+            crate::store::sqlite::task_admission::authority_in(&b.conn.lock().unwrap(), &task.id)
+                .unwrap()
+        );
+        let project = b.ensure_wave_project(path, "product").unwrap();
+        b.move_task(&task.id, None, Some(&project.id)).unwrap();
+        let journal = b.export_peer_planning(path, &route.id()).unwrap();
+        a.import_peer_planning(path, &route.id(), "attached", &journal)
+            .unwrap();
+        assert_eq!(
+            a.task(&task.id).unwrap().unwrap().project_id,
+            Some(project.id.clone())
+        );
+        a.move_task(&task.id, Some(&project.id), None).unwrap();
+        a.delete_task(&task.id).unwrap();
+        let journal = a.export_peer_planning(path, &route.id()).unwrap();
+        b.import_peer_planning(path, &route.id(), "detached", &journal)
+            .unwrap();
+        assert!(b.task(&task.id).unwrap().unwrap().project_id.is_none());
+        assert!(b.list_tasks(None).unwrap().is_empty());
+        let conn = b.conn.lock().unwrap();
+        let body: String = conn
+            .query_row(
+                "SELECT body FROM task_comments WHERE id='standalone-comment'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "Retain direction");
     }
 
     #[test]
@@ -675,10 +774,10 @@ mod tests {
         let a = SqliteStore::open_ephemeral(&path).unwrap();
         let task = plan(&a);
         let project = a.task(&task).unwrap().unwrap().project_id;
-        let mut saved = a.project(&project).unwrap().unwrap();
+        let mut saved = a.project(project.as_ref().unwrap()).unwrap().unwrap();
         // These strings would be interpreted as Markdown by the retired storage path.
         saved.description = "Authored purpose\nworkflow: literal prose".into();
-        saved.workflow = "review".into();
+
         saved.krs = vec![crate::work::project::ProjectKR {
             text: "First line\n## Not a section\n- [ ] not another KR".into(),
             holds: true,
@@ -690,7 +789,10 @@ mod tests {
         a.insert_project(&saved).unwrap();
         drop(a);
         let a = SqliteStore::open_ephemeral(&path).unwrap();
-        assert_eq!(a.project(&project).unwrap().unwrap(), saved);
+        assert_eq!(
+            a.project(project.as_ref().unwrap()).unwrap().unwrap(),
+            saved
+        );
         let b = SqliteStore::open_ephemeral(&right.path().join("db")).unwrap();
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
@@ -703,7 +805,7 @@ mod tests {
             local(
                 &conn,
                 &crate::work::edit::WorkEdit::for_target(
-                    project.as_str(),
+                    project.as_ref().unwrap().as_str(),
                     &[
                         Edit::ProjectTeams(vec!["team-1".into(), "team-2".into()]),
                         Edit::ProjectInitiatives(vec!["initiative-1".into()]),
@@ -715,16 +817,16 @@ mod tests {
         let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
         b.import_peer_planning("/repo", &route.id(), "revision", &journal)
             .unwrap();
-        let received = b.project(&project).unwrap().unwrap();
+        let received = b.project(project.as_ref().unwrap()).unwrap().unwrap();
         assert_eq!(received.description, saved.description);
         assert_eq!(received.krs, saved.krs);
         assert_eq!(received.metric_targets, saved.metric_targets);
-        assert_eq!(received.workflow, saved.workflow);
+
         let conn = b.conn.lock().unwrap();
         let (teams, initiatives): (String, String) = conn
             .query_row(
                 "SELECT planning_teams,planning_initiatives FROM projects WHERE id=?1",
-                [project.as_str()],
+                [project.as_ref().unwrap().as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
@@ -737,18 +839,27 @@ mod tests {
             ["initiative-1"]
         );
         drop(conn);
-        let current = a.project(&project).unwrap().unwrap();
-        let pending = a.pending_project_changes(&project).unwrap();
+        let current = a.project(project.as_ref().unwrap()).unwrap().unwrap();
+        let pending = a
+            .pending_project_changes(project.as_ref().unwrap())
+            .unwrap();
         a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
         assert!(a
-            .select_project_workflow(
-                &project,
+            .select_wave_workflow(
+                &saved.wave_id,
                 "another",
                 "nodes: {}\nedges: [{from: start, to: end}]\n"
             )
             .is_err());
-        assert_eq!(a.project(&project).unwrap().unwrap(), current);
-        assert_eq!(a.pending_project_changes(&project).unwrap(), pending);
+        assert_eq!(
+            a.project(project.as_ref().unwrap()).unwrap().unwrap(),
+            current
+        );
+        assert_eq!(
+            a.pending_project_changes(project.as_ref().unwrap())
+                .unwrap(),
+            pending
+        );
         assert!(a
             .wave_workflow(&saved.wave_id, "another")
             .unwrap()
@@ -787,7 +898,7 @@ mod tests {
             conn.execute_batch(
                 &include_str!("../../../tests/fixtures/migrations/planning_local_sessions.sql")
                     .replace("task-proof", task.as_str())
-                    .replace("wave-proof", local_wave.as_str()),
+                    .replace("wave-proof", local_wave.as_ref().unwrap().as_str()),
             )
             .unwrap();
         }
@@ -943,7 +1054,8 @@ mod tests {
         let prior = incoming
             .winners()
             .find(|(_, c)| {
-                c.edit.target == wave.as_str() && c.edit.change.field() == "wave_project"
+                c.edit.target == wave.as_ref().unwrap().as_str()
+                    && c.edit.change.field() == "wave_project"
             })
             .unwrap()
             .1
@@ -961,7 +1073,10 @@ mod tests {
             let field = value.field();
             let parents = incoming
                 .heads()
-                .filter(|(_, c)| c.edit.target == wave.as_str() && c.edit.change.field() == field)
+                .filter(|(_, c)| {
+                    c.edit.target == wave.as_ref().unwrap().as_str()
+                        && c.edit.change.field() == field
+                })
                 .map(|(id, _)| id.to_owned())
                 .collect();
             let clock = incoming.changes.values().map(|c| c.clock).max().unwrap() + 1;
@@ -969,7 +1084,7 @@ mod tests {
                 id.into(),
                 PlanningMutation {
                     edit: WorkEdit {
-                        target: wave.to_string(),
+                        target: wave.as_ref().unwrap().to_string(),
                         change: value,
                     },
                     clock,
@@ -987,7 +1102,7 @@ mod tests {
         assert_eq!(status.changes, exported.changes);
         assert!(status.candidates.contains("rejected"));
         let mut conn = store.conn.lock().unwrap();
-        let values = super::read(&conn, "waves", wave.as_str()).unwrap();
+        let values = super::read(&conn, "waves", wave.as_ref().unwrap().as_str()).unwrap();
         assert!(values.contains(&Edit::WaveName("Renamed".into())));
         assert!(values.contains(&Edit::WaveProject(serde_json::from_value(prior).unwrap())));
         assert_eq!(
@@ -1003,7 +1118,7 @@ mod tests {
         local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
-                wave.as_str(),
+                wave.as_ref().unwrap().as_str(),
                 &[Edit::WaveName("Local edit".into())],
             ),
         )
@@ -1013,7 +1128,10 @@ mod tests {
         let local = store.export_peer_planning("/repo", &route.id()).unwrap();
         let (_, name) = local
             .winners()
-            .find(|(_, c)| c.edit.target == wave.as_str() && c.edit.change.field() == "wave_name")
+            .find(|(_, c)| {
+                c.edit.target == wave.as_ref().unwrap().as_str()
+                    && c.edit.change.field() == "wave_name"
+            })
             .unwrap();
         assert!(name.parents.contains("rename"));
         assert!(!local

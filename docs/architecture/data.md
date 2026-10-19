@@ -39,7 +39,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Flow's identity, state and step results | Its Flow process and child step processes in `processes` |
 | A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the Flow process |
-| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
+| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task workflow move` |
 | A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Machine |
@@ -71,8 +71,7 @@ A capture's `events.jsonl` holds every provider event verbatim. SQLite history
 keeps what streaming increments add up to: a run of deltas is one event at the
 first delta's position, a Turn keeps its last cumulative diff, and the raw
 notification behind each increment stays in the file. Complete items, usage,
-input and outcomes are kept in both. Sizes and the reasoning are in the
-[storage footprint review](../reviews/storage-footprint.md).
+input and outcomes are kept in both.
 
 A Flow is one lf process and the step processes it starts, and its ID is the
 Flow process's. The Flow process keeps the cursor in memory and appends FlowProcess: the
@@ -107,15 +106,17 @@ an incompatible store. Observation failures remain explicit; they never justify
 an agent launch without its required records. Optional stream failures preserve
 missingness without inventing a terminal result.
 
-Saved Session handoffs retain the executable, Machine and database together. A later
-installation selection must not redirect an already-prepared command. Failed
-launch diagnostics survive retry. Store copies preserve data, not live process
-authority, and do not synchronize private writes back to the installation.
+Saved Session handoffs retain the Machine and stable installed entry. Prepared
+commands select the current installation when executed; private-Home handoffs
+retain their explicit executable. Failed launch diagnostics survive retry.
+Store copies preserve data, not live process authority, and do not synchronize
+private writes back to the installation.
 
 ## Attribution and Started
 
-Typed ancestry belongs to LfSession and Process. Task implies Wave;
-constructors fill omitted ancestors and reject contradictions in the transaction.
+Typed ancestry belongs to LfSession and Process. Tasks require repository identity
+and have optional Project membership, which determines their optional Wave.
+Constructors derive ancestors and reject contradictions in the transaction.
 Flow members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or attachment.
 

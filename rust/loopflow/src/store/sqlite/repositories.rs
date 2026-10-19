@@ -43,7 +43,7 @@ fn git_locator_in(conn: &Connection, repo: &str) -> StoreResult<Option<PathBuf>>
 fn retained_checkout_matches(conn: &Connection, repo: &str) -> StoreResult<bool> {
     let mut statement = conn.prepare(
         "SELECT t.worktree,t.branch FROM tasks t
-         JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+         JOIN repository_plans w ON w.id=t.repository_id
          WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
            AND t.worktree IS NOT NULL AND t.worktree<>?1 AND t.branch IS NOT NULL",
     )?;
@@ -177,8 +177,7 @@ impl SqliteStore {
         // A future clone reusing the old path cannot acquire this history.
         tx.execute(
             "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
-             SELECT t.id,e.id FROM tasks t JOIN projects p ON p.id=t.project_id
-             JOIN waves w ON w.id=p.wave_id JOIN processes e
+             SELECT t.id,e.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
                ON e.cwd=rtrim(t.worktree,'/') OR instr(e.cwd,rtrim(t.worktree,'/')||'/')=1
              WHERE w.repo=?1 AND t.checkout_machine_id=(SELECT id FROM machines WHERE route='local')
                AND (t.worktree=?1 OR instr(t.worktree,?1||'/')=1)",
@@ -204,7 +203,7 @@ impl SqliteStore {
         // their actual paths, even when their names retain the old prefix.
         for (table, column, scope) in [
             ("agent_sessions", "cwd", "repo=?2"),
-            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND project_id IN (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)"),
+            ("tasks", "worktree", "checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND repository_id IN (SELECT id FROM repository_plans WHERE repo=?2)"),
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET {column}=?2 || substr({column},length(?1)+1)
@@ -284,7 +283,7 @@ impl SqliteStore {
             Option<i64>,
         ) = tx.query_row(
             "SELECT w.repo,t.worktree,t.checkout_machine_id,t.started_at
-             FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+             FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              WHERE t.id=?1",
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -363,6 +362,16 @@ impl SqliteStore {
         Ok(identity)
     }
 
+    pub(crate) fn repository_paths(&self) -> StoreResult<Vec<PathBuf>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare("SELECT DISTINCT repo FROM repository_plans WHERE selected=1")?;
+        let paths = query
+            .query_map([], |row| row.get::<_, String>(0).map(PathBuf::from))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(paths)
+    }
+
     pub fn repository_path(&self, id: &RepositoryId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -436,7 +445,8 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/before/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON tasks BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
         }
@@ -516,7 +526,8 @@ mod tests {
                 rusqlite::params![project.as_str(), wave.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES(?1,?2,'WORK-1','Shared Task','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'WORK-1','Shared Task','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
         }
         first
             .place_work(&WorkRef::Wave(wave.clone()), &destination)

@@ -12,12 +12,6 @@ struct TaskProjection: Identifiable {
     let id: WorkNodeKey
     let task: RoadmapTask
     let sessions: [SessionRecord]
-
-    /// Sessions remain available inside Work, but their presence cannot establish
-    /// that a Task started. Shared execution evidence keeps unsettled work visible.
-    var inWorkingSet: Bool {
-        !task.task.isTerminal && task.runtime?.status != .paused && task.runtime?.started == true && task.condition.unresolvedExecution
-    }
 }
 
 struct WaveProjection: Identifiable {
@@ -30,11 +24,12 @@ struct WaveProjection: Identifiable {
 /// A presentation of the two shared readings, never another inventory.
 struct WorkProjection {
     let waves: [WaveProjection]
+    let standaloneTasks: [TaskProjection]
     let unmatchedSessions: [SessionRecord]
 
-    init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
+    init(roadmaps: [WaveRoadmap], inventory: [RoadmapTask], sessions: [SessionRecord]) {
         var matched = Set<String>()
-        let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
+        let visibleTaskIds = Set(inventory.flatMap { [$0.id, $0.runtime?.workId].compactMap { $0 } })
         var taskSessions: [String: [SessionRecord]] = [:]
         var waveSessions: [String: [SessionRecord]] = [:]
         // Index the shared memberships once. A Session may belong to more than
@@ -72,6 +67,11 @@ struct WorkProjection {
                 }
             )
         }
+        standaloneTasks = inventory.filter { $0.task.waveId == nil }.sorted { $0.task.rank < $1.task.rank }.map { task in
+            let records = taskSessions[task.runtime?.workId ?? task.id] ?? []
+            matched.formUnion(records.map(\.id))
+            return TaskProjection(id: WorkNodeKey(repo: task.task.repo, work: .task(id: task.id)), task: task, sessions: records)
+        }
         // Missing planning and unattributed Sessions remain reachable, including
         // mandatory human boundaries and multiple conversations on one subject.
         unmatchedSessions = sessions.filter { !matched.contains($0.id) }
@@ -81,6 +81,10 @@ struct WorkProjection {
     /// siblings share its parent subject; the final crumb chooses among them.
     func breadcrumb(selection: WorkReference?, sessionId: String?) -> WorkBreadcrumb? {
         if let sessionId {
+            if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }),
+               let session = task.sessions.first(where: { $0.id == sessionId }) {
+                return WorkBreadcrumb(wave: nil, task: task, session: session, siblings: task.sessions)
+            }
             for wave in waves {
                 if let session = wave.sessions.first(where: { $0.id == sessionId }) {
                     return WorkBreadcrumb(wave: wave, task: nil, session: session, siblings: wave.sessions)
@@ -100,6 +104,11 @@ struct WorkProjection {
             }
         }
         guard let selection else { return nil }
+        if let task = standaloneTasks.first(where: {
+            $0.id.work == selection || $0.task.runtime.map { WorkReference.task(id: $0.workId) } == selection
+        }) {
+            return WorkBreadcrumb(wave: nil, task: task, session: nil, siblings: task.sessions)
+        }
         for wave in waves {
             if wave.id.work == selection {
                 return WorkBreadcrumb(wave: wave, task: nil, session: nil, siblings: wave.sessions)
@@ -114,6 +123,7 @@ struct WorkProjection {
     }
 
     func subject(for sessionId: String) -> WorkReference? {
+        if let task = standaloneTasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) { return task.id.work }
         for wave in waves {
             if wave.sessions.contains(where: { $0.id == sessionId }) { return wave.id.work }
             if let task = wave.tasks.first(where: { $0.sessions.contains { $0.id == sessionId } }) {
@@ -146,176 +156,6 @@ struct WorkBreadcrumb {
         if let id = session?.workspace?.taskId { return .task(id: id) }
         if let work = session?.work, work.kind == .task { return work }
         return nil
-    }
-}
-
-struct WorkOutlineSubject {
-    let key: WorkNodeKey
-    let title: String
-}
-
-/// The outline organizes Work; conversations open from each row's menu.
-struct WorkOutlineRow: Identifiable {
-    let subject: WorkOutlineSubject
-    let hasChildren: Bool
-    let inlineSessions: [SessionRecord]
-    let depth: Int
-    let ancestors: [WorkOutlineSubject]
-    let task: RoadmapTask?
-
-    var id: WorkNodeKey { subject.key }
-    var title: String { subject.title }
-}
-
-extension WorkProjection {
-    func outline(
-        collapsed: Set<WorkNodeKey>,
-        search: String, planningReadable: Bool,
-        selection: WorkReference? = nil
-    ) -> [WorkOutlineRow] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Resolve planning/runtime identity through the same trail as the header.
-        let selectedTask = breadcrumb(selection: selection, sessionId: nil)?.task?.id
-        func matches(_ text: String) -> Bool {
-            query.isEmpty || text.localizedCaseInsensitiveContains(query)
-        }
-        func expanded(_ key: WorkNodeKey) -> Bool {
-            !query.isEmpty || !collapsed.contains(key)
-        }
-        var rows: [WorkOutlineRow] = []
-        func appendWork(_ subject: WorkOutlineSubject, depth: Int,
-                        ancestors: [WorkOutlineSubject], hasChildren: Bool,
-                        sessions: [SessionRecord] = [], task: RoadmapTask? = nil) {
-            rows.append(WorkOutlineRow(
-                subject: subject, hasChildren: hasChildren, inlineSessions: sessions,
-                depth: depth,
-                ancestors: ancestors, task: task
-            ))
-        }
-        for wave in waves {
-            let waveSubject = WorkOutlineSubject(key: wave.id, title: wave.roadmap.wave.displayName)
-            let complete: Bool
-            if case .available(_, false) = wave.roadmap.tasks {
-                complete = planningReadable && wave.roadmap.unavailableTasks.isEmpty
-            } else { complete = false }
-            let workingSet = wave.tasks.filter { task in
-                task.inWorkingSet || (task.task.task.isTerminal && task.id == selectedTask)
-            }
-            let waveHasChildren = !workingSet.isEmpty
-            let omitWave = waves.count == 1 && complete
-                && waveHasChildren && wave.sessions.isEmpty && expanded(wave.id)
-            let waveStart = rows.count
-            if !omitWave { appendWork(waveSubject, depth: 0, ancestors: [], hasChildren: waveHasChildren,
-                                      sessions: wave.sessions + wave.tasks.flatMap(\.sessions)) }
-            if expanded(wave.id) {
-                let waveDepth = omitWave ? 0 : 1
-                let ancestors = [waveSubject]
-                for task in workingSet {
-                    let taskSubject = WorkOutlineSubject(key: task.id, title: task.task.task.name)
-                    let taskMatches = matches(taskSubject.title) || matches(task.task.task.identifier)
-                        || matches(waveSubject.title)
-                    guard taskMatches else { continue }
-                    // Retain exact conversations for contextual opening, not tallies.
-                    appendWork(taskSubject, depth: waveDepth, ancestors: ancestors,
-                               hasChildren: false, sessions: task.sessions, task: task.task)
-                }
-            }
-            if !query.isEmpty, !omitWave, rows.count == waveStart + 1, !matches(waveSubject.title) { rows.removeLast() }
-        }
-        return rows
-    }
-}
-
-/// One Work destination with current, actionable Session evidence.
-struct WorkAttentionItem: Identifiable {
-    let work: WorkReference
-    let waveID: String
-    let waveName: String
-    let title: String
-    let reason: String
-    let detail: String
-    let session: SessionRecord
-    var id: WorkReference { work }
-}
-
-extension WorkProjection {
-    func attention(unavailable: String?) -> [WorkAttentionItem] {
-        guard unavailable == nil else { return [] }
-        var items: [WorkAttentionItem] = []
-        var includedSessions: Set<String> = []
-        let tasks = waves.flatMap(\.tasks)
-        for wave in waves {
-            let subjects = wave.tasks.filter { !$0.task.task.isTerminal }
-                .map { ($0.id.work, $0.task.task.name, $0.sessions) }
-            for (work, title, sessions) in subjects {
-                // Inspect each Session: another Session's busy report cannot
-                // hide a question, and process liveness is never attention.
-                for session in sessions where session.state != .closed && !includedSessions.contains(session.id) {
-                    if let owner = session.workspace?.taskId,
-                       let task = tasks.first(where: { $0.task.runtime?.workId == owner || $0.id.work.id == owner }),
-                       task.id.work != work { continue }
-                    let status = SessionProgramStatus(sessions: [session], unavailable: nil)
-                    let reason: String
-                    switch status {
-                    case .available: reason = "Available"
-                    case .reported(_, let report) where report.state == .blocked:
-                        reason = report.kind.map { $0.rawValue.capitalized } ?? "Blocked"
-                    default: continue
-                    }
-                    includedSessions.insert(session.id)
-                    items.append(WorkAttentionItem(work: work, waveID: wave.roadmap.wave.id,
-                        waveName: wave.roadmap.wave.displayName, title: title,
-                        reason: reason, detail: status.help, session: session))
-                    break
-                }
-            }
-        }
-        return items
-    }
-}
-
-/// One partition of the navigation: available Tasks occur only above the Waves.
-struct WorkNavigatorProjection {
-    struct AvailableTask: Identifiable {
-        let row: WorkOutlineRow
-        let attention: WorkAttentionItem
-        var id: WorkNodeKey { row.id }
-    }
-    struct Branch: Identifiable {
-        let wave: WaveProjection
-        let tasks: [WorkOutlineRow]
-        var id: WorkNodeKey { wave.id }
-    }
-    let available: [AvailableTask]
-    let waves: [Branch]
-}
-
-extension WorkProjection {
-    func navigator(search: String, planningReadable: Bool, selection: WorkReference?,
-                   unavailable: String?) -> WorkNavigatorProjection {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attention = attention(unavailable: unavailable)
-        let availableWork = Set(attention.map(\.work))
-        let rows = outline(collapsed: [], search: search, planningReadable: planningReadable,
-                           selection: selection).filter { $0.task != nil && !availableWork.contains($0.id.work) }
-        let available = attention.compactMap { item -> WorkNavigatorProjection.AvailableTask? in
-            guard let wave = waves.first(where: { $0.roadmap.wave.id == item.waveID }),
-                  let task = wave.tasks.first(where: { $0.id.work == item.work }),
-                  query.isEmpty || [item.title, item.waveName, task.task.task.identifier]
-                    .contains(where: { $0.localizedCaseInsensitiveContains(query) }) else { return nil }
-            let parent = WorkOutlineSubject(key: wave.id, title: item.waveName)
-            let row = WorkOutlineRow(subject: WorkOutlineSubject(key: task.id, title: item.title),
-                hasChildren: false, inlineSessions: task.sessions, depth: 0,
-                ancestors: [parent], task: task.task)
-            return .init(row: row, attention: item)
-        }
-        let branches = waves.compactMap { wave -> WorkNavigatorProjection.Branch? in
-            let tasks = rows.filter { $0.ancestors.contains { $0.key == wave.id } }
-            guard query.isEmpty || !tasks.isEmpty || wave.roadmap.wave.displayName.localizedCaseInsensitiveContains(query)
-            else { return nil }
-            return .init(wave: wave, tasks: tasks)
-        }
-        return WorkNavigatorProjection(available: available, waves: branches)
     }
 }
 
@@ -355,9 +195,26 @@ struct TaskRunDraft: Equatable {
 @MainActor
 @Observable
 final class WorkNavigation {
+    enum SidebarFilter: String, CaseIterable {
+        case working = "Working tasks"
+        case available = "Available"
+        case running = "Running"
+    }
+    /// Presentation order, independent of query arrivals, attention and recency.
+    var workingTaskIDs: [String] = []
+    var showsSlotHints = false
+    var sidebarFilter: SidebarFilter = .working
+    var sidebarFocusRequested = false
+
+    func retainWorkingTask(_ id: String, aliases: [String] = []) {
+        var seen = Set<String>()
+        workingTaskIDs = (workingTaskIDs.map { aliases.contains($0) ? id : $0 } + [id])
+            .filter { seen.insert($0).inserted }
+    }
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {
         case search
+        case sidebarSearch
         case flow(String)
         case workflow(String)
     }
@@ -371,7 +228,12 @@ final class WorkNavigation {
         get { workspacePresentation.content }
         set { workspacePresentation.content = newValue }
     }
-    var palette: Palette?
+    var palette: Palette? {
+        didSet {
+            if oldValue == nil, palette != nil { restorePaletteFocus = true }
+        }
+    }
+    var restorePaletteFocus = true
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
     var expandedCompositionGroups: [String: Set<String>] = [:]
@@ -406,30 +268,22 @@ final class WorkNavigation {
     var expandedNotices: Set<String> = []
     /// Flow processes whose graph and steps are open, keyed by Flow process.
     var expandedFlowProcesses: Set<String> = []
-    var search = ""
     var selection: WorkReference?
     /// Repository-local visits; nil names the repository conversation.
     var backStack: [WorkReference?] = []
     var forwardStack: [WorkReference?] = []
-    var selectedTaskEvidence: (wave: WaveRoadmap, task: RoadmapTask)?
-    var listScrollOffset: CGFloat = 0
-    var showsNavigator = false
+    var selectedTaskEvidence: (wave: WaveRoadmap?, task: RoadmapTask)?
+    var showsNavigator = true
 
     func toggleNavigator() {
         palette = nil
         showsNavigator.toggle()
     }
-
-    func pinNavigator() {
-        palette = nil
-        showsNavigator = true
-    }
-
-    var sidebarWidth: CGFloat = 380
-    var expandedWaves: Set<WorkNodeKey> = []
+    var sidebarWidth: CGFloat = 240
+    var sidebarScrollOffset: CGFloat = 0
 
     func resizeSidebar(_ width: CGFloat, availableWidth: CGFloat) {
-        sidebarWidth = min(600, max(260, min(width, availableWidth - 360)))
+        sidebarWidth = min(600, max(240, min(width, availableWidth - 360)))
     }
 
     /// Selections and visits from another Machine name no Work on this one.
@@ -437,8 +291,8 @@ final class WorkNavigation {
         selection = nil
         backStack = []
         forwardStack = []
-        expandedWaves = []
         selectedTaskEvidence = nil
+        workingTaskIDs = []
         content = .overview
     }
 

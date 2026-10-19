@@ -33,7 +33,7 @@ struct WorkPaletteTests {
         #expect(definition.terminal.readabilityErrors.isEmpty)
         for surface in surfaces {
             let base = rgb(surface, environment)
-            #expect(ratio(workSelection, base) >= 3)
+            #expect(ratio(rgb(palette.selectionEdge, environment), base) >= 3)
             let selected = composite(rgb(palette.selectionFill, environment), over: base)
             for background in [base, selected] {
                 for ink in text {

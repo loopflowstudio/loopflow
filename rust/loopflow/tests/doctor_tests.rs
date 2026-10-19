@@ -201,10 +201,12 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         "- cmd: doctor\n- cmd: __telemetry-scorecard\n",
     )
     .unwrap();
-    fs::create_dir_all(home.path().join("performance")).unwrap();
     fs::create_dir_all(home.path().join(".lf/wave/product/metrics")).unwrap();
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for file in ["scripts/lifecycle_scorecard.py", "performance/budgets.json"] {
+    for file in [
+        "scripts/lifecycle_scorecard.py",
+        "scripts/performance-budgets.json",
+    ] {
         fs::copy(source.join(file), home.path().join(file)).unwrap();
     }
     fs::write(

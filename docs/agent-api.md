@@ -60,7 +60,7 @@ lf wait INF-123 --until terminal                # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its current Linear Project owns Tasks, KRs, targets and workflow.
+memory; its current Linear Project owns Tasks, KRs and targets.
 A Task owns its checkout and its PR history, with one current PR. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 

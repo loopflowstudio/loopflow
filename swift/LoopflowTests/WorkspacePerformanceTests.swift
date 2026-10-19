@@ -48,7 +48,7 @@ struct WorkspacePerformanceTests {
             }
             for attempt in 0..<21 {
                 let start = ContinuousClock.now
-                let projection = WorkProjection(roadmaps: roadmap.waves, sessions: sessions)
+                let projection = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: sessions)
                 let elapsed = start.duration(to: .now)
                 let milliseconds = Double(elapsed.components.seconds) * 1000
                     + Double(elapsed.components.attoseconds) / 1e15

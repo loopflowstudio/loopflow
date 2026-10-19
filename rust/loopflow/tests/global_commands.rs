@@ -468,8 +468,8 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "open", "list", "hide", "restore", "focus", "split", "move", "resize", "zoom", "shell",
-        "files", "flow-log", "read", "text", "key",
+        "open", "list", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files",
+        "flow-log", "read", "text", "key",
     ] {
         let output = command(
             home.path(),
@@ -490,7 +490,6 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
             "key" => vec!["--pane", "absent", "enter"],
             "read" => vec!["--pane", "absent", "--region", "screen"],
             "files" | "flow-log" => vec!["--pane", "absent"],
-            "split" => vec!["--pane", "absent", "--axis", "vertical"],
             "move" => vec![
                 "--pane",
                 "absent",
@@ -674,9 +673,12 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             .unwrap();
         store
             .create_task(&loopflow::work::task::NewTask {
+                repository_id: store
+                    .ensure_repository(repo.canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
-                project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
+                project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),
                 title: title.into(),
                 description: String::new(),
             })
@@ -1394,7 +1396,15 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
                 command(
                     home.path(),
                     repo.path(),
-                    &["task", "move", "INF-123", "end", "--explain", "--json"],
+                    &[
+                        "task",
+                        "workflow",
+                        "move",
+                        "INF-123",
+                        "end",
+                        "--explain",
+                        "--json",
+                    ],
                 )
                 .output()
                 .unwrap(),
@@ -1495,6 +1505,11 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     let db_path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&db_path).unwrap();
     connection_history(&db, &session);
+    db.execute(
+        "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
+        [&session.id],
+    )
+    .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&db_path).unwrap();
     let read = |args: &[&str]| -> serde_json::Value {
@@ -1693,11 +1708,7 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         .unwrap();
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = fs::read(&db_path).unwrap();
-        for (flag, blocked) in [
-            (None, true),
-            (Some("--takeover"), false),
-            (Some("--try"), false),
-        ] {
+        for flag in [None, Some("--takeover"), Some("--try")] {
             let mut args = vec![
                 "session",
                 "connect",
@@ -1712,9 +1723,8 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
             ))
             .unwrap();
             assert_eq!(report["state"], "active", "{report}");
-            assert_eq!(
-                !report["impediments"].as_array().unwrap().is_empty(),
-                blocked,
+            assert!(
+                report["impediments"].as_array().unwrap().is_empty(),
                 "{report}"
             );
             assert_eq!(report["actions"][1]["kind"], "move_here");
@@ -1843,7 +1853,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     };
     let before = identity(&old);
     let session: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &old, &["session", "ensure", "--json"])
+        command(home.path(), &old, &["connect", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))
@@ -1864,7 +1874,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     );
     assert_eq!(identity(&moved), after);
     let resumed: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &moved, &["session", "ensure", "--json"])
+        command(home.path(), &moved, &["connect", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))
@@ -2107,6 +2117,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     };
     let preview = read(&[
         "task",
+        "workflow",
         "move",
         "INF-123",
         "start",
@@ -2143,6 +2154,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         "--task",
         registered.task.id.as_str(),
         "task",
+        "workflow",
         "move",
         "INF-123",
         "start",
@@ -2154,7 +2166,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     assert_eq!(scoped["action"], preview["action"]);
     for action in [
         vec!["task", "run", "INF-123"],
-        vec!["task", "move", "INF-123", "start"],
+        vec!["task", "workflow", "move", "INF-123", "start"],
         vec!["task", "workflow", "restart", "INF-123"],
         vec!["task", "workflow", "show", "INF-123"],
     ] {
@@ -2164,7 +2176,10 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("conflicting Task selections"));
     }
-    let cases = [(vec!["task", "move", "INF-123", "missing"], "has no node")];
+    let cases = [(
+        vec!["task", "workflow", "move", "INF-123", "missing"],
+        "has no node",
+    )];
     let mut reasons = Vec::new();
     for (args, expected) in &cases {
         let mut args = args.clone();
@@ -2175,7 +2190,15 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         assert!(reason.contains(expected), "{report}");
         reasons.push(reason.to_owned());
     }
-    let completion = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
+    let completion = read(&[
+        "task",
+        "workflow",
+        "move",
+        "INF-123",
+        "end",
+        "--explain",
+        "--json",
+    ]);
     assert_eq!(completion["action"]["to"], "end");
     assert!(completion["unavailable"][0]
         .as_str()
@@ -2185,7 +2208,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         command(
             home.path(),
             repo.path(),
-            &["task", "move", "INF-123", "start", "--explain"],
+            &["task", "workflow", "move", "INF-123", "start", "--explain"],
         )
         .output()
         .unwrap(),
@@ -2198,7 +2221,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     let invalid_context = command(
         home.path(),
         repo.path(),
-        &["task", "move", "INF-123", "start", "--context"],
+        &["task", "workflow", "move", "INF-123", "start", "--context"],
     )
     .output()
     .unwrap();
@@ -2250,7 +2273,15 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
         ))
         .unwrap()
     };
-    let absent = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
+    let absent = read(&[
+        "task",
+        "workflow",
+        "move",
+        "INF-123",
+        "end",
+        "--explain",
+        "--json",
+    ]);
     assert!(absent["action"].is_null());
     assert!(absent["unavailable"][0]
         .as_str()
@@ -2282,7 +2313,15 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
         .as_str()
         .unwrap()
         .contains("has no workflow"));
-    let end = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
+    let end = read(&[
+        "task",
+        "workflow",
+        "move",
+        "INF-123",
+        "end",
+        "--explain",
+        "--json",
+    ]);
     assert!(end["action"]["workflow"].is_null());
     assert!(end["action"]["from"].is_null());
     assert_eq!(end["action"]["to"], "end");
@@ -2413,7 +2452,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     assert_eq!(created["action"]["description"], "A new Task");
     assert_eq!(
         created["action"]["project"],
-        registered.task.project_id.as_str()
+        registered.task.project_id.as_ref().unwrap().as_str()
     );
     assert_eq!(created["resolution"]["task"]["state"], "unbound");
     assert_eq!(created["impediments"], serde_json::json!([]));
@@ -2510,21 +2549,21 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
         .as_str()
         .unwrap()
         .contains("registration/acquisition was not performed"));
-    let inbox = read(&[
+    let report: loopflow::ops::task::TaskPlanningExplanation =
+        serde_json::from_value(unregistered).unwrap();
+    assert!(report.render().contains("Project selection unavailable"));
+    let standalone = read(&[
         "task",
         "create",
         "--title",
-        "Inbox Task",
+        "Standalone Task",
         "--explain",
         "--json",
     ]);
-    assert_eq!(inbox["action"]["kind"], "create");
-    assert!(inbox["action"]["project"].is_null());
-    assert_eq!(inbox["resolution"]["wave"]["state"], "unbound");
-    assert!(inbox["unavailable"][0]
-        .as_str()
-        .unwrap()
-        .contains("initialization"));
+    assert_eq!(standalone["action"]["kind"], "create");
+    assert!(standalone["action"]["project"].is_null());
+    assert_eq!(standalone["resolution"]["wave"]["state"], "unbound");
+    assert_eq!(standalone["impediments"], serde_json::json!([]));
     let invalid = read(&[
         "task",
         "create",
@@ -2597,7 +2636,7 @@ fn task_planning_explain_create_uses_piped_input_and_current_project_validation(
 
     db.execute(
         "UPDATE projects SET status='completed' WHERE id=?1",
-        [registered.task.project_id.as_str()],
+        [registered.task.project_id.as_ref().unwrap().as_str()],
     )
     .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
@@ -2665,22 +2704,20 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     let selected = store
         .ensure_wave_project(canonical.to_str().unwrap(), "selected")
         .unwrap();
-    let inbox = store
+    store
         .ensure_wave_project(canonical.to_str().unwrap(), "inbox")
         .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
-    for (explicit, declaration, project, source) in [
-        (true, "unknown", &selected, "explicit"),
-        (
-            false,
-            selected.wave_id.as_str(),
-            &selected,
-            "inherited_declaration",
-        ),
-        (false, "", &inbox, "default_inbox"),
-        (false, "  ", &inbox, "default_inbox"),
+    for (explicit, no_wave, declaration) in [
+        (true, false, "unknown"),
+        (false, false, selected.wave_id.as_str()),
+        (false, false, "unknown"),
+        (false, false, ""),
+        (false, false, "  "),
+        (false, true, selected.wave_id.as_str()),
+        (false, true, "unknown"),
     ] {
         let mut invocation = command(
             home.path(),
@@ -2688,25 +2725,51 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
             &["task", "create", "--title", "New", "--explain", "--json"],
         );
         invocation.env("LF_WAVE_ID", declaration);
+        if !declaration.trim().is_empty() {
+            invocation.env("LF_AS", format!("wave:{declaration}"));
+        }
         if explicit {
             invocation.args(["--wave", "selected"]);
         }
+        if no_wave {
+            invocation.arg("--no-wave");
+        }
         let preview: serde_json::Value =
             serde_json::from_str(&success(invocation.output().unwrap())).unwrap();
-        assert_eq!(
-            preview["resolution"]["wave"]["value"],
-            project.wave_id.as_str()
-        );
-        assert_eq!(preview["resolution"]["wave"]["source"], source);
+        if explicit {
+            assert_eq!(
+                preview["resolution"]["wave"]["value"],
+                selected.wave_id.as_str()
+            );
+            assert_eq!(preview["resolution"]["wave"]["source"], "explicit");
+            assert_eq!(preview["action"]["project"], selected.id.as_str());
+        } else {
+            assert_eq!(preview["resolution"]["wave"]["state"], "unbound");
+            assert!(preview["action"]["project"].is_null());
+            let report: loopflow::ops::task::TaskPlanningExplanation =
+                serde_json::from_value(preview.clone()).unwrap();
+            assert!(report
+                .render()
+                .contains("create Task \"New\" without a Wave"));
+        }
         assert_eq!(preview["resolution"]["task"]["state"], "unbound");
-        assert_eq!(preview["action"]["project"], project.id.as_str());
+        assert_eq!(preview["impediments"], serde_json::json!([]));
+        assert_eq!(
+            preview["unavailable"],
+            serde_json::json!(["Provider freshness, synchronization delivery and concurrent saves are not observed or reserved"])
+        );
+        assert_eq!(preview["resolution"]["repository"]["state"], "bound");
+        assert_eq!(
+            preview["resolution"]["repository_path"]["value"],
+            canonical.to_str().unwrap()
+        );
     }
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
 }
 
 #[test]
-fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work() {
+fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     for wave in ["source", "destination"] {
@@ -2737,9 +2800,12 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     let destination = project("destination");
     let task = store
         .create_task(&loopflow::work::task::NewTask {
+            repository_id: store
+                .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                .unwrap(),
             due_date: None,
             id: loopflow::durable::TaskId::new(),
-            project_id: loopflow::durable::ProjectId::parse(&source).unwrap(),
+            project_id: Some(loopflow::durable::ProjectId::parse(&source).unwrap()),
             title: "Unallocated work".into(),
             description: String::new(),
         })
@@ -2751,7 +2817,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
                 repo.path(),
                 &[
                     "task",
-                    "refile",
+                    "move",
                     task.id.as_str(),
                     "--wave",
                     wave,
@@ -2767,7 +2833,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let report = read("destination");
-    assert_eq!(report["action"]["kind"], "refile", "{report}");
+    assert_eq!(report["action"]["kind"], "move", "{report}");
     assert_eq!(report["action"]["project"], destination);
     assert_eq!(report["action"]["previous_project"], source);
     assert_eq!(report["impediments"], serde_json::json!([]), "{report}");
@@ -2780,14 +2846,14 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     assert_eq!(read(&destination_wave)["action"], report["action"]);
     let absent = read("unregistered");
     assert!(absent["action"].is_null());
-    assert!(absent["unavailable"].to_string().contains("not performed"));
+    assert!(absent["unavailable"].to_string().contains("not registered"));
     let text = success(
         command(
             home.path(),
             repo.path(),
             &[
                 "task",
-                "refile",
+                "move",
                 task.id.as_str(),
                 "--wave",
                 "destination",
@@ -2797,7 +2863,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
         .output()
         .unwrap(),
     );
-    assert!(text.contains("Intended action: refile Task to Wave"));
+    assert!(text.contains("Intended action: move Task to Wave"));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(
         fs::read(&path).unwrap() == before,
@@ -2806,10 +2872,13 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
         .create_task(&loopflow::work::task::NewTask {
+            repository_id: store
+                .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                .unwrap(),
             due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: task.project_id.clone(),
-            title: "Refile by ID".into(),
+            title: "Move by ID".into(),
             description: String::new(),
         })
         .unwrap();
@@ -2819,7 +2888,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
             repo.path(),
             &[
                 "task",
-                "refile",
+                "move",
                 second.id.as_str(),
                 "--wave",
                 &destination_wave,
@@ -2841,7 +2910,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
         .unwrap();
     assert_eq!(count, 2);
     fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
-    // A recorded checkout prevents moving ownership even without a live process.
+    // Recorded work stays put while its planning membership can change.
     db.execute(
         "UPDATE tasks SET worktree=?2,checkout_machine_id=?3 WHERE id=?1",
         rusqlite::params![
@@ -2853,12 +2922,32 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
-    let refused = read("destination");
-    assert!(
-        refused["impediments"].to_string().contains("recorded work"),
-        "{refused}"
-    );
+    let retained = read("destination");
+    assert_eq!(retained["action"], report["action"]);
+    assert_eq!(retained["impediments"], serde_json::json!([]));
     assert_eq!(read("source")["impediments"], serde_json::json!([]));
+    let detached: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "move",
+                task.id.as_str(),
+                "--no-wave",
+                "--explain",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(detached["action"]["kind"], "move");
+    assert_eq!(detached["action"]["previous_project"], source);
+    assert!(detached["action"]["project"].is_null());
+    assert!(detached["action"]["wave"].is_null());
+    assert_eq!(detached["impediments"], serde_json::json!([]));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(
         fs::read(&path).unwrap() == before,
@@ -2879,10 +2968,8 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let remote = read("destination");
-    assert!(
-        remote["impediments"].to_string().contains("recorded work"),
-        "{remote}"
-    );
+    assert_eq!(remote["action"], report["action"]);
+    assert_eq!(remote["impediments"], serde_json::json!([]));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
     assert!(!home.path().join(".lf/chapter-locks").exists());

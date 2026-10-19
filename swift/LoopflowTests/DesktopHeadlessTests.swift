@@ -134,8 +134,8 @@ struct DesktopHeadlessTests {
         await model.refresh()
         model.select(.wave(id: wave.id))
         await model.loadWorkflowCatalog()
-        let view = WaveWorkflowView(model: model, wave: wave, name: "code")
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "Stored in this Wave")
+        let view = WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == "code" }, model: model)
+        #expect(try view.inspect().find(text: "Stored in this Wave").string() == "Stored in this Wave")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         _ = try view.inspect().find(button: "Edit")
         let updated = "nodes: {review: demo}\nedges: []\n"
@@ -158,9 +158,6 @@ struct DesktopHeadlessTests {
         let proof = try JSONDecoder().decode(Proof.self, from: data)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let thread = String(decoding: try JSONSerialization.data(withJSONObject: #require(object["comments"])), as: UTF8.self)
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first).wave
         let model = WorkModel(query: RegistryQuery { args, _ in
             guard args.prefix(2) == ["task", "comment"] else {
                 throw RegistryQueryError("Unexpected command: \(args)")
@@ -170,10 +167,10 @@ struct DesktopHeadlessTests {
         #expect(proof.task.reference.workspace == nil)
         #expect(proof.task.task.id == "task_0123456789ab40008000000000000001")
         #expect(proof.task.runControl.unavailable == nil)
-        await model.loadComments(task: proof.task, wave: wave)
+        await model.loadComments(task: proof.task)
         #expect(model.comments[proof.task.id].value == proof.comments)
         model.navigation.expandedComments.insert(proof.task.id)
-        let view = TaskCommentsView(model: model, task: proof.task, wave: wave)
+        let view = TaskCommentsView(model: model, task: proof.task)
         _ = try view.inspect().find(text: "Fixture Person")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier:
             "task-comment-00000000-0000-4000-8000-000000000001")
@@ -222,7 +219,7 @@ struct DesktopHeadlessTests {
         feed.send(try frame("planning", sequence: 1, answers: 0, body: planning))
         try await eventually { model.task(id: "issue-now") != nil }
         let found = try #require(model.task(id: "issue-now"))
-        let (task, wave) = (found.task, found.wave.wave)
+        let task = found.task
         model.select(.task(id: task.id))
         model.syncWorkScope()
         try await eventually { feed.requests.last?.id == 2 }
@@ -266,11 +263,11 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
-        let oldRead = Task { await model.loadComments(task: task, wave: wave) }
+        let oldRead = Task { await model.loadComments(task: task) }
         try await eventually { model.comments.inFlight.contains(task.id) }
 
         // The subscription updates normally; command confirmation is separate.
-        let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
+        let moving = Task { await model.moveTask(to: "demo", task: task) }
         try await eventually { feed.requests.last == .checkpoint(id: 4, replay: []) }
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
@@ -304,13 +301,13 @@ struct DesktopHeadlessTests {
         #expect(model.comments[task.id].value?.comments.count == 3)
         #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
         model.navigation.expandedComments.insert(task.id)
-        let comments = TaskCommentsView(model: model, task: task, wave: wave)
+        let comments = TaskCommentsView(model: model, task: task)
         _ = try comments.inspect().find(text: "Pending sync")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.flowProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
         #expect(await calls.calls == [
-            ["task", "comment", task.id, "--wave", wave.name, "--json"],
-            ["task", "move", task.task.identifier, "demo"],
+            ["task", "comment", task.id, "--json"],
+            ["task", "workflow", "move", task.task.identifier, "demo"],
         ])
     }
 
@@ -351,45 +348,22 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(button: "Refresh")
     }
 
-    @Test("A Project's workflow is drawn, is set through lf, and keeps an invalid file visible")
-    func waveDefault() async throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first).wave
-        let catalog = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json")), as: UTF8.self)
-        let calls = Recorder()
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            await calls.add(args)
-            if args.prefix(3) == ["wave", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["wave", "workflow", "set"], args.dropFirst(3).first == "broken" {
-                throw RegistryQueryError("broken does not load")
-            }
-            if args.prefix(2) == ["wave", "show"] { return String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self) }
-            return "{}"
-        })
-        await model.refresh()
+    @Test("The workflow inspector draws builtins and keeps invalid definitions editable")
+    func workflowDefinitions() async throws {
+        let catalog = try String(contentsOf: fixtures.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
+        let model = WorkModel(query: RegistryQuery { _, _ in catalog })
         await model.loadWorkflowCatalog()
-        func view(_ name: String) -> WaveWorkflowView { WaveWorkflowView(model: model, wave: wave, name: name) }
-
-        // A builtin workflow is drawn before any Task has run it, and editing it is an explicit Customize.
+        func view(_ name: String) -> WorkflowCatalogInspector {
+            WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+        }
         let builtin = view("code")
         _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "builtin workflow")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Customize")
-        try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().tap()
-
-        // An invalid repository file stays listed with its reason and can still be opened.
+        _ = try builtin.inspect().find(text: "builtin Workflow")
+        _ = try builtin.inspect().find(button: "Customize")
         let invalid = view("proof")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-invalid").text().string().contains("unreachable"))
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == ".lf/workflows/proof.yaml")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Edit")
-
-        // Setting the workflow changes only that line; a refusal is shown on the Wave.
-        await model.setWorkflow("code", wave: wave)
-        #expect(await calls.calls.contains(["wave", "workflow", "set", "code", wave.id]))
-        #expect(model.workflowErrors[wave.id] == nil)
-        await model.setWorkflow("broken", wave: wave)
-        #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-error").text().string() == "broken does not load")
+        _ = try invalid.inspect().find(ViewType.Text.self) { try $0.string().contains("unreachable") }
+        _ = try invalid.inspect().find(text: ".lf/workflows/proof.yaml")
+        _ = try invalid.inspect().find(button: "Edit")
     }
 
     @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
@@ -405,7 +379,7 @@ struct DesktopHeadlessTests {
             start: { args, _ in await started.add(args) },
             run: { args, _ in
                 if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
-                if args.prefix(2) == ["task", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
+                if args.prefix(3) == ["task", "workflow", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
                 return "{}"
             }))
         func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
@@ -414,7 +388,7 @@ struct DesktopHeadlessTests {
             workflow["outgoing"] = outgoing
             wire["workflow"] = workflow
             let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
-            return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
+            return TaskWorkflowHeader(model: model, task: task, work: .available(work))
         }
 
         // The fixture's `pursue` edge is running: Rust lists no edge to choose beside it.
@@ -445,20 +419,20 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "ship"]])
 
-        // A Task that has taken up no workflow starts on its Project's.
+        // A Task that has taken up no workflow uses its Wave or repository default.
         wire["workflow"] = NSNull()
-        let unstarted = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(
+        let unstarted = TaskWorkflowHeader(model: model, task: task, work: .available(
             try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))))
         try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
         for _ in 0..<200 where await started.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
 
         // Going back is the same command a person would type.
-        await model.moveTask(to: "design", task: task, wave: wave.wave)
-        #expect(await started.calls.last == ["task", "move", task.task.identifier, "design"])
+        await model.moveTask(to: "design", task: task)
+        #expect(await started.calls.last == ["task", "workflow", "move", task.task.identifier, "design"])
 
         // Completion has its own operation and does not move the Workflow.
-        await model.completeTask(task, wave: wave.wave)
+        await model.completeTask(task)
         #expect(await started.calls.last == ["task", "complete", task.task.identifier])
     }
 
@@ -480,7 +454,7 @@ struct DesktopHeadlessTests {
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
         #expect(task.id == original.id)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
-        let view = TaskWorkflowHeader(model: model, task: task, wave: wave.wave,
+        let view = TaskWorkflowHeader(model: model, task: task,
             work: .available(TaskOverview(sessions: [], flowProcesses: [], workflow: nil)))
         if state == "unstarted" {
             _ = try view.inspect().find(button: "Complete")
@@ -509,7 +483,7 @@ struct DesktopHeadlessTests {
             wire["workflow"] = workflow
             let work = try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
             drawnWorkflow = work.workflow
-            return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
+            return TaskWorkflowHeader(model: model, task: task, work: .available(work))
         }
 
         // `feature`, with the Task waiting at `design`.
@@ -602,6 +576,7 @@ struct DesktopHeadlessTests {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         wire["waves"] = []
+        wire["tasks"] = ["state": "ok", "items": [], "truncated": false]
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(empty), waves: .available([]),
                            workActivity: .loading, repos: [])
@@ -620,10 +595,14 @@ struct DesktopHeadlessTests {
         tasks["items"] = items
         waves[0]["tasks"] = tasks
         saved["waves"] = waves
+        saved["tasks"] = tasks
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
+        model.applySelectionPlans([ViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            ViewMember(work: .init(repository: "repo", kind: .wave, id: wave.id), title: wave.displayName)
+        ])], reason: "")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
             .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()

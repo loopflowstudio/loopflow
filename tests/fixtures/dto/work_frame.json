@@ -15,7 +15,12 @@
     "body": {
       "roadmap": {
         "generated_at": "2026-10-05T00:00:00Z",
-        "waves": []
+        "waves": [],
+        "tasks": {
+          "state": "ok",
+          "items": [],
+          "truncated": false
+        }
       },
       "waves": []
     }
@@ -371,6 +376,42 @@
           }
         ]
       }
+    }
+  },
+  {
+    "sequence": 11,
+    "answers": 8,
+    "home": "/home/test/.lf",
+    "revisions": {
+      "planning": 911,
+      "sessions": 402,
+      "flows": 88,
+      "processes": 5120,
+      "usage": 77
+    },
+    "unavailable": null,
+    "part": "selections",
+    "body": {
+      "repo": "/src/loopflow",
+      "plans": [
+        {
+          "owner": {
+            "repository": "repo-fixture",
+            "kind": "wave",
+            "id": "wave-fixture"
+          },
+          "members": [
+            {
+              "work": {
+                "repository": "repo-fixture",
+                "kind": "task",
+                "id": "task-fixture"
+              },
+              "title": "Retained work"
+            }
+          ]
+        }
+      ]
     }
   }
 ]

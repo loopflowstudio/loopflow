@@ -939,8 +939,11 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     ))
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    conn.execute("UPDATE waves SET repo=?1", [repo.path().to_str().unwrap()])
-        .unwrap();
+    conn.execute_batch(&format!(
+        "UPDATE waves SET repo='{0}'; UPDATE repository_plans SET repo='{0}';",
+        repo.path().display()
+    ))
+    .unwrap();
     conn.execute(
         "UPDATE tasks SET worktree=?1",
         [repo.path().to_str().unwrap()],

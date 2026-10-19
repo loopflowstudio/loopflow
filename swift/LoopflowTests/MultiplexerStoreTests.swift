@@ -62,36 +62,12 @@ struct MultiplexerStoreTests {
         #expect(decoded == store.layout)
     }
 
-    @Test("Shell location survives arrangement and Undo without replaying its launch")
-    func shellLocationSurvivesLayoutChanges() throws {
-        let store = MultiplexerStore()
-        let local = WorkspaceIdentity(machineId: "local", worktree: "/same/path")
-        let peer = WorkspaceIdentity(machineId: "peer", worktree: "/same/path")
-        let first = try #require(store.newShell(command: ["local-command"], location: local))
-        let second = try #require(store.split(first.id, axis: .vertical,
-            command: ["remote-command"], location: peer))
-        store.move(first.id, beside: second.id, axis: .horizontal)
-        store.setCollapsed(paneId: second.id, collapsed: true)
-        store.setZoom(first.id, enabled: true)
-        #expect(store.layout.pane(for: first.id) == first)
-        #expect(store.layout.pane(for: second.id) == second)
-        let decoded = try JSONDecoder().decode(LayoutNode.self, from: JSONEncoder().encode(store.layout))
-        #expect(decoded == store.layout)
-        store.close(second.id)
-        store.undoClose()
-        let restored = try #require(store.layout.pane(for: second.id))
-        #expect(restored.content.location == peer)
-        #expect(restored.incarnation != second.incarnation)
-        #expect(store.shellCommands[second.id] == nil)
-        #expect(store.layout.pane(for: first.id)?.content.location == local)
-    }
-
     @Test("Visibility follows retained occurrences, collapse and zoom, not focus")
     func exactPaneVisibility() throws {
         let store = MultiplexerStore()
         store.load(sessionId: "retained")
         let retained = store.focusedPane
-        let other = try #require(store.split(retained.id, axis: .vertical))
+        let other = try #require(store.newShell())
         #expect(store.isVisible(retained))
         #expect(store.isVisible(other))
         store.setZoom(other.id, enabled: true)
@@ -108,77 +84,6 @@ struct MultiplexerStoreTests {
         #expect(!store.isVisible(retained))
         #expect(store.isVisible(try #require(store.layout.pane(for: retained.id))))
         #expect(store.isVisible(other))
-    }
-
-    @Test("Observed shell panes carry their launch command")
-    func shellLaunchIsPublishedTogether() async throws {
-        let store = MultiplexerStore()
-        await confirmation("layout changes are observable") { changed in
-            withObservationTracking {
-                _ = store.layout
-            } onChange: { changed() }
-            store.newShell(command: ["fixture"])
-        }
-        store.newShell(command: ["fixture"])
-        #expect(store.layout.allPanes.count == 2)
-        for pane in store.layout.allPanes {
-            #expect(pane.content == .shell(location: nil))
-            #expect(store.shellCommands[pane.id] == ["fixture"])
-        }
-    }
-
-    @Test("Companion insertion clears Undo and preserves the requested focus", arguments: [false, true], [
-        PaneContent.shell(location: nil), .files(taskId: "task"), .flowLog(taskId: "task"),
-    ])
-    func emptyCompanionPublishesCompleteState(focus: Bool, content: PaneContent) throws {
-        let store = MultiplexerStore()
-        let empty = store.focusedPane
-        store.split(empty.id, axis: .vertical)
-        store.load(sessionId: "selected")
-        let selected = store.focusedPane
-        let temporary = try #require(store.split(selected.id, axis: .horizontal))
-        store.close(temporary.id)
-        store.setFocusedPane(selected.id)
-        store.setZoom(selected.id, enabled: true)
-        store.setCollapsed(paneId: empty.id, collapsed: true)
-        #expect(store.canUndoClose)
-
-        if content == .shell(location: nil) { store.newShell(command: ["fixture"], beside: empty.id, focus: focus) }
-        else { store.show(content, beside: empty.id, focus: focus) }
-        #expect(!store.canUndoClose)
-        #expect(store.layout.pane(for: empty.id)?.content == content)
-        #expect(store.layout.pane(for: empty.id)?.incarnation != empty.incarnation)
-        #expect(!store.collapsedPaneIds.contains(empty.id))
-        #expect(store.focusedPaneId == (focus ? empty.id : selected.id))
-        #expect(store.zoomedPaneId == (focus ? empty.id : selected.id))
-        if content == .shell(location: nil) { #expect(store.shellCommands[empty.id] == ["fixture"]) }
-        let published = store.layout
-        store.undoClose()
-        #expect(store.layout == published)
-        #expect(store.layout.pane(for: selected.id) == selected)
-    }
-
-    @Test("Targeted companions fill empty panes and preserve unrelated focus")
-    func targetedCompanions() {
-        let store = MultiplexerStore()
-        let empty = store.focusedPane
-        store.split(empty.id, axis: .horizontal)
-        store.load(sessionId: "selected")
-        let selected = store.focusedPane
-        store.setZoom(selected.id, enabled: true)
-        store.newShell(command: ["fixture"], beside: empty.id, focus: false)
-        let shell = store.layout.pane(for: empty.id)
-        #expect(shell?.content == .shell(location: nil))
-        #expect(shell?.incarnation != empty.incarnation)
-        #expect(store.shellCommands[empty.id] == ["fixture"])
-        store.show(.files(taskId: "task"), beside: empty.id, focus: false)
-        store.show(.flowLog(taskId: "task"), beside: empty.id, focus: false)
-        store.show(.files(taskId: "task"), beside: empty.id, focus: false)
-        #expect(store.layout.allPanes.count == 5)
-        #expect(store.layout.pane(for: empty.id) == shell)
-        #expect(store.layout.pane(for: selected.id) == selected)
-        #expect(store.focusedPane == selected)
-        #expect(store.zoomedPaneId == selected.id)
     }
 
     @Test("Reopening a hidden companion reveals its retained occurrence", arguments: [
@@ -263,8 +168,8 @@ struct MultiplexerStoreTests {
         store.newShell(command: ["server"])
         let shell = store.focusedPaneId
         store.load(sessionId: "design")
-        #expect(store.layout.pane(for: shell)?.content == .shell(location: nil))
-        #expect(store.shellCommands[shell] == ["server"])
+        #expect(store.layout.pane(for: shell)?.content.selectedShell != nil)
+        #expect(store.layout.pane(for: shell)?.content.selectedShell?.command == ["server"])
         store.setCollapsed(paneId: shell, collapsed: true)
         store.setCollapsed(paneId: store.focusedPaneId, collapsed: true)
         store.load(sessionId: "design")
@@ -302,14 +207,14 @@ struct MultiplexerStoreTests {
         store.setCollapsed(paneId: shell, collapsed: true)
         #expect(store.layout == original)
         #expect(store.visibleLayout?.allPanes.map(\.id) == [ask])
-        #expect(store.shellCommands[shell] == ["server"])
+        #expect(store.layout.pane(for: shell)?.content.selectedShell?.command == ["server"])
         store.setCollapsed(paneId: ask, collapsed: true)
         #expect(store.visibleLayout == nil)
         store.reveal(sessionId: "ask")
         #expect(store.focusedPaneId == ask)
         store.setCollapsed(paneId: shell, collapsed: false)
         #expect(store.visibleLayout == original)
-        #expect(store.shellCommands[shell] == ["server"])
+        #expect(store.layout.pane(for: shell)?.content.selectedShell?.command == ["server"])
     }
 
     @Test("starts with one focused empty pane")
@@ -319,23 +224,12 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPane.content == .empty)
     }
 
-    @Test("split adds and focuses a distinct pane")
-    func splitAddsAndFocuses() throws {
-        let store = MultiplexerStore()
-        let first = store.focusedPaneId
-        let pane = try #require(store.split(first, axis: .vertical))
-        #expect(store.layout.allPanes.count == 2)
-        #expect(store.focusedPaneId == pane.id)
-        #expect(pane.content == .shell(location: nil))
-        #expect(store.shellCommands[pane.id] == [])
-    }
-
     @Test("loading an open session jumps to its pane without duplicating it")
     func loadJumpsToOpenSession() throws {
         let store = MultiplexerStore()
         let first = store.focusedPaneId
         store.load(sessionId: "session-1")
-        let second = try #require(store.split(first, axis: .vertical))
+        let second = try #require(store.newShell())
 
         store.load(sessionId: "session-1")
 
@@ -362,27 +256,15 @@ struct MultiplexerStoreTests {
     func explicitSplitKeepsBothSessions() throws {
         let store = MultiplexerStore()
         store.load(sessionId: "session-1")
-        _ = try #require(store.split(store.focusedPaneId, axis: .vertical))
+        let shell = try #require(store.newShell())
 
         store.load(sessionId: "ask-2")
 
         #expect(store.layout.allPanes.map(\.content) == [
             .session(id: "session-1"),
-            .shell(location: nil),
+            shell.content,
             .session(id: "ask-2"),
         ])
-    }
-
-    @Test("new shell uses the empty pane then splits an occupied pane")
-    func newShellUsesAvailableSpace() {
-        let store = MultiplexerStore()
-        store.newShell()
-        #expect(store.focusedPane.content == .shell(location: nil))
-        #expect(store.layout.allPanes.count == 1)
-
-        store.newShell()
-        #expect(store.focusedPane.content == .shell(location: nil))
-        #expect(store.layout.allPanes.count == 2)
     }
 
     @Test("Shell, Files and process companions alternate splits and preserve the conversation")
@@ -407,7 +289,8 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPaneId == log.id)
         store.close(log.id)
         let next = try #require(store.newShell(location: location))
-        #expect(store.layout.allPanes.count == 4)
+        #expect(store.layout.allPanes.count == 3)
+        #expect(next.id == shell.id)
         #expect(store.focusedPaneId == next.id)
         #expect(store.layout.pane(for: main.id) == main)
     }
@@ -424,7 +307,7 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPane.sessionId == "fresh")
         #expect(store.focusedPane.incarnation != main.incarnation)
         #expect(store.layout.pane(for: shell.id) == shell)
-        #expect(store.shellCommands[shell.id] == ["retained-command"])
+        #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["retained-command"])
         guard case .split(_, _, _, let ratio) = store.layout else { Issue.record("Lost split"); return }
         #expect(ratio == 0.63)
     }
@@ -433,11 +316,12 @@ struct MultiplexerStoreTests {
     func loadingSessionPreservesShell() {
         let store = MultiplexerStore()
         store.newShell()
+        let shell = store.focusedPane
 
         store.load(sessionId: "session-1")
 
         #expect(store.layout.allPanes.map(\.content) == [
-            .shell(location: nil),
+            shell.content,
             .session(id: "session-1"),
         ])
     }
@@ -445,8 +329,9 @@ struct MultiplexerStoreTests {
     @Test("close collapses the split and undo restores it")
     func closeUndo() throws {
         let store = MultiplexerStore()
+        store.load(sessionId: "retained")
         let first = store.focusedPane
-        let second = try #require(store.split(first.id, axis: .vertical))
+        let second = try #require(store.newShell())
 
         store.close(second.id)
         #expect(store.layout.allPanes == [first])
@@ -466,7 +351,7 @@ struct MultiplexerStoreTests {
     func closeLeftPane() throws {
         let store = MultiplexerStore()
         let first = store.focusedPaneId
-        let second = try #require(store.split(first, axis: .vertical))
+        let second = try #require(store.newShell())
 
         store.close(first)
 
@@ -502,8 +387,9 @@ struct MultiplexerStoreTests {
     @Test("zoom keeps the tree intact and toggles off")
     func zoomToggle() throws {
         let store = MultiplexerStore()
+        store.load(sessionId: "retained")
         let first = store.focusedPaneId
-        _ = try #require(store.split(first, axis: .vertical))
+        _ = try #require(store.newShell())
 
         store.toggleZoom(first)
         #expect(store.zoomedPaneId == first)
@@ -542,7 +428,7 @@ struct MultiplexerStoreTests {
         store.show(.files(taskId: "task"))
         let files = store.focusedPane
         store.updateRatio(between: shell.id, and: files.id, ratio: 0.3)
-        let temporary = try #require(store.split(files.id, axis: .horizontal))
+        let temporary = try #require(store.show(.flowLog(taskId: "task")))
         store.close(temporary.id)
         store.setCollapsed(paneId: first.id, collapsed: true)
         store.setFocusedPane(files.id)
@@ -556,7 +442,7 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPane == files)
         #expect(store.collapsedPaneIds.isEmpty)
         #expect(store.zoomedPaneId == nil)
-        #expect(store.shellCommands[shell.id] == ["retained-command"])
+        #expect(store.layout.pane(for: shell.id)?.content.selectedShell?.command == ["retained-command"])
         #expect(!store.canUndoClose)
         store.undoClose()
         store.removeSessions(["first", "second"])
@@ -576,7 +462,7 @@ struct MultiplexerStoreTests {
         #expect(store.canUndoClose == retained)
         store.undoClose()
         #expect((store.pane(forSessionId: "session-1") != nil) == retained)
-        #expect(store.layout.pane(for: shellPane)?.content == .shell(location: nil))
+        #expect(store.layout.pane(for: shellPane)?.content.selectedShell != nil)
         if !retained {
             #expect(store.layout.allPanes.map(\.id) == [shellPane])
             #expect(store.focusedPaneId == shellPane)

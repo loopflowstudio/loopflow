@@ -220,7 +220,7 @@ impl ContextDelivery {
     }
 
     pub fn hook_settings(&self) -> anyhow::Result<serde_json::Value> {
-        let executable = crate::os_process::resolve_lf_binary();
+        let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
         let command = format!(
             "env LF_HOME={} {} __context-block --moment",

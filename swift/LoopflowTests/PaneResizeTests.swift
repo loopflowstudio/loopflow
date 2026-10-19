@@ -7,14 +7,12 @@ import Testing
 @Suite("Pane resizing")
 @MainActor
 struct PaneResizeTests {
-    @Test("New shells use the golden split and retain the existing pane", arguments: [false, true])
-    func newShellStartsAtGoldenRatio(explicitSplit: Bool) throws {
+    @Test("New shells use the golden split and retain the existing pane")
+    func newShellStartsAtGoldenRatio() throws {
         let store = MultiplexerStore()
         store.load(sessionId: "conversation")
         let original = store.focusedPane
-        let added = try #require(explicitSplit
-            ? store.split(original.id, axis: .horizontal)
-            : store.newShell())
+        let added = try #require(store.newShell())
         guard case .split(_, let first, let second, let ratio) = store.layout else {
             Issue.record("Expected a shell split"); return
         }

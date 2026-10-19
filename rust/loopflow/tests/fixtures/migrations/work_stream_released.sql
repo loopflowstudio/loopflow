@@ -1,4 +1,5 @@
 -- Released 0.13.13 planning and an already captured Task Workflow.
+INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','{repo}',1);
 INSERT INTO waves(id,name,repo,created_at) VALUES('{wave}','product','{repo}',1);
 INSERT INTO projects(id,wave_id,created_at,project_name,project_slug,workflow,description,updated_at)
 VALUES('{project}','{wave}',1,'Current','current','feature','',1);

@@ -55,7 +55,7 @@ struct ProjectActivationTests {
         #expect(model.projectCommandErrors["b"] == nil)
     }
 
-    @Test("both surfaces show pending activation alongside retained planning")
+    @Test("the portfolio shows pending activation alongside retained planning")
     func pendingPresentation() async throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: path))
@@ -71,29 +71,24 @@ struct ProjectActivationTests {
         let command = model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
         await response.started()
         // Finish the suspended transport before assertions can throw.
-        let primary = WorkSurfaceView(model: model)
-        let portfolio = WaveDetailPane(
+        var portfolio: WaveDetailPane { WaveDetailPane(
             wave: WaveViewModel(api: Wave(id: wave.id, name: wave.name, repo: wave.repo, status: .ready),
                 plan: WavePlan(objective: "Retained objective")),
             repoPath: wave.repo, streamed: nil,
             isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
-            transportError: nil, onActivateProject: {}, onClose: {}, onOpenTask: { _ in })
-        let primaryPending = try? primary.inspect().find(text: "Preparing Project…").string()
-        let retainedKRs = try? primary.inspect().find(text: "Current KRs").string()
+            transportError: model.projectCommandErrors[wave.id], onActivateProject: {}, onClose: {}, onOpenTask: { _ in }) }
         let portfolioPending = try? portfolio.inspect().find(text: "Preparing Project…").string()
         let retainedObjective = try? portfolio.inspect().find(text: "Retained objective").string()
         await response.finish()
         await command?.value
-        #expect(primaryPending == "Preparing Project…")
         #expect(portfolioPending == "Preparing Project…")
-        #expect(retainedKRs == "Current KRs")
         #expect(retainedObjective == "Retained objective")
-        #expect(try primary.inspect().find(text: "offline").string() == "offline")
+        #expect(try portfolio.inspect().find(text: "offline").string() == "offline")
 
         let retry = model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
         await response.started()
-        let retryPending = try? primary.inspect().find(text: "Preparing Project…").string()
-        let staleError = try? primary.inspect().find(text: "offline").string()
+        let retryPending = try? portfolio.inspect().find(text: "Preparing Project…").string()
+        let staleError = try? portfolio.inspect().find(text: "offline").string()
         await response.finish()
         await retry?.value
         #expect(retryPending == "Preparing Project…")
@@ -108,30 +103,6 @@ struct ProjectActivationTests {
         #expect(try view.inspect().find(text: "Project activation has no recorded outcome yet.").string()
             == "Project activation has no recorded outcome yet.")
         #expect((try? view.inspect().find(text: "Preparing Project…")) == nil)
-    }
-
-    @Test("a Project without a workflow offers the menu and reports nothing invalid")
-    func absentFlow() throws {
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
-        var data = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
-        var waves = try #require(data["waves"] as? [[String: Any]])
-        var projects = try #require(waves[0]["projects"] as? [String: Any])
-        var items = try #require(projects["items"] as? [[String: Any]])
-        for index in items.indices { items[index]["workflow"] = "" }
-        projects["items"] = items; waves[0]["projects"] = projects; data["waves"] = waves
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: data))
-        let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
-        model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
-            workActivity: .loading, repos: [])
-        model.select(.wave(id: roadmap.waves[0].wave.id))
-        let view = try WorkSurfaceView(model: model).inspect()
-        #expect(view.findAll(ViewType.Text.self) {
-            let text = (try? $0.string()) ?? ""
-            return text.hasPrefix("Flow ·") || text == "Flow template unavailable"
-        }.isEmpty)
-        _ = try view.find(viewWithAccessibilityIdentifier: "wave-workflow-menu")
-        #expect(throws: (any Error).self) { try view.find(viewWithAccessibilityIdentifier: "wave-workflow-invalid") }
-        #expect(try view.find(text: "Current KRs").string() == "Current KRs")
     }
 
     @Test("rotation report retains destinations and unresolved Task reasons")

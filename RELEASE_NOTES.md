@@ -1,26 +1,37 @@
-# v0.14.5
+# v0.14.7
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.5 repairs two interruptions to ongoing work: repositories stranded by the 0.14.4 upgrade and OpenCode diagnostics covering unfinished terminal input. Existing Task checkouts can restore their retained repository identity through ordinary reads, while OpenCode errors remain available in a private log without obscuring the composer.
+v0.14.7 makes it easier to return to ongoing work while expanding the choice of coding harness. Desktop keeps working Tasks in a stable sidebar and retains their Shell and Files tabs as you switch Tasks or hide tools. Pi joins the supported harnesses for native Sessions and headless skills and Flows, with saved conversation history and portable generated skill names.
 
-## Keep existing Tasks usable after upgrading
+## Switch Tasks without losing your place
 
-The repository relocation support in 0.14.4 could leave older repositories without the Git locator needed to recognize their retained identity. Ordinary reads now enroll that identity when a retained local Task checkout still matches the Git common directory and branch, avoiding manual binding when that evidence is available. (#1583)
+Desktop now keeps explicitly opened Tasks in a working list above Waves, replacing activity-driven regrouping with predictable return paths. Shell and Files collect each Task's tools into retained tabs so switching work preserves the workspace during the app session. (#1594)
 
-- Keep existing repository identity and Task work connected, including through symlink aliases and concurrent reads.
-- Relocate populated planning destinations and their routes in one transaction without premature foreign-key failures.
-- Preserve explicit recovery when evidence is missing or ambiguous; repository names and remote URLs do not establish identity.
+- Working Tasks keep their order through activity changes, filtering and completion. Pausing hides a Task while retaining its position and workspace; saved working order survives relaunch.
+- Use ⌘1–9 and Control-Tab to navigate working slots. Breadcrumbs, tools and actions share the native titlebar.
+- Keep multiple terminals in one Shell tool. Files retains document, Brief, Changes and PR tabs; hiding either tool preserves clients and drafts.
+- Browse repositories and Waves without starting work. Waves show their full current Task plan, and unstarted Tasks open their brief.
+- Codex excerpts follow the current Session and native turn. New turns clear old text, working excerpts expire after 30 seconds, and Available results retain their source age. Other providers show labeled summaries.
+- Provider switching reads saved history before releasing the current terminal. If the transcript is missing, the conversation stays intact for retry.
 
-## Keep typing through OpenCode retries
+## Use Pi for conversations and automation
 
-Raw OpenCode errors could overwrite the terminal composer during errors and retries. Launch and resume now capture stderr separately, leaving OpenCode in control of its native error display and keeping unfinished input readable. (#1582)
+Pi users can run native Sessions and headless skills and Flows through Loopflow, then resume the same saved conversation. Pi owns model selection and credentials; Loopflow retains text, tools and reported usage in its existing history. (#1591)
 
-- Find full diagnostics in the announced `opencode.stderr.log`, opened with owner-only permissions. Capture preserves arbitrary bytes and subprocess diagnostics.
-- Resume with the supplied native Session identity intact.
-- Keep the provider running if a log write fails: capture continues draining stderr and reports the failure after the provider exits.
+- Choose `pi` or `pi:provider/model` through the normal agent selector.
+- Context refreshes after compaction, live steering receives independent receipts, and native usage checkpoints survive crashes.
+- Headless execution waits through Pi's internal retries and rejects blank final answers.
+- Built-in bash commands use Pi's executor with Loopflow's watchdog established before execution, allowing cleanup of detached tool groups if the provider dies. Custom tools retain their own lifecycle ownership.
 
 ## Operational notes
 
-- The OpenCode change fixes diagnostic overlays, not model-access denial. An installed OpenCode 1.19.3 probe with synthetic local responses reproduced three overlays on lf 0.14.4 and none on the candidate, with all three errors retained in the log. Paid-account access, OpenCode 1.18.33 and approval UI were not verified in that PR. (#1582)
-- A new CI installation proof starts with checksum-verified lf 0.14.3 and a real Task checkout and Session. The recorded run verified identity, historical Process paths, unpublished edits, CLI and Desktop destination reads, a later directory move and promotion retry. Configured macOS installation and real native-provider acceptance remained outstanding at implementation delivery. (#1583)
+- **Desktop command change:** `lf desktop shell` adds a Shell tab. `lf desktop split` is removed. (#1594)
+- **Desktop upgrade and persistence:** use the matching published CLI to apply the Session-preview migration. Working order persists across launches; pane layouts and embedded clients do not. (#1594)
+- **Pi baseline and limits:** Pi 1.3.0 is the tested baseline. Pi supplies no OS sandbox; callers own confinement. Managed account switching, subscription estimates, response schemas, turn limits and cross-harness history import are unsupported. Native session switching remains outside Loopflow's recorded conversation identity. (#1591)
+- **Acceptance status:** real-Pi probes covered terminal and protocol behavior, steering, compaction, errors, crash recovery and viewer handoff. The supplied record does not establish a clean final combined-tree matrix: the broad local Rust run stopped with failures and unrun tests, leaving resolution to candidate and merge-queue CI. Desktop's mounted input continuity and final visual acceptance remain unverified; verify that Task switching and hiding/restoring tools preserve live input, drafts, selection and focus on a configured Mac. (#1591, #1594)
+
+## Small changes
+
+- Generated skill names use a shared lowercase-letter, digit and hyphen format capped at 64 characters. Long names shorten with stable suffixes, and collisions retain both sources while preserving canonical Loopflow identities, resource paths and third-party bundles. The tested shared Pi catalog loaded 101 skills with zero diagnostics; all 27 third-party skill files remained byte-identical. (#1591)
+- Failed Desktop status observers restart on a later event. (#1594)

@@ -1,4 +1,4 @@
--- depends_on: session_transport
+-- depends_on: none
 -- A Trace owns one journal directory. Case aliases may have distinct directories
 -- even when no Process primary keys collide. Never choose one and lose the other.
 CREATE TEMP TABLE canonical_identity_conflicts (domain TEXT, first TEXT, second TEXT);
@@ -452,6 +452,8 @@ INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'home_',id FROM m
 INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'pr_',task_pr_id FROM task_pr_repair_incidents WHERE task_pr_id IS NOT NULL AND 'pr_' IS NOT NULL;
 
 INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'repo_',id FROM repository_plans WHERE id IS NOT NULL AND 'repo_' IS NOT NULL;
+INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'repo_',repository_id FROM tasks WHERE repository_id IS NOT NULL AND 'repo_' IS NOT NULL;
+INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'repo_',repository_id FROM task_creation_intents WHERE repository_id IS NOT NULL AND 'repo_' IS NOT NULL;
 
 INSERT OR IGNORE INTO canonical_values(domain,original) SELECT 'response_',id FROM tool_responses WHERE id IS NOT NULL AND 'response_' IS NOT NULL;
 
@@ -705,7 +707,8 @@ UPDATE canonical_tasks SET external_issue_id=coalesce((SELECT canonical FROM can
     checkout_machine_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='home_' AND original=canonical_tasks.checkout_machine_id),checkout_machine_id),
     parent_pr_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='pr_' AND original=canonical_tasks.parent_pr_id),parent_pr_id),
     primary_session_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='session' AND original=canonical_tasks.primary_session_id),primary_session_id),
-    issue_identifier=coalesce((SELECT canonical FROM canonical_values WHERE domain='label' AND original=canonical_tasks.issue_identifier),issue_identifier);
+    issue_identifier=coalesce((SELECT canonical FROM canonical_values WHERE domain='label' AND original=canonical_tasks.issue_identifier),issue_identifier),
+    repository_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='repo_' AND original=canonical_tasks.repository_id),repository_id);
 
 UPDATE canonical_task_prs SET linear_attachment_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='uuid' AND original=canonical_task_prs.linear_attachment_id),linear_attachment_id),
     linear_comment_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='uuid' AND original=canonical_task_prs.linear_comment_id),linear_comment_id),
@@ -824,7 +827,8 @@ UPDATE canonical_pr_landings SET task_id=coalesce((SELECT canonical FROM canonic
 UPDATE canonical_task_linear_observations SET task_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='task_' AND original=canonical_task_linear_observations.task_id),task_id);
 
 UPDATE canonical_task_creation_intents SET task_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='task_' AND original=canonical_task_creation_intents.task_id),task_id),
-    project_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='proj_' AND original=canonical_task_creation_intents.project_id),project_id);
+    project_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='proj_' AND original=canonical_task_creation_intents.project_id),project_id),
+    repository_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='repo_' AND original=canonical_task_creation_intents.repository_id),repository_id);
 
 UPDATE canonical_task_admissions SET task_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='task_' AND original=canonical_task_admissions.task_id),task_id),
     machine_id=coalesce((SELECT canonical FROM canonical_values WHERE domain='home_' AND original=canonical_task_admissions.machine_id),machine_id);
@@ -1331,11 +1335,7 @@ DROP TRIGGER flow_process_steps_are_append_only;
 
 DROP TRIGGER pr_landings_no_machine_update;
 
-DROP TRIGGER validate_project_conversation_parents;
-
 DROP TRIGGER selected_project_owner_update;
-
-DROP TRIGGER validate_task_conversation_parents;
 
 DROP TRIGGER validate_task_started_update;
 
@@ -1350,6 +1350,16 @@ DROP TRIGGER task_admissions_immutable;
 DROP TRIGGER task_pr_history_no_mark;
 
 DROP TRIGGER task_placement_to_pr;
+
+DROP TRIGGER task_repository_is_fixed;
+
+DROP TRIGGER validate_task_repository_update;
+
+DROP TRIGGER validate_project_task_repositories;
+
+DROP TRIGGER task_session_membership;
+
+DROP TRIGGER project_task_session_membership;
 
 UPDATE agent_sessions SET wave_id=proposed.wave_id,agent_process_id=proposed.agent_process_id,transport_lf_process_id=proposed.transport_lf_process_id,task_id=proposed.task_id,id=proposed.id FROM canonical_agent_sessions proposed WHERE agent_sessions.rowid=proposed.source_rowid AND (agent_sessions.wave_id IS NOT proposed.wave_id OR agent_sessions.agent_process_id IS NOT proposed.agent_process_id OR agent_sessions.transport_lf_process_id IS NOT proposed.transport_lf_process_id OR agent_sessions.task_id IS NOT proposed.task_id OR agent_sessions.id IS NOT proposed.id);
 
@@ -1429,7 +1439,7 @@ UPDATE task_comment_deliveries SET comment_id=proposed.comment_id,comment_json=p
 
 UPDATE task_comments SET id=proposed.id,task_id=proposed.task_id FROM canonical_task_comments proposed WHERE task_comments.rowid=proposed.source_rowid AND (task_comments.id IS NOT proposed.id OR task_comments.task_id IS NOT proposed.task_id);
 
-UPDATE task_creation_intents SET task_id=proposed.task_id,project_id=proposed.project_id,export_json=proposed.export_json FROM canonical_task_creation_intents proposed WHERE task_creation_intents.rowid=proposed.source_rowid AND (task_creation_intents.task_id IS NOT proposed.task_id OR task_creation_intents.project_id IS NOT proposed.project_id OR task_creation_intents.export_json IS NOT proposed.export_json);
+UPDATE task_creation_intents SET task_id=proposed.task_id,project_id=proposed.project_id,repository_id=proposed.repository_id,export_json=proposed.export_json FROM canonical_task_creation_intents proposed WHERE task_creation_intents.rowid=proposed.source_rowid AND (task_creation_intents.repository_id IS NOT proposed.repository_id OR task_creation_intents.task_id IS NOT proposed.task_id OR task_creation_intents.project_id IS NOT proposed.project_id OR task_creation_intents.export_json IS NOT proposed.export_json);
 
 UPDATE task_deletions SET wave_id=proposed.wave_id,issue_id=proposed.issue_id,identifier=proposed.identifier FROM canonical_task_deletions proposed WHERE task_deletions.rowid=proposed.source_rowid AND (task_deletions.wave_id IS NOT proposed.wave_id OR task_deletions.issue_id IS NOT proposed.issue_id OR task_deletions.identifier IS NOT proposed.identifier);
 
@@ -1451,7 +1461,7 @@ UPDATE task_workflow_moves SET lf_process_id=proposed.lf_process_id,task_id=prop
 
 UPDATE task_workflows SET lf_process_id=proposed.lf_process_id,task_id=proposed.task_id FROM canonical_task_workflows proposed WHERE task_workflows.rowid=proposed.source_rowid AND (task_workflows.lf_process_id IS NOT proposed.lf_process_id OR task_workflows.task_id IS NOT proposed.task_id);
 
-UPDATE tasks SET external_issue_id=proposed.external_issue_id,planning_assignee=proposed.planning_assignee,planning_team_id=proposed.planning_team_id,id=proposed.id,project_id=proposed.project_id,checkout_machine_id=proposed.checkout_machine_id,parent_pr_id=proposed.parent_pr_id,primary_session_id=proposed.primary_session_id,issue_identifier=proposed.issue_identifier,admission_authority=proposed.admission_authority FROM canonical_tasks proposed WHERE tasks.rowid=proposed.source_rowid AND (tasks.external_issue_id IS NOT proposed.external_issue_id OR tasks.planning_assignee IS NOT proposed.planning_assignee OR tasks.planning_team_id IS NOT proposed.planning_team_id OR tasks.id IS NOT proposed.id OR tasks.project_id IS NOT proposed.project_id OR tasks.checkout_machine_id IS NOT proposed.checkout_machine_id OR tasks.parent_pr_id IS NOT proposed.parent_pr_id OR tasks.primary_session_id IS NOT proposed.primary_session_id OR tasks.issue_identifier IS NOT proposed.issue_identifier OR tasks.admission_authority IS NOT proposed.admission_authority);
+UPDATE tasks SET external_issue_id=proposed.external_issue_id,planning_assignee=proposed.planning_assignee,planning_team_id=proposed.planning_team_id,id=proposed.id,project_id=proposed.project_id,checkout_machine_id=proposed.checkout_machine_id,parent_pr_id=proposed.parent_pr_id,primary_session_id=proposed.primary_session_id,issue_identifier=proposed.issue_identifier,admission_authority=proposed.admission_authority,repository_id=proposed.repository_id FROM canonical_tasks proposed WHERE tasks.rowid=proposed.source_rowid AND (tasks.repository_id IS NOT proposed.repository_id OR tasks.external_issue_id IS NOT proposed.external_issue_id OR tasks.planning_assignee IS NOT proposed.planning_assignee OR tasks.planning_team_id IS NOT proposed.planning_team_id OR tasks.id IS NOT proposed.id OR tasks.project_id IS NOT proposed.project_id OR tasks.checkout_machine_id IS NOT proposed.checkout_machine_id OR tasks.parent_pr_id IS NOT proposed.parent_pr_id OR tasks.primary_session_id IS NOT proposed.primary_session_id OR tasks.issue_identifier IS NOT proposed.issue_identifier OR tasks.admission_authority IS NOT proposed.admission_authority);
 
 UPDATE tool_responses SET id=proposed.id,work_id=proposed.work_id FROM canonical_tool_responses proposed WHERE tool_responses.rowid=proposed.source_rowid AND (tool_responses.id IS NOT proposed.id OR tool_responses.work_id IS NOT proposed.work_id);
 
@@ -1485,16 +1495,15 @@ WHEN NEW.current_project_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM projects WHERE id=NEW.current_project_id AND wave_id=NEW.id
 ) BEGIN SELECT RAISE(ABORT, 'selected Project belongs to another Wave'); END;
 
-CREATE TRIGGER validate_conversation_ancestry_update
-BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
+CREATE TRIGGER validate_conversation_ancestry_update BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
     SELECT CASE WHEN NEW.task_id IS NOT NULL AND NOT EXISTS(
-        SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
-        WHERE t.id=NEW.task_id AND p.wave_id=NEW.wave_id
-    ) THEN RAISE(ABORT,'AgentSession Task and Wave disagree') END;
+        SELECT 1 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+        WHERE t.id=NEW.task_id AND p.wave_id IS NEW.wave_id
+    ) THEN RAISE(ABORT,'Session Task and Wave disagree') END;
     SELECT CASE WHEN OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id
-        THEN RAISE(ABORT,'AgentSession binding is permanent') END;
-    SELECT CASE WHEN OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
-        THEN RAISE(ABORT,'AgentSession Wave is permanent') END;
+        THEN RAISE(ABORT,'Session Task binding is permanent') END;
+    SELECT CASE WHEN OLD.task_id IS NULL AND OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
+        THEN RAISE(ABORT,'Wave Session binding is permanent') END;
 END;
 
 CREATE TRIGGER task_workflow_graph_is_fixed BEFORE UPDATE OF graph ON task_workflows BEGIN
@@ -1519,19 +1528,9 @@ BEGIN
     SELECT RAISE(ABORT, 'Remote machine landing supervision is retired');
 END;
 
-CREATE TRIGGER validate_project_conversation_parents BEFORE UPDATE OF wave_id ON projects
-WHEN EXISTS(SELECT 1 FROM agent_sessions s JOIN tasks t ON t.id=s.task_id
-    WHERE t.project_id=NEW.id AND s.wave_id IS NOT NEW.wave_id)
-BEGIN SELECT RAISE(ABORT,'Project would change AgentSession ancestry'); END;
-
 CREATE TRIGGER selected_project_owner_update BEFORE UPDATE OF wave_id ON projects
 WHEN EXISTS(SELECT 1 FROM waves WHERE current_project_id=NEW.id AND id!=NEW.wave_id)
 BEGIN SELECT RAISE(ABORT, 'selected Project cannot change Wave ownership'); END;
-
-CREATE TRIGGER validate_task_conversation_parents BEFORE UPDATE OF project_id ON tasks
-WHEN EXISTS(SELECT 1 FROM agent_sessions s JOIN projects p ON p.id=NEW.project_id
-    WHERE s.task_id=NEW.id AND s.wave_id IS NOT p.wave_id)
-BEGIN SELECT RAISE(ABORT,'Task would change AgentSession ancestry'); END;
 
 CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks BEGIN
     SELECT CASE WHEN OLD.started_at IS NOT NULL AND NEW.started_at IS NOT OLD.started_at
@@ -1576,6 +1575,30 @@ BEGIN
  UPDATE task_prs SET branch=NEW.branch, base_commit=NEW.base_commit,
  parent_pr_id=NEW.parent_pr_id WHERE task_id=NEW.id AND historical=0
  AND merge_commit IS NULL AND abandoned_at IS NULL;
+END;
+
+CREATE TRIGGER task_repository_is_fixed BEFORE UPDATE OF repository_id ON tasks
+WHEN NEW.repository_id IS NOT OLD.repository_id
+BEGIN SELECT RAISE(ABORT, 'Task repository identity cannot change'); END;
+
+CREATE TRIGGER validate_task_repository_update BEFORE UPDATE OF project_id,repository_id ON tasks
+WHEN NEW.project_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id
+    JOIN repository_plans r ON r.repo=w.repo WHERE p.id=NEW.project_id AND r.id=NEW.repository_id
+)
+BEGIN SELECT RAISE(ABORT, 'Task Project must belong to its repository'); END;
+
+CREATE TRIGGER validate_project_task_repositories BEFORE UPDATE OF wave_id ON projects
+WHEN EXISTS (SELECT 1 FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
+    WHERE t.project_id=NEW.id AND NOT EXISTS(SELECT 1 FROM waves w WHERE w.id=NEW.wave_id AND w.repo=r.repo))
+BEGIN SELECT RAISE(ABORT, 'Project move would change Task repository'); END;
+
+CREATE TRIGGER task_session_membership AFTER UPDATE OF project_id ON tasks BEGIN
+    UPDATE agent_sessions SET wave_id=(SELECT wave_id FROM projects WHERE id=NEW.project_id) WHERE task_id=NEW.id;
+END;
+
+CREATE TRIGGER project_task_session_membership AFTER UPDATE OF wave_id ON projects BEGIN
+    UPDATE agent_sessions SET wave_id=NEW.wave_id WHERE task_id IN (SELECT id FROM tasks WHERE project_id=NEW.id);
 END;
 
 DROP TABLE canonical_agent_sessions;
@@ -4181,6 +4204,8 @@ CREATE TRIGGER canonical_task_creation_intents_insert BEFORE INSERT ON task_crea
 BEGIN
  SELECT RAISE(ABORT,'canonical identity required: task_creation_intents') FROM (
  WITH incoming AS (
+SELECT 'repo_' AS domain,NEW.repository_id AS original
+UNION ALL
 SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT 'proj_' AS domain,NEW.project_id AS original
@@ -4210,10 +4235,12 @@ SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WH
  ) WHERE original IS NOT canonical;
 END;
 
-CREATE TRIGGER canonical_task_creation_intents_update BEFORE UPDATE OF task_id,project_id,export_json ON task_creation_intents
+CREATE TRIGGER canonical_task_creation_intents_update BEFORE UPDATE OF task_id,project_id,export_json,repository_id ON task_creation_intents
 BEGIN
  SELECT RAISE(ABORT,'canonical identity required: task_creation_intents') FROM (
  WITH incoming AS (
+SELECT 'repo_' AS domain,NEW.repository_id AS original
+UNION ALL
 SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT 'proj_' AS domain,NEW.project_id AS original
@@ -4843,6 +4870,8 @@ CREATE TRIGGER canonical_tasks_insert BEFORE INSERT ON tasks
 BEGIN
  SELECT RAISE(ABORT,'canonical identity required: tasks') FROM (
  WITH incoming AS (
+SELECT 'repo_' AS domain,NEW.repository_id AS original
+UNION ALL
 SELECT 'uuid' AS domain,NEW.external_issue_id AS original
 UNION ALL
 SELECT 'uuid' AS domain,NEW.planning_assignee AS original
@@ -4886,10 +4915,12 @@ SELECT CASE WHEN path='$.machine_id' THEN 'home_' WHEN path='$.repository_id' TH
  ) WHERE original IS NOT canonical;
 END;
 
-CREATE TRIGGER canonical_tasks_update BEFORE UPDATE OF external_issue_id,planning_assignee,planning_team_id,id,project_id,checkout_machine_id,parent_pr_id,primary_session_id,issue_identifier,admission_authority ON tasks
+CREATE TRIGGER canonical_tasks_update BEFORE UPDATE OF external_issue_id,planning_assignee,planning_team_id,id,project_id,checkout_machine_id,parent_pr_id,primary_session_id,issue_identifier,admission_authority,repository_id ON tasks
 BEGIN
  SELECT RAISE(ABORT,'canonical identity required: tasks') FROM (
  WITH incoming AS (
+SELECT 'repo_' AS domain,NEW.repository_id AS original
+UNION ALL
 SELECT 'uuid' AS domain,NEW.external_issue_id AS original
 UNION ALL
 SELECT 'uuid' AS domain,NEW.planning_assignee AS original

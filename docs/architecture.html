@@ -1984,7 +1984,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 </tr>
 <tr>
 <td>Project</td>
-<td>A Wave's plan, KRs, targets and workflow</td>
+<td>A Wave's plan, KRs and targets</td>
 <td>Linear Project and its synchronized <code>projects</code> row</td>
 </tr>
 <tr>
@@ -2035,7 +2035,8 @@ exited; a deciding or routing step also answers through the Session turn its
 Process captured. Mechanical work creates no agent conversation. A Session reaches
 its Flow through the step Process that captured its input. A killed Flow process leaves
 its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
-<p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
+<p>Task requires repository identity and may belong to a Project; its Wave is derived
+from that Project. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
 or change Flow membership. Done and landed Tasks remain valid targets. Earlier

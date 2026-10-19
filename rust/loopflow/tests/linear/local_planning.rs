@@ -152,7 +152,15 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
         home.path(),
         &["wave", "ensure", "inbox", "--json"],
     );
-    let args = ["task", "create", "--title", "Concurrent work", "--json"];
+    let args = [
+        "task",
+        "create",
+        "--wave",
+        "inbox",
+        "--title",
+        "Concurrent work",
+        "--json",
+    ];
     let mut ids = std::collections::BTreeSet::new();
     let children: Vec<_> = (0..3)
         .map(|_| {
@@ -246,7 +254,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
                 .unwrap()
                 .clone(),
         );
-        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","workflow":"","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}));
+        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}));
     }
     let path = home.path().join("rotation.json");
     let args = [
@@ -376,7 +384,7 @@ fn public_local_plan_matches_desktop() {
     )
     .is_ok());
     let roadmap = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
-    let mut task = roadmap["waves"][0]["tasks"]["items"][0].clone();
+    let mut task = roadmap["tasks"]["items"][0].clone();
     assert_eq!(task["task"]["id"], id);
     assert!(task["reference"]["workspace"].is_null());
     assert!(task["run_control"]["unavailable"].is_null());
@@ -390,6 +398,8 @@ fn public_local_plan_matches_desktop() {
         .as_str()
         .unwrap()
         .to_string();
+    task["task"]["repository_id"] = serde_json::json!("repo_00000000000040008000000000000001");
+    task["task"]["repo"] = serde_json::json!("/repo");
     let proof = serde_json::json!({"task":task,"comments":comments});
     let canonical = serde_json::to_string(&proof)
         .unwrap()
@@ -422,12 +432,16 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
     lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "First", "--json"],
+        &[
+            "task", "create", "--wave", "inbox", "--title", "First", "--json",
+        ],
     );
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Second", "--json"],
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Second", "--json",
+        ],
     );
     let id = created["id"].as_str().unwrap();
     lf(
@@ -546,9 +560,14 @@ fn nested_waves_create_files_and_store_project_identity() {
     lf(
         repo.path(),
         home.path(),
+        &["wave", "ensure", "instruments/lexer", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
         &[
             "task",
-            "refile",
+            "move",
             created["id"].as_str().unwrap(),
             "--wave",
             "instruments/lexer",
@@ -615,9 +634,12 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow::work::task::NewTask {
+                repository_id: store
+                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
-                project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
+                project_id: Some(loopflow::durable::ProjectId::parse(&project).unwrap()),
                 title: title.into(),
                 description: String::new(),
             })
@@ -669,6 +691,8 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let args = [
         "task",
         "create",
+        "--wave",
+        "inbox",
         "--title",
         "Fix parser",
         "--notes",
@@ -687,6 +711,8 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &[
             "task",
             "create",
+            "--wave",
+            "inbox",
             "--title",
             "Fix parser",
             "--notes",
@@ -761,7 +787,11 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         .to_string()
         .contains("Keep private parser work local"));
     let plan_file = home.path().join("plan.json");
-    std::fs::write(&plan_file,r#"{"workflow":"","metric_targets":[],"krs":[{"text":"Quoted input survives","holds":false}]}"#).unwrap();
+    std::fs::write(
+        &plan_file,
+        r#"{"metric_targets":[],"krs":[{"text":"Quoted input survives","holds":false}]}"#,
+    )
+    .unwrap();
     lf(
         repo.path(),
         home.path(),
@@ -774,18 +804,10 @@ fn public_local_planning_survives_restart_with_generated_identity() {
             plan_file.to_str().unwrap(),
         ],
     );
-    let project_id = status["project"]["id"].as_str().unwrap();
     let project = lf(
         repo.path(),
         home.path(),
-        &[
-            "wave",
-            "workflow",
-            "show",
-            "--project",
-            project_id,
-            "--json",
-        ],
+        &["task", "status", identity.as_str(), "--json"],
     );
     assert_eq!(
         project["project"]["krs"][0]["text"],
@@ -806,6 +828,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "task",
+            "workflow",
             "move",
             identity.as_str(),
             "end",
@@ -901,7 +924,15 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Local execution", "--json"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Local execution",
+            "--json",
+        ],
     );
     let id = created["id"].as_str().unwrap();
     let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
@@ -913,9 +944,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "wave",
             "workflow",
             "set",
-            "--project",
-            project_id,
             "proof",
+            "inbox",
             "--file",
             definition.to_str().unwrap(),
         ],
@@ -943,14 +973,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let source = lf(
         repo.path(),
         home.path(),
-        &[
-            "wave",
-            "workflow",
-            "source",
-            "--project",
-            project_id,
-            "proof",
-        ],
+        &["wave", "workflow", "source", "proof", "inbox"],
     );
     assert_eq!(
         source.as_str().unwrap().trim(),
@@ -986,7 +1009,15 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let backlog = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Later work", "--json"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Later work",
+            "--json",
+        ],
     );
     let wave = lf(
         repo.path(),
@@ -995,7 +1026,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     let successor = uuid::Uuid::new_v4();
     let plan_file = home.path().join("rotation.json");
-    std::fs::write(&plan_file,serde_json::to_vec(&serde_json::json!({"name":"Next", "waves":[{"wave_id":wave["wave"]["id"],"successor_id":successor.to_string(),"create":true,"project_name":"Next","workflow":"proof","metric_targets":[],"krs":[{"text":"Retain active work","holds":false}]}]})).unwrap()).unwrap();
+    std::fs::write(&plan_file,serde_json::to_vec(&serde_json::json!({"name":"Next", "waves":[{"wave_id":wave["wave"]["id"],"successor_id":successor.to_string(),"create":true,"project_name":"Next","metric_targets":[],"krs":[{"text":"Retain active work","holds":false}]}]})).unwrap()).unwrap();
     let rotate = [
         "wave",
         "new-chapter",
@@ -1039,7 +1070,15 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let retry = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Local execution", "--json"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Local execution",
+            "--json",
+        ],
     );
     assert_ne!(retry["id"], id);
     lf(
@@ -1047,6 +1086,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         home.path(),
         &[
             "task",
+            "workflow",
             "move",
             id,
             "end",
@@ -1121,7 +1161,15 @@ fn project_creation_binding_and_activation_save_offline() {
         );
         for mapped in [false, true] {
             let provider = "11111111-1111-4111-8111-111111111111";
-            db.execute("UPDATE projects SET external_project_id=?2,status='backlog',krs=?3,workflow='feature' WHERE id=?1", rusqlite::params![id.as_str(),mapped.then_some(provider),r#"[{"text":"Preserve Tasks","holds":false}]"#]).unwrap();
+            db.execute(
+                "UPDATE projects SET external_project_id=?2,status='backlog',krs=?3 WHERE id=?1",
+                rusqlite::params![
+                    id.as_str(),
+                    mapped.then_some(provider),
+                    r#"[{"text":"Preserve Tasks","holds":false}]"#
+                ],
+            )
+            .unwrap();
             db.execute(
                 "UPDATE waves SET current_project_id=NULL WHERE id=?1",
                 [wave.id()],
@@ -1147,7 +1195,7 @@ fn project_creation_binding_and_activation_save_offline() {
             assert_eq!(active["status"], "started");
             assert_eq!(active["name"], "Authored name");
             assert_eq!(active["summary"], "Retain summary");
-            assert_eq!(active["workflow"], "feature");
+            assert!(active.get("workflow").is_none());
             assert_eq!(active["krs"][0]["text"], "Preserve Tasks");
             let changes = store.pending_project_changes(&id).unwrap();
             let state = changes
@@ -1168,7 +1216,7 @@ fn project_creation_binding_and_activation_save_offline() {
             if mapped {
                 let incoming = serde_json::from_value(serde_json::json!({
                     "id": provider, "slug": active["slug"], "name": "Authored name",
-                    "summary": "Retain summary", "workflow": "feature", "krs": active["krs"],
+                    "summary": "Retain summary", "krs": active["krs"],
                     "metric_targets": [], "status": "completed", "revision": "2026-10-08T11:00:00Z",
                     "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
                 }))
@@ -1287,8 +1335,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             .map(|name| {
                 serde_json::from_value(serde_json::json!({
                     "id": format!("linear-{name}"), "slug": name, "name": name,
-                    "summary": "", "revision": null, "status": "started", "workflow": "",
-                    "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
+                    "summary": "", "revision": null, "status": "started", "krs": [], "metric_targets": [], "initiative_ids": ["initiative"],
                     "team_ids": ["team"]
                 }))
                 .unwrap()
@@ -1456,7 +1503,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
             slug: "original".into(),
             name: "Original".into(),
             summary: "Original summary".into(),
-            workflow: "feature".into(),
             status: loopflow::work::project::ProjectStatus::Started,
             krs: vec![loopflow::work::project::ProjectKR {
                 text: "Retain the proof".into(),
@@ -1502,8 +1548,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         shadow.slug = project.id.clone();
         store.insert_project(&shadow).unwrap();
         // Both repositories use an ordinary Wave, with optional mapping and no credentials.
-        let source = home.path().join("workflow.yaml");
-        std::fs::write(&source, "nodes: {}\nedges: [{from: start, to: end}]\n").unwrap();
         lf(
             repo.path(),
             home.path(),
@@ -1520,31 +1564,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 &authored.description,
             ],
         );
-        let output = command(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "workflow",
-                "set",
-                "--project",
-                id.as_str(),
-                "review",
-                "--file",
-                source.to_str().unwrap(),
-            ],
-        )
-        .output()
-        .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
-            connected
-        );
         // An active writer cannot block inspection of the committed plan.
         let writer = std::fs::File::open(
             home.path()
@@ -1553,18 +1572,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         )
         .unwrap();
         fs2::FileExt::lock_exclusive(&writer).unwrap();
-        let saved = lf(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "workflow",
-                "show",
-                "--project",
-                id.as_str(),
-                "--json",
-            ],
-        );
+        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
         drop(writer);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
@@ -1578,7 +1586,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["description"], authored.description.trim());
         assert_eq!(saved["project"]["name"], "Saved");
         assert_eq!(saved["project"]["summary"], "");
-        assert_eq!(saved["project"]["workflow"], "review");
         assert_eq!(saved["project"]["krs"][0]["text"], "Retain the proof");
         assert_eq!(saved["sync"]["connected"], connected);
         assert_eq!(
@@ -1587,24 +1594,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
         );
         if mapped {
             assert_eq!(
-                lf(
-                    repo.path(),
-                    home.path(),
-                    &[
-                        "wave",
-                        "workflow",
-                        "show",
-                        "--project",
-                        &project.id,
-                        "--json"
-                    ]
-                ),
+                serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()}),
                 saved
             );
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         let changes = store.pending_project_changes(&id).unwrap();
-        assert_eq!(changes.len(), 4);
+        assert_eq!(changes.len(), 3);
         lf(
             repo.path(),
             home.path(),
@@ -1629,7 +1625,6 @@ fn project_edits_save_offline_in_both_connection_modes() {
         if mapped {
             let mut incoming = project.clone();
             incoming.name = "Remote name".into();
-            incoming.workflow = "research".into();
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
             loopflow::linear::acceptance::accept_linear_project_in(
@@ -1640,20 +1635,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 18,
             )
             .unwrap();
-            let read = lf(
-                repo.path(),
-                home.path(),
-                &[
-                    "wave",
-                    "workflow",
-                    "show",
-                    "--project",
-                    id.as_str(),
-                    "--json",
-                ],
-            );
+            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
             assert_eq!(read["project"]["name"], "Remote name");
-            assert_eq!(read["project"]["workflow"], "research");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
             assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -1671,14 +1654,12 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 .all(|change| change.value.field() != "project_name"
                     && change.value.field() != "workflow"));
             let conflicts = read["sync"]["changes"].as_array().unwrap();
-            for field in ["project_name", "workflow"] {
-                assert!(conflicts
-                    .iter()
-                    .any(|change| change["field"] == field && change["state"] == "adopted_linear"));
-            }
+            assert!(conflicts
+                .iter()
+                .any(|change| change["field"] == "project_name"
+                    && change["state"] == "adopted_linear"));
             // Later provider edits advance; superseded intentions never become pending again.
             incoming.name = "Saved".into();
-            incoming.workflow = "review".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
             loopflow::linear::acceptance::accept_linear_project_in(
                 &store,
@@ -1688,24 +1669,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 19,
             )
             .unwrap();
-            let read = lf(
-                repo.path(),
-                home.path(),
-                &[
-                    "wave",
-                    "workflow",
-                    "show",
-                    "--project",
-                    id.as_str(),
-                    "--json",
-                ],
-            );
+            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
             assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
         }
         let plan_file = home.path().join("plan.json");
         let content = serde_json::json!({
-            "workflow": "review", "metric_targets": [],
+            "metric_targets": [],
             "krs": [{"text": "Save the complete plan offline", "holds": false}]
         });
         std::fs::write(&plan_file, serde_json::to_vec(&content).unwrap()).unwrap();
@@ -1727,20 +1697,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
             connected
         );
-        let saved = lf(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "workflow",
-                "show",
-                "--project",
-                id.as_str(),
-                "--json",
-            ],
-        );
+        let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
         assert_eq!(saved["project"]["krs"], content["krs"]);
-        assert_eq!(saved["project"]["workflow"], content["workflow"]);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
             saved["project"]["linear_id"],
@@ -1755,21 +1713,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["summary"], "");
         assert_eq!(
             store.pending_project_changes(&id).unwrap().len(),
-            if mapped { 3 } else { 5 }
+            if mapped { 3 } else { 4 }
         );
         lf(repo.path(), home.path(), &args);
-        let repeated = lf(
-            repo.path(),
-            home.path(),
-            &[
-                "wave",
-                "workflow",
-                "show",
-                "--project",
-                id.as_str(),
-                "--json",
-            ],
-        );
+        let repeated = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
         assert_eq!(repeated, saved);
         if mapped {
             let mut incoming = project.clone();
@@ -1783,18 +1730,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 20,
             )
             .unwrap();
-            let read = lf(
-                repo.path(),
-                home.path(),
-                &[
-                    "wave",
-                    "workflow",
-                    "show",
-                    "--project",
-                    id.as_str(),
-                    "--json",
-                ],
-            );
+            let read = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
             assert_eq!(
                 read["project"]["krs"][0]["text"],
                 "Keep the concurrent provider plan"
@@ -1847,7 +1783,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             slug: "product".into(),
             name: "Product".into(),
             summary: "".into(),
-            workflow: "".into(),
             status: loopflow::work::project::ProjectStatus::Started,
             krs: vec![],
             metric_targets: vec![],
@@ -1984,7 +1919,15 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert_eq!(pending.len(), 3);
         assert!(store.pending_task_changes(&first).unwrap().is_empty());
         assert!(store
-            .project_order_delivery(&store.task(&second).unwrap().unwrap().project_id)
+            .project_order_delivery(
+                store
+                    .task(&second)
+                    .unwrap()
+                    .unwrap()
+                    .project_id
+                    .as_ref()
+                    .unwrap()
+            )
             .unwrap()
             .is_some());
         let edited = store.task(&second).unwrap().unwrap();
@@ -2221,18 +2164,24 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         }
         let active = store
             .create_task(&NewTask {
+                repository_id: store
+                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: Some("2026-12-31".into()),
                 id: TaskId::new(),
-                project_id: project.id.clone(),
+                project_id: Some(project.id.clone()),
                 title: "Started work".into(),
                 description: "Retain description".into(),
             })
             .unwrap();
         let backlog = store
             .create_task(&NewTask {
+                repository_id: store
+                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
-                project_id: project.id.clone(),
+                project_id: Some(project.id.clone()),
                 title: "Unreviewed backlog".into(),
                 description: "".into(),
             })
@@ -2252,7 +2201,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             name: project.name.clone(),
             summary: project.summary.clone(),
             description: Some(project.description.clone()),
-            workflow: project.workflow.clone(),
             status: project.status,
             krs: project.krs.clone(),
             metric_targets: project.metric_targets.clone(),
@@ -2312,7 +2260,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             [backlog.id.as_str()],
         )
         .unwrap();
-        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
+        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}]});
         std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
         let args = [
             "wave",
@@ -2352,7 +2300,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert_eq!(preview_task["description"], "Retain description");
         assert_eq!(
             store.task(&active.id).unwrap().unwrap().project_id,
-            project.id
+            Some(project.id.clone())
         );
         let revision = || {
             db.query_row(
@@ -2389,7 +2337,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             applied_decision["task"],
             serde_json::to_value(&moved).unwrap()
         );
-        assert_eq!(moved.project_id, successor);
+        assert_eq!(moved.project_id, Some(successor.clone()));
         assert_eq!(
             db.query_row(
                 "SELECT started_at FROM tasks WHERE id=?1",
@@ -2401,14 +2349,14 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         );
         assert_eq!(
             store.task(&backlog.id).unwrap().unwrap().project_id,
-            project.id
+            Some(project.id.clone())
         );
         let changes = store.pending_task_changes(&active.id).unwrap();
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].value.field(), "task_project");
         assert_eq!(
             changes[0].value,
-            WorkValue::TaskProject(successor.to_string())
+            WorkValue::TaskProject(Some(successor.to_string()))
         );
         let status = store.pending_project_changes(&project.id).unwrap();
         assert_eq!(
@@ -2417,7 +2365,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         );
         // Released receipts nest content and preserve their original JSON bytes/order.
         let retained = format!(
-            r#"{{"wave_id":"{}","successor_id":"{}","create":true,"project_name":"Next","content":{{"metric_targets":[],"workflow":"","krs":[{{"text":"Preserve work","holds":false}}]}}}}"#,
+            r#"{{"wave_id":"{}","successor_id":"{}","create":true,"project_name":"Next","content":{{"metric_targets":[],"krs":[{{"text":"Preserve work","holds":false}}]}}}}"#,
             wave.id(),
             successor,
         );
@@ -2453,7 +2401,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 })
                 .unwrap();
             let retained = store.task(&active.id).unwrap().unwrap();
-            assert_eq!(retained.project_id, successor);
+            assert_eq!(retained.project_id, Some(successor.clone()));
             assert_eq!(retained.description, "Incoming unrelated edit");
             assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
             assert_eq!(
@@ -2464,7 +2412,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert_eq!(
             reopened.task(&active.id).unwrap().unwrap().project_id,
-            successor
+            Some(successor.clone())
         );
         assert_eq!(reopened.pending_task_changes(&active.id).unwrap(), changes);
         if mapped {
@@ -2487,7 +2435,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             project.status = successor_plan.status;
             project.summary = successor_plan.summary;
             project.description = Some(successor_plan.description);
-            project.workflow = successor_plan.workflow;
             project.krs = successor_plan.krs;
             project.metric_targets = successor_plan.metric_targets;
             echo.item.project_id = Some(project.id.clone());
@@ -2504,7 +2451,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
             assert_eq!(
                 store.task(&active.id).unwrap().unwrap().project_id,
-                successor
+                Some(successor.clone())
             );
         }
         // Select an already stored destination using its provider alias when present.
@@ -2527,7 +2474,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         lf(repo.path(), home.path(), &args);
         assert_eq!(
             store.task(&active.id).unwrap().unwrap().project_id,
-            existing.id
+            Some(existing.id.clone())
         );
         assert_eq!(store.project(&existing.id).unwrap().unwrap().name, "Next");
         let pending = store.pending_project_changes(&existing.id).unwrap();
@@ -2566,11 +2513,13 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
             assert_eq!(
                 store.task(&active.id).unwrap().unwrap().project_id,
-                store
-                    .project_by_project("third-provider-project")
-                    .unwrap()
-                    .unwrap()
-                    .id
+                Some(
+                    store
+                        .project_by_project("third-provider-project")
+                        .unwrap()
+                        .unwrap()
+                        .id
+                )
             );
             assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
             assert_eq!(
@@ -2590,7 +2539,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
 }
 
 #[test]
-fn refiling_saves_membership_offline_and_retains_inbound_changes() {
+fn moving_saves_membership_offline_and_retains_inbound_changes() {
     use loopflow::durable::TaskId;
     use loopflow::work::task::NewTask;
 
@@ -2631,7 +2580,6 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                     name: project.name.clone(),
                     summary: project.summary.clone(),
                     description: Some(project.description.clone()),
-                    workflow: project.workflow.clone(),
                     status: project.status,
                     krs: project.krs.clone(),
                     metric_targets: project.metric_targets.clone(),
@@ -2657,9 +2605,12 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
+                repository_id: store
+                    .ensure_repository(repo.path().canonicalize().unwrap().to_str().unwrap())
+                    .unwrap(),
                 due_date: None,
                 id: TaskId::new(),
-                project_id: projects[0].id.clone(),
+                project_id: Some(projects[0].id.clone()),
                 title: "Refile me".into(),
                 description: "Original".into(),
             })
@@ -2682,7 +2633,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 )
                 .unwrap();
         }
-        let args = ["task", "refile", task.id.as_str(), "--wave", "destination"];
+        let args = ["task", "move", task.id.as_str(), "--wave", "destination"];
         let revision = || {
             db.query_row(
                 "SELECT revision FROM store_revisions WHERE domain='planning'",
@@ -2701,7 +2652,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         db.execute_batch("DROP TRIGGER fail_refile").unwrap();
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().project_id,
-            projects[0].id
+            Some(projects[0].id.clone())
         );
         assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
         assert_eq!(revision(), before);
@@ -2716,8 +2667,8 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             connected
         );
         let moved = store.task(&task.id).unwrap().unwrap();
-        assert_eq!(moved.project_id, projects[1].id);
-        assert_eq!(moved.wave_id, projects[1].wave_id);
+        assert_eq!(moved.project_id, Some(projects[1].id.clone()));
+        assert_eq!(moved.wave_id, Some(projects[1].wave_id.clone()));
         assert_eq!(moved.revision, task.revision + 1);
         assert!(moved.worktree.is_none());
         let changes = store.pending_task_changes(&task.id).unwrap();
@@ -2725,7 +2676,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         assert_eq!(changes[0].value.field(), "task_project");
         assert_eq!(
             changes[0].value,
-            WorkValue::TaskProject(projects[1].id.to_string())
+            WorkValue::TaskProject(Some(projects[1].id.to_string()))
         );
         // A repeated command may refresh exchange status, but cannot edit the Task
         // or enqueue another membership effect.
@@ -2751,7 +2702,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                 )
                 .unwrap();
             let retained = store.task(&task.id).unwrap().unwrap();
-            assert_eq!(retained.project_id, projects[1].id);
+            assert_eq!(retained.project_id, Some(projects[1].id.clone()));
             assert_eq!(retained.description, "Incoming after refiling");
             assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
             let mut other = incoming.project.clone().unwrap();
@@ -2774,7 +2725,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
             assert_eq!(
                 store.task(&task.id).unwrap().unwrap().project_id,
-                projects[2].id
+                Some(projects[2].id.clone())
             );
             assert_eq!(
                 store.task_acquisition(&task.id).unwrap().state,
@@ -2789,37 +2740,44 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert_eq!(
             reopened.task(&task.id).unwrap().unwrap().project_id,
-            projects[if mapped { 2 } else { 1 }].id
+            Some(projects[if mapped { 2 } else { 1 }].id.clone())
         );
         assert_eq!(
             reopened.pending_task_changes(&task.id).unwrap(),
             store.pending_task_changes(&task.id).unwrap()
         );
-        // A retained start cannot be moved by refiling, even without a checkout.
+        // Membership moves retain the original start, even without a checkout.
         db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [task.id.as_str()]).unwrap();
         db.execute(
             "UPDATE tasks SET started_at=17 WHERE id=?1",
             [task.id.as_str()],
         )
         .unwrap();
-        let pending = store.pending_task_changes(&task.id).unwrap();
-        let refused = command(
+        let moved = command(
             repo.path(),
             home.path(),
-            &["task", "refile", task.id.as_str(), "--wave", "source"],
+            &["task", "move", task.id.as_str(), "--wave", "source"],
         )
         .output()
         .unwrap();
         assert!(
-            !refused.status.success(),
+            moved.status.success(),
             "{}",
-            String::from_utf8_lossy(&refused.stdout)
+            String::from_utf8_lossy(&moved.stderr)
         );
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().project_id,
-            projects[if mapped { 2 } else { 1 }].id
+            Some(projects[0].id.clone())
         );
-        assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
+        assert_eq!(
+            db.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.id.as_str()],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            17
+        );
         for (wave, placement) in placements {
             assert_eq!(
                 store
@@ -2868,7 +2826,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             home.path(),
             &["wave", "ensure", "tools/parser", "--json"],
         );
-        let project_id = project["id"].as_str().unwrap();
+        assert!(project["id"].is_string());
         let task = lf(
             repo.path(),
             home.path(),
@@ -2886,7 +2844,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         lf(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "set", "--project", project_id, "finish"],
+            &["wave", "workflow", "set", "finish", "tools/parser"],
         );
         std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
@@ -2915,14 +2873,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         let source = lf(
             repo.path(),
             home.path(),
-            &[
-                "wave",
-                "workflow",
-                "source",
-                "--project",
-                project_id,
-                "finish",
-            ],
+            &["wave", "workflow", "source", "finish", "tools/parser"],
         );
         assert!(source.as_str().unwrap().contains("from: start"));
         std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
@@ -2954,11 +2905,8 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
             .iter()
             .find(|entry| entry["name"] == "unimported")
             .unwrap();
-        assert!(unimported["workflow"].is_null());
-        assert!(unimported["unavailable"]
-            .as_str()
-            .unwrap()
-            .contains("lf wave ensure"));
+        assert!(unimported["workflow"].is_object());
+        assert!(unimported["unavailable"].is_null());
         lf(
             repo.path(),
             home.path(),
@@ -3069,21 +3017,24 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
         .unwrap();
     let alias = home.path().join("first-alias");
     std::os::unix::fs::symlink(first.path(), &alias).unwrap();
-    db.execute(
-        "UPDATE waves SET repo=?1 WHERE id=?2",
-        rusqlite::params![
-            alias.to_string_lossy(),
-            tasks[0]["wave_id"].as_str().unwrap()
-        ],
-    )
-    .unwrap();
     for (repo, task) in [
         (first.path(), &tasks[0]),
         (alias.as_path(), &tasks[0]),
         (second.path(), &tasks[1]),
     ] {
-        let status = lf(repo, home.path(), &["task", "status", "DUP-1", "--json"]);
-        assert_eq!(status["task"]["id"], task["id"]);
+        for selector in ["DUP-1", "dup-1", "Dup-1"] {
+            let status = lf(repo, home.path(), &["task", "status", selector, "--json"]);
+            assert_eq!(status["task"]["id"], task["id"]);
+            assert_eq!(status["task"]["identifier"], "DUP-1");
+        }
+    }
+    let ambiguous = command(home.path(), home.path(), &["--task", "dup-1", "--explain"])
+        .output()
+        .unwrap();
+    assert!(ambiguous.status.success());
+    let error = String::from_utf8_lossy(&ambiguous.stdout);
+    for task in &tasks {
+        assert!(error.contains(task["id"].as_str().unwrap()), "{error}");
     }
     // Exact identity remains constrained to the selected repository.
     let foreign = tasks[1]["id"].as_str().unwrap();
@@ -3096,15 +3047,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     let rejected = command(
         first.path(),
         home.path(),
-        &[
-            "task",
-            "edit",
-            foreign,
-            "--wave",
-            tasks[0]["wave_id"].as_str().unwrap(),
-            "--title",
-            "Wrong owner",
-        ],
+        &["task", "edit", foreign, "--title", "Wrong owner"],
     )
     .output()
     .unwrap();
@@ -3112,7 +3055,7 @@ fn task_selectors_use_repository_scope_and_preserve_exact_identity_through_alias
     lf(
         &alias,
         home.path(),
-        &["task", "edit", "DUP-1", "--title", "First only"],
+        &["task", "edit", "dup-1", "--title", "First only"],
     );
     let status = lf(
         second.path(),
@@ -3206,10 +3149,23 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         "linear:\n  team: fixture-team\n",
     )
     .unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "inbox", "--json"],
+    );
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Saved plan", "--json"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Saved plan",
+            "--json",
+        ],
     );
     let id = created["id"].as_str().unwrap();
     let project = created["project_id"].as_str().unwrap();
@@ -3336,19 +3292,29 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Unstarted proof", "--json"],
+        &[
+            "task",
+            "create",
+            "--wave",
+            "inbox",
+            "--title",
+            "Unstarted proof",
+            "--json",
+        ],
     );
     let task_id = loopflow::durable::TaskId::parse(created["id"].as_str().unwrap()).unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let task = store.task(&task_id).unwrap().unwrap();
-    let current = store.project(&task.project_id).unwrap().unwrap();
+    let current = store
+        .project(task.project_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
     let mut historical = current.clone();
     historical.id = loopflow::durable::ProjectId::new();
     historical.slug = "earlier".into();
     historical.name = "Earlier chapter".into();
     historical.status = loopflow::work::project::ProjectStatus::Completed;
-    historical.workflow = "code".into();
     historical.krs = vec![loopflow::work::project::ProjectKR {
         text: "Historical proof remains".into(),
         holds: true,
@@ -3378,7 +3344,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         .find(|p| p["id"] == historical.id.as_str())
         .unwrap();
     assert_eq!(old["current"], false);
-    assert_eq!(old["workflow"], "code");
+    assert!(old.get("workflow").is_none());
     assert_eq!(old["krs"][0]["text"], "Historical proof remains");
     let text = lf(repo.path(), home.path(), &["wave", "show", wave.slug()]);
     let text = text.as_str().unwrap();
@@ -3390,20 +3356,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["project"]["id"], current.id.as_str());
-    let retained = lf(
-        repo.path(),
-        home.path(),
-        &[
-            "wave",
-            "workflow",
-            "show",
-            "--project",
-            historical.id.as_str(),
-            "--json",
-        ],
-    );
-    assert_eq!(retained["project"]["workflow"], "code");
+    assert_eq!(selected["wave_id"], wave.id().as_str());
     let scoped = lf(
         repo.path(),
         home.path(),
@@ -3416,26 +3369,13 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
             "--json",
         ],
     );
-    assert_eq!(scoped["project"]["id"], current.id.as_str());
+    assert_eq!(scoped["wave_id"], wave.id().as_str());
     let source = lf(
         repo.path(),
         home.path(),
         &["wave", "workflow", "source", "code", wave.slug()],
     );
-    let historical_source = lf(
-        repo.path(),
-        home.path(),
-        &[
-            "wave",
-            "workflow",
-            "source",
-            "code",
-            "--project",
-            historical.id.as_str(),
-        ],
-    );
     assert!(source.as_str().unwrap().contains("nodes:"));
-    assert_eq!(historical_source, source);
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
@@ -3462,7 +3402,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "workflow", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["project"]["workflow"], "code");
+    assert_eq!(selected["workflow"], "code");
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
     assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
     lf(
@@ -3625,24 +3565,29 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let created = lf(
         repo.path(),
         home.path(),
-        &["task", "create", "--title", "Original", "--json"],
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Original", "--json",
+        ],
     );
     let id = created["id"].as_str().unwrap();
     let id = TaskId::parse(id).unwrap();
     let path = home.path().join("loopflow.db");
     let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
     let task = store.task(&id).unwrap().unwrap();
-    let mut project = store.project(&task.project_id).unwrap().unwrap();
+    let mut project = store
+        .project(task.project_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
     project.linear_id = Some(loopflow::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
     let observed: loopflow::linear::LinearProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
-        "summary":"", "description":"Saved Project prose", "workflow":"", "status":"started",
+        "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
     loopflow::linear::acceptance::accept_linear_project_in(
         &store,
-        &task.wave_id,
+        task.wave_id.as_ref().unwrap(),
         "initiative",
         &observed,
         17,
@@ -3668,7 +3613,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
             &scope,
             "linear",
             &record,
-            Some((&task.wave_id, "initiative")),
+            Some((task.wave_id.as_ref().unwrap(), "initiative")),
         )
         .unwrap();
     let task = store.task(&id).unwrap().unwrap();
@@ -3718,7 +3663,10 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         assert_eq!(status["task"]["title"], "Saved locally");
         assert_eq!(status["task"]["description"], "Saved Task prose");
         assert_eq!(status["task"]["due_date"], "2026-10-20");
-        assert_eq!(status["project"]["id"], saved.project_id.as_str());
+        assert_eq!(
+            status["project"]["id"],
+            saved.project_id.as_ref().unwrap().as_str()
+        );
         assert_eq!(status["project"]["description"], "Saved Project prose");
         assert_eq!(status["execution"], initial["execution"]);
         let wave = lf(
@@ -3740,7 +3688,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         }
     }
     // A pending membership save explains the difference without replacing content.
-    db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.to_string())).unwrap()]).unwrap();
+    db.execute("INSERT INTO task_changes(id,task_id,value_json,base_json,attempted) VALUES('pending-membership',?1,?2,NULL,0)", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
     assert_eq!(read()["planning_state"], "available");
     store
         .observe_pm_issue_change("provider-task", None, true)
@@ -3870,4 +3818,282 @@ fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
     let retained = lf(repo.path(), home.path(), &["checkout", "ENG-124", "--json"]);
     assert_eq!(retained["branch"], placed["branch"]);
     assert_eq!(retained["worktree"], placed["worktree"]);
+}
+
+#[test]
+fn waveless_task_lifecycle() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+    std::fs::write(repo.path().join(".lf/config.yaml"), "workflow: proof\n").unwrap();
+    std::fs::write(
+        repo.path().join(".lf/workflows/proof.yaml"),
+        "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
+    )
+    .unwrap();
+    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    repo.stage_all();
+    repo.commit("Configure repository workflow");
+    repo.push();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--no-wave",
+            "--title",
+            "Standalone proof",
+            "--json",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    assert!(created["repository_id"].is_string());
+    assert!(created["project_id"].is_null());
+    assert!(created["wave_id"].is_null());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let counts: (u32, u32, u32) = db.query_row("SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM waves),(SELECT count(*) FROM projects)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+    assert_eq!(counts, (1, 0, 0));
+    let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
+    assert_eq!(listed[0]["task"]["id"], id);
+    assert_eq!(listed[0]["workflow_name"], "proof");
+    assert_eq!(listed[0]["workflow_source"], "repository");
+    let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
+    assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
+    let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
+    lf(repo.path(), home.path(), &["task", "run", id]);
+    let before = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "product", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "move", id, "--wave", "product"],
+    );
+    let attached = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_eq!(attached["execution"]["worktree"], placed["worktree"]);
+    assert_eq!(attached["execution"]["wave"], "product");
+    assert_eq!(
+        lf(
+            repo.path(),
+            home.path(),
+            &["task", "workflow", "show", id, "--json"]
+        ),
+        before
+    );
+    lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
+    lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
+    let detached = lf(repo.path(), home.path(), &["task", "list", "--json"]);
+    assert_eq!(detached[0]["task"]["id"], id);
+    assert!(detached[0]["task"]["wave_id"].is_null());
+    assert_eq!(detached[0]["workflow_source"], "task");
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "move", id, "start"],
+    );
+    lf(repo.path(), home.path(), &["task", "complete", id]);
+    assert_eq!(
+        lf(repo.path(), home.path(), &["task", "status", id, "--json"])["execution"]["status"],
+        "done"
+    );
+
+    let standalone = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Always standalone", "--json"],
+    );
+    let standalone_id = standalone["id"].as_str().unwrap();
+    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
+    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
+    let completed = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", standalone_id, "--json"],
+    );
+    assert_eq!(completed["execution"]["status"], "done");
+    assert!(completed["execution"]["wave"].is_null());
+    assert!(completed["execution"]["project_id"].is_null());
+}
+#[test]
+fn workflow_defaults_follow_task_wave_and_repository() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/config.yaml", "workflow: repository\n");
+    repo.create_file(".lf/flows/proof.yaml", "- cmd: flow show proof\n");
+    for (name, node) in [
+        ("repository", "repo-review"),
+        ("wave", "wave-review"),
+        ("explicit", "task-review"),
+    ] {
+        repo.create_file(&format!(".lf/workflows/{name}.yaml"), &format!("nodes: {{{node}: demo}}\nedges: [{{from: start, to: {node}, flow: proof}}, {{from: {node}, to: end}}]\n"));
+    }
+    repo.stage_all();
+    repo.commit("Configure selection proof");
+    repo.push();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "product", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "set", "wave", "product"],
+    );
+    let task = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "product",
+            "--title",
+            "Wave default",
+            "--json",
+        ],
+    );
+    let id = task["id"].as_str().unwrap();
+    lf(repo.path(), home.path(), &["task", "run", id]);
+    let captured = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
+    );
+    assert_eq!(captured["name"], "wave");
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "set", "explicit", "product"],
+    );
+    lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
+    repo.create_file(".lf/config.yaml", "workflow: ''\n");
+    assert_eq!(
+        lf(
+            repo.path(),
+            home.path(),
+            &["task", "workflow", "show", id, "--json"]
+        ),
+        captured
+    );
+    let standalone = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--no-wave",
+            "--title",
+            "Invalid default",
+            "--json",
+        ],
+    );
+    let standalone_id = standalone["id"].as_str().unwrap();
+    let refused = command(repo.path(), home.path(), &["task", "run", standalone_id])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid Workflow name"));
+    repo.create_file(".lf/config.yaml", "workflow: repository\n");
+    let explicit = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "product",
+            "--title",
+            "Explicit choice",
+            "--json",
+        ],
+    );
+    let explicit_id = explicit["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "run", explicit_id, "repository"],
+    );
+    assert_eq!(
+        lf(
+            repo.path(),
+            home.path(),
+            &["task", "workflow", "show", explicit_id, "--json"]
+        )["name"],
+        "repository"
+    );
+}
+
+#[test]
+fn task_creation_defaults_to_standalone_in_bound_contexts() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let wave = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "product", "--json"],
+    );
+    let wave_id = wave["wave_id"].as_str().unwrap();
+    let parent = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task", "create", "--wave", "product", "--title", "Parent", "--json",
+        ],
+    );
+    let parent_id = parent["id"].as_str().unwrap();
+    let placed = lf(repo.path(), home.path(), &["checkout", parent_id, "--json"]);
+    let checkout = Path::new(placed["worktree"].as_str().unwrap());
+    let task_context = format!("task:{parent_id}");
+    let wave_context = format!("wave:{wave_id}");
+    for (cwd, declaration, inherited_wave) in [
+        (repo.path(), None, ""),
+        (repo.path(), Some(wave_context.as_str()), wave_id),
+        (repo.path(), Some(task_context.as_str()), wave_id),
+        (repo.path(), Some("wave:missing-wave"), "missing-wave"),
+        (repo.path(), Some("task:missing-task"), "missing-wave"),
+        (checkout, None, ""),
+        (checkout, Some(task_context.as_str()), wave_id),
+    ] {
+        for flags in [&[][..], &["--no-wave"][..], &["--wave", "product"][..]] {
+            let mut args = vec!["task", "create", "--title", "Capture", "--json"];
+            args.extend_from_slice(flags);
+            let mut invocation = command(cwd, home.path(), &args);
+            invocation.env("LF_WAVE_ID", inherited_wave);
+            if let Some(declaration) = declaration {
+                invocation.env("LF_AS", declaration);
+            }
+            let output = invocation.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(task["repository_id"], parent["repository_id"]);
+            if flags.first() == Some(&"--wave") {
+                assert_eq!(task["wave_id"], parent["wave_id"]);
+                assert_eq!(task["project_id"], parent["project_id"]);
+            } else {
+                assert!(task["wave_id"].is_null(), "{task}");
+                assert!(task["project_id"].is_null(), "{task}");
+            }
+            assert!(task["worktree"].is_null());
+        }
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let retained = store
+        .task(&crate::durable::TaskId::parse(parent_id).unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.wave_id.as_ref().unwrap().as_str(), wave_id);
+    assert_eq!(retained.worktree.as_deref(), Some(checkout));
 }

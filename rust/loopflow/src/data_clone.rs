@@ -189,6 +189,9 @@ fn create(
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
     source_db.busy_timeout(std::time::Duration::from_secs(15))?;
+    // Hold one WAL snapshot so concurrent Session writes cannot restart the
+    // incremental backup between batches.
+    source_db.execute_batch("BEGIN; SELECT count(*) FROM sqlite_schema;")?;
     let mut destination = Connection::open(manifest.directory.join("loopflow.db"))?;
     rusqlite::backup::Backup::new(&source_db, &mut destination)?.run_to_completion(
         256,

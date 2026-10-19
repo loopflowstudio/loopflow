@@ -7,9 +7,9 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app and its children use this checkout's bundled CLI against
-main-Machine data by default. Explicit `LF_HOME` selects separate data, not a
-different binary. For populated data, use [offline data clones](../docs/data-clones.md):
+The development app's main-Machine commands forward to the installed CLI.
+Select a private `LF_HOME` to use this checkout's bundled CLI with separate data.
+For populated data, use [offline data clones](../docs/data-clones.md):
 `lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
 terminals, preserves source checkouts read-only, and reports copied Sessions'
 continuation limits. A bare SQLite copy provides no filesystem, provider or client
@@ -37,47 +37,49 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Navigation starts closed, with the repository selected in the Session workspace
-header. Click the location control or press **⌘K** to drop the full navigator over
-your panes. Choosing a repository, Wave, Task or Session closes the dropdown.
-Escape or a click outside dismisses it and restores your previous focus.
-Press **⌃⌘S** or choose **Pin sidebar** to dock the same navigator alongside the workspace.
+Open a started Task to add it to the working list. Reopening it keeps its position;
+activity, completion, Wave navigation and sidebar filtering do not reorder it.
+Paused Tasks leave the list and number slots while keeping their stored position,
+panes and drafts. They remain reachable in their Wave and search. Unstarted Tasks
+open their brief without joining the list or starting execution. Waves follow Tasks
+in the same scrolling sidebar, with counts from the planning inventory.
 
-Open a Wave conversation without moving its row. Its Tasks appear underneath;
-other expanded Waves stay open. Click the Task count to fold a branch without
-navigating. The repository stays at the top. Search filters both sections without
-changing selection. Burgundy fill marks one selected destination.
+Click a row to select its retained workspace. The title-bar **Repo / Wave / Task**
+path follows hierarchy; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
+across repositories and opens another repository in its own window. Its
+**Sidebar shows** picker filters Working tasks / Available / Running without
+changing the selected Work. **⌘1–9** selects stable working slots regardless of the
+filter; **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing.
+With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
+widens the same navigator. **Shift-F10** opens the focused Task's actions without
+changing the open workspace.
 
-**Available** shows full-size Tasks with their Wave context and opens the exact
-available conversation. Those Tasks are omitted from the Wave branches, so each
-appears once. Wave conversations stay in the hierarchy. Availability comes from
-shared Session evidence or a reported Blocked state; the CLI exposes it through
-`lf session list --available --json`.
+The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.
 
-**Command-click** Work to open it beside the current workspace. A normal click
-replaces the focused workspace, or focuses it if already visible. Each workspace
-keeps its own panes, drafts and focus. Close its context header to hide it without
-closing its panes. Context headers appear when multiple workspaces are visible. **⌘[ / ⌘]** go Back / Forward; there are no history buttons.
+Each Work keeps one pane layout and document store. Repository and Wave
+entry shows their retained conversation or an explicit **Open conversation** action.
+Waves pair that conversation with their objective, status, current Project and
+full Task inventory, followed by their metrics. **Project history**, **Realign Projects…** and **Workflow**
+open the existing planning inspectors. The sidebar starts at 240 points wide;
+drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
+Its scroll position survives Wave and Task navigation. Working order survives
+relaunch; ordinary launch still opens the repository, without acquiring a Session.
 
-Drag the pinned sidebar edge to resize it. Its collapse button or **⌃⌘S** closes
-it; **⌃⌘S** opens it again at the remembered width. Pinned navigation stays open
-across selections.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
-Task rows show a title above reported program status, stored Task/PR links and the
-recorded remote Machine. Local Machine names stay hidden. The title opens the
-conversation; links open separately and underline on hover or keyboard focus.
-Unknown activity and live clients without program reports show no activity label
-or dot. Shared availability is labeled as inferred; report Blocked and Error remain
-distinct. Status read errors stay inspectable through a quiet info icon. A program's
-Done never completes its Task. Saved readings wait for fresh status.
+Task rows show reported program status, Task IDs, stored PR links and the recorded
+remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
+remain plain text. Qualified Session excerpts show their source age; stale output
+falls back to a labeled summary. Local Machine names stay hidden. Links open
+separately from the Task row; unknown activity and live clients without reports
+show no activity label.
 
-Selected Work uses the theme’s selection fill and contrasting text, mirrored in Needs you.
+Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Appearance → Choose Theme…** to preview the whole workspace. Set
+Choose **Settings → Appearance** to preview the whole workspace. Set
 **Light theme** and **Dark theme** independently; **System** follows macOS using
 both. System lists both pickers; Light or Dark lists only its own. Each picker
 shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
@@ -120,7 +122,7 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-Choose **Background progress** in the repository toolbar to enable minute
+Choose **Settings → Delivery**, select a repository, and enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
 continue with the app closed on the selected Machine. Disabling stops scheduled
 admission; already-running work and requested GitHub merges continue.
@@ -130,16 +132,18 @@ quit. The watcher starts a ci-fix when a recorded landing fails its required
 checks; `lf ci watch --status` shows its last poll and what it started.
 
 ```text
-⌘T          new terminal; split right, then down, alternating
-⌘D          split right
-⌘⇧D         split down
+⌘T          new shell tab in the Task’s Shell tool
+⌃`          show / hide Shell
+⇧⌘E         show / hide Files
 ⌘⌥←/→/↑/↓   focus the visual neighbor
 ⌘⇧Return    zoom the focused pane
-⌘W / ⌘Z     close / restore a pane
+⌘W / ⌘⇧T    close / restore a pane
 ⌘F          find in the focused terminal
 ```
 
 Panes sit in rounded islands with small gutters; drag a gutter to resize.
+**View → Zoom Focused Pane** and **View → Focus Pane** expose the same pane controls.
+
 The focused pane has a quiet raised edge. Copying selected text or a command
 block briefly confirms the number of copied lines without moving focus.
 Find reserves its own row above the terminal, so it never covers a match.
@@ -147,9 +151,11 @@ Return / Shift-Return select the next / previous match; Escape closes Find.
 Search and terminal state stay with their retained pane when switching Work.
 
 Task workspaces start with the Session on the left and Files on the right,
-at 61.8/38.2. Click the companion's name to switch between **Task**, **PR**, **Files**,
-**Shell**, and **lf process**. Hidden shells keep running and file drafts stay
-retained. Files starts with its chooser closed. Click the selected path or press
+at 61.8/38.2. Use **View → Toggle Shell** or **Toggle Files**, or their shortcuts.
+If every pane is hidden, **Show pane** restores the retained pane; **Open conversation**
+remains available when the Task has no conversation open.
+Shell holds retained shell tabs; Files holds documents, **Brief**, **Changes** and
+recorded **Pull request** tabs. Hidden tools keep their clients and drafts. Files starts with its chooser closed. Click the file-browser toggle or press
 Command-P in the file pane to search **scratch** and files changed from the
 branch's recorded parent commit. Selection closes the dropdown; pin it to keep
 the list alongside the document (Control-Command-B). Escape dismisses the dropdown.
@@ -164,13 +170,18 @@ read published patches. Refresh updates GitHub data using the signed-in GitHub
 CLI on this Mac. Missing access and omitted large/binary patches are shown inline;
 local uncommitted edits stay in Files.
 
-Hover over or click **Task** in the compact workspace header to reveal Complete,
-Pause, and Abandon. Use **+** or Command-T to add panes explicitly; new splits
-alternate right/down. The main Session's menu switches between **Claude**,
+Open **•••** or press Command-/ for the selected Task’s actions. Row context
+menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
 **Codex**, and **OpenCode**, continuing the same Session with its history.
 **Reset session** starts a fresh primary conversation/process from current Work
 instructions, without replaying the previous conversation; its history remains
-available. Switching or resetting replaces the current provider process.
+available. Reset preserves the previous terminal and client. Provider switching
+first reads its saved history, then replaces the current provider process. If the
+provider has not saved a transcript yet, the current terminal stays open; finish
+its first turn and retry the switch. A failed status observer reconnects on the
+next status event without replacing the conversation.
+Repository, Wave, Task and exact Session
+preparation all use `lf connect --prepare`; reset uses `--fresh` for its scope.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red
@@ -193,7 +204,7 @@ colors however Desktop was opened.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-**+ → Files** in a Task's toolbar opens its checkout as a pane beside the
+**View → Toggle Files** opens a Task's checkout as a pane beside the
 retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
@@ -208,7 +219,7 @@ shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
 Changing Work assignment leaves the recorded checkout Machine and path intact.
 Files panes retain their opening location through Close/Undo, including a first open
-without a Session link. A shell split beside Files uses that same location.
+without a Session link. Shell tabs use that same location.
 Unknown or changed owners stay unavailable without redirecting retained drafts.
 Remote paths are never opened or watched on the presentation Mac. Filesystem events
 on the execution Machine refresh retained documents, including hidden drafts. Disconnects
@@ -219,7 +230,7 @@ read-only explanation. If a regular file becomes a symlink, its retained draft
 and Undo survive while editing, Save and autosave stop.
 
 Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
-app menu for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+Settings → Editing for explicit **Save** (⌘S). Both modes receive filesystem changes live,
 including atomic replacements. Disjoint local edits survive; disk wins overlaps
 without a conflict dialog. Incoming updates reset Undo to the surviving local
 edits, so Undo cannot restore text the LLM replaced. IME composition completes
@@ -265,21 +276,16 @@ conversations stay out of the sidebar without deleting their history.
 **Available** means the conversation can be joined. Historical feedback remains
 readable without granting completion authority. Failed provider starts offer recovery.
 
-Search Work names and identifiers; nonmatching Waves disappear without changing
-the selected Work. Click the repository name to return to its retained,
-configured conversation. Normal repository launches start there, whether or not
-Waves and Tasks exist; explicit Task links still open the addressed Task.
-Begin with what to work on, without creating a Wave or Task first.
-Unscoped Sessions remain available through `lf session list --orphan`, not a
-sidebar group or search inventory. Missing planning never deletes retained workspaces.
+Search Work names and identifiers with **⌘K**. The repository name opens its
+conversation. Unscoped Sessions remain available through `lf session list --orphan`.
+Missing planning or selection readings retain known Work and show the read error.
 **Task details** opens the description, comments and Run history.
 
-Opening a Task enters its conversation and retained panes. First opening reuses
-or prepares its primary conversation through `lf`; it never starts the Workflow
-or takes over another client. The sidebar switches retained Work; no top tab strip
-is needed. Returning preserves panes, drafts and focus, including deliberately
-opened historical conversations. Explicit bare
-CLI Task links still support inspection without conversation acquisition.
+Opening a Task enters its retained panes. **Open conversation** explicitly reuses
+or prepares its primary through `lf`; it never starts the Workflow or takes over
+another client. Returning preserves panes, drafts and focus, including historical
+conversations. Explicit bare CLI Task links still support inspection without
+conversation acquisition.
 The compact header shows the current Workflow position and available actions;
 **Overview** expands its graph and description above the multiplexer. Opening
 feedback stays inside the terminal area. Resolving a conversation installs its
@@ -303,8 +309,8 @@ Loading or unavailable Workflow readings remain explicit; a failed refresh keeps
 the last recorded graph with its actions disabled. Only a successful Task reading
 with no captured Workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
-The toolbar's **+** changes what the multiplexer shows: **New shell**,
-**Files** or **Flow processes**. The Flow process log lists every Flow process in the
+Use **⌘T** for a new shell tab and **View → Toggle Files** for Files.
+Choose **Flow processes** in **⌘K** to open the Flow process log. It lists every Flow process in the
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Flow, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
@@ -312,10 +318,9 @@ how long it ran. A row opens to its id, graph and steps (the shape of
 **stopped**. One whose process was killed has no exit record and keeps reading
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
-The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf wave workflow list`); **Customize** or **Edit** opens its source in a
-sheet. Save stores the definition in the Wave and selects it for the current
-chapter; captured Task Workflows stay unchanged.
+The Wave page's **Workflow** opens its definition in the catalogue inspector.
+**Customize** or **Edit** opens the existing source editor; captured Task
+Workflows stay unchanged.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
@@ -339,8 +344,8 @@ the Task's read-only worktree location and the Activity glyph.
 
 Each nonempty pane has a compact program header with its known provider,
 conversation or terminal title, directory and current reported status. Hovering
-the focused header reveals split right, split down and close; its context menu
-and the keybinds above offer the same plus zoom. A neutral edge and subtle shadow
+the focused header reveals Close; its context menu offers zoom. Shell tabs share
+one tool pane. A lone terminal omits the redundant pane header. A neutral edge and subtle shadow
 distinguish the selected pane without recoloring its reported activity.
 Terminal surfaces sit inside the rounded edge, so text wraps before the border
 in both single and split panes.
@@ -367,17 +372,22 @@ may not reach the requested ratio. Graphics, images, transparent backdrops and
 custom postprocessing are outside the opaque-text contrast guarantee.
 
 Files and the Flow process log open beside retained Sessions and shells in the
-same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
+same multiplexer. Resize, zoom, close and Reopen preserve each pane’s content.
 Drag any pane divider to resize; it highlights on hover and snaps near 38.2% or
-61.8%. New shell splits give 61.8% to the existing pane and 38.2% to the shell.
+61.8%. Showing a tool gives 61.8% to the existing pane and 38.2% to the tool.
 Both sides retain usable minimum sizes, including nested splits; small windows
 shrink those minimums together.
 
-Press **⌘K** to open and focus Find Work in the navigator. Search filters the
-existing Wave/Task rows. Flow and Workflow definitions remain in the repository
-menu; selecting one opens its inspector. Session rename and binding remain in
-the conversation's own controls.
-Failed reads preserve the workspace and offer Retry.
+Press **⌘K** to search Waves and planned Tasks across repositories, plus Workflows
+and Flows in the selected repository. Empty search shows working Tasks first, then other Tasks, Waves and repositories; arrows select,
+Return opens and Escape returns focus to the previous terminal. Flow entries
+inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
+Each repository retains up to 20 recent
+destinations for the window. Visited historical Tasks remain in recents after
+leaving their pages; opening one reads its exact identity again. This does not
+search all historical Tasks. Failed reads preserve the workspace and offer Retry.
+If a highlighted row disappears, Return opens the first remaining visible result;
+with no results it does nothing.
 
 With an unassigned Session selected, choose **Bind to Task…** beside the Session
 name. Review the named Task, then choose
@@ -454,7 +464,7 @@ The Session ID targets conversation actions and history lookup. A prepared
 input alone does not establish live provider activity.
 
 Click the repository name to open its configured conversation. Task rows open the
-Task's primary conversation; Task details retain exact links to conversations
+Task’s retained workspace; Task details retain exact links to conversations
 waiting for input, plus disclosed Session history and raw diagnostics.
 
 
@@ -467,9 +477,8 @@ to a shell when it exits or hands off to an external app.
 Running shells stay intact when a Task's Session or another pane opens.
 
 Selecting a Session in another checkout restores that worktree's conversation,
-companion terminals, split layout, and focus. Outside Task context, the toolbar's
-worktree menu splits entire workspaces; pane strips and keybinds split within one
-workspace. Hiding a worktree retains its processes. Closing a shell ends that shell. Changing a shell's
+shell tabs, pane layout, and focus. Each Task keeps one Shell tool and one Files
+tool; hiding a tool retains its clients and drafts. Closing a shell ends that shell. Changing a shell's
 directory does not move it into another workspace.
 
 Manually launched agents in these shells register against their actual terminal.
@@ -589,10 +598,10 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app selects its bundled helper with `LF_BIN`. New Sessions and agent
-children retain that selection; embedded shells restore its directory first on
-PATH after startup. Existing providers keep their environment when reattached.
-Nothing changes the global installed CLI or shell configuration.
+The dev app supplies its bundled helper through `LF_BIN` and embedded shell PATH.
+Main-Machine commands forward to installed lf; new Sessions and agent children
+use its stable entry. Private-Home launches retain the bundled helper selection.
+Existing providers keep their environment when reattached.
 
 `run` and `run-debug` check `repo identity --json` through that helper before
 launching. This checks repository registration, not all Desktop actions. Schema
@@ -805,7 +814,7 @@ keeping the owner's data directory and explicit takeover behavior. Local panes a
 drafts remain retained; no remote planning tree or execution record is imported.
 
 `lf --task LOO-427 desktop hide --pane "$pane"` and `lf --task LOO-427 desktop restore --pane "$pane"`
-change retained pane visibility. Focus, split, move, resize and zoom use that same
+change retained pane visibility. Focus, move, resize and zoom use that same
 exact-target path through the registry and multiplexer; see the
 [CLI examples](../docs/lf.md#desktop-navigation). `--repo`/`--task` select Work;
 `--pane` selects a pane ID from inspection or a creation receipt. Without it,
@@ -813,10 +822,10 @@ the verified caller terminal wins within selected Work, otherwise one eligible
 pane is required; ambiguity lists choices and does nothing. Surface/window/content tokens are internal.
 Move retains the pane itself,
 including its content occurrence and surface key; it never closes/reopens a client.
-Split adds a shell on the addressed pane’s execution Machine and checkout. Shell panes retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Arrangement preserves selection except explicit focus;
+Shell adds and selects a tab in the Task’s single Shell tool on its recorded execution Machine and checkout. Shell tabs retain their creation location through arrangement and Close/Undo. Session panes capture their recorded location; changed readings invalidate old pane targets without changing focus. Unknown locations never open a local replacement. Move, resize, hide and restore preserve selection;
 zoom does not redirect input to an unselected pane. Window/content replacement
 rejects stale targets, including the second target of a move or resize. Mutation replies
-identify the affected pane directly; they are not native-rendering proof. Shell, Files and Flow-log add
+identify the affected pane directly; they are not native-rendering proof. Files and Flow-log add
 companions beside the exact target without changing focus or zoom. Files and
 Flow-log reuse existing panes for the named Task; its recorded checkout must
 match. Remote shells run on the recorded execution Machine; changed or missing checkouts
@@ -842,3 +851,10 @@ require the exact existing live surface and leave focus unchanged. An active IME
 composition must finish first. Missing/exited/replaced surfaces never reopen or
 redirect input. A lost reply is uncertain: do not automatically resend. The native
 fixture covers cursor insertion and submission but has not run here.
+
+Sidebar excerpts use current native-turn evidence when available, with a 30-second
+working-output lifetime. A current Available result shows its source age. Missing,
+stale or disconnected evidence shows a labeled Task summary. Codex currently
+supplies turn-qualified excerpts; providers without that evidence use the summary.
+Repository and Wave navigation displays retained conversation entry without
+starting a provider. Waves show their full Started and Not started inventory.

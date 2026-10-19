@@ -60,7 +60,7 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
 }
 
 #[cfg(test)]
-pub(crate) use tests::{apply_before_current_draft, current_draft_sql};
+pub(crate) use tests::{apply_before_current_draft, current_draft_sql, upgrade_from_draft};
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -823,6 +823,7 @@ pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> Stor
     }
     if sql.contains("CREATE TABLE planning_peer_changes (")
         || sql.contains("CREATE TABLE delegated_placements (")
+        || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
     {
         super::sqlite::planning_write::seed(conn)?;
     }
@@ -860,6 +861,24 @@ fn migration_preflight(
 ) -> StoreResult<()> {
     if migration_contains(migration, "canonical_structured_ids") {
         super::canonical_ids::preflight(conn, guards)?;
+    }
+    if migration.sql.contains("CREATE TABLE tasks_migration (")
+        && migration.sql.contains("repository_id TEXT NOT NULL")
+    {
+        let mut query = conn.prepare("SELECT t.id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+            LEFT JOIN waves w ON w.id=p.wave_id LEFT JOIN repository_plans r ON r.repo=w.repo AND r.selected=1
+            WHERE r.id IS NULL UNION SELECT t.task_id FROM task_creation_intents t
+            LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
+            LEFT JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE r.id IS NULL")?;
+        let missing = query
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !missing.is_empty() {
+            return Err(StoreError::InvalidData(format!(
+                "Tasks have no retained repository: {}",
+                missing.join(", ")
+            )));
+        }
     }
     if !migration_contains(migration, "durable_input_spine") {
         return Ok(());
@@ -1790,14 +1809,13 @@ mod tests {
         ))
         .unwrap();
         apply_project_content_cut(&conn).unwrap();
-        let (description, workflow, krs, targets, revision): (String, String, String, String, i64) = conn.query_row(
-            "SELECT description,workflow,krs,metric_targets,pm_snapshot_synced_at FROM projects WHERE id='retained-project'", [],
-            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).unwrap();
+        let (description, krs, targets, revision): (String, String, String, i64) = conn.query_row(
+            "SELECT description,krs,metric_targets,pm_snapshot_synced_at FROM projects WHERE id='retained-project'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
         assert_eq!(
             description,
             "Authored purpose.\n\n## Example\n````markdown\n```yaml\nworkflow: example\nflow: legacy-example\n```\n## KRs\n- [x] Example only\n````\nTarget rationale.\nTarget note.\nThis preamble is authored prose.\n## Notes\nKeep these bytes.\n"
         );
-        assert_eq!(workflow, "saved-selection");
         assert_eq!(revision, 7);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&krs).unwrap(),
@@ -2936,12 +2954,51 @@ mod tests {
         assert_eq!(addresses, ("/before/task".into(), "/before/task".into()));
     }
 
+    #[test]
+    fn session_preview_upgrades_released_activity_without_inventing_output() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "session_preview");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/session_preview_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("session_preview"))
+            .unwrap();
+        let activity: (i64, i64, Option<String>) = conn.query_row(
+            "SELECT observed_at,pending_input,preview FROM session_activity WHERE session_id='retained'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
+        assert_eq!(activity, (100, 1, None));
+    }
+
     pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);
         } else {
             apply_set(conn, MIGRATIONS, &mut Vec::new()).unwrap();
         }
+    }
+
+    /// Finish a historical fixture's partial migration before using current readers.
+    pub(crate) fn upgrade_from_draft(conn: &rusqlite::Connection, name: &str) {
+        super::_migration_transaction(conn, |conn, guards| {
+            if _draft_is_canonical(name) {
+                let (index, sql, offset) = draft_location(name);
+                conn.execute_batch(&sql[offset..])?;
+                super::seed_peer_planning(conn, sql)?;
+                super::insert_applied_migration(
+                    conn,
+                    &MIGRATIONS[index],
+                    &super::migration_prefix_fingerprint(&MIGRATIONS[..index]),
+                )?;
+                apply_set(conn, MIGRATIONS, guards)?;
+            }
+            for draft in crate::build_info::migration_draft_manifest() {
+                conn.execute_batch(draft.sql)?;
+                super::seed_peer_planning(conn, draft.sql)?;
+            }
+            super::validate_foreign_keys(conn)
+        })
+        .unwrap();
     }
 
     pub(crate) fn current_draft_sql(name: &str) -> String {
@@ -2958,6 +3015,84 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn optional_task_ancestry_preserves_released_work_and_current_defaults() {
+        let conn = open();
+        apply_before_current_draft(&conn, "optional_task_ancestry");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/optional_task_ancestry.sql"
+        ))
+        .unwrap();
+        super::_migration_transaction(&conn, |conn, _| {
+            conn.execute_batch(&current_draft_sql("optional_task_ancestry"))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        let task: (String, String, String, String) = conn.query_row(
+            "SELECT repository_id,project_id,worktree,branch FROM tasks WHERE id='task_retained'", [],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        assert_eq!(
+            task,
+            (
+                "repo_retained".into(),
+                "proj_current".into(),
+                "/retained/task".into(),
+                "branch".into()
+            )
+        );
+        let defaults: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT id,workflow FROM waves ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            defaults,
+            vec![
+                ("wave-retained".into(), Some("code".into())),
+                ("wave-unselected".into(), None)
+            ]
+        );
+        let receipt: (String, bool, String) = conn
+            .query_row(
+                "SELECT repository_id,export_attempted,export_json FROM task_creation_intents",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            receipt,
+            (
+                "repo_retained".into(),
+                true,
+                r#"{"id":"reserved-issue"}"#.into()
+            )
+        );
+        conn.execute(
+            "UPDATE tasks SET project_id=NULL WHERE id='task_retained'",
+            [],
+        )
+        .unwrap();
+        let current: Option<String> = conn
+            .query_row("SELECT wave_id FROM agent_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(current, None);
+        let capture: String = conn
+            .query_row("SELECT wave_id FROM session_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(capture, "wave-retained");
+        let position: String = conn
+            .query_row("SELECT node FROM task_workflows", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(position, "review");
+        assert!(!conn
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .exists([])
+            .unwrap());
     }
 
     #[test]
@@ -5211,7 +5346,9 @@ mod tests {
             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project_fields','wave_fields','current',1);
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
                 VALUES('task_fields','project_fields','LOO-318','LOO-318',1);").unwrap();
-        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',17,?1)", [serde_json::to_string(project).unwrap()]).unwrap();
+        let mut historical_project = serde_json::to_value(&project).unwrap();
+        historical_project["workflow"] = serde_json::json!("");
+        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',17,?1)", [historical_project.to_string()]).unwrap();
         conn.execute("INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES('wave_fields','current',11)", []).unwrap();
         conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',17,?1)", [serde_json::to_string(item).unwrap()]).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
@@ -5278,7 +5415,6 @@ mod tests {
             .unwrap();
         let content = crate::linear::project_document::parse_project_document(&text).unwrap();
         assert_eq!(content.krs, project.krs);
-        assert_eq!(content.workflow, project.workflow);
         assert_eq!(content.metric_targets, project.metric_targets);
         conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();
         assert_eq!(

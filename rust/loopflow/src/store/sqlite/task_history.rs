@@ -40,8 +40,7 @@ impl SqliteStore {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare(
                 "SELECT e.id,e.task_id,e.kind_json,e.created_at FROM task_events e
-                 JOIN tasks t ON t.id=e.task_id JOIN projects p ON p.id=t.project_id
-                 JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1 AND t.planning_deleted_at IS NULL
+                 JOIN tasks t ON t.id=e.task_id JOIN repository_plans w ON w.id=t.repository_id WHERE w.repo=?1 AND t.planning_deleted_at IS NULL
                  AND json_extract(e.kind_json,'$.kind') IN
                     ('follow_through_intent','follow_through_linked','follow_up','follow_through_conversion')
                  ORDER BY e.id",
@@ -152,7 +151,7 @@ impl SqliteStore {
             "SELECT DISTINCT source.id, json_extract(e.kind_json, '$.intent.relation_id'),
                 source.external_issue_id, target.external_issue_id
              FROM task_events e JOIN tasks source ON source.id=e.task_id
-             JOIN projects p ON p.id=source.project_id JOIN waves w ON w.id=p.wave_id
+             JOIN repository_plans w ON w.id=source.repository_id
              JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')
                 OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
@@ -226,7 +225,15 @@ fn recover_filing_in(conn: &Connection, intent: &RetainedFiling) -> StoreResult<
         conn,
         &crate::work::task::NewTask {
             id,
-            project_id: crate::durable::ProjectId::from_raw(project_id),
+            repository_id: super::repositories::ensure_repository_in(
+                conn,
+                &conn.query_row(
+                    "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+                    [&project_id],
+                    |row| row.get::<_, String>(0),
+                )?,
+            )?,
+            project_id: Some(crate::durable::ProjectId::from_raw(project_id)),
             title: intent.title.clone(),
             description: intent.notes.clone(),
             due_date: intent.due.clone(),
@@ -260,8 +267,9 @@ mod tests {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description,external_project_id)
                 VALUES(?1,?2,1,1,'proof','Proof','','original-project')", params![project.as_str(),wave.id()]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
-                VALUES(?1,?2,'source-linear','FIX-1','Source','',1,1,'source')", params![source.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'source-linear','FIX-1','Source','',1,1,'source')", params![source.as_str(),project.as_str()]).unwrap();
         }
         let intent = RetainedFiling {
             key: "installed".into(),
@@ -348,7 +356,7 @@ mod tests {
             .prepare_planning_export(
                 PlanningChanges::Task(&child.id),
                 "changed-team",
-                "changed-initiative",
+                Some("changed-initiative"),
             )
             .unwrap();
         assert_eq!(export.id, intent.issue_id);

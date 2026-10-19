@@ -47,7 +47,7 @@ struct RoadmapViewTests {
         let section = try view.inspect().find(NowSectionView.self).actualView()
         let row = try #require(section.section.rows.first)
         try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)").callOnTapGesture()
-        #expect(opened?.0 == row.wave.repo)
+        #expect(opened?.0 == row.wave!.repo)
         #expect(opened?.1 == row.task.id)
         #expect(model.selection == nil)
     }

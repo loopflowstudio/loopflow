@@ -60,6 +60,13 @@
     "attention": "available",
     "task_primary": false,
     "program_status": null,
-    "agent_process_id": "44444444-4444-4444-8444-444444444444"
+    "agent_process_id": "44444444-4444-4444-8444-444444444444",
+    "preview": {
+      "provider_thread": "thread-fixture",
+      "provider_turn": "turn-fixture",
+      "observed_at": 1700000000,
+      "source": "codex",
+      "text": "Current provider output"
+    }
   }
 ]

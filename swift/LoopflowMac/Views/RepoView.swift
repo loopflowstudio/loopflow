@@ -8,7 +8,6 @@ struct RepoView: View {
     let initialRepoPath: String?
 
     @Environment(\.palette) private var palette
-    @State private var showsAutomation = false
     @State private var model: WorkModel
     /// The repository window retains its panes and native surfaces through
     /// navigation. Other repository windows never mount these surfaces.
@@ -41,6 +40,20 @@ struct RepoView: View {
         _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localMachineId: model.savedMachineId))
     }
 
+    @ToolbarContentBuilder
+    private var workToolbar: some ToolbarContent {
+#if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
+        }
+#else
+        ToolbarItem(placement: .navigation) { WorkBreadcrumbs(model: model) }
+#endif
+    }
+
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
@@ -65,12 +78,11 @@ struct RepoView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
         .accessibilityElement(children: .contain)
-        .toolbar {
-            if let repo = model.repoPath {
-                Button("Background progress", systemImage: "clock.arrow.circlepath") { showsAutomation = true }
-                    .popover(isPresented: $showsAutomation) { TaskAutomationView(query: query, repo: repo) }
-            }
-        }
+        .navigationTitle(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work")
+        .toolbar { workToolbar }
+        .toolbarBackground(palette.titlebarBackground, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .toolbarColorScheme(palette.titlebarColorScheme, for: .windowToolbar)
         .accessibilityLabel("Loopflow Desktop")
         .accessibilityIdentifier("loopflow")
         .background {
@@ -84,7 +96,7 @@ struct RepoView: View {
                         model.confirmMachine(machine)
                         model.bindWorkspaces(sessionWorkspaces, repository: repository)
                     }
-                    await model.openTaskLink(url)
+                    await model.receiveWorkLink(url)
                 }.frame(width: 0, height: 0)
             }
         }

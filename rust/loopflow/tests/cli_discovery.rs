@@ -891,14 +891,13 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
 }
 
 #[test]
-fn command_tree_has_no_registered_aliases() {
+fn command_tree_only_aliases_resume_to_connect() {
     fn check(command: &clap::Command) {
-        assert_eq!(
-            command.get_all_aliases().count(),
-            0,
-            "{}",
-            command.get_name()
-        );
+        let aliases = command.get_all_aliases().collect::<Vec<_>>();
+        if !aliases.is_empty() {
+            assert_eq!(command.get_name(), "connect");
+            assert_eq!(aliases, ["resume"]);
+        }
         for arg in command.get_arguments() {
             assert!(
                 arg.get_all_aliases().unwrap_or_default().is_empty(),
@@ -1163,22 +1162,17 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
     let output = success(run(
         repo.path(),
         home.path(),
-        &["help", "desktop", "split", "--json"],
+        &["help", "desktop", "shell", "--json"],
     ));
-    let split: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let shell: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
-        split,
-        describe_command(&["desktop".into(), "split".into()], false).unwrap()
+        shell,
+        describe_command(&["desktop".into(), "shell".into()], false).unwrap()
     );
     assert!(!home.path().join(".lf").exists());
-    let definition = &split["definition"];
+    let definition = &shell["definition"];
     let args = definition["arguments"].as_array().unwrap();
-    let axis = args.iter().find(|arg| arg["name"] == "axis").unwrap();
-    assert_eq!(axis["required"], true);
-    assert_eq!(
-        axis["values"],
-        serde_json::json!(["horizontal", "vertical"])
-    );
+    assert!(!args.iter().any(|arg| arg["name"] == "axis"));
     assert!(args
         .iter()
         .any(|arg| arg["name"] == "pane" && arg["required"] == false));
@@ -1203,7 +1197,7 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         serde_json::json!(["screen", "scrollback", "selection"])
     );
     assert!(read["definition"]["result_schema"]["$defs"]["DesktopTextResult"].is_object());
-    assert!(describe_command(&["desktop".into(), "splut".into()], false).is_err());
+    assert!(describe_command(&["desktop".into(), "split".into()], false).is_err());
     let all = describe_command(&["desktop".into()], true).unwrap();
     assert!(all["definition"]["commands"]
         .as_array()

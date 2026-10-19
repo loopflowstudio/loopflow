@@ -33,8 +33,7 @@
   `4cde15a0d3` removes Task inventory hashes/reads, not capture receipts.
   Installed input exceeds budget; rendering proves no adoption.
 
-[LOO-427's comparison](../../../docs/reviews/terminal-command-comparison.md) records
-command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
+Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff. October 8: design approved; implementation
 authorized through demo review. Owned cmux probe cleaned up.
 
@@ -138,8 +137,7 @@ pane IDs, including created/reused companions, not readiness. `help --json` deri
 syntax and Desktop result schemas from Clap/Rust DTOs; installed support and current
 Work eligibility stay separate. Native proof remains. LOO-397 is unstarted.
 Jack authorized Product follow-ups LOO-452 (shortcut customization, beyond LOO-403)
-and LOO-453 (readiness/events); research:
-[the comparison](../../../docs/reviews/terminal-command-comparison.md#rex-composition-and-discoverability-2026-10-10).
+and LOO-453 (readiness/events).
 
 Jack Heart (October 10) accepted Work-named repository/Wave/Task tabs; close hides.
 October 13 replaced their visible strip with sidebar switching, retaining ownership.
@@ -147,8 +145,8 @@ October 13 replaced their visible strip with sidebar switching, retaining owners
 hide/reopen retains panes, drafts and zoom.
 `37fa81df13`: terminals retain captured locations; Files/logs prefer recorded
 owners, including unavailable ones. Pane moves preserve locations, not execution
-transfer. Shell-default Split and
-no-acquisition bare navigation survive. Logs reuse the matching local stream or
+transfer. October 17 replaces shell-per-pane Split with Shell tabs;
+no-acquisition bare navigation survives. Logs reuse the matching local stream or
 owner-pinned reads. Foreign physical Task IDs cannot disprove local correspondence;
 late preparation retains its original Work. Files refuses changed owners without redirecting drafts. Native acceptance/admission remain unproved. Failures: `2feed22e1109:wave/product/MEMORY.md`,
 this paragraph; checks: `scratch/findings.md`, **Work-tab cutover**.
@@ -174,6 +172,32 @@ Jack subsequently selected stacking on LOO-412 and landing after it; the earlier
 baseline-first interpretation is superseded.
 Jack requested publication and merge; full matrix stays with CI. No installation,
 live migration or provider-account use is authorized.
+
+## Optional Task membership (LOO-505, accepted 2026-10-17)
+
+Jack Heart approved shipping after required checks. His October 17 review correction
+makes creation standalone even in bound Sessions/checkouts: only explicit `--wave`
+selects membership; `--no-wave` equals omission. Repository identity is required;
+optional Project supplies the derived Wave. The read projection is validated on
+save, not a second owner. No synthetic inbox or query-owned workspace.
+
+Jack selected **Task → Wave → repository** Workflow precedence and direct Wave
+default ownership, removing Project defaults/history. Repository `workflow:` uses
+strict local config; invalid selection is an error, absence needs selection.
+Captured graphs survive config, chapter and membership changes. Repository-default
+definitions bypass same-named Wave customizations.
+
+Jack renamed membership to `task move --wave/--no-wave`; position uses
+`task workflow move`. Same-repository moves may include active work and preserve
+execution, PR, checkout and conversation identity. Current Session membership
+follows the Task; capture/dispatch ownership, including null, remains historical.
+Next capture uses the new home; membership never transfers execution.
+
+Branch tests cover nullable transport, Linear recovery, Workflow defaults, live
+Flow detach/reattach and CLI-stream workspace/file-draft retention. A file draft
+does not prove unsent provider input. Broader gate, between-Wave and configured
+native proof remain; no external-progress credit follows. LOO-489 owns query UI;
+LOO-416 retains lifecycle scope.
 
 ## Task delivery boundary (LOO-418, revised 2026-10-11)
 
@@ -240,7 +264,8 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   put 83% of the read in one per-Task statement, and reading it in bulk met
   300 ms. Sample first.
 - The outline lists started Tasks only (2026-09-25). LOO-382 asked that a
-  new Task appear there; Jack kept the rule for now (2026-10-05).
+  new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
+  exposes unstarted standalone captures in repository inventory/navigation.
 
 ## Workflow and Flow alignment (LOO-386, 2026-10-07)
 
@@ -249,63 +274,41 @@ then requested gate and Task-completing landing. Review/approval:
 `9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
 
 Independent namespaces retain kind/name. Restart keeps the graph/history;
-Project selection affects future take-up. Latest FlowProcessDetail grants no
-control authority; selection, execution and TaskRunControl stay separate.
+Wave/repository defaults affect future take-up (LOO-505). Latest FlowProcessDetail
+grants no control authority; selection, execution and TaskRunControl stay separate.
 LOO-400's `e467ea995` supplies Process/LFID; old captures remain readable.
 Wave-owned commands supersede Project commands. A reset Task cannot advance
 from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
 `a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
 live-planning, configured-provider acceptance or chapter KR.
 
-## Task conversation and Workflows (LOO-353, PR #1439; October 4–6)
+## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
 
-Jack Heart approved the October 6 fixture Task view after three Desktop looks
-("good enough. approved", then "lets get this landed"). No real provider,
-populated store or live Home was shown (LOO-391). Full dated decisions,
-unreviewed implementation choices, failures and lessons:
-`96b3217fe:wave/product/MEMORY.md`, this heading; original design and demo:
-`e67cdc62f:scratch/` (`focus-on-your-own-work.md`, `questions.md`,
-`task-workflow.md`, `demo-task-workflow.md`).
+Jack Heart approved the October 6 fixture Task view and landing; no configured
+provider or populated live store was shown. History and evidence limits: `28dc141671:.lf/wave/product/MEMORY.md`, this heading;
+design/demo: `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
+`questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
 
-Surviving decisions:
-- One ongoing Task conversation holds design/review. Headless work is ordinary
-  `lf -b`; more conversations are deliberate. Session means interactive, Run
-  headless, with the same LfSession continuity.
-- Jack removed Task workers, mutable Flow switching, automatic database recovery,
-  `session ready/complete` and their handshake. Caller owns recovery; hiding or
-  selecting never terminates or approves. Task association includes checkout and
-  explicit binds, excluding repo/Wave scopes. Operational Flows hold autonomous
-  loops/XORs; `loop-or-next` decides.
-- Workflow is a captured, immutable graph with live position. Person and agent
-  choose through the same Task operation and Desktop buttons. Project Workflow
-  is future take-up; Task override wins. Restart returns to start without replacing
-  graph/history. Flow/Process naming and root `run` removal are superseded above.
-- `--steers-after` prevents repeated context growth. Nodes may run several Flow
-  processes; no chosen "primary" Flow. Task completion is now independent of
-  Workflow position under LOO-418, not the older ready/active/done derivation.
-- The Task header owns its Workflow graph, one Task Session plus shells and one
-  **+** menu for shell, Files or Flow log. No Monitor, Sessions-sidebar toggle
-  or Flow chip. Task pages consume only the Work stream's Task part.
-- Jack deferred nonreporter shell Waiting (LOO-384), no-PR completion/reopening
-  (LOO-385, now overlapping 418), inner Flow naming (386) and clipped graph (392).
+- One ongoing Task conversation holds review; additional Sessions are deliberate.
+  Interactive Session and headless Run share LfSession continuity. Association
+  includes checkout and explicit binds, excluding repository/Wave conversations.
+- Jack removed Task workers, mutable Flow switching, automatic recovery and the
+  Session ready/complete handshake. Hiding/selecting never terminates or approves.
+  Stopped Flows are history; caller-owned recovery starts authorized remaining work.
+- Workflow is a captured graph with live position. Restart preserves graph/history;
+  October 17's Task → Wave → repository selection replaces Project defaults.
+  Completion remains independent under LOO-418. Each Flow process is equal work;
+  `--steers-after` filters nodes without restarting them.
+- Task pages consume the Work stream; the header owns Workflow presentation beside
+  retained conversations/shells/files/logs. Monitor, Session-sidebar toggle and Flow chip remain retired.
+- Whole failed Flows currently retry three times; held exit 3 stays held. LOO-435
+  owns failed-step retry. Driver death and step-registration gaps retain uncertain
+  liveness; disabled Desktop Start does not exclude another CLI run. Nonreporter
+  Waiting and lone headless-skill visibility remain unresolved as archived.
 
-Unreviewed behavior and remaining evidence: whole failed Flows retry three times;
-exit 3 stays held. LOO-435 owns Jack's later failed-step retry request. Driver death
-and the step-registration gap retain uncertain liveness; another Task run is not
-excluded by Desktop's disabled Start button. Quiet/stream Waiting is superseded
-for reporters by OSC 7501, but nonreporter inference remains. A lone headless skill
-Run's visibility outside the Flow log remains Jack's open question. Older
-completion/force and no-Workflow startup behaviors are historical, not current
-requirements. The archive retains all prior evidence instead of inferring closure.
-
-Lessons: capture the model before implementing records; delete hidden jobs only
-with their replacements (Started, steer cursors, attribution, normalization).
-`INSERT OR REPLACE` skips update triggers; use upsert where revisions require them.
-SQL strings can compile against deleted columns. Whole-suite failures after passing
-slices are retained in the archive; diff rewritten plans for accidentally dropped work.
-
-October 6 gate failures and outstanding native/provider/migration proof:
-`16e9c950b9:wave/product/MEMORY.md`, **Task conversation and Workflows**.
+Lessons: capture the model before records; delete jobs with their replacements.
+Upsert when revisions depend on update triggers (`INSERT OR REPLACE` skips them).
+SQL can compile against removed columns; focused passes do not replace suites.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -317,8 +320,7 @@ Stopped execution is history, not permission to resume; an open conversation
 schedules nothing. Naming the Wave as next owner must not evade its own duty.
 Original decisions, continuation history and evidence limits:
 `28588f8910:.lf/wave/product/MEMORY.md`, this heading.
-The [review](../../../docs/reviews/session-operate-prompts.md) established simulations
-and read-only model runs, not installed behavior.
+The review established simulations and read-only model runs, not installed behavior.
 
 ## Capture and work-first entry (October 1–14)
 
@@ -436,45 +438,21 @@ observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
 Provider adoption and composed native-pane acceptance remain unproven; this does
 not establish status in cmux or herdr.
 
-## Current Tasks and completion history (2026-10-02)
+## Current Tasks and completion history (reconciled 2026-10-17)
 
-LOO-371's retired measurements and observer failures remain in the archive below;
-LOO-408 owns installed settlement.
+Jack Heart's October 17 Console approval replaces the sidebar's completion-range
+controls and selected-terminal-Task exception with explicit retained working order.
+The October 2–14 decisions, Growth counterexample, inline-edit semantics and proof
+limits remain at `ac973064c6:.lf/wave/product/MEMORY.md`, this heading. Historical
+records survive; navigation/filtering never completes Work or evicts panes and drafts.
 
-Jack Heart requested current work without obsolete duplicates, completed Tasks
-hidden initially, and Show completed with 7 days, positive N days and All time
-(LOO-369). Coordinator guidance limits that control to successful completions;
-it is not attributed as a separate decision from Jack. Canceled/duplicate history
-remains in the shared inventory and Linear. Window-local filters affect displayed
-rows and their count, never Task lifecycle, Flow settlement or Session membership.
-
-The observed Growth snapshot already contained canceled states; the Task summary
-dropped them. Preserve provider state separately from successful completion and
-carry actual completion time. Unknown dates belong only in All time; reopening
-makes planning current despite an old timestamp. Equal-revision storage enrichment
-may fill a genuinely absent completion-date key, but cannot change an observed
-null or date. Snapshot acquisition and unrelated updates cannot establish recency.
-
-Jack relayed that removed checkouts alone must not keep settled Tasks current.
-Started and unresolved execution own ordinary sidebar membership (LOO-462).
-October 14: Jack Heart selected an exception for the selected completed/canceled
-Task, with green Completed/red Canceled header text. Navigation away removes the
-exception; Back restores the same workspace and row without reopening execution.
-History/filter changes never evict native surfaces, files or drafts. Real CLI
-create/start/complete/abandon reaches the open subscription and production outline;
-retained native-view identity is synthetic/unmounted, not native acceptance.
-
-Jack Heart approved inline checkbox/number editing: remembered range starts at
-seven days; zero means All Tasks. Enter/blur applies, Escape cancels, invalid
-drafts preserve the range. Wave-scoped native text preserves glyph placement and
-scrolls long integers. Prototype details: the archive below.
-
-Earlier gate, seven focused tests and Jack's Growth screenshot are preserved at
-`c89c789fd1:.lf/wave/product/MEMORY.md`, this heading, and
-[the review evidence](../../../docs/reviews/task-history.md). The offline capture
-had no successful completions or Sessions: recency, native focus/continuation,
-live refresh and retained-Session review remain unproved. No sustained-use KR or
-external-progress credit follows.
+Preserve provider cancellation separately from successful completion and actual
+completion time. Reopening makes planning current despite an old timestamp;
+snapshot acquisition cannot establish recency. Equal-revision enrichment may fill
+an absent key, never replace an observed null or date. Missing checkouts alone
+cannot establish settlement. CLI subscription fixtures establish neither mounted
+input continuity nor native acceptance. LOO-408 retains installed settlement;
+retired numeric/soak obligations remain historical. No external-progress credit follows.
 
 ## Ask removal decision (2026-10-01)
 
@@ -549,20 +527,16 @@ Primary Sessions runtime moved to LOO-364.
 
 Jack also accepted ordinary Projects independent of optional chapter coordination
 (LOO-366), and a Task admission/completion audit (LOO-367). Task supplies purpose and
-continuity to Flows, not separate execution semantics. See
-[the dated review and retained design references](../../../docs/reviews/task-workspace.md)
-and [research](../../../docs/reviews/independent-operations.md). These decisions do not
+continuity to Flows, not separate execution semantics. These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
-## CI repair and waited landing (2026-10-01, reconciled 2026-10-08)
+## CI repair and waited landing (reconciled 2026-10-17)
 
-On LOO-365, Jack Heart chose one optional repository watcher, runnable from a
-terminal, launchd or Desktop per open repository; never a required resident.
-Repair needs no owning conversation and deduplicates per failing PR/head.
-A PR without a Task is reported, not repaired. Jack preferred this helper to the
-minute cron and wanted that cron removed. October 4 retired Flow resumption.
-Unreviewed exceptions—taskless landing, unarmed reporting, Desktop view—and proof
-limits remain at `53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
+LOO-365: Jack Heart chose an optional repository watcher over the minute cron.
+Repair needs no conversation and deduplicates per PR/head; taskless PRs are
+reported, not repaired. October 4 retired Flow resumption. Unreviewed taskless
+landing, unarmed reporting, Desktop view and proof limits remain at
+`53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
 
 October 8, LOO-418: Jack confirmed self-contained CI repair with Desktop closed
 and requested explicit `land --wait-and-fix` naming. Default waiting was not accepted.
@@ -570,12 +544,15 @@ Repeated land preserves merged work. Busy checkouts cannot poison another waiter
 After sync with #1512, caller ancestry exempts waiting; live or unresolved
 Processes still block. Unanswered turns alone are history, not execution.
 
-Finite landing (#1382) provided continuation after caller exit; #1384 moved
-repair to the watcher. #1287 fixed repair permissions and locks retained across
-canceled waits. No record establishes a land crash caused the switch. Task run retries whole failed Flows three times while its
-carrier survives; held exit 3 now stays held. Jack requested failed-step retry
-as Infrastructure LOO-435. Local CLI/provider fixtures pass; live repair and
-crashed-runner recovery remain unproven. Evidence: `53be55c70:scratch/`.
+October 17, LOO-503/#1586: Jack Heart required waited landing/repair to continue
+without elapsed-time cutoffs or synthetic timeout reruns. Live repair ownership
+survives publication of a new head; cancellation and concrete failures remain.
+Merge cannot invent Task completion intent. Paused-clock and CLI/Flow fixtures
+prove components; configured GitHub repair and installed upgrade remain unproved.
+Infrastructure owns that lifecycle, also used by standalone Tasks in LOO-505.
+Earlier finite-landing/watcher history: `070e5bb6a4:.lf/wave/product/MEMORY.md`,
+this heading. LOO-435 retains failed-step retry; whole-Flow retry and held exit 3
+remain distinct from waited delivery.
 
 ## Skill reduction decisions (2026-09-28)
 
@@ -635,23 +612,44 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (September 26–October 15)
+## Workspace redesign decisions (reconciled 2026-10-17)
 
-Jack Heart rejected September 26's composition despite structural fidelity:
-its warmth and chrome did not match the mocks. Full decisions, deferred owners
-and counterevidence: `77ff8e8eb8:.lf/wave/product/MEMORY.md`, **Workspace redesign decisions (2026-09-26)**.
-Retain serif repo/page/Task titles, sans Wave rows without decorative glyph/count,
-shared Work binding and native surface ownership. October 14's semantic roles
-cover both appearances, superseding the light-first emphasis.
+Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
+superseding dashboard/grid, favorites, attention sorting and automatic sidebar
+collapse proposals. Stable working Tasks precede direct Wave rows in one scrolling
+sidebar. One native titlebar holds breadcrumbs, tools and actions; Lato controls,
+mono excerpts, neutral selection and quiet Dark burgundy replace older serif/Ink
+on Paper navigation. Prior rejected compositions and limits remain at
+`ac973064c6:.lf/wave/product/MEMORY.md`, this heading.
 
-October 15, LOO-462: Jack selected Ink on Paper, one Work selection mirrored in
-Needs you, drill-in Repo/Wave/Task navigation and nested Work/pane layouts.
-Command-click adds adjacent Work; ordinary click replaces the focused slot;
-close hides and retains panes/drafts. Resizable/collapsible sidebar and keyboard
-Back/Forward replace persistent adjacent columns and visible history buttons.
-Program headers and rounded panes supersede the old edge-to-edge/no-header rule.
-Parent `77ff8e8eb8` establishes no mounted focus, provider continuity or visual
-acceptance. Cross-launch layout restoration remains excluded.
+Explicitly opening started, unpaused work appends once; attention/filter changes
+cannot reorder slots. Pause hides membership without discarding retained order,
+panes or drafts. Completion does not automatically remove retained work. A Wave
+pairs its conversation with all current planned and started Tasks. The shared
+default query excludes unstarted/terminal Tasks, so its members cannot stand in
+for planning inventory. Repository/Wave selection stays passive; unstarted Task
+entry shows its brief. LOO-505 supplies standalone membership and moves.
+
+Jack accepted LOO-497's Shell/Files tabs in the same cut: one Shell tool, multiple
+terminal tabs; Files owns document/Brief/Changes tabs. Hiding tools preserves their
+clients and drafts. Existing workspace/layout/surface owners remain authoritative;
+the unused compact tile renderer was removed. LOO-497 retains dashboards/public
+APIs, LOO-416 cross-launch attachment, LOO-452 rebinding. Cmd-number uses stable
+slots; Ctrl-Tab cycles them; history retains Cmd-brackets. Publication for demo
+review is authorized, not merge or Task completion.
+
+Preview freshness is separate from execution state: Codex records thread/turn/time,
+clears on turn start and fences replacement attachments. Swift pairs status/text
+from one Session; running text falls back to summary after 30 seconds, Available
+results retain their age. Other providers lack qualified previews.
+
+October 17 recovery: the demo retained a Codex draft but Claude → Codex failed
+before Claude saved a transcript; later transfer succeeded. Preparation now reads
+requested-provider history before terminal release; failure preserves concurrent
+Session updates and permits retry. Missing history is not an empty conversation.
+An exited status writer restarts on a later event. Headless checks cover refusal,
+retry, new-turn clearing and observation recovery; mounted retention and visual
+acceptance remain open. Jack Heart cut Open in editor on October 17.
 
 October 15, LOO-492: Jack Heart clarified that nested corner curves need even
 clearance; text padding alone does not satisfy the defect. The implementation
@@ -727,18 +725,17 @@ preserve the failed attempts and superseded proposals. Current usage lives in
 
 ## Accepted calmer workspace (2026-09-25)
 
-Repo → Wave → Task is current navigation (LOO-462); conversations live inside
-retained Work. Project owns chapters. Optimize one repository: connected
-header/sidebar, started
-Tasks only, bottom search. Starting work is durable evidence, independent of
-Session/process liveness; inspection never starts Task execution. The accepted
+LOO-489's October 17 Console contract above owns current navigation; conversations
+live inside retained Work and Project owns chapters. The older started-only rule does not hide
+new standalone captures under LOO-505. Starting work is durable evidence, independent
+of Session/process liveness; inspection never starts Task execution. The accepted
 September 30 desktop discovery operation ensures primary repo/Wave conversations;
 ordinary list/status reads remain read-only. Wave detail holds its
 objective, Current KRs and complete Task plan, including unstarted Tasks.
 
-October 15's Work navigation/selection and themes supersede September's D
-composition (`ffdcf68935:.lf/wave/product/MEMORY.md`, this heading).
-Retain serif titles, sans body, lowercase mono Flow skills and one Task title.
+October 17's Console supersedes the older navigation typography and chrome;
+September's D composition remains at `ffdcf68935:.lf/wave/product/MEMORY.md`, this heading.
+Retain lowercase mono Flow skills and one Task title.
 Description holds current scope/blockers; collapsed Comments hold dated updates.
 Omit ELSEWHERE, Local work evidence and preview jargon.
 
@@ -828,9 +825,8 @@ or soak acceptance.
 
 Keep hierarchy navigation and Task-workspace interaction as separate observations,
 with exact identities, source/build/population, rendered endpoint, retained input
-and failed attempts. The opt-in desktop-performance runner and hash-verified
-[baseline](../../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
-remain useful instruments: synthetic Work, three owned cat PTYs, forced bitmap/text
+and failed attempts. The opt-in desktop-performance runner remains a useful
+instrument: synthetic Work, three owned cat PTYs, forced bitmap/text
 capture and PTY replies. They establish neither compositor hitches nor provider
 continuation. Its Monitor scenarios no longer compare because that pane was deleted.
 
@@ -853,9 +849,8 @@ no new store-cleanup or installation authority.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-The accepted start, not the summer draft, is frozen at
-[the chapter start](../../../.lf/chapters/20260923T000959Z-502f011b/start.md)
-(23 September–21 October). Gate 2 accepted planning, not publication. The later
+The accepted start covered 23 September–21 October. Gate 2 accepted planning,
+not publication. The later
 September 24 hierarchy decisions govern. Historical KR counts and review mechanics:
 `b1e3f623a:wave/product/MEMORY.md`; planning-review lessons:
 `4a84d93b59:.lf/wave/product/MEMORY.md`, this heading.
@@ -926,9 +921,9 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   observed conflicts. No file mirror or Desktop plan becomes another authority.
   Current reads expose one chapter and direct Tasks; historical Projects retain
   provenance.
-- PM writes resolve stable provider edges, not names or Issue prefixes. Task creation
-  selects its Wave's current Project; ordinary Task saves cannot restore an old
-  parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
+- PM writes resolve stable provider edges, not names or Issue prefixes. Explicit Wave
+  creation selects its current Project; standalone creation has none. Ordinary
+  Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
   repository configuration owns the Linear Team.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
@@ -1140,4 +1135,4 @@ proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
   must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Released migrations are immutable.** The Product/Intelligence `061` collision
   left existing databases missing a column. Test upgrades from the released frontier;
-  AGENTS.md owns one draft per Task. [Incident history](../../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).
+  AGENTS.md owns one draft per Task.

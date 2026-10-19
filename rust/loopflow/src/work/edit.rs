@@ -101,7 +101,7 @@ work_values! {
     (ProjectRank, "project_rank", u32),
     (ProjectInitiatives, "project_initiatives", Vec<String>),
     (ProjectTeams, "project_teams", Vec<String>),
-    (TaskProject, "task_project", String),
+    (TaskProject, "task_project", Option<String>),
     (TaskLinearId, "task_linear_id", Option<String>),
     (TaskIdentifier, "task_identifier", String),
     (TaskTitle, "task_title", Option<String>),
@@ -115,7 +115,8 @@ work_values! {
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
     (CommentTask, "comment_task", String),
-    (Workflow, "workflow", String),
+    (HistoricalProjectWorkflow, "workflow", String),
+    (WaveWorkflow, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
     (Disposition, "disposition", Disposition),
@@ -135,9 +136,10 @@ impl WorkValue {
                     *v = canonical_uuid(v);
                 }
             }
-            Self::WaveProject(Some(v)) => *v = canonical_prefixed(v, "proj_"),
+            Self::WaveProject(Some(v)) | Self::TaskProject(Some(v)) => {
+                *v = canonical_prefixed(v, "proj_")
+            }
             Self::ProjectWave(v) => *v = canonical_uuid(v),
-            Self::TaskProject(v) => *v = canonical_prefixed(v, "proj_"),
             Self::CommentTask(v) => *v = canonical_prefixed(v, "task_"),
             Self::TaskIdentifier(v) => *v = canonical_task_identifier(v),
             Self::ProjectInitiatives(values) | Self::ProjectTeams(values) => {

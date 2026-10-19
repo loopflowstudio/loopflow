@@ -302,10 +302,6 @@ public struct RegistryQuery: Sendable {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
-        _ = try await run(["wave", "workflow", "set", name, wave], cwd)
-    }
-
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust takes the Task's edge or its Project's workflow.
     public func runTask(issue: String, flow: String?, cwd: String?) async throws {
@@ -320,7 +316,12 @@ public struct RegistryQuery: Sendable {
 
     /// Put the Task at a node of its Workflow without running anything.
     public func moveTask(issue: String, node: String, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node], cwd)
+        _ = try await run(["task", "workflow", "move", issue, node], cwd)
+    }
+
+    public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
+        let destination = wave.map { ["--wave", $0] } ?? ["--no-wave"]
+        _ = try await run(["task", "move", issue] + destination, cwd)
     }
 
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
@@ -341,8 +342,8 @@ public struct RegistryQuery: Sendable {
 
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
-    public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
-        let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
+    public func taskComments(id: String, cwd: String) async throws -> TaskComments {
+        let stdout = try await run(["task", "comment", id, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
     }
 
@@ -360,9 +361,9 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ContextReport.self, from: stdout)
     }
 
-    public func updateTaskDirective(id: String, wave: String, text: String, cwd: String) async throws {
+    public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
         _ = try await run([
-            "task", "edit", id, "--wave", wave, "--notes=\(text)",
+            "task", "edit", id, "--notes=\(text)",
         ], cwd)
     }
 
@@ -430,7 +431,8 @@ public struct RegistryQuery: Sendable {
 
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
-        var args = ["session", "ensure", "--json"]
+        var args = ["session", "connect", "--prepare", "--json"]
+        if wave == nil { args = ["--repo", cwd] + args }
         if let wave { args += ["--wave", wave] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
@@ -448,9 +450,11 @@ public struct RegistryQuery: Sendable {
     public func prepareSession(
         id: String,
         takeover: Bool = false,
+        agent: String? = nil,
         cwd: String? = nil
     ) async throws -> SessionRecord {
         let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
+            + (agent.map { ["--agent", $0] } ?? [])
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
@@ -467,8 +471,17 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Replace the primary conversation with fresh Work context; retain its history.
-    public func resetSession(id: String, agent: String?, cwd: String?) async throws -> SessionRecord {
-        var args = ["session", "new", id, "--json"]
+    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
+        var args = ["session", "connect", "--fresh", "--prepare", "--json"]
+        if session.taskPrimary, session.taskIds.count == 1, let task = session.taskIds.first {
+            args += ["--task", task]
+        } else if session.primaryScope == "wave", let wave = session.waveId {
+            args += ["--wave", wave]
+        } else if session.primaryScope == "repository" {
+            args = ["--repo", session.cwd] + args
+        } else {
+            throw RegistryQueryError("Session is not a primary conversation.")
+        }
         if let agent { args += ["--agent", agent] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
@@ -617,14 +630,16 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: String
     public let waves: [WaveRoadmap]
+    public let tasks: WorkEvidence<RoadmapTask>
 
     enum CodingKeys: String, CodingKey {
-        case waves
+        case waves, tasks
         case generatedAt = "generated_at"
     }
 }
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let workflow: String?
     public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
@@ -635,7 +650,7 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
-        case wave, projects, tasks
+        case wave, projects, tasks, workflow
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }

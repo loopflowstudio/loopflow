@@ -62,7 +62,7 @@ def _resource_report() -> dict[str, object]:
     return {
         "schema": 1,
         "ok": True,
-        "policy_path": "performance/budgets.json",
+        "policy_path": "scripts/performance-budgets.json",
         "before": snapshot,
         "after": snapshot,
         "recovery": [],
@@ -865,7 +865,8 @@ def test_resource_timeout_stops_its_cleanup_child(tmp_path, monkeypatch):
     script = tmp_path / "resources.py"
     child = f"import time; from pathlib import Path; time.sleep(1); Path({str(marker)!r}).touch()"
     script.write_text(
-        f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(20)"
+        f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); "
+        "time.sleep(20)"
     )
     monkeypatch.setattr(gate, "RESOURCE_SCRIPT", script)
     monkeypatch.setattr(gate, "RESOURCE_RECOVERY_TIMEOUT", 0.3)

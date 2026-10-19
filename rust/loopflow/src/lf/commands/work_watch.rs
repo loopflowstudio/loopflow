@@ -74,6 +74,7 @@ pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     PeerPlanning(Option<PeerPlanningPart>),
     Sessions(Option<SessionsPart>),
+    Selections(Option<SelectionsPart>),
     Task(Option<Box<TaskPart>>),
     TaskHistory(Option<Box<TaskHistoryPart>>),
     Wave(Option<Box<WavePart>>),
@@ -105,6 +106,12 @@ pub struct SessionsPart {
     pub repo: String,
     pub includes_headless: bool,
     pub entries: Vec<SessionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectionsPart {
+    pub repo: String,
+    pub plans: Vec<crate::work::selection::ViewPlan>,
 }
 
 /// Selected workspace facts and `lf flow show --processes` for each of its Flows,
@@ -190,6 +197,7 @@ struct Scope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Part {
+    Selections,
     TaskHistory,
     Sessions,
     Planning,
@@ -203,18 +211,20 @@ enum Part {
 impl Part {
     // Deliver the selected Work before the portfolio; every part still reads
     // the same snapshot, and a checkpoint follows the complete pass.
-    const ALL: [Part; 8] = [
+    const ALL: [Part; 9] = [
         Part::Task,
         Part::Wave,
         Part::Sessions,
+        Part::Selections,
         Part::Planning,
         Part::PeerPlanning,
         Part::WorkActivity,
         Part::TaskHistory,
         Part::Activity,
     ];
-    const SCOPED: [Part; 5] = [
+    const SCOPED: [Part; 6] = [
         Part::Sessions,
+        Part::Selections,
         Part::PeerPlanning,
         Part::Task,
         Part::Wave,
@@ -224,6 +234,7 @@ impl Part {
     fn name(self) -> &'static str {
         match self {
             Part::Sessions => "sessions",
+            Part::Selections => "selections",
             Part::Planning => "planning",
             Part::PeerPlanning => "peer_planning",
             Part::Task => "task",
@@ -272,6 +283,7 @@ impl Part {
             Part::PeerPlanning => Duration::from_secs(5),
             Part::Activity
             | Part::Sessions
+            | Part::Selections
             | Part::Task
             | Part::TaskHistory
             | Part::WorkActivity => ACTIVITY_CLOCK,
@@ -280,7 +292,7 @@ impl Part {
 
     fn selected(self, scope: &Scope) -> bool {
         match self {
-            Part::Sessions | Part::PeerPlanning => scope.repo.is_some(),
+            Part::Sessions | Part::PeerPlanning | Part::Selections => scope.repo.is_some(),
             Part::Task => scope.task.is_some(),
             Part::TaskHistory => scope.history.is_some(),
             Part::Wave => scope.wave.is_some(),
@@ -501,19 +513,23 @@ impl Reader {
             let Ok(checkouts) = store.sqlite.task_checkouts() else {
                 return;
             };
+            let mut paths: Vec<_> = checkouts.into_iter().map(|row| row.worktree).collect();
+            if let Ok(repositories) = store.sqlite.repository_paths() {
+                paths.extend(repositories);
+            }
+            if let Some(repo) = &self.scope.repo {
+                paths.push(std::path::PathBuf::from(repo));
+            }
             let wake = shared.clone();
-            self.checkouts.watch(
-                checkouts.into_iter().map(|row| row.worktree).collect(),
-                move || {
-                    lock(&wake).look = true;
-                    wake.1.notify_all();
-                },
-            );
+            self.checkouts.watch(paths, move || {
+                lock(&wake).look = true;
+                wake.1.notify_all();
+            });
             self.watched_at = Some(revisions.planning);
         }
         let changed = self.checkouts.take(Instant::now());
         // Every one is asked again, not only up to the first that differs.
-        let mut differs = false;
+        let mut differs = !changed.is_empty();
         for worktree in &changed {
             differs |= crate::git::reread_retained(worktree);
         }
@@ -573,6 +589,7 @@ impl Reader {
                 };
                 for part in Part::SCOPED {
                     let changed = match part {
+                        Part::Selections => self.scope.repo != next.repo,
                         Part::Sessions => {
                             self.scope.repo != next.repo || self.scope.headless != next.headless
                         }
@@ -684,6 +701,13 @@ impl Reader {
                         crate::ops::planning_sync::peer_status(store, &root.to_string()).await?;
                     WorkContent::PeerPlanning(Some(PeerPlanningPart { repo, destinations }))
                 }
+                Part::Selections => {
+                    let repo = self.scope.repo.clone().context("no repository in scope")?;
+                    let root = CanonicalRepo::discover(Path::new(&repo))?;
+                    let plans =
+                        crate::work::selection::default_plans(&store.sqlite, &root.to_string())?;
+                    WorkContent::Selections(Some(SelectionsPart { repo, plans }))
+                }
                 Part::Sessions => {
                     let repo = self.scope.repo.clone().context("no repository in scope")?;
                     let filter = crate::session::SessionFilter {
@@ -782,6 +806,10 @@ impl Reader {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
                     waves: Vec::new(),
+                    tasks: super::waves::Evidence::Ok {
+                        items: Vec::new(),
+                        truncated: false,
+                    },
                 },
                 waves: Vec::new(),
             }))),
@@ -795,7 +823,7 @@ impl Reader {
                 entries: Vec::new(),
             })),
             Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
-            Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
+            Part::Selections | Part::Task | Part::TaskHistory | Part::Wave | Part::WorkActivity => {
                 anyhow::bail!("no Loopflow store exists in this Machine yet")
             }
         })
@@ -807,6 +835,7 @@ fn unavailable(part: Part) -> WorkContent {
         Part::Planning => WorkContent::Planning(None),
         Part::PeerPlanning => WorkContent::PeerPlanning(None),
         Part::Sessions => WorkContent::Sessions(None),
+        Part::Selections => WorkContent::Selections(None),
         Part::Task => WorkContent::Task(None),
         Part::TaskHistory => WorkContent::TaskHistory(None),
         Part::Wave => WorkContent::Wave(None),
@@ -1130,7 +1159,7 @@ mod tests {
     use crate::lf::commands::top::ActivitySnapshot;
 
     #[test]
-    fn released_planning_failure_keeps_the_stored_workflow_readable() {
+    fn planning_failure_keeps_the_stored_workflow_readable() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
@@ -1143,9 +1172,12 @@ mod tests {
             .replace("{task}", task.as_str())
             .replace("{repo}", directory.path().to_str().unwrap());
         conn.execute_batch(&fixture).unwrap();
+        crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
+            .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
-        // Use the released shared schema through a read-only connection. The
-        // fixture lives outside the real Machine and has no draft provenance.
+        // Inject a planning-only failure after upgrading retained work, then
+        // prove the independent Workflow read needs no repair or writer.
         let reader = super::Reader {
             store: Some(std::sync::Arc::new(crate::store::Store {
                 sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),

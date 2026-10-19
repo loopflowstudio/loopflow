@@ -102,20 +102,43 @@ pub(crate) async fn explain_connect(
     target: super::SessionTarget<'_>,
     mode: OpenMode,
     prepare_only: bool,
+    fresh: bool,
 ) -> SessionConnectExplanation {
-    let selector = match super::select_connection(store, cwd, target, false).await {
-        Ok(selector) => selector,
+    use crate::session::PrimaryScope;
+    let selected = async {
+        if let super::SessionTarget::Session(id) = target {
+            return Ok((None, Some(id.to_string())));
+        }
+        let scope = super::connection_scope(store, cwd, target).await?;
+        let session = if fresh {
+            None
+        } else {
+            match &scope {
+                PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
+                _ => store.sqlite.primary_session(&scope)?,
+            }
+        };
+        Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id.to_string())))
+    }
+    .await;
+    let (scope, selector) = match selected {
+        Ok(selected) => selected,
         Err(error) => return SessionConnectExplanation::unavailable(error),
+    };
+    let task = match &scope {
+        Some(PrimaryScope::Task(task)) => Some(task.as_str()),
+        _ => None,
+    };
+    let wave = match &scope {
+        Some(PrimaryScope::Wave(wave)) => Some(wave.as_str()),
+        _ => None,
     };
     let mut report = SessionConnectExplanation {
         resolution: crate::ops::context::explain_context(
             store,
             cwd,
-            WorkSelection {
-                task: None,
-                wave: None,
-            },
-            Some(&selector),
+            WorkSelection { task, wave },
+            selector.as_deref(),
             None,
         )
         .await,
@@ -125,13 +148,43 @@ pub(crate) async fn explain_connect(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
+    if let Some(PrimaryScope::Repository(_)) = &scope {
+        report.resolution.task = ContextFact::Unbound;
+        report.resolution.wave = ContextFact::Unbound;
+    }
+    if selector.is_none() {
+        if let Some(scope @ (PrimaryScope::Repository(_) | PrimaryScope::Wave(_))) = &scope {
+            let path = match &report.resolution.repository_path {
+                ContextFact::Bound { value, .. } => Path::new(value),
+                _ => cwd,
+            };
+            match super::primary::scope_worktree(path, scope) {
+                Ok(plan) => {
+                    report.resolution.checkout = ContextFact::Bound {
+                        value: plan.worktree_path.to_string_lossy().into_owned(),
+                        source: "persistent_checkout".into(),
+                    }
+                }
+                Err(error) => report.unavailable.push(error.to_string()),
+            }
+        }
+    }
     if let ContextFact::Bound { source, .. } = &mut report.resolution.session {
         if !matches!(target, super::SessionTarget::Session(_)) {
             *source = "contextual_session".into();
         }
     }
-    if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await {
-        report.unavailable.push(error.to_string());
+    if let Some(selector) = selector {
+        if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await
+        {
+            report.unavailable.push(error.to_string());
+        }
+    } else {
+        report.action = Some(SessionConnectAction {
+            intent: SessionConnectIntent::Start,
+            mode,
+            prepare_only,
+        });
     }
     report
 }
@@ -198,7 +251,7 @@ async fn read_connection(
     report.actions = super::session_actions(state);
     // Retained terminal attachment precedes the native-client refusal in ordinary open.
     // With no socket observation, report the native fallback's refusal conditionally.
-    if provider.is_some() {
+    if !prepare_only && provider.is_some() {
         if let Err(error) = mode.require_action(state) {
             if intent == SessionConnectIntent::ConnectOrResume {
                 report

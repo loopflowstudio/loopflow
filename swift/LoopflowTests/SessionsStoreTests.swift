@@ -7,7 +7,7 @@ import Testing
 @Suite("Sessions store")
 @MainActor
 struct SessionsStoreTests {
-    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode"])
+    @Test("Provider switching keeps the Session and prepares an explicit provider launch", arguments: ["claude", "codex", "opencode", "pi"])
     func switchingProviderKeepsSession(agent: String) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "main", state: "closed", replacing: true)
@@ -21,7 +21,34 @@ struct SessionsStoreTests {
         #expect(prepared.record.title == previous.record.title)
         #expect(prepared.launchId != previous.launchId)
         #expect(prepared.launchArguments == ["lf", "session", "connect", "main", "--takeover", "--agent", agent])
+        #expect(prepared.presentationProvider == agent)
         #expect(item(store, "other")?.state == .pending)
+    }
+
+    @Test("Prepared Sessions accept current provider and terminal evidence without losing their launch")
+    func preparationRetainsCommandButRefreshesProvider() async throws {
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            session(id: "main", state: "closed", replacing: true)
+        })
+        store.reconcile(try records([session(id: "main", state: "active")]))
+        try await store.switchProvider("main", to: "claude")
+        let launch = try #require(item(store, "main")).launchArguments
+        var wire = try #require(JSONSerialization.jsonObject(with: Data(session(id: "main", state: "active").utf8)) as? [String: Any])
+        wire["provider"] = "claude"
+        wire["agent_process_id"] = "new-agent"
+        wire["terminal_ids"] = ["current-terminal"]
+        let observed = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        store.reconcile([observed])
+        let prepared = try #require(item(store, "main"))
+        #expect(prepared.record.provider == "claude")
+        #expect(prepared.record.agentProcessId == "new-agent")
+        #expect(prepared.launchArguments == launch)
+        #expect(SessionProviderReading(record: prepared.record, terminal: "current-terminal")?.agentProcessId == "new-agent")
+        #expect(SessionProviderReading(record: prepared.record, terminal: "previous-terminal") == nil)
+        store.recordPaneLive("main")
+        store.reconcile([observed])
+        #expect(item(store, "main")?.agentOverride == nil)
+        #expect(item(store, "main")?.presentationProvider == "claude")
     }
 
     @Test("A refused provider change preserves the original Session presentation")
@@ -35,18 +62,91 @@ struct SessionsStoreTests {
         #expect(item(store, "main") == previous)
     }
 
-    @Test("Reset prepares the successor and keeps the old conversation accessible")
-    func resetPreparesSuccessor() async throws {
+    @Test("A failed transfer retains concurrent Session updates and can retry")
+    func failedTransferCanRetry() async throws {
+        let (requests, request) = AsyncStream<Void>.makeStream()
+        let (responses, response) = AsyncStream<Bool>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args.suffix(2) == ["--agent", "codex"] else {
+                throw RegistryQueryError("Transfer preparation did not select Codex")
+            }
+            request.yield(())
+            for await fails in responses {
+                if fails { throw RegistryQueryError("Claude transcript was not found. Retry after Claude saves its first turn.") }
+                break
+            }
+            return session(id: "main", state: "closed", replacing: true)
+        })
+        let original = try #require(records([session(id: "main", state: "closed")]).first)
+        store.reconcile([original])
+        store.adoptPreparation(original)
+        store.recordPaneLive("main")
+        let previous = try #require(item(store, "main"))
+        let transfer = Task { try await store.switchProvider("main", to: "codex") }
+        for await _ in requests { break }
+        #expect(item(store, "main") == previous)
+        let updated = try #require(records([session(id: "main", state: "active")
+            .replacingOccurrences(of: "Design the control surface", with: "Retained conversation")]).first)
+        store.reconcile([updated])
+        response.yield(true)
+        await #expect(throws: RegistryQueryError.self) { try await transfer.value }
+        #expect(item(store, "main")?.record.title == "Retained conversation")
+        #expect(item(store, "main")?.launchId == previous.launchId)
+        #expect(item(store, "main")?.agentOverride == nil)
+        response.yield(false)
+        try await store.switchProvider("main", to: "codex")
+        #expect(item(store, "main")?.id == original.id)
+        #expect(item(store, "main")?.state == .prepared)
+        #expect(item(store, "main")?.presentationProvider == "codex")
+    }
+
+    @Test("Reset prepares the successor and keeps the old conversation accessible", arguments: [false, true])
+    func resetPreparesSuccessor(bound: Bool) async throws {
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             session(id: "fresh", state: "available")
         })
-        store.reconcile(try records([session(id: "main", state: "active"), session(id: "other", state: "available")]))
+        store.reconcile(try records([session(id: "main", state: "active", primary: true), session(id: "other", state: "available")]))
+        if !bound {
+            let unbound = session(id: "main", state: "active", primary: true)
+                .replacingOccurrences(of: #""work": { "kind": "task", "id": "task-main" }"#, with: #""work": null"#)
+            store.reconcile(try records([unbound]))
+        }
+        let previous = try #require(item(store, "main"))
         let successor = try await store.reset("main")
         #expect(successor.id == "fresh")
         #expect(item(store, "fresh")?.state == .prepared)
         #expect(item(store, "fresh")?.launchArguments == ["lf", "session", "connect", "fresh"])
-        #expect(item(store, "main")?.state == .ended("Replaced by a fresh conversation."))
+        #expect(item(store, "main")?.state == previous.state)
         #expect(item(store, "other")?.state == .pending)
+    }
+
+    @Test("Reset leaves the previous Session live and preserves updates while preparing", arguments: [false, true])
+    func resetPreservesConcurrentUpdates(fails: Bool) async throws {
+        let (requests, request) = AsyncStream<Void>.makeStream()
+        let (responses, response) = AsyncStream<Void>.makeStream()
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            request.yield(())
+            for await _ in responses { break }
+            if fails { throw RegistryQueryError("Preparation failed") }
+            return session(id: "fresh", state: "available")
+        })
+        store.reconcile(try records([session(id: "main", state: "closed", primary: true)]))
+        let previous = try #require(item(store, "main"))
+        store.adoptPreparation(previous.record)
+        store.recordPaneLive("main")
+
+        let reset = Task { try await store.reset("main") }
+        for await _ in requests { break }
+        #expect(item(store, "main")?.state == .live)
+        store.noteSurfaceClosed(.session("main", machineId: fixtureMachineId), output: "Client exited")
+        response.yield(())
+        if fails {
+            await #expect(throws: RegistryQueryError.self) { try await reset.value }
+        } else {
+            let successor = try await reset.value
+            #expect(successor.id == "fresh")
+        }
+        #expect(item(store, "main")?.state == .ended("Client exited"))
     }
 
     @Test("Filtered refresh retains Sessions without creating local terminals")
@@ -320,7 +420,7 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
     )
 }
 
-private func session(id: String, state: String, replacing: Bool = false) -> String {
+private func session(id: String, state: String, replacing: Bool = false, primary: Bool = false) -> String {
     // A conversation available for a person has no client; `available` is its attention.
     let wire = state == "available" ? "unknown" : state
     return """
@@ -335,7 +435,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
+      "title_source": "generated", "task_primary": \(primary), "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [],
       "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--takeover\"" : "")]
     }
     """

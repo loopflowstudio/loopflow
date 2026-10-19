@@ -286,8 +286,9 @@ fn scopes_flow_downward_and_idle_peers_keep_independent_pending_receipts() {
         )
         .unwrap();
         conn.execute_batch(
-            "INSERT INTO tasks(id,project_id,issue_identifier,worktree,created_at)
-            VALUES('task','project','T-1','/task',1),('sibling-task','project','T-2','/sibling',1);
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,project_id,issue_identifier,worktree,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','project','T-1','/task',1),('repo_00000000000040008000000000000001','sibling-task','project','T-2','/sibling',1);
             UPDATE tasks SET checkout_machine_id=(SELECT id FROM machines WHERE route='local');
             UPDATE agent_sessions SET repo='/repo',cwd='/' ;
             UPDATE agent_sessions SET cwd='/task' WHERE id IN ('session','peer');

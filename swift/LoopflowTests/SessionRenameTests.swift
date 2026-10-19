@@ -100,14 +100,14 @@ import Testing
     func breadcrumbNamesTheExactSession() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let task = WorkReference.task(id: "ts_review00000000000000000000000000")
-        let one = WorkProjection(roadmaps: roadmap.waves, sessions: [try record("first", title: "review-design", work: task)])
+        let one = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [try record("first", title: "review-design", work: task)])
         let single = try #require(one.breadcrumb(selection: nil, sessionId: "first"))
         #expect(single.wave?.roadmap.wave.name == "product")
         #expect(single.task?.task.task.identifier == "W2-131")
         #expect(single.session?.id == "first")
         #expect(single.siblings.map(\.id) == ["first"])
 
-        let many = WorkProjection(roadmaps: roadmap.waves, sessions: [
+        let many = WorkProjection(roadmaps: roadmap.waves, inventory: roadmap.tasks.items, sessions: [
             try record("first", title: "Launch design", work: task),
             try record("second", title: "Verification cases", work: task),
             try record("loose", title: "lyric-cadenza", work: nil),

@@ -3,9 +3,10 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-/// Work destinations and scoped actions; Task entry opens its conversation, not its Workflow.
+/// Work destinations and scoped actions; navigation preserves the retained workspace.
 enum WorkDestination: Hashable {
     case repository
+    case openRepository(String)
     case wave(String)
     case task(String)
     case flow(String)

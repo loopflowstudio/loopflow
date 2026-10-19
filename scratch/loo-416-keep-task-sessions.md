@@ -263,13 +263,21 @@ One integrated LOO-416 outcome; serialization alone cannot complete it.
    with: lf resume <id>` (`transport/native.rs`). `serve_locked` now hands its
    transport to the launch, removing a nested owner. Leaving ends the invocation
    and its AgentProcess on all four harnesses, Codex included, so Codex's "work
-   continues" was also false. Relay frames above 16 MiB (Codex `skills/list`)
-   dropped the connection; relay limits are lifted. Proof (disposable home, real
+   continues" was also false. Relay frames above 16 MiB (Codex `plugin/list`
+   carries the whole 7,000+ plugin remote catalog) dropped the connection; relay
+   limits are lifted (Codex's own client accepts 128 MiB). Proof (disposable home, real
    providers): exit, detach, reattach without relaunch, pasted command works, no
    native text leaks — Claude, Codex, OpenCode, Pi. Open: a dropped partial
    final frame when a client's last frame and exit text share one read; `lf
    resume` takes only full ids; repeated `Loopflow diagnostics:` startup lines
    (#1595); raw `codex resume` while lf's app-server holds the thread untested.
+   Accepted residual (Jack, October 18): a drop after thread creation but before
+   the TUI receives its ID leaves Codex at "Reconnect failed", ignoring `/exit`;
+   Ctrl+C then `lf resume` continues the thread without replay, but a turn already
+   accepted ends interrupted and may lose its input. The trigger was the 16 MiB
+   frame; lf relaunching the TUI on the known thread is the fix if it recurs.
+   Task creation no longer admits Sessions (Jack, October 18): the first connect,
+   including `--prepare`, creates the Task's conversation.
 
 **Verification:** build changed code and run focused behavioral suites. Gate owns
 affected Desktop/session/control/file/DTO suites plus the candidate CLI transport

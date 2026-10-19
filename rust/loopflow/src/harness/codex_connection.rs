@@ -18,9 +18,9 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-// Codex sends single frames larger than tungstenite's defaults (skills/list
-// exceeded 16 MiB). The relay forwards between two Codex endpoints and
-// imposes no limit of its own.
+// Codex sends single frames larger than tungstenite's defaults: plugin/list
+// carries the whole curated marketplace (7,000+ plugins, over 16 MiB). The
+// relay forwards between two Codex endpoints and imposes no limit of its own.
 fn relay_config() -> Option<WebSocketConfig> {
     Some(
         WebSocketConfig::default()

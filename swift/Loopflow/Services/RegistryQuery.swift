@@ -663,29 +663,56 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: String
     public let waves: [WaveRoadmap]
+    /// Every Task once; each names its Wave.
     public let tasks: WorkEvidence<RoadmapTask>
 
     enum CodingKeys: String, CodingKey {
         case waves, tasks
         case generatedAt = "generated_at"
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        let tasks = try container.decode(WorkEvidence<RoadmapTask>.self, forKey: .tasks)
+        self.tasks = tasks
+        var list = try container.nestedUnkeyedContainer(forKey: .waves)
+        var waves: [WaveRoadmap] = []
+        while !list.isAtEnd {
+            waves.append(try WaveRoadmap(from: list.superDecoder(), roadmapTasks: tasks))
+        }
+        self.waves = waves
+    }
 }
 
-public struct WaveRoadmap: Decodable, Sendable, Hashable {
+public struct WaveRoadmap: Sendable, Hashable {
     public let workflow: String?
     public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
+    /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
-        case wave, projects, tasks, workflow
+        case wave, projects, workflow
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
+    }
+
+    init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        workflow = try container.decode(String?.self, forKey: .workflow)
+        projectReadiness = try container.decode(ProjectReadiness.self, forKey: .projectReadiness)
+        let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
+        self.wave = wave
+        metricPortfolio = try container.decode(MetricPortfolio.self, forKey: .metricPortfolio)
+        projects = try container.decode(WorkEvidence<ProjectPlanningSnapshot>.self, forKey: .projects)
+        tasks = roadmapTasks.filter { $0.task.waveId == wave.id }
+        unavailableTasks = try container.decode([UnavailableTaskEvidence].self, forKey: .unavailableTasks)
     }
 }
 

@@ -363,9 +363,8 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
         String::from_utf8_lossy(&roadmap.stderr)
     );
     let roadmap: serde_json::Value = serde_json::from_slice(&roadmap.stdout).expect("roadmap JSON");
-    let wave = &roadmap["waves"][0];
-    assert_eq!(wave["tasks"]["state"], "ok", "roadmap wave: {wave:#}");
-    let roadmap_task = &wave["tasks"]["items"][0];
+    assert_eq!(roadmap["tasks"]["state"], "ok", "roadmap: {roadmap:#}");
+    let roadmap_task = &roadmap["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "INF-123");
     assert_eq!(roadmap_task["actions"]["recommended"], "no_action");
     assert!(roadmap_task["condition"]["reason"]
@@ -408,7 +407,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     );
     let stale_roadmap: serde_json::Value =
         serde_json::from_slice(&stale_roadmap.stdout).expect("stale roadmap JSON");
-    let stale_condition = &stale_roadmap["waves"][0]["tasks"]["items"][0]["condition"];
+    let stale_condition = &stale_roadmap["tasks"]["items"][0]["condition"];
     assert_eq!(stale_condition["state"], "blocked");
     assert!(stale_condition["reason"]
         .as_str()

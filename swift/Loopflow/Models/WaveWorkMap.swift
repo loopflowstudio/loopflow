@@ -422,4 +422,10 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
         if case let .unavailable(reason) = self { return reason }
         return nil
     }
+
+    /// The items that pass `isIncluded`; unavailable evidence stays unavailable.
+    public func filter(_ isIncluded: (Item) -> Bool) -> WorkEvidence<Item> {
+        guard case let .available(items, truncated) = self else { return self }
+        return .available(items: items.filter(isIncluded), truncated: truncated)
+    }
 }

@@ -24,9 +24,16 @@ struct TaskHistoryFilterTests {
 
     private func roadmapWire() throws -> [String: Any] {
         var root = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
-        var waves = try #require(root["waves"] as? [[String: Any]])
-        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
-        var rows = try historyRows()
+        let waves = try #require(root["waves"] as? [[String: Any]])
+        let waveId = try #require((waves[0]["wave"] as? [String: Any])?["id"] as? String)
+        var evidence = try #require(root["tasks"] as? [String: Any])
+        var rows = try historyRows().map { row in
+            var row = row
+            var plan = try #require(row["task"] as? [String: Any])
+            plan["wave_id"] = waveId
+            row["task"] = plan
+            return row
+        }
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
             rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
             var condition = try #require(rows[index]["condition"] as? [String: Any])
@@ -34,7 +41,6 @@ struct TaskHistoryFilterTests {
             rows[index]["condition"] = condition
         }
         evidence["items"] = rows
-        waves[0]["tasks"] = evidence
         root["waves"] = [waves[0]]
         root["tasks"] = evidence
         return root

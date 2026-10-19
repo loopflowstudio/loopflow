@@ -380,6 +380,7 @@ pub enum RoadmapSection {
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoadmapSnapshot {
+    /// Every Task once; each names its Wave.
     pub tasks: Evidence<RoadmapTask>,
     /// RFC3339 time this read was taken.
     pub generated_at: String,
@@ -393,8 +394,25 @@ pub struct WaveRoadmap {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
-    pub tasks: Evidence<RoadmapTask>,
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
+}
+
+impl RoadmapSnapshot {
+    /// The Tasks of one Wave, in plan order.
+    pub fn wave_tasks<'a>(&'a self, wave: &WaveRoadmap) -> Evidence<&'a RoadmapTask> {
+        match &self.tasks {
+            Evidence::Ok { items, truncated } => Evidence::Ok {
+                items: items
+                    .iter()
+                    .filter(|task| task.task.wave_id.as_deref() == Some(wave.wave.id.as_str()))
+                    .collect(),
+                truncated: *truncated,
+            },
+            Evidence::Unavailable { reason } => Evidence::Unavailable {
+                reason: reason.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -855,22 +873,10 @@ async fn roadmap_snapshot(
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
-        let wave_tasks = match &tasks {
-            Evidence::Ok { items, truncated } => Evidence::Ok {
-                items: items
-                    .iter()
-                    .filter(|task: &&RoadmapTask| {
-                        task.task.wave_id.as_deref() == Some(wave.id().as_str())
-                    })
-                    .cloned()
-                    .collect(),
-                truncated: *truncated,
-            },
-            Evidence::Unavailable { reason } => Evidence::Unavailable {
-                reason: reason.clone(),
-            },
-        };
-        if task.is_some() && matches!(&wave_tasks, Evidence::Ok { items, .. } if items.is_empty()) {
+        if task.is_some()
+            && matches!(&tasks, Evidence::Ok { items, .. }
+                if !items.iter().any(|task| task.task.wave_id.as_deref() == Some(wave.id().as_str())))
+        {
             continue;
         }
         roadmaps.push(WaveRoadmap {
@@ -878,7 +884,6 @@ async fn roadmap_snapshot(
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
-            tasks: wave_tasks,
             unavailable_tasks: Vec::new(),
             metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
                 store,
@@ -2345,7 +2350,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);
-        let tasks = match &wave.tasks {
+        let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
                 println!("  tasks unavailable: {reason}");
                 continue;
@@ -2353,7 +2358,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             Evidence::Ok { items, .. } => items,
         };
         let rows: Vec<RoadmapRow> = tasks
-            .iter()
+            .into_iter()
             .map(|task| task_roadmap_row(task, now))
             .collect();
         if rows.is_empty() {

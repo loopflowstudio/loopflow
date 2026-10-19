@@ -670,7 +670,9 @@ struct DTOFixtureTests {
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
         #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
-        #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
+        // The wire carries each Task once; Waves share them by the Task's Wave.
+        #expect(roadmap.tasks.items.count == 4)
+        #expect(roadmap.waves[1].tasks.items.isEmpty)
 
     }
 

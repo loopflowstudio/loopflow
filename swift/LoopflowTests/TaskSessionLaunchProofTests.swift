@@ -100,16 +100,16 @@ struct TaskSessionLaunchProofTests {
             var wave = try #require(waves[wi]["wave"] as? [String: Any])
             if wave["repo"] as? String == "/src/loopflow" { wave["repo"] = directory.path }
             waves[wi]["wave"] = wave
-            var evidence = try #require(waves[wi]["tasks"] as? [String: Any])
-            guard var items = evidence["items"] as? [[String: Any]] else { continue }
-            for ti in items.indices {
-                var reference = try #require(items[ti]["reference"] as? [String: Any])
-                reference["workspace"] = NSNull()
-                items[ti]["reference"] = reference
-            }
-            evidence["items"] = items; waves[wi]["tasks"] = evidence
         }
         plan["waves"] = waves
+        var evidence = try #require(plan["tasks"] as? [String: Any])
+        var items = try #require(evidence["items"] as? [[String: Any]])
+        for ti in items.indices {
+            var reference = try #require(items[ti]["reference"] as? [String: Any])
+            reference["workspace"] = NSNull()
+            items[ti]["reference"] = reference
+        }
+        evidence["items"] = items; plan["tasks"] = evidence
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {

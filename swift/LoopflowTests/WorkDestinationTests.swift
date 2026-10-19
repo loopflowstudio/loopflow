@@ -168,20 +168,13 @@ struct WorkDestinationTests {
         var initial = snapshot
         if unprepared {
             var planning = try JSONSerialization.jsonObject(with: Data(data.utf8)) as! [String: Any]
-            var waves = planning["waves"] as! [[String: Any]]
-            var tasks = waves[0]["tasks"] as! [String: Any]
-            var items = tasks["items"] as! [[String: Any]]
-            items[0]["runtime"] = NSNull()
-            var reference = items[0]["reference"] as! [String: Any]
-            reference["workspace"] = NSNull()
-            items[0]["reference"] = reference
-            tasks["items"] = items
-            waves[0]["tasks"] = tasks
-            planning["waves"] = waves
             var inventory = try #require(planning["tasks"] as? [String: Any])
             var allTasks = try #require(inventory["items"] as? [[String: Any]])
             let index = try #require(allTasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == task.id })
-            allTasks[index] = items[0]
+            allTasks[index]["runtime"] = NSNull()
+            var reference = allTasks[index]["reference"] as! [String: Any]
+            reference["workspace"] = NSNull()
+            allTasks[index]["reference"] = reference
             inventory["items"] = allTasks
             planning["tasks"] = inventory
             initial = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
@@ -1036,30 +1029,6 @@ struct WorkDestinationTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func taskLinkUsesRepositoryInventoryWithAnotherWaveUnavailable(scoped: Bool) async throws {
-        let data = try fixture()
-        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
-        let wave = try #require(snapshot.waves.first)
-        let task = try #require(wave.tasks.items.first)
-        let exact = try oneTask(data, taskId: task.id)
-        var result = try #require(JSONSerialization.jsonObject(with: Data(exact.utf8)) as? [String: Any])
-        var waves = try #require(result["waves"] as? [[String: Any]])
-        let other = try #require(waves.indices.first { index in
-            let tasks = waves[index]["tasks"] as? [String: Any]
-            return (tasks?["items"] as? [Any])?.isEmpty == true
-        })
-        waves[other]["tasks"] = ["state": "unavailable", "reason": "Chapter unavailable"]
-        result["waves"] = waves
-        let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
-        let (model, _) = destinationModel(query: RegistryQuery { _, _ in response })
-        var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
-        if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
-        await model.openTaskLink(try #require(link.url))
-        #expect(model.selection == .task(id: task.id))
-        #expect(!model.showsTaskLink)
-    }
-
     @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
         let wave = try #require(snapshot.waves.first)
@@ -1131,7 +1100,8 @@ struct WorkDestinationTests {
         #expect(stale.task?.actions == nil)
         #expect(stale.task?.runControl == nil)
 
-        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [], tasks: .available(items: [], truncated: false))
+        let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(
+            #"{"generated_at":"2026-10-08T21:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#.utf8))
         model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
         model.select(.task(id: task.id))
         let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
@@ -1859,16 +1829,6 @@ struct WorkDestinationTests {
 
     private func oneTask(_ data: String, taskId: String) throws -> String {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(data.utf8)) as? [String: Any])
-        var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        for index in waves.indices {
-            var evidence = try #require(waves[index]["tasks"] as? [String: Any])
-            let items = evidence["items"] as? [[String: Any]] ?? []
-            evidence["state"] = "ok"
-            evidence["truncated"] = false
-            evidence["items"] = items.filter { ($0["task"] as? [String: Any])?["id"] as? String == taskId }
-            waves[index]["tasks"] = evidence
-        }
-        snapshot["waves"] = waves
         var inventory = try #require(snapshot["tasks"] as? [String: Any])
         let tasks = try #require(inventory["items"] as? [[String: Any]])
         inventory["items"] = tasks.filter { ($0["task"] as? [String: Any])?["id"] as? String == taskId }

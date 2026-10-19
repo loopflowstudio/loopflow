@@ -967,7 +967,7 @@ struct DesktopPerformanceTests {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
-        var tasks = try #require(wave["tasks"] as? [String: Any])
+        var tasks = try #require(snapshot["tasks"] as? [String: Any])
         let template = try #require((tasks["items"] as? [[String: Any]])?.first)
         tasks["items"] = try (0..<taskCount).map { index in
             var task = template
@@ -993,7 +993,6 @@ struct DesktopPerformanceTests {
             task["runtime"] = runtime
             return task
         }
-        wave["tasks"] = tasks
         wave["unavailable_tasks"] = []
         var waveInfo = try #require(wave["wave"] as? [String: Any])
         waveInfo["repo"] = checkout

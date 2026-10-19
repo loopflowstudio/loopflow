@@ -53,20 +53,13 @@ struct WorkNavigationTests {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing planning must not execute") }, repoPath: "/src/loopflow")
         func apply(started: Bool, status: String) throws {
             var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
-            var waves = try #require(json["waves"] as? [[String: Any]])
-            var inventory = try #require(waves[0]["tasks"] as? [String: Any])
-            var tasks = try #require(inventory["items"] as? [[String: Any]])
-            var runtime = try #require(tasks[0]["runtime"] as? [String: Any])
-            runtime["started"] = started
-            runtime["status"] = status
-            tasks[0]["runtime"] = runtime
-            inventory["items"] = tasks
-            waves[0]["tasks"] = inventory
-            json["waves"] = waves
             var allTasks = try #require(json["tasks"] as? [String: Any])
             var allItems = try #require(allTasks["items"] as? [[String: Any]])
             let index = try #require(allItems.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
-            allItems[index] = tasks[0]
+            var runtime = try #require(allItems[index]["runtime"] as? [String: Any])
+            runtime["started"] = started
+            runtime["status"] = status
+            allItems[index]["runtime"] = runtime
             allTasks["items"] = allItems
             json["tasks"] = allTasks
             let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
@@ -441,7 +434,7 @@ struct WorkNavigationTests {
         model.select(.task(id: "issue-review"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        waves[0]["tasks"] = truncated
+        snapshot["tasks"] = truncated
             ? ["state": "ok", "items": [], "truncated": true]
             : ["state": "unavailable", "reason": "planning offline"]
         waves[0]["unavailable_tasks"] = []
@@ -597,7 +590,7 @@ struct WorkNavigationTests {
         let original = try roadmapJSON()
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
         var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        waves[0]["tasks"] = ["state": "ok", "items": [], "truncated": false]
+        snapshot["tasks"] = ["state": "ok", "items": [], "truncated": false]
         waves[0]["unavailable_tasks"] = []
         if planning == "no-current-project" {
             waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
@@ -817,11 +810,6 @@ struct WorkNavigationTests {
         task["task"] = summary
         inventory["items"] = [task]
         wire["tasks"] = inventory
-        var waves = try #require(wire["waves"] as? [[String: Any]])
-        var waveTasks = try #require(waves[0]["tasks"] as? [String: Any])
-        waveTasks["items"] = []
-        waves[0]["tasks"] = waveTasks
-        wire["waves"] = waves
         let initial = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
         let source = ReadingSource(roadmap: initial, sessions: try sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -842,9 +830,6 @@ struct WorkNavigationTests {
             task["task"] = summary
             inventory["items"] = [task]
             wire["tasks"] = inventory
-            waveTasks["items"] = attached ? [task] : []
-            waves[0]["tasks"] = waveTasks
-            wire["waves"] = waves
             await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self))
             await model.refresh()
             #expect(model.selection == .task(id: taskId))

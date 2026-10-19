@@ -159,7 +159,12 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     ));
 
     let roadmap: RoadmapSnapshot = serde_json::from_str(ROADMAP).unwrap();
-    let Evidence::Ok { items, .. } = &roadmap.waves[0].tasks else {
+    // Each Task is written once, under the roadmap; Waves do not repeat them.
+    assert_eq!(
+        serde_json::to_value(&roadmap).unwrap(),
+        serde_json::from_str::<serde_json::Value>(ROADMAP).unwrap()
+    );
+    let Evidence::Ok { items, .. } = roadmap.wave_tasks(&roadmap.waves[0]) else {
         panic!("fixture has current Project evidence")
     };
     assert!(!items.is_empty());
@@ -637,7 +642,7 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
         assert_eq!(task.work.workflow, execution.work.workflow);
         assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
         let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
-            &plan.roadmap.waves[0].tasks
+            plan.roadmap.wave_tasks(&plan.roadmap.waves[0])
         else {
             panic!("Task plan unavailable")
         };

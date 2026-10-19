@@ -174,6 +174,18 @@ fn status_human(home: &Path, wave: &str) -> String {
     String::from_utf8(output.stdout).expect("status is utf8")
 }
 
+/// A roadmap Wave holding its share of the roadmap's Tasks, as `wave status`
+/// shows them; the roadmap writes each Task once.
+fn roadmap_wave(roadmap: &serde_json::Value, wave: &serde_json::Value) -> serde_json::Value {
+    let mut view = wave.clone();
+    let mut tasks = roadmap["tasks"].clone();
+    if let Some(items) = tasks["items"].as_array_mut() {
+        items.retain(|task| task["task"]["wave_id"] == wave["wave"]["id"]);
+    }
+    view["tasks"] = tasks;
+    view
+}
+
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     command
@@ -504,7 +516,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
         }],
         "truncated": false
     });
-    for view in [&status, &roadmap["waves"][0]] {
+    for view in [&status, &roadmap_wave(&roadmap, &roadmap["waves"][0])] {
         assert_eq!(view["projects"], expected_projects);
         assert_eq!(view["wave"]["status"], "ready");
         assert_eq!(view["tasks"]["state"], "ok");
@@ -774,7 +786,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         seed_stale_project_work(home.path(), abandon_parent, false);
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
-        let wave = &roadmap["waves"][0];
+        let wave = &roadmap_wave(&roadmap, &roadmap["waves"][0]);
         for view in [&status, wave] {
             assert_eq!(view["projects"]["state"], "ok");
             assert_eq!(view["projects"]["truncated"], false);
@@ -819,7 +831,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
-        for view in [&status, &roadmap["waves"][0]] {
+        for view in [&status, &roadmap_wave(&roadmap, &roadmap["waves"][0])] {
             assert_eq!(view["projects"], before["projects"]);
             assert_eq!(view["tasks"]["state"], "ok");
             let tasks = view["tasks"]["items"].as_array().unwrap();
@@ -879,10 +891,7 @@ fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
-        for task in [
-            &status["tasks"]["items"][0],
-            &roadmap["waves"][0]["tasks"]["items"][0],
-        ] {
+        for task in [&status["tasks"]["items"][0], &roadmap["tasks"]["items"][0]] {
             assert_eq!(task["task"]["identifier"], "PRD-52");
             assert_eq!(task["runtime"]["started"], assigned);
         }
@@ -913,9 +922,8 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         assert_eq!(status_task["pr"]["publication"]["merge"]["mode"], "user");
 
         let roadmap = roadmap_json(home.path(), "product");
-        let wave = &roadmap["waves"][0];
-        assert_eq!(wave["tasks"]["state"], "ok");
-        let roadmap_task = &wave["tasks"]["items"][0];
+        assert_eq!(roadmap["tasks"]["state"], "ok");
+        let roadmap_task = &roadmap["tasks"]["items"][0];
         assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
         assert_eq!(
             roadmap_task["pr"]["publication"]["presentation"],
@@ -940,9 +948,8 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
     assert_eq!(status_task["pr"]["publication"]["merge"]["mode"], "user");
 
     let roadmap = roadmap_json(home.path(), "product");
-    let wave = &roadmap["waves"][0];
-    assert_eq!(wave["tasks"]["state"], "ok");
-    let roadmap_task = &wave["tasks"]["items"][0];
+    assert_eq!(roadmap["tasks"]["state"], "ok");
+    let roadmap_task = &roadmap["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
     assert_eq!(
         roadmap_task["pr"]["publication"]["presentation"],
@@ -984,7 +991,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             assert_eq!(result["waves"], serde_json::json!([]));
             continue;
         }
-        let tasks = result["waves"][0]["tasks"]["items"].as_array().unwrap();
+        let tasks = result["tasks"]["items"].as_array().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["task"]["identifier"], identifier);
         assert!(tasks[0]["pr"].is_null());
@@ -1067,10 +1074,13 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let waves = result["waves"].as_array().unwrap();
         assert_eq!(waves.len(), if all { 2 } else { 1 });
-        let retained = waves
-            .iter()
-            .find(|row| row["wave"]["id"] == other.id().to_string())
-            .unwrap();
+        let retained = roadmap_wave(
+            &result,
+            waves
+                .iter()
+                .find(|row| row["wave"]["id"] == other.id().to_string())
+                .unwrap(),
+        );
         let task = store.task_by_issue("other-task").unwrap().unwrap();
         assert_eq!(
             retained["tasks"]["items"][0]["task"]["id"],
@@ -1116,11 +1126,10 @@ fn ordinary_task_due_date_is_visible_before_checkout() {
     );
     assert_eq!(row["task"]["completed"], false);
     let roadmap = roadmap_json(home.path(), "product");
-    let roadmap_child = roadmap["waves"]
+    let roadmap_child = roadmap["tasks"]["items"]
         .as_array()
         .unwrap()
         .iter()
-        .flat_map(|wave| wave["tasks"]["items"].as_array().into_iter().flatten())
         .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
     assert_eq!(roadmap_child["task"], row["task"]);

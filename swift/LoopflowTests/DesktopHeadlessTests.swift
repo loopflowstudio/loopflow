@@ -444,8 +444,7 @@ struct DesktopHeadlessTests {
         let original = try #require(wave.tasks.items.first)
         let root = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
-        let waves = try #require(root["waves"] as? [[String: Any]])
-        let tasks = try #require(waves.first?["tasks"] as? [String: Any])
+        let tasks = try #require(root["tasks"] as? [String: Any])
         var row = try #require((tasks["items"] as? [[String: Any]])?.first)
         var planning = try #require(row["task"] as? [String: Any])
         planning["state"] = state
@@ -583,8 +582,7 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         var saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waves = try #require(saved["waves"] as? [[String: Any]])
-        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         var planning = try #require(items[0]["task"] as? [String: Any])
         planning["sync"] = ["connected": true, "changes": [[
@@ -593,8 +591,6 @@ struct DesktopHeadlessTests {
         ]]]
         items[0]["task"] = planning
         tasks["items"] = items
-        waves[0]["tasks"] = tasks
-        saved["waves"] = waves
         saved["tasks"] = tasks
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
         let wave = try #require(roadmap.waves.first).wave

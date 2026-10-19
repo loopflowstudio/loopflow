@@ -63,15 +63,10 @@ fn read(binary: &Path, repo: &Path, home: &Path, args: &[&str]) -> Value {
 }
 
 fn task_row(roadmap: &Value) -> Value {
-    roadmap["waves"]
+    roadmap["tasks"]["items"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("Task plan unavailable: {roadmap}"))
         .iter()
-        .flat_map(|wave| {
-            wave["tasks"]["items"]
-                .as_array()
-                .unwrap_or_else(|| panic!("Task plan unavailable: {wave}"))
-        })
         .find(|task| task["task"]["identifier"] == "FIX-1")
         .unwrap_or_else(|| panic!("source Task missing: {roadmap}"))
         .clone()

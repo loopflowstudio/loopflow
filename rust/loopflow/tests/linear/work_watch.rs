@@ -252,7 +252,7 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
     roadmap
         .waves
         .iter()
-        .flat_map(|wave| match &wave.tasks {
+        .flat_map(|wave| match roadmap.wave_tasks(wave) {
             Evidence::Ok { items, .. } => items
                 .iter()
                 .map(|task| task.task.identifier.clone())
@@ -346,7 +346,7 @@ impl Watch {
             let WorkContent::Planning(Some(part)) = frame.content else {
                 continue;
             };
-            let Evidence::Ok { items, .. } = &part.roadmap.waves[0].tasks else {
+            let Evidence::Ok { items, .. } = part.roadmap.wave_tasks(&part.roadmap.waves[0]) else {
                 continue;
             };
             let progress = &items[0].condition.local_progress;
@@ -1142,8 +1142,8 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
             }
             if let WorkContent::Planning(Some(part)) = frame.content {
                 last = Some(format!("{part:?}"));
-                for wave in part.roadmap.waves {
-                    if let Evidence::Ok { items, .. } = wave.tasks {
+                {
+                    if let Evidence::Ok { items, .. } = part.roadmap.tasks {
                         for task in items {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected

@@ -14,8 +14,8 @@ struct WorkspacePerformanceTests {
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
-        var tasks = try #require(wave["tasks"] as? [String: Any])
+        let wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
+        var tasks = try #require(snapshot["tasks"] as? [String: Any])
         let template = try #require((tasks["items"] as? [[String: Any]])?.first)
         var observations: [[String: Any]] = []
         for count in [256, 2048] {
@@ -30,7 +30,7 @@ struct WorkspacePerformanceTests {
                 task["runtime"] = runtime
                 return task
             }
-            wave["tasks"] = tasks
+            snapshot["tasks"] = tasks
             snapshot["waves"] = [wave]
             let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
                 from: JSONSerialization.data(withJSONObject: snapshot))

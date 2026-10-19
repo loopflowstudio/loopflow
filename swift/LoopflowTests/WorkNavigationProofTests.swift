@@ -20,8 +20,7 @@ struct WorkNavigationProofTests {
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var waves = try #require(snapshot["waves"] as? [[String: Any]])
-        var evidence = try #require(waves[0]["tasks"] as? [String: Any])
+        var evidence = try #require(snapshot["tasks"] as? [String: Any])
         let tasks = try #require(evidence["items"] as? [[String: Any]])
         let template = try #require(tasks.last)
         evidence["items"] = try (0..<80).map { index in
@@ -38,8 +37,7 @@ struct WorkNavigationProofTests {
             task["runtime"] = runtime
             return task
         }
-        waves[0]["tasks"] = evidence
-        snapshot["waves"] = waves
+        snapshot["tasks"] = evidence
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
@@ -101,12 +99,13 @@ struct WorkNavigationProofTests {
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let base = try #require((snapshot["waves"] as? [[String: Any]])?.first)
-        let template = try #require(((base["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first {
+        let template = try #require(((snapshot["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first {
             (($0["task"] as? [String: Any])?["id"] as? String) == "issue-review"
         })
         // 3 Waves × 50 Tasks, 20 started; a few started Tasks need eyes.
         let executions = ["work-0-0": "running", "work-0-7": "blocked", "work-1-6": "human", "work-1-13": "idle"]
         var waves: [[String: Any]] = []
+        var items: [[String: Any]] = []
         for waveIndex in 0..<3 {
             var wave = base
             var identity = try #require(base["wave"] as? [String: Any])
@@ -114,10 +113,11 @@ struct WorkNavigationProofTests {
             identity["name"] = ["product", "infrastructure", "intelligence"][waveIndex]
             wave["wave"] = identity
             wave["unavailable_tasks"] = []
-            wave["tasks"] = ["state": "ok", "truncated": false, "items": try (0..<50).map { index -> [String: Any] in
+            items += try (0..<50).map { index -> [String: Any] in
                 var item = template
                 var task = try #require(item["task"] as? [String: Any])
                 task["id"] = "task-\(waveIndex)-\(index)"
+                task["wave_id"] = "wave-\(waveIndex)"
                 task["identifier"] = "T-\(waveIndex)-\(index)"
                 task["name"] = ["Retry and publish the chapter safely", "Understand running work",
                                 "A calmer desktop workspace", "Keep Task observation read-only"][index % 4] + " \(index)"
@@ -133,10 +133,11 @@ struct WorkNavigationProofTests {
                 execution["state"] = executions[workId] ?? "idle"
                 item["execution"] = execution
                 return item
-            }]
+            }
             waves.append(wave)
         }
         snapshot["waves"] = waves
+        snapshot["tasks"] = ["state": "ok", "truncated": false, "items": items]
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
             let binding = work as? [String: String]
@@ -280,17 +281,12 @@ struct WorkNavigationProofTests {
         let latest = flows[0]
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
-        var waves = try #require(plan["waves"] as? [[String: Any]])
-        let waveIndex = try #require(waves.firstIndex { wave in
-            let tasks = wave["tasks"] as? [String: Any]
-            return (tasks?["items"] as? [[String: Any]])?.contains { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" } == true
-        })
-        var tasks = try #require(waves[waveIndex]["tasks"] as? [String: Any])
+        var tasks = try #require(plan["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
         items[taskIndex]["latest_flow_process"] = latest
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
-        tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
+        tasks["items"] = items; plan["tasks"] = tasks
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
         let planning = SidebarSessionSource(list: roadmap)
         let query = RegistryQuery { args, _ in
@@ -393,7 +389,6 @@ struct WorkNavigationProofTests {
         #expect(model.sessions.value?.first { $0.id == "first" }?.work == nil)
         #expect(model.navigation.binding?.preview?.taskId == task.id)
         var relocatedPlan = plan
-        var relocatedWaves = waves
         var relocatedTasks = tasks
         var relocatedItems = items
         var reference = try #require(relocatedItems[taskIndex]["reference"] as? [String: Any])
@@ -403,8 +398,7 @@ struct WorkNavigationProofTests {
         reference["workspace"] = taskWorkspace
         relocatedItems[taskIndex]["reference"] = reference
         relocatedTasks["items"] = relocatedItems
-        relocatedWaves[waveIndex]["tasks"] = relocatedTasks
-        relocatedPlan["waves"] = relocatedWaves
+        relocatedPlan["tasks"] = relocatedTasks
         await planning.replace(String(decoding: try JSONSerialization.data(withJSONObject: relocatedPlan), as: UTF8.self))
         await model.refresh()
         await model.commitSessionBinding()
@@ -423,9 +417,9 @@ struct WorkNavigationProofTests {
         let selection = model.selection
         let focusedPane = workspace.multiplexer.focusedPaneId
         var missingPlan = plan
-        var missingWaves = waves
-        missingWaves[waveIndex]["tasks"] = ["state": "unavailable", "reason": "planning offline"]
-        missingWaves[waveIndex]["unavailable_tasks"] = []
+        missingPlan["tasks"] = ["state": "unavailable", "reason": "planning offline"]
+        var missingWaves = try #require(plan["waves"] as? [[String: Any]])
+        for index in missingWaves.indices { missingWaves[index]["unavailable_tasks"] = [] }
         missingPlan["waves"] = missingWaves
         let unavailable = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
         missingPlan["waves"] = []

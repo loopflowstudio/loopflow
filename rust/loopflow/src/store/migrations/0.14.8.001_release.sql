@@ -1,4 +1,4 @@
--- depends_on: none
+-- draft: canonical_structured_ids
 -- A Trace owns one journal directory. Case aliases may have distinct directories
 -- even when no Process primary keys collide. Never choose one and lose the other.
 CREATE TEMP TABLE canonical_identity_conflicts (domain TEXT, first TEXT, second TEXT);

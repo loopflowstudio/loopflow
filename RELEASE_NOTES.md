@@ -1,37 +1,40 @@
-# v0.14.7
+# v0.14.8
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.7 makes it easier to return to ongoing work while expanding the choice of coding harness. Desktop keeps working Tasks in a stable sidebar and retains their Shell and Files tabs as you switch Tasks or hide tools. Pi joins the supported harnesses for native Sessions and headless skills and Flows, with saved conversation history and portable generated skill names.
+v0.14.8 makes returning to work more predictable: structured IDs resolve regardless of casing, Codex reconnects retain the saved conversation without automatically replaying uncertain input, and stacked Tasks can sync after a parent's checkout is removed. Codex relay failures now appear in Session history, giving operators evidence when a connection fails. Startup recovery remains unresolved; this release improves continuity and diagnosis without establishing a fix for the original fresh-launch reset.
 
-## Switch Tasks without losing your place
+## Find work with the ID you have
 
-Desktop now keeps explicitly opened Tasks in a working list above Waves, replacing activity-driven regrouping with predictable return paths. Shell and Files collect each Task's tools into retained tabs so switching work preserves the workspace during the app session. (#1594)
+Commands now accept structured IDs in any casing and store and print one canonical spelling. Task and Session selection distinguish Loopflow identities from provider-owned values, so convenience in lookup preserves the exact identity of native conversations. (#1602)
 
-- Working Tasks keep their order through activity changes, filtering and completion. Pausing hides a Task while retaining its position and workspace; saved working order survives relaunch.
-- Use ⌘1–9 and Control-Tab to navigate working slots. Breadcrumbs, tools and actions share the native titlebar.
-- Keep multiple terminals in one Shell tool. Files retains document, Brief, Changes and PR tabs; hiding either tool preserves clients and drafts.
-- Browse repositories and Waves without starting work. Waves show their full current Task plan, and unstarted Tasks open their brief.
-- Codex excerpts follow the current Session and native turn. New turns clear old text, working excerpts expire after 30 seconds, and Available results retain their source age. Other providers show labeled summaries.
-- Provider switching reads saved history before releasing the current terminal. If the transcript is missing, the conversation stays intact for retry.
+- Use `LOO-506` or `loo-506`, mixed-case Task and Session IDs, or mixed-case Linear UUIDs to find the same record.
+- Structured UUIDs and prefixed IDs use lowercase; Linear ticket labels use uppercase. Desktop decodes the same canonical identities across the CLI transport.
+- Provider conversation IDs, tokens, hashes, names and paths retain their exact bytes. UUIDs with and without hyphens remain distinct.
 
-## Use Pi for conversations and automation
+## Return to Codex with better continuity and evidence
 
-Pi users can run native Sessions and headless skills and Flows through Loopflow, then resume the same saved conversation. Pi owns model selection and credentials; Loopflow retains text, tools and reported usage in its existing history. (#1591)
+Reconnects use the Session's saved Codex thread, including when its identity arrives after the terminal disconnects. Initial-input submission evidence distinguishes explicit rejection from uncertain delivery, reducing the risk of duplicate submissions while keeping connection failures inspectable. (#1598, #1599)
 
-- Choose `pi` or `pi:provider/model` through the normal agent selector.
-- Context refreshes after compaction, live steering receives independent receipts, and native usage checkpoints survive crashes.
-- Headless execution waits through Pi's internal retries and rejects blank final answers.
-- Built-in bash commands use Pi's executor with Loopflow's watchdog established before execution, allowing cleanup of detached tool groups if the provider dies. Custom tools retain their own lifecycle ownership.
+- Explicitly rejected initial input remains retryable. Dispatched input without an acknowledgment is never replayed automatically.
+- Client failures leave the reconnect listener available; stale attachments cannot overwrite the current attachment's submission evidence.
+- Run `lf history show SESSION` to inspect retained relay failures and their original AgentProcess. Add `--events` for the failed operation, connection direction and error payload, including failures before a native turn starts.
+- Diagnostics live in private Session events, replacing the separate `codex-relay.log`. Retention is capped at the first 16 failures per captured input and 2048 UTF-8 bytes per error. Explicit client closes stay quiet; diagnostic writes are best-effort and do not settle turns or interrupt the native terminal.
+
+## Keep automated work moving
+
+Flow routing can now read answers captured when transport delegates execution to another process. The lookup follows that delegation while keeping captures from ordinary agent-issued nested commands separate. (#1600)
+
+- Routing steps find their captured Session turn through `lf transport serve` delegation.
+- This repair requires no schema, command or wire-format change.
 
 ## Operational notes
 
-- **Desktop command change:** `lf desktop shell` adds a Shell tab. `lf desktop split` is removed. (#1594)
-- **Desktop upgrade and persistence:** use the matching published CLI to apply the Session-preview migration. Working order persists across launches; pane layouts and embedded clients do not. (#1594)
-- **Pi baseline and limits:** Pi 1.3.0 is the tested baseline. Pi supplies no OS sandbox; callers own confinement. Managed account switching, subscription estimates, response schemas, turn limits and cross-harness history import are unsupported. Native session switching remains outside Loopflow's recorded conversation identity. (#1591)
-- **Acceptance status:** real-Pi probes covered terminal and protocol behavior, steering, compaction, errors, crash recovery and viewer handoff. The supplied record does not establish a clean final combined-tree matrix: the broad local Rust run stopped with failures and unrun tests, leaving resolution to candidate and merge-queue CI. Desktop's mounted input continuity and final visual acceptance remain unverified; verify that Task switching and hiding/restoring tools preserve live input, drafts, selection and focus on a configured Mac. (#1591, #1594)
+- **Identifier migration:** existing structured IDs and declared JSON references convert in one transaction. A collision after case normalization aborts the migration; subsequent non-canonical writes are rejected with `canonical identity required: <table>`. Existing fence, receipt and trace paths are retained without renaming files, and metric payloads and hashes remain unchanged. (#1602)
+- **Live work delays migration:** the upgrade defers without changes when dispatch is busy, an affected owner is live, or a receipt is unreadable or malformed. An older client holding a mixed-case live claim must settle before the upgrade can proceed. (#1602)
+- **Codex recovery limits:** disposable probes verified retained startup diagnostics and preserved edited Unicode drafts across reconnects. Injected faults do not establish the original installed reset's cause. An after-thread reset with Codex 0.163.0 displayed “Reconnect failed” and timed out; startup recovery remains unresolved. (#1598, #1599)
+- **Verification limits:** the supplied branch records leave Linux and the full hosted matrix to CI. Compiled acceptance and Clippy for the transport-routing repair were deferred for insufficient disk space; its recorded query simulation does not replace compiled tests. (#1599, #1600)
 
 ## Small changes
 
-- Generated skill names use a shared lowercase-letter, digit and hyphen format capped at 64 characters. Long names shorten with stable suffixes, and collisions retain both sources while preserving canonical Loopflow identities, resource paths and third-party bundles. The tested shared Pi catalog loaded 101 skills with zero diagnostics; all 27 third-party skill files remained byte-identical. (#1591)
-- Failed Desktop status observers restart on a later event. (#1594)
+- `lf sync` in a stacked child Task targets the default branch after its parent lands, even when the parent's worktree has been removed. PR observation falls back to the Task's repository instead of failing with a missing-directory error. (#1597)

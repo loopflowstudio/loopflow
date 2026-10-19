@@ -2044,24 +2044,26 @@ mod tests {
         let mut command = tokio::process::Command::new("/bin/sleep");
         command.arg("60").stdin(std::process::Stdio::null());
         let input = crate::session_record::new_artifact_key();
-        // Virtual time passes the old startup deadline while the owned child
-        // waits. Canceling the future then reaps it through kill_on_drop.
-        let result = tokio::runtime::Builder::new_current_thread()
+        // Advance explicitly: a real child's I/O can prevent the paused clock
+        // from auto-advancing. Dropping the future reaps it through kill_on_drop.
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .start_paused(true)
             .build()
             .unwrap()
             .block_on(async {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(31),
-                    super::spawn_session_process(&mut command, &input),
-                )
-                .await
+                let launch = super::spawn_session_process(&mut command, &input);
+                tokio::pin!(launch);
+                assert!(futures_util::poll!(&mut launch).is_pending());
+                tokio::time::advance(std::time::Duration::from_secs(31)).await;
+                tokio::time::resume();
+                let result =
+                    tokio::time::timeout(std::time::Duration::from_secs(1), &mut launch).await;
+                assert!(
+                    result.is_err(),
+                    "foreground launch ended before first-use input: {result:?}"
+                );
             });
-        assert!(
-            result.is_err(),
-            "foreground launch ended before first-use input: {result:?}"
-        );
     }
 
     #[test]

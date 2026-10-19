@@ -55,6 +55,8 @@ These fixtures still invoke the built CLI with disposable Homes. Shared executio
 fixtures seed fixed admission evidence; they do not expose acquisition APIs.
 Queued multi-Wave responses must pin distinct Wave creation times to match their
 newest-first discovery order; same-second creation can hide an ordering mismatch.
+Paused-clock tests that own real subprocesses must poll startup and advance time
+explicitly; child I/O can prevent Tokio's clock from auto-advancing.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency

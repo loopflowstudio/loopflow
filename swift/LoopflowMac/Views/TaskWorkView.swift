@@ -243,6 +243,42 @@ struct TaskHeading: View {
     }
 }
 
+extension RoadmapTask {
+    /// Not yet started and still open: its Session slot offers Start.
+    var awaitsStart: Bool { runtime?.started != true && !task.isTerminal }
+}
+
+/// An unstarted Task's Session slot. Showing it starts nothing; Start runs the
+/// Task's Workflow through the same path as `lf task run`.
+struct TaskStartOffer: View {
+    let model: WorkModel
+    let task: RoadmapTask
+
+    private var unavailable: String? {
+        if let draft = model.navigation.taskRunDrafts[task.id], draft.acting { return draft.progress ?? "Updating Task…" }
+        if let error = model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return task.runControl.unavailable
+    }
+
+    var body: some View {
+        SessionSlotOffer(
+            title: "Not started", systemImage: "play.circle",
+            action: "Start", actionImage: "play.fill",
+            note: model.navigation.taskRunDrafts[task.id]?.error
+                ?? "Starts this Task’s Workflow and its first conversation.",
+            unavailable: unavailable, help: "lf task run \(task.task.identifier)",
+            accessibilityLabel: "Start \(task.task.identifier)",
+            actionIdentifier: "task-start-\(task.id)",
+            perform: { Task { await model.startTask(nil, task: task) } }
+        ) {
+            Text(task.task.description.isEmpty ? "No description recorded." : task.task.description)
+                .lineLimit(8)
+        }
+        .accessibilityIdentifier("task-start-offer-\(task.id)")
+    }
+}
+
 /// Shared Task actions for keyboard access and sidebar context menus.
 struct TaskActionItems: View {
     let model: WorkModel

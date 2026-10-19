@@ -61,6 +61,54 @@ struct WorkspacePanesView: View {
     }
 }
 
+/// The Session slot before a conversation runs here: what that means and its
+/// one explicit action. Move here and an unstarted Task's Start share it.
+struct SessionSlotOffer<Description: View>: View {
+    let title: String
+    let systemImage: String
+    /// Nil when no action applies; the slot still explains itself.
+    let action: String?
+    let actionImage: String
+    var note: String?
+    var unavailable: String?
+    var help: String
+    var accessibilityLabel: String?
+    var accessibilityHint: String?
+    let actionIdentifier: String
+    let perform: () -> Void
+    @ViewBuilder let description: Description
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(theme.palette.text)
+        } description: {
+            description.foregroundStyle(theme.palette.textSecondary)
+        } actions: {
+            if let action {
+                VStack(spacing: Spacing.sm) {
+                    Button(action: perform) { Label(action, systemImage: actionImage) }
+                        .buttonStyle(.bordered)
+                        .tint(theme.palette.text)
+                        .foregroundStyle(theme.palette.text)
+                        .disabled(unavailable != nil)
+                        .help(unavailable ?? help)
+                        .accessibilityLabel(accessibilityLabel ?? action)
+                        .accessibilityHint(accessibilityHint ?? "")
+                        .accessibilityIdentifier(actionIdentifier)
+                    if let note = unavailable ?? note {
+                        Text(note)
+                            .font(Typography.caption(9))
+                            .foregroundStyle(theme.palette.textSecondary)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
 enum PaneGeometry {
     // Keep pane outlines inside the native window's larger lower corners.
     static let windowInset: CGFloat = 10
@@ -699,10 +747,20 @@ struct SessionPaneView: View {
     /// explains what that means and makes the takeover explicit: nothing is
     /// stopped until Move here.
     private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
-        ContentUnavailableView {
-            Label("Active in another terminal", systemImage: "rectangle.on.rectangle")
-                .foregroundStyle(theme.palette.text)
-        } description: {
+        let action = item.record.action(.moveHere)
+        return SessionSlotOffer(
+            title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
+            action: action?.label, actionImage: "arrow.down.forward.square",
+            note: "Moving stops the other client. Unsent text typed there is lost.",
+            unavailable: action?.unavailableReason, help: action?.help ?? "",
+            accessibilityLabel: "Move session here",
+            accessibilityHint: "Stops the other client; unsent text typed there is lost",
+            actionIdentifier: "session-move-here-\(item.id)",
+            perform: {
+                sessions.beginPaneLoad(item.id)
+                Task { @MainActor in await sessions.moveHere(item.id) }
+            }
+        ) {
             Text(
                 """
                 \(item.record.title) is attached to a provider client outside \
@@ -710,31 +768,7 @@ struct SessionPaneView: View {
                 It keeps running there until you move it.
                 """
             )
-            .foregroundStyle(theme.palette.textSecondary)
-        } actions: {
-            if let action = item.record.action(.moveHere) {
-                VStack(spacing: Spacing.sm) {
-                    Button {
-                        sessions.beginPaneLoad(item.id)
-                        Task { @MainActor in await sessions.moveHere(item.id) }
-                    } label: {
-                        Label(action.label, systemImage: "arrow.down.forward.square")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(theme.palette.text)
-                    .foregroundStyle(theme.palette.text)
-                    .disabled(action.unavailableReason != nil)
-                    .help(action.unavailableReason ?? action.help)
-                    .accessibilityLabel("Move session here")
-                    .accessibilityHint("Stops the other client; unsent text typed there is lost")
-                    .accessibilityIdentifier("session-move-here-\(item.id)")
-                    Text("Moving stops the other client. Unsent text typed there is lost.")
-                        .font(Typography.caption(9))
-                        .foregroundStyle(theme.palette.textSecondary)
-                }
-            }
         }
-        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("session-elsewhere-\(item.id)")
     }
 

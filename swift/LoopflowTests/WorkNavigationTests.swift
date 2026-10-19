@@ -108,6 +108,43 @@ struct WorkNavigationTests {
         #expect(root.multiplexer.layout == layout)
     }
 
+    @Test("Each breadcrumb's › lists what is inside it and searches that scope; ⌘K keeps Find Work")
+    func jumpBar() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let crumbs = WorkBreadcrumbs(model: model)
+        for scope in ["repositories", "repository", "wave-wave-1"] {
+            _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
+        }
+        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
+        #expect(model.jumpRows(.repositories, filter: "").map(\.id) == [.repository])
+        #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
+        #expect(model.jumpRows(.repository, filter: "W2-131").map(\.id) == [.task("issue-review")])
+        let wave = try #require(model.wave(id: "wave-1"))
+        #expect(Set(model.jumpRows(.wave("wave-1"), filter: "").map(\.id)) == Set(wave.tasks.items.map { .task($0.id) }))
+        #expect(model.jumpRows(.wave("wave-1"), filter: "W2-144").map(\.id) == [.task("issue-now")])
+        model.navigation.palette = .search
+        model.jump(to: .wave("wave-1"), source: "test")
+        #expect(model.selection == .wave(id: "wave-1"))
+        #expect(model.navigation.palette == nil)
+    }
+
+    @Test("An unstarted Task's Session slot offers Start; showing it starts nothing")
+    func unstartedTaskOffersStart() async throws {
+        let model = try model()
+        await model.refresh()
+        let task = try #require(model.task(id: "issue-now")?.task)
+        #expect(task.awaitsStart)
+        #expect(try #require(model.task(id: "issue-review")?.task).awaitsStart == false)
+        #expect(try #require(model.task(id: "issue-later")?.task).awaitsStart == false)
+        let offer = TaskStartOffer(model: model, task: task)
+        let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-now").button()
+        #expect(!start.isDisabled())
+        #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
+        #expect(model.navigation.taskRunDrafts[task.id] == nil)
+    }
+
     @Test("Selecting Work closes Find Work and preserves the sidebar preference", arguments: [false, true])
     func selectionClosesSearch(pinned: Bool) async throws {
         let model = try model()

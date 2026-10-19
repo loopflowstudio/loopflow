@@ -207,14 +207,18 @@ The sidebar presents the repository's retained working Task order, then direct W
 rows. Opening started, unpaused Work appends once. Activity and query refresh never
 reorder slots; explicit pause hides a slot without deleting its stored position.
 Working references are saved through WorkCache; they convey no execution authority.
-Unstarted Tasks show their brief without joining the working set.
+Unstarted Tasks show their brief beside a Start offer in the Session slot, the
+same view as Move here, without joining the working set. Only Start runs anything.
 
 The navigator's Working tasks / Available / Running choice filters presentation
 without selecting Work or changing panes, clients, focus or drafts. Missing planning
 keeps an unavailable row. Work observation retains its last reading on failure.
 Wave navigation leaves working positions and the sidebar viewport intact.
 
-Title-bar breadcrumbs follow hierarchy, Back follows visits, and Cmd+K routes
+Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
+› after it lists what is inside (This Mac › repositories, repository › Waves and
+Dashboards, Wave › Tasks) with a filter that searches that scope. Back follows
+visits, and Cmd+K routes
 cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
 stable eligible slots, independent of the filter. Each Work owns one retained
 workspace. Dashboard queries compose those workspaces side by side; ordinary

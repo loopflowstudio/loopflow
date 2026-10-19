@@ -35,6 +35,22 @@ Jack Heart, of `scratch/chevron-ux/index.html`: “i think B is the closest”.
 - “Closest”, not final: keep to B's behavior; flag details for demo review rather
   than inventing extras.
 
+## Implemented — October 19
+
+1. `TaskStartOffer` fills the Session slot of unstarted, open Tasks (Dashboard tile
+   and Task workspace, beside the brief) through `SessionSlotOffer`, the view Move
+   here now shares. Start calls `WorkModel.startTask(nil, …)` (`lf task run`).
+   Shell/Files/new-terminal commands are off until the Task starts, so the empty
+   Files workspace is unreachable for unstarted Tasks. Completed Tasks unchanged.
+2. `WorkBreadcrumbs` renders `This Mac › repo › Wave › Task`; each › is a
+   `WorkJumpSeparator` popover over `WorkModel.jumpRows`. Choosing goes through
+   `WorkModel.jump(to:)`, which Find Work's `navigate` now shares. The chevron
+   that opened Find Work is gone; ⌘K is unchanged.
+
+Flag for demo review (choices beyond “closest”): “This Mac” is plain text, not a
+destination; a Dashboard crumb keeps `/` before its Task; menus have no Open/Clone
+repository rows; the start offer takes 62% beside the brief, like a Wave's split.
+
 ## Proof
 
 Headless Swift view tests for both (see AGENTS.md Verification Cadence). Native

@@ -41,11 +41,13 @@ Open a started Task to add it to the working list. Reopening it keeps its positi
 activity, completion, Wave navigation and sidebar filtering do not reorder it.
 Paused Tasks leave the list and number slots while keeping their stored position,
 panes and drafts. They remain reachable in their Wave and search. Unstarted Tasks
-open their brief without joining the list or starting execution. Waves follow Tasks
+open their brief beside **Start**, which runs the Task's Workflow; opening alone
+neither joins the list nor starts execution. Waves follow Tasks
 in the same scrolling sidebar, with counts from the planning inventory.
 
-Click a row to select its retained workspace. The title-bar **Repo / Wave / Task**
-path follows hierarchy; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
+Click a row to select its retained workspace. The title-bar **This Mac › Repo › Wave › Task**
+path follows hierarchy: click a name to go there, or the **›** after it to list and
+search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
 changing the selected Work. **⌘1–9** selects stable working slots regardless of the
@@ -870,7 +872,7 @@ starting a provider. Waves show their full Started and Not started inventory.
 Use **+** beside Dashboards to name and pin a query such as
 `(wave:product state:open) or state:available`. Cmd-K finds saved Dashboards.
 Edit changes only that Dashboard; repository and Wave conversations keep their
-normal views. Unstarted Tasks show their briefs without opening a Session.
+normal views. Unstarted Tasks show **Start** and their brief without opening a Session.
 
 `lf desktop view 'state:available'` opens an unsaved Dashboard. Save it to name,
 pin and arrange it. Tasks appear side by side only in Dashboard query results;

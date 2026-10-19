@@ -208,32 +208,104 @@ struct WorkBreadcrumbs: View {
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .frame(width: 24, height: 28).contentShape(Rectangle())
                 .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
-            HStack(spacing: 2) {
-                Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
-                    model.select(nil)
-                    model.navigation.content = .terminals
-                }.lineLimit(1)
-                Button { model.navigation.palette = .search } label: {
-                    Image(systemName: "chevron.down").frame(width: 24, height: 28).contentShape(Rectangle())
-                }
-                    .help("Navigate (⌘K)").accessibilityLabel("Navigate Tasks, Waves and repositories")
-            }.fixedSize()
+            Text("This Mac").foregroundStyle(.secondary).lineLimit(1).fixedSize()
+            WorkJumpSeparator(model: model, scope: .repositories, label: "Repositories")
+            Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
+                model.select(nil)
+                model.navigation.content = .terminals
+            }.lineLimit(1).fixedSize()
+            WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
             if showWave, model.navigation.trailDashboardID == nil, let wave = model.breadcrumb?.wave {
-                Text("/")
                 Button(wave.roadmap.wave.displayName) {
                     model.select(.wave(id: wave.roadmap.wave.id))
                     model.navigation.content = .terminals
                 }.lineLimit(1).fixedSize()
+                WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
             }
             if let id = model.navigation.trailDashboardID {
-                Text("/")
                 Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
                     .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             }
             if let task = model.breadcrumb?.task {
-                Text("/")
                 TaskHeading(task: task.task)
             }
+        }
+    }
+}
+
+/// A jump-bar separator: the › after a crumb lists what is inside it, and
+/// typing searches that scope. Find Work stays on ⌘K.
+struct WorkJumpSeparator: View {
+    let model: WorkModel
+    let scope: WorkJumpScope
+    let label: String
+    @State private var open = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .rotationEffect(.degrees(open ? 90 : 0))
+                .frame(width: 18, height: 28).contentShape(Rectangle())
+        }
+        .help(label).accessibilityLabel(label)
+        .accessibilityIdentifier("work-jump-" + scope.identifier)
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            WorkJumpMenu(model: model, scope: scope, title: label) { open = false }
+        }
+    }
+}
+
+struct WorkJumpMenu: View {
+    let model: WorkModel
+    let scope: WorkJumpScope
+    let title: String
+    let dismiss: () -> Void
+    @State private var filter = ""
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let rows = model.jumpRows(scope, filter: filter)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
+            TextField(scope == .repositories ? "Filter repositories" : "Search \(title.lowercased())", text: $filter)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { if let first = rows.first { choose(first.id) } }
+                .accessibilityIdentifier("work-jump-filter")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(rows) { row in
+                        Button { choose(row.id) } label: {
+                            HStack {
+                                Text(row.title).lineLimit(1)
+                                Spacer()
+                                Text(row.detail).font(Typography.caption()).foregroundStyle(palette.textSecondary).lineLimit(1)
+                            }.padding(6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+                    if rows.isEmpty { Text("No matches").font(Typography.caption()).foregroundStyle(palette.textSecondary).padding(6) }
+                }
+            }.frame(maxHeight: 320)
+        }
+        .padding(10).frame(width: 380)
+        .onExitCommand(perform: dismiss)
+        .accessibilityIdentifier("work-jump-menu")
+    }
+
+    private func choose(_ destination: WorkDestination) {
+        dismiss()
+        model.jump(to: destination, source: "jump_bar")
+        model.remember(destination)
+    }
+}
+
+extension WorkJumpScope {
+    fileprivate var identifier: String {
+        switch self {
+        case .repositories: "repositories"
+        case .repository: "repository"
+        case .wave(let id): "wave-" + id
         }
     }
 }

@@ -149,8 +149,8 @@ struct DashboardView: View {
                 }
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.waiting).textSelection(.enabled) }
-                if content.states.contains(.backlog), let task = model.task(id: member.work.id) {
-                    ScrollView { Text(task.task.task.description).frame(maxWidth: .infinity, alignment: .leading).padding() }
+                if let task = model.task(id: member.work.id)?.task, task.awaitsStart {
+                    TaskStartOffer(model: model, task: task)
                 } else if let pane = entry.multiplexer.zoomedPaneId.flatMap({ entry.multiplexer.layout.pane(for: $0) })
                     ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) }) {
                     WorkspacePanesView(workspace: entry, isFocused: workspaces.selectedWork == member.work, sessions: sessions, model: model,

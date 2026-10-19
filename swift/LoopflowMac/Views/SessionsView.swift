@@ -1054,7 +1054,8 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        !navigation.showsSelection && workspaces.selectedWork != nil && (currentKey.kind != .task || fileTask?.task.runtime?.started == true || workspace.presentation.content == .terminals)
+        !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
+            && (currentKey.kind != .task || fileTask?.task.runtime?.started == true || workspace.presentation.content == .terminals)
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1098,9 +1099,9 @@ struct SessionsContentView: View {
             zoom: { _handle(.zoom) }, focusPane: { _handle(.focus($0)) },
             back: { model.goBack() }, forward: { model.goForward() },
             adjacent: { model.cycleWorkingTask($0) }, slot: { model.selectWorkingTask(slot: $0) },
-            shell: currentKey.kind == .task && !navigation.showsSelection ? { _handle(.toggleShell) } : nil,
-            files: currentKey.kind == .task && !navigation.showsSelection ? { _handle(.toggleFiles) } : nil,
-            newTerminal: currentKey.kind == .task && !navigation.showsSelection ? { _handle(.newTerminal) } : nil,
+            shell: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.toggleShell) } : nil,
+            files: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.toggleFiles) } : nil,
+            newTerminal: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.newTerminal) } : nil,
             close: { _handle(.close) }, reopen: multiplexer.canUndoClose ? { _handle(.undoClose) } : nil))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
@@ -1225,7 +1226,19 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if key.kind == .wave, active {
+            if let task, task.task.awaitsStart, active {
+                // The Session slot offers Start; its brief stays beside it.
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        TaskStartOffer(model: model, task: task.task)
+                            .frame(width: geometry.size.width * 0.62)
+                            .background(theme.terminal.background.color)
+                        Divider()
+                        WorkSurfaceView(model: model, onOpenSession: openSession, onNewSession: newTaskSession)
+                        if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
+                    }
+                }
+            } else if key.kind == .wave, active {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         WorkspacePanesView(workspace: entry, isFocused: navigation.palette == nil, sessions: store, model: model,
@@ -1317,16 +1330,11 @@ struct SessionsContentView: View {
         navigation.restorePaletteFocus = false
         navigation.palette = nil
         switch destination {
-        case .repository: model.select(nil)
-        case .dashboard(let id): model.selectDashboard(id)
-        case .openRepository(let path): model.openRepository?(path, nil)
-        case .wave(let id): model.openPaletteWave(id)
-        case .task(let id):
-            let trace = UUID().uuidString
-            Perf.$inputTrace.withValue(trace) {
-                Perf.agentInput("task_click", task: id, detail: "source=palette")
-                Task { await model.openPaletteTask(id) }
-            }
+        case .repository, .dashboard, .openRepository, .wave:
+            model.jump(to: destination, source: "palette")
+        case .task:
+            // Opening the Task records it as recent once it resolves.
+            model.jump(to: destination, source: "palette")
             return
         case .flow(let name): navigation.palette = .flow(name)
         case .workflow(let name): navigation.palette = .workflow(name)

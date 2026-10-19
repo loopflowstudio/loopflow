@@ -6,6 +6,8 @@ import tarfile
 import time
 from pathlib import Path
 
+CANONICAL_IDS = "store::migrations::canonical_ids_tests"
+
 PROOFS = {
     "running_provider_uses_updated_install_for_commands_hooks_and_flow": (
         "os_process::installation_tests"
@@ -17,10 +19,21 @@ PROOFS = {
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
     "early_observation_records_preflight": "process_ownership_tests",
+    # Structured-ID upgrade on a case-sensitive filesystem with live owners.
+    "canonical_ids_live_receipt_defers_then_normal_settlement_allows_upgrade": CANONICAL_IDS,
+    "canonical_ids_changed_claim_waits_for_canonical_live_caller": CANONICAL_IDS,
+    "canonical_ids_canonical_live_claim_does_not_defer_upgrade": CANONICAL_IDS,
+    "canonical_ids_retained_receipt_and_trace_locator_survive_identity_change": CANONICAL_IDS,
+    "canonical_ids_commands_read_the_upgraded_work_and_native_history": CANONICAL_IDS,
 }
 
 
-LIB_PROOFS = {"task_adoption_tests", "flow_tests", "os_process::installation_tests"}
+LIB_PROOFS = {
+    "task_adoption_tests",
+    "flow_tests",
+    "os_process::installation_tests",
+    CANONICAL_IDS,
+}
 
 
 def _prepare_image(image: str) -> None:

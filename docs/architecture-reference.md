@@ -169,6 +169,30 @@ exact local races use OS locks; remote execution uses lf --machine
 An identifier in one area is not authority in another. The detailed boundaries
 below are the architecture's central constraint.
 
+### Identifier spelling
+
+Structured IDs have one stored and emitted spelling; input may use any casing.
+Domain constructors, parsing and serde normalize (`id.rs`), and SQLite triggers
+reject a noncanonical write with `canonical identity required: <table>`.
+
+| Domain | Canonical form |
+| --- | --- |
+| Wave, Trace, LfProcess/Flow, steer, attachment and owned UUIDs; Linear Issue, Project, Initiative, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
+| Task, Project, repository, Machine, PR, landing, tool response, cron receipt | Lowercase prefix and UUID (`task_`, `proj_`, `repo_`, `home_`, `pr_`, `landing_`, `response_`, `cron_`) |
+| LfSession (`LfSessionId`) | Lowercase `session_<hex>` or bare 32 hex; other historical names keep their bytes |
+| Task label | Lowercase local `lf-<hex>`; uppercase Linear `<TEAM>-<n>` |
+
+Opaque values keep their bytes: provider conversation and turn IDs
+(`AgentSessionId`), account IDs, request and cursor tokens, credentials, hashes,
+capture locators, names, slugs, paths and arbitrary payload content. A Task
+selector resolves each domain separately (`TaskSelector`), so an opaque
+external ID is never treated as a ticket; a Session selector tries the
+canonical LfSession first and gives native lookup the original text.
+Metric evidence keeps its originally hashed Wave spelling while its Work
+association is canonical. Files named from an identity keep their retained
+locators (below). The `canonical_structured_ids` migration converts released
+rows and declared JSON paths in one transaction and aborts on any collision.
+
 ## Planning and execution vocabulary
 
 These are the accepted product owners; see [cutover status](#cutover-status)

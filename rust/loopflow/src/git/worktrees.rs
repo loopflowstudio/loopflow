@@ -163,6 +163,9 @@ pub struct AgentWorktree {
 }
 
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
+    if let Some(layout) = crate::git::read_layout(repo) {
+        return Ok(layout.common_dir);
+    }
     let output = crate::git::retained_output(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],

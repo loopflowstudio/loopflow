@@ -117,21 +117,26 @@ impl Machine {
             rusqlite::params![self.wave.id(),PROJECT]).unwrap();
     }
 
-    /// Start FIX-1 in a real Git checkout with one commit, and return it.
+    /// Start `FIX-<index>` in a real Git checkout with one commit, and return it.
     #[cfg(target_os = "macos")]
-    fn checkout(&self) -> std::path::PathBuf {
-        let worktree = repository(&self.path().join("checkout"));
+    fn start(&self, index: usize) -> std::path::PathBuf {
+        let worktree = repository(&self.path().join(format!("checkout-{index}")));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let mut task = self.store.task_by_issue("issue-1").unwrap().unwrap();
+        let mut task = self
+            .store
+            .task_by_issue(&format!("issue-{index}"))
+            .unwrap()
+            .unwrap();
         task.worktree = Some(worktree.clone());
-        task.workspace_slug = "fix-one".into();
+        task.workspace_slug = format!("fix-{index}");
+        git(&worktree, &["branch", "--move", &task.workspace_slug]);
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
             slug: task.workspace_slug.clone(),
-            branch: "fix-one".into(),
+            branch: task.workspace_slug.clone(),
             base_commit: head,
             parent_pr_id: None,
             publication: None,
@@ -1008,7 +1013,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
 fn a_checkout_changed_on_disk_is_shown() {
     let home = Machine::at(tempfile::tempdir().unwrap());
     home.plan(1);
-    let worktree = home.checkout();
+    let worktree = home.start(1);
     let watch = home.watch();
     watch.checkout((false, false));
 
@@ -1430,5 +1435,26 @@ fn planning_runs_git_per_repository_not_per_wave() {
     assert!(
         grown.len() <= baseline.len(),
         "baseline: {baseline:#?}\ngrown: {grown:#?}"
+    );
+}
+
+/// A planning reading asks Git only whether each live checkout is dirty; its
+/// HEAD and Git layout are read from disk. On October 18, 2026 Jack Heart's
+/// 55 live checkouts cost three commands each.
+#[cfg(target_os = "macos")]
+#[test]
+fn planning_asks_git_once_per_live_checkout() {
+    let home = Machine::new();
+    home.plan(4);
+    home.start(1);
+    let one = planning_git_commands(home.path());
+    for index in 2..=4 {
+        home.start(index);
+    }
+    let four = planning_git_commands(home.path());
+
+    assert!(
+        four.len() <= one.len() + 3,
+        "one checkout: {one:#?}\nfour checkouts: {four:#?}"
     );
 }

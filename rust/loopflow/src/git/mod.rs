@@ -77,6 +77,100 @@ impl WorktreeLease {
     }
 }
 
+/// Where a checkout keeps its Git metadata, read from disk the way Git finds
+/// it. Listings ask this of every checkout; reading two files is far cheaper
+/// than starting `git`. Layouts this does not recognize are left to Git.
+#[derive(Debug)]
+pub(crate) struct GitLayout {
+    git_dir: PathBuf,
+    pub(crate) common_dir: PathBuf,
+}
+
+pub(crate) fn read_layout(repo: &Path) -> Option<GitLayout> {
+    // The environment can point Git elsewhere; then only Git knows.
+    if [
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_WORK_TREE",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some())
+    {
+        return None;
+    }
+    let repo = repo.canonicalize().ok()?;
+    let mut found = None;
+    for dir in repo.ancestors() {
+        // Git asks whether a directory is itself a repository before looking
+        // for `.git` in it, as a bare repository is.
+        if dir.join("HEAD").is_file() && dir.join("objects").is_dir() {
+            return None;
+        }
+        let dot = dir.join(".git");
+        if dot.symlink_metadata().is_ok() {
+            found = Some((dir, dot));
+            break;
+        }
+    }
+    let (top, dot) = found?;
+    let git_dir = if dot.is_dir() {
+        dot
+    } else {
+        let link = fs::read_to_string(&dot).ok()?;
+        top.join(link.strip_prefix("gitdir: ")?.trim_end())
+    };
+    let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
+        Ok(relative) => git_dir.join(relative.trim_end()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => git_dir.clone(),
+        Err(_) => return None,
+    };
+    let (git_dir, common_dir) = (
+        git_dir.canonicalize().ok()?,
+        common_dir.canonicalize().ok()?,
+    );
+    // Git's own test for a repository; reftable refs are not read here.
+    (git_dir.join("HEAD").is_file()
+        && common_dir.join("objects").is_dir()
+        && common_dir.join("refs").is_dir()
+        && !common_dir.join("reftable").exists())
+    .then_some(GitLayout {
+        git_dir,
+        common_dir,
+    })
+}
+
+impl GitLayout {
+    /// The commit HEAD names, through at most one branch.
+    fn head(&self) -> Option<String> {
+        let head = fs::read_to_string(self.git_dir.join("HEAD")).ok()?;
+        let head = head.trim_end();
+        let Some(name) = head.strip_prefix("ref: ") else {
+            return object_id(head);
+        };
+        if !name.starts_with("refs/heads/") || name.contains("..") {
+            return None;
+        }
+        // Branches are shared; a checkout keeps only its own pseudo-refs.
+        match fs::read_to_string(self.common_dir.join(name)) {
+            Ok(sha) => return object_id(sha.trim_end()),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return None,
+            Err(_) => {}
+        }
+        fs::read_to_string(self.common_dir.join("packed-refs"))
+            .ok()?
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .find(|(_, packed_name)| *packed_name == name)
+            .and_then(|(sha, _)| object_id(sha))
+    }
+}
+
+fn object_id(text: &str) -> Option<String> {
+    (matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| text.to_string())
+}
+
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
     Ok(retained_output(repo, args)?)
 }
@@ -1055,6 +1149,11 @@ pub fn show_file(repo: &Path, rev: &str, path: &str) -> Result<Option<String>, G
 
 /// Get the SHA for a ref (branch, tag, HEAD, etc.).
 pub fn rev_parse(repo: &Path, refspec: &str) -> Result<String, GitError> {
+    if refspec == "HEAD" {
+        if let Some(sha) = read_layout(repo).and_then(|layout| layout.head()) {
+            return Ok(sha);
+        }
+    }
     let sha = git_stdout(repo, &["rev-parse", refspec])?
         .trim()
         .to_string();
@@ -1359,6 +1458,75 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn layout_read_from_disk_agrees_with_git() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let main = dir.path().join("main");
+        let git = |cwd: &Path, args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(cwd)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{args:?}: {output:?}");
+            String::from_utf8(output.stdout).unwrap().trim().to_string()
+        };
+        fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(
+            &main,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "one",
+            ],
+        );
+        git(&main, &["worktree", "add", "-q", "-b", "side", "../side"]);
+        let side = dir.path().join("side");
+        fs::create_dir_all(side.join("deep/er")).unwrap();
+        let agree = |checkout: &Path| {
+            let layout = read_layout(checkout).expect("layout is read from disk");
+            assert_eq!(
+                layout.common_dir,
+                PathBuf::from(git(
+                    checkout,
+                    &["rev-parse", "--path-format=absolute", "--git-common-dir"]
+                ))
+            );
+            assert_eq!(layout.head(), Some(git(checkout, &["rev-parse", "HEAD"])));
+        };
+        agree(&main);
+        agree(&side.join("deep/er"));
+        // Branches packed away and a detached HEAD are both read.
+        git(
+            &side,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "two",
+            ],
+        );
+        git(&main, &["pack-refs", "--all"]);
+        agree(&side);
+        git(&main, &["checkout", "-q", "--detach"]);
+        agree(&main);
+        // A bare repository is its own Git directory; Git answers for it.
+        git(dir.path(), &["clone", "-q", "--bare", "main", "bare.git"]);
+        assert!(read_layout(&dir.path().join("bare.git")).is_none());
+    }
 
     #[test]
     fn git_reads_from_several_threads_run_side_by_side() {

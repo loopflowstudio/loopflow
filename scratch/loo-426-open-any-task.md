@@ -778,7 +778,7 @@ Built in the third pass (October 18):
   Task stands (`Available`, then its Workflow node), via
   `terminal_title::standing`; provider `--name` keeps the Session name.
 
-Compress: `cargo test work_open_tests::` + lib open/link tests pass.
+Compress (fifth): dropped unused `WorkUrl::kind`, narrowed module-only `pub`; `--lib work::link` 11 pass, clippy clean.
 
 Remaining: none planned. "Question" has no shared reader, so titles do not say it.
 

@@ -10,7 +10,7 @@ use anyhow::{bail, ensure, Result};
 
 use crate::durable::RepositoryId;
 
-pub const SCHEME: &str = "loopflow";
+const SCHEME: &str = "loopflow";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkTarget {
@@ -42,7 +42,8 @@ impl WorkUrl {
 
     pub fn parse(text: &str) -> Result<Self> {
         let rest = text
-            .strip_prefix("loopflow://")
+            .strip_prefix(SCHEME)
+            .and_then(|rest| rest.strip_prefix("://"))
             .ok_or_else(|| anyhow::anyhow!("Work links start with loopflow://"))?;
         ensure!(
             !rest.chars().any(|ch| ch.is_control() || ch.is_whitespace()),
@@ -105,14 +106,6 @@ impl WorkUrl {
             session: None,
             diff: false,
             ..self.clone()
-        }
-    }
-
-    pub fn kind(&self) -> &'static str {
-        match self.target {
-            WorkTarget::Repository => "repository",
-            WorkTarget::Wave(_) => "wave",
-            WorkTarget::Task(_) => "task",
         }
     }
 }

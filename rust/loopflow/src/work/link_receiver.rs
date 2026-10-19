@@ -29,7 +29,7 @@ pub enum Receiver {
 }
 
 /// The receiver's argv before the URL: `lf open` without terminal-host context.
-pub fn receiver_argv(lf: &Path) -> Vec<String> {
+fn receiver_argv(lf: &Path) -> Vec<String> {
     let mut argv = vec!["/usr/bin/env".to_owned()];
     for name in crate::lf::commands::open::HOST_CONTEXT {
         argv.extend(["-u".to_owned(), (*name).to_owned()]);
@@ -107,7 +107,7 @@ fn herdr_manifest(lf: &Path) -> String {
 
 /// Write the desktop entry and select it in `mimeapps.list` unless another
 /// handler was chosen for `loopflow:`.
-pub fn install_xdg(data: &Path, config: &Path, lf: &Path) -> Result<Receiver> {
+fn install_xdg(data: &Path, config: &Path, lf: &Path) -> Result<Receiver> {
     let applications = data.join("applications");
     fs::create_dir_all(&applications)
         .with_context(|| format!("create {}", applications.display()))?;
@@ -246,7 +246,7 @@ fn install_macos(home: &Path, lf: &Path, placed_desktop: bool) -> Result<Receive
 /// Compile an AppleScript applet whose `open location` handler runs the
 /// receiver argv with the clicked URL. Failures surface with `lf open`'s
 /// own explanation and fallback command.
-pub fn write_applet(applet: &Path, lf: &Path) -> Result<()> {
+fn write_applet(applet: &Path, lf: &Path) -> Result<()> {
     let parent = applet.parent().expect("applet has a parent");
     fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     let command = shlex::try_join(receiver_argv(lf).iter().map(String::as_str))?;

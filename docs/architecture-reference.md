@@ -458,8 +458,9 @@ and no command changes a running Flow; the control is ending its Flow process.
 
 A step's result is how its process exited. A deciding or routing step gets its
 answer contract in its message, and the Flow process reads the final answer of the
-Session turn that step Process captured, accepting a JSON value wrapped in prose
-or a code fence. An invalid answer is corrected by resuming the same
+Session turn that step Process captured, following `transport serve` delegation
+to the served command without including commands the agent ran. It accepts a JSON
+value wrapped in prose or a code fence. An invalid answer is corrected by resuming the same
 conversation: at most two corrective turns, then the Flow fails. After an
 operation step the Flow process looks for a landing of its checkout that is still
 being watched; the Flow stops there, and neither failed. Mechanical steps create

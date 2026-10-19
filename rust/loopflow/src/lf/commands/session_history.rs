@@ -112,12 +112,20 @@ pub fn inspect(
     let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
     let dir = crate::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
+    let diagnostics: Vec<_> = store
+        .summary_for_input(&snapshot.session_id, &input)?
+        .into_iter()
+        .filter(|event| event.payload["source"] == "codex_relay")
+        .collect();
     if events {
         for event in store.input_events(&input)? {
             match event.get("unparsed").and_then(serde_json::Value::as_str) {
                 Some(bytes) => println!("{bytes}"),
                 None => println!("{}", serde_json::to_string(&event)?),
             }
+        }
+        for event in &diagnostics {
+            println!("{}", serde_json::to_string(event)?);
         }
         return Ok(());
     }
@@ -185,6 +193,13 @@ pub fn inspect(
         "Working directory: {}",
         snapshot.worktree.as_deref().unwrap_or("unknown")
     );
+    for event in &diagnostics {
+        println!(
+            "Codex relay diagnostic (AgentProcess {}): {}",
+            event.agent_process_id.as_deref().unwrap_or("unknown"),
+            event.payload["error"].as_str().unwrap_or("unavailable")
+        );
+    }
     let manifest = crate::session_record::read_manifest(&dir).ok();
     println!(
         "Replay: {}",

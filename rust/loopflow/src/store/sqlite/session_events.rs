@@ -93,6 +93,37 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Keep initiating failures without unbounded growth during reconnect storms.
+    pub(crate) fn retain_codex_relay_failure(
+        &self,
+        input: &str,
+        attachment: Option<&crate::process::SessionAttachment>,
+        payload: &Value,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let captured = super::sessions::capture_seq_in(&tx, input)?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM session_events WHERE captured_event=?1 AND kind='observed'
+             AND json_extract(payload,'$.source')='codex_relay'",
+            [captured],
+            |row| row.get(0),
+        )?;
+        if count < 16 {
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,agent_process_id,lf_process_id,
+                 task_id,wave_id,observed_at,payload,captured_event)
+                 SELECT session_id,'observed',?2,?3,?4,task_id,wave_id,?5,?6,seq
+                 FROM session_events WHERE seq=?1",
+                params![captured,format!("{input}:codex_relay:{count}"),
+                    attachment.map(|a| &a.agent_process_id),attachment.and_then(|a| a.lf_process_id.as_ref()),
+                    time::OffsetDateTime::now_utc().unix_timestamp(),serde_json::to_string(payload)?],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Replace the Session's reading with its current attachment's.
     pub(crate) fn record_session_activity(
         &self,
@@ -250,7 +281,7 @@ impl SqliteStore {
     }
 
     /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
-    pub(super) fn summary_for_input(
+    pub(crate) fn summary_for_input(
         &self,
         session: &str,
         input: &str,
@@ -289,7 +320,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    origin.agent_process_id,CASE WHEN e.kind='captured' THEN e.lf_process_id ELSE origin.lf_process_id END,
+                    CASE WHEN e.kind IN ('observed','captured') THEN e.agent_process_id ELSE origin.agent_process_id END,
+                    CASE WHEN e.kind IN ('observed','captured') THEN e.lf_process_id ELSE origin.lf_process_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
              FROM session_events e LEFT JOIN session_events origin

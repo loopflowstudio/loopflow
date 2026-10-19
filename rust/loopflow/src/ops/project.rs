@@ -155,9 +155,9 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     let repo = crate::repository::CanonicalRepo::discover(repo)
         .map_err(project_error)?
         .to_string();
-    if crate::durable::ProjectId::parse(selector).is_ok() {
+    if let Ok(id) = crate::durable::ProjectId::parse(selector) {
         let project = store
-            .get_project_by_project(selector)
+            .get_project_by_project(id.as_str())
             .await
             .map_err(project_error)?
             .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;
@@ -187,7 +187,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         project
             .linear_id
             .as_ref()
-            .is_some_and(|id| id.as_str() == selector)
+            .is_some_and(|id| id.as_str() == crate::id::canonical_uuid(selector))
     }) {
         return Ok(project.clone());
     }

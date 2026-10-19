@@ -60,7 +60,7 @@ pub(crate) async fn ensure_task(
         Some(session) => Some(session.to_string()),
         None => task_conversation(store, id)
             .await?
-            .map(|session| session.id),
+            .map(|session| session.id.to_string()),
     };
     if !binding.cwd.try_exists()? {
         // Reuse Task preparation's recorded placement and restoration checks.
@@ -247,7 +247,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
     let (provider, model) = crate::config::parse_agent(&agent);
     LfSession {
         captured: None,
-        id: uuid::Uuid::new_v4().simple().to_string(),
+        id: uuid::Uuid::new_v4().simple().to_string().into(),
         artifact_key: crate::session_record::new_artifact_key(),
         caller_artifact_key: None,
         input_published: false,

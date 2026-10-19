@@ -20,6 +20,18 @@ public enum PaneContent: Codable, Sendable, Equatable {
     /// A Task's worktree files.
     case files(taskId: String, location: WorkspaceIdentity? = nil, execution: TaskLocationObservation? = nil)
 
+    var canonicalized: PaneContent {
+        switch self {
+        case .session(let id, let location, let execution):
+            .session(id: StructuredIdentity.session(id), location: location, execution: execution)
+        case .files(let id, let location, let execution):
+            .files(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
+        case .flowLog(let id, let location, let execution):
+            .flowLog(taskId: StructuredIdentity.prefixed(id, "task_"), location: location, execution: execution)
+        case .empty, .shell: self
+        }
+    }
+
     /// Terminals retain their captured location; Files and logs follow their
     /// recorded owner. Unavailable owner evidence never falls back to a path.
     public var location: WorkspaceIdentity? {
@@ -60,7 +72,7 @@ public struct PaneState: Codable, Sendable, Identifiable, Equatable {
         content: PaneContent
     ) {
         self.id = id
-        self.content = content
+        self.content = content.canonicalized
         self.incarnation = UUID().uuidString
     }
 }
@@ -245,4 +257,13 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
 
 private extension Double {
     var clampedSplitRatio: Double { min(max(self, 0.1), 0.9) }
+}
+
+extension PaneState {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        incarnation = try values.decode(String.self, forKey: .incarnation)
+        content = try values.decode(PaneContent.self, forKey: .content).canonicalized
+    }
 }

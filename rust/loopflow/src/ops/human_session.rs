@@ -86,7 +86,7 @@ async fn most_recent(
         .max_by_key(|(session, opened)| {
             (
                 human
-                    .get(&session.id)
+                    .get(session.id.as_str())
                     .copied()
                     .or(*opened)
                     .unwrap_or(session.created_at.saturating_mul(1000)),
@@ -195,12 +195,12 @@ pub(crate) async fn select_connection(
                 .primary_session(&crate::session::PrimaryScope::Wave(work.wave.id().clone()))?
         };
         return session
-            .map(|session| session.id)
+            .map(|session| session.id.to_string())
             .context("No interactive Session found for this Work");
     }
     latest_interactive_session(store, cwd)
         .await?
-        .map(|session| session.id)
+        .map(|session| session.id.to_string())
         .context("No interactive Session found in this repository or worktree")
 }
 
@@ -576,7 +576,7 @@ impl<'a> NativeSession<'a> {
 
 fn session_token(session: &LfSession) -> HumanSessionToken {
     HumanSessionToken::Primary {
-        id: session.id.clone(),
+        id: session.id.to_string(),
     }
 }
 
@@ -960,7 +960,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
-        id: session.id.clone(),
+        id: session.id.to_string(),
         workspace: None,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
@@ -1076,7 +1076,7 @@ pub(crate) async fn preview_binding(
 ) -> Result<SessionBindingPreview> {
     let (session, task) = binding_target(store, id, task).await?;
     Ok(SessionBindingPreview {
-        session_id: session.id,
+        session_id: session.id.to_string(),
         task_id: task.id.to_string(),
         identifier: task.identifier,
         title: task.title,
@@ -1498,7 +1498,7 @@ mod tests {
                 let mut provider = crate::harness::agent_process::spawn(
                     command,
                     None,
-                    &(store.sqlite.clone(), session.id.clone(), first.clone()),
+                    &(store.sqlite.clone(), session.id.to_string(), first.clone()),
                 )?;
                 std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
                 // Without native identity, connect must leave the running provider alone.

@@ -6,7 +6,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::prefixed_uuid_id;
+use crate::id::prefixed_uuid_id;
 use crate::work::task::TaskId;
 
 pub(crate) const SUPERVISOR_STALE_AFTER: time::Duration = time::Duration::minutes(2);
@@ -25,6 +25,12 @@ prefixed_uuid_id!(
     PrLandingDataError,
     PrLandingDataError::InvalidId
 );
+
+impl PrLandingId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(crate::id::canonical_prefixed(&value.into(), "landing_"))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

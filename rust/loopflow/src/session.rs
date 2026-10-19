@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::{AgentSessionId, WaveId};
+use crate::id::{AgentSessionId, LfSessionId, WaveId};
 
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
@@ -75,7 +75,7 @@ impl SessionEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LfSession {
     pub captured: Option<i64>,
-    pub id: String,
+    pub id: LfSessionId,
     /// Immutable captured input, not a resumable execution identity.
     pub artifact_key: String,
     /// Causal input reference; grants neither attachment nor Flow authority.

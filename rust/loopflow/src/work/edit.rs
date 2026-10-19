@@ -23,6 +23,19 @@ impl WorkEdit {
             .collect()
     }
 
+    pub(crate) fn canonicalized(&self) -> StoreResult<Self> {
+        let mut edit = self.clone();
+        let table = crate::store::sqlite::planning_write::table(&edit.change);
+        edit.target = match table {
+            "waves" | "task_comments" => crate::id::canonical_uuid(&edit.target),
+            "projects" => crate::id::canonical_prefixed(&edit.target, "proj_"),
+            "tasks" => crate::id::canonical_prefixed(&edit.target, "task_"),
+            _ => unreachable!("Work tables are exhaustive"),
+        };
+        edit.change.canonicalize()?;
+        Ok(edit)
+    }
+
     pub(crate) fn key(&self) -> (&str, &str) {
         (&self.target, self.change.field())
     }
@@ -110,6 +123,42 @@ work_values! {
 }
 
 impl WorkValue {
+    fn canonicalize(&mut self) -> StoreResult<()> {
+        use crate::id::{canonical_prefixed, canonical_task_identifier, canonical_uuid};
+        match self {
+            Self::WaveParent(v)
+            | Self::ProjectLinearId(v)
+            | Self::TaskLinearId(v)
+            | Self::TaskAssignee(v)
+            | Self::TaskTeam(v) => {
+                if let Some(v) = v {
+                    *v = canonical_uuid(v);
+                }
+            }
+            Self::WaveProject(Some(v)) => *v = canonical_prefixed(v, "proj_"),
+            Self::ProjectWave(v) => *v = canonical_uuid(v),
+            Self::TaskProject(v) => *v = canonical_prefixed(v, "proj_"),
+            Self::CommentTask(v) => *v = canonical_prefixed(v, "task_"),
+            Self::TaskIdentifier(v) => *v = canonical_task_identifier(v),
+            Self::ProjectInitiatives(values) | Self::ProjectTeams(values) => {
+                let mut seen = std::collections::BTreeMap::new();
+                for value in values {
+                    let canonical = canonical_uuid(value);
+                    if let Some(original) = seen.insert(canonical.clone(), value.clone()) {
+                        if original != *value {
+                            return Err(StoreError::InvalidData(format!(
+                                "canonical identity collision: membership: {original} / {value}"
+                            )));
+                        }
+                    }
+                    *value = canonical;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate(&self) -> StoreResult<()> {
         match self {
             Self::WaveDelegation(Some(v))

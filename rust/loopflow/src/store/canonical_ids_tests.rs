@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use fs2::FileExt;
 use rusqlite::{params, Connection};
 
-use super::{_migration_transaction, apply_sqlite, tests::current_draft_sql};
+use super::{_migration_transaction, apply_sqlite};
 use crate::id::LfProcessId;
 use crate::journal::{ProcessIdentityEvidence, ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::store::canonical_ids::{preflight, session_fence_file};
@@ -28,6 +28,14 @@ fn released() -> (tempfile::TempDir, Connection) {
     ))
     .unwrap();
     (home, conn)
+}
+
+fn conversion_sql() -> &'static str {
+    super::MIGRATIONS
+        .iter()
+        .find(|migration| super::migration_contains(migration, "canonical_structured_ids"))
+        .expect("materialized conversion release")
+        .sql
 }
 
 fn receipt(
@@ -97,8 +105,7 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
             waiter
         }));
         waiting.recv().unwrap();
-        conn.execute_batch(&current_draft_sql("canonical_structured_ids"))?;
-        conn.execute("UPDATE agent_sessions SET id=lower(id)", [])?;
+        conn.execute_batch(conversion_sql())?;
         assert!(locked.try_recv().is_err());
         Ok(())
     })
@@ -108,13 +115,11 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
         .unwrap();
     let waiter = caller.unwrap().join().unwrap();
     let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
-    assert!(store.session_attachment(SESSION).is_err());
+    assert!(store.session_attachment(SESSION).unwrap().is_none());
     let stale_insert = conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,'stale','human',1,0,'/repo')", [SESSION]
     ).unwrap_err();
-    assert!(stale_insert
-        .to_string()
-        .contains("Session identity must be canonical"));
+    assert!(stale_insert.to_string().contains("canonical"));
     assert!(store
         .try_lock_session_attachment(&SESSION.to_ascii_lowercase())
         .unwrap()
@@ -188,11 +193,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
     let original = fs::read(&path).unwrap();
     _migration_transaction(&conn, |conn, guards| {
         preflight(conn, guards)?;
-        conn.execute_batch(&current_draft_sql("canonical_structured_ids"))?;
-        conn.execute(
-            "UPDATE processes SET id=lower(id),trace_id=lower(trace_id)",
-            [],
-        )?;
+        conn.execute_batch(conversion_sql())?;
         Ok(())
     })
     .unwrap();
@@ -258,11 +259,8 @@ fn canonical_ids_pruning_uses_retained_receipt_owner_and_requires_completion() {
     let path = receipt(home.path(), PROCESS, TRACE, std::process::id(), 1);
     _migration_transaction(&conn, |conn, guards| {
         preflight(conn, guards)?;
-        conn.execute_batch(&current_draft_sql("canonical_structured_ids"))?;
-        conn.execute(
-            "UPDATE processes SET id=lower(id),trace_id=lower(trace_id),completed_at=NULL",
-            [],
-        )?;
+        conn.execute_batch(conversion_sql())?;
+        conn.execute("UPDATE processes SET completed_at=NULL", [])?;
         Ok(())
     })
     .unwrap();
@@ -479,7 +477,7 @@ fn canonical_ids_failed_commit_retains_guards_through_rollback() {
     .unwrap();
     assert!(_migration_transaction(&conn, |conn, guards| {
         preflight(conn, guards)?;
-        conn.execute_batch(&current_draft_sql("canonical_structured_ids"))?;
+        conn.execute_batch(conversion_sql())?;
         Ok(())
     })
     .is_err());
@@ -710,7 +708,7 @@ fn canonical_ids_wave_collision_preserves_original_metric_evidence() {
         .unwrap();
     let error = apply_sqlite(&conn).unwrap_err().to_string();
     assert!(
-        error.contains("canonical identity collision: Wave"),
+        error.contains("canonical identity collision: waves"),
         "{error}"
     );
     assert!(error.contains(TRACE), "{error}");
@@ -760,4 +758,247 @@ fn canonical_ids_wave_associations_keep_uuid_punctuation() {
             .unwrap(),
         spellings.len() as i64
     );
+}
+
+#[test]
+fn canonical_ids_released_work_upgrades_without_replacing_history() {
+    let (home, conn) = released();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_work.sql"
+    ))
+    .unwrap();
+    let opaque: (String, String, String) = conn
+        .query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+        .unwrap();
+    let mutations: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
+        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+    apply_sqlite(&conn).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| Ok(
+            (
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?
+            )
+        ))
+        .unwrap(),
+        opaque
+    );
+    assert_eq!(
+        conn.query_row("SELECT provider_thread FROM agent_sessions", [], |r| r
+            .get::<_, String>(
+            0
+        ))
+        .unwrap(),
+        "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    );
+    assert_eq!(
+        conn.query_row("SELECT request_id FROM tool_responses", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
+    );
+    assert_eq!(
+        conn.query_row("SELECT node FROM task_workflows", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        "start"
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM task_workflow_moves", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    let authority: String = conn
+        .query_row("SELECT admission_authority FROM tasks", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&authority).unwrap()["machine_id"],
+        "home_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    let event: String = conn
+        .query_row("SELECT kind_json FROM task_events", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&event).unwrap()["steer_id"],
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    );
+    let migrated: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
+        conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    serde_json::from_str(&r.get::<_, String>(1)?).unwrap(),
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+    let saved = crate::planning_exchange::PlanningSnapshot { changes: migrated };
+    let original = crate::planning_exchange::PlanningSnapshot { changes: mutations };
+    assert_eq!(saved.merge(&original).unwrap(), saved);
+    assert_eq!(saved.merge(&original).unwrap().changes.len(), 2);
+    let store = SqliteStore::open_processes_read_only(&home.path().join("loopflow.db")).unwrap();
+    for selector in [
+        "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "lOo-506",
+        "FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF",
+        "LF-AAAA",
+    ] {
+        assert_eq!(
+            store
+                .resolve_task_id(selector, None)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+    assert_eq!(
+        store.session(SESSION).unwrap().unwrap().id.as_str(),
+        "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    assert_eq!(
+        store.resolve_process(PROCESS).unwrap().unwrap().id.as_str(),
+        PROCESS.to_ascii_lowercase()
+    );
+    assert!(conn
+        .execute("UPDATE task_admissions SET machine_id='other'", [])
+        .is_err());
+    assert!(conn
+        .execute(
+            "UPDATE tasks SET external_issue_id=upper(external_issue_id)",
+            []
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("canonical identity"));
+    assert!(conn.execute("UPDATE tasks SET admission_authority=json_set(admission_authority,'$.machine_id',upper(json_extract(admission_authority,'$.machine_id')))",[]).unwrap_err().to_string().contains("canonical identity"));
+}
+
+#[test]
+fn canonical_ids_planning_key_collision_rolls_back_release() {
+    let (_home, conn) = released();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_work.sql"
+    ))
+    .unwrap();
+    conn.execute("INSERT INTO planning_peer_changes(id,record_table,mutation) SELECT lower(id),record_table,mutation FROM planning_peer_changes ORDER BY id LIMIT 1",[]).unwrap();
+    let error = apply_sqlite(&conn).unwrap_err().to_string();
+    assert!(
+        error.contains("canonical identity collision: planning_peer_changes"),
+        "{error}"
+    );
+    assert!(conn
+        .prepare("SELECT fence_locator FROM agent_sessions")
+        .is_err());
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM planning_peer_changes", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        3
+    );
+}
+
+#[test]
+fn canonical_ids_unique_linear_claim_and_json_membership_collisions_roll_back() {
+    for setup in [
+        "INSERT INTO projects(id,wave_id,external_project_id,created_at) SELECT 'proj_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',wave_id,lower(external_project_id),1 FROM projects",
+        "UPDATE projects SET planning_teams='[\"AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\",\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"]'",
+        "INSERT INTO planning_peer_changes(id,record_table,mutation) SELECT 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC',record_table,json_set(mutation,'$.clock',2,'$.parents',json('[]')) FROM planning_peer_changes ORDER BY id LIMIT 1; UPDATE planning_peer_changes SET id=lower(id) WHERE id LIKE 'BBBB%'",
+    ] {
+        let (_home,conn)=released();
+        conn.execute_batch(include_str!("../../tests/fixtures/migrations/canonical_ids_work.sql")).unwrap();
+        conn.execute_batch(setup).unwrap();
+        let error=apply_sqlite(&conn).unwrap_err().to_string();
+        assert!(error.contains("canonical identity collision"),"{error}");
+        assert!(conn.prepare("SELECT receipt_locator FROM processes").is_err());
+        assert_eq!(conn.query_row("SELECT id FROM tasks",[],|r|r.get::<_,String>(0)).unwrap(),"TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+}
+
+#[test]
+fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
+    let (home, conn) = released();
+    conn.execute_batch(include_str!(
+        "../../tests/fixtures/migrations/canonical_ids_work.sql"
+    ))
+    .unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    conn.execute("UPDATE waves SET repo=?1", [repo.path().to_str().unwrap()])
+        .unwrap();
+    conn.execute(
+        "UPDATE tasks SET worktree=?1",
+        [repo.path().to_str().unwrap()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET repo=?1,cwd=?1",
+        [repo.path().to_str().unwrap()],
+    )
+    .unwrap();
+    apply_sqlite(&conn).unwrap();
+    let binary = loopflow_test_support::lf_binary();
+    for args in [
+        vec!["task", "status", "lOo-506", "--json"],
+        vec![
+            "task",
+            "status",
+            "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--json",
+        ],
+        vec!["session", "history", SESSION, "--json"],
+    ] {
+        let mut command = std::process::Command::new(binary);
+        for (name, _) in std::env::vars_os() {
+            if name.to_string_lossy().starts_with("LF_")
+                || name.to_string_lossy().starts_with("LOOPFLOW_")
+            {
+                command.env_remove(name);
+            }
+        }
+        let output = command
+            .args(&args)
+            .current_dir(repo.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", binary)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let json = output.to_string();
+        assert!(
+            !json.contains("TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            "{json}"
+        );
+        if args[0] == "task" {
+            assert!(
+                json.contains("task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                "{json}"
+            );
+            assert!(
+                json.contains("session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                "{json}"
+            );
+        }
+    }
 }

@@ -93,6 +93,8 @@ fn title_source(source: TitleSource) -> &'static str {
 }
 
 pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSession>> {
+    let canonical = crate::id::canonical_session(id);
+    let id = canonical.as_str();
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
         [id],
@@ -395,6 +397,8 @@ impl SqliteStore {
         attachment: &crate::process::SessionAttachment,
         owner: &crate::id::LfProcessId,
     ) -> StoreResult<()> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
@@ -409,6 +413,8 @@ impl SqliteStore {
         &self,
         session: &str,
     ) -> StoreResult<Option<crate::id::LfProcessId>> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let id: Option<String> = conn
             .query_row(
@@ -529,6 +535,8 @@ impl SqliteStore {
         id: &str,
         now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut labels = std::collections::HashMap::new();
@@ -543,13 +551,14 @@ impl SqliteStore {
 
     /// Resolve a conversation or captured-input selector from its SQLite owner.
     pub(crate) fn resolve_history_input(&self, selector: &str) -> StoreResult<String> {
+        let canonical = crate::id::canonical_session(selector);
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-            [selector],
+            [&canonical],
             |row| row.get::<_, bool>(0),
         )? {
-            return Ok(selector.to_string());
+            return Ok(canonical);
         }
         let mut query = conn.prepare("SELECT id FROM (
             SELECT receipt_key AS id FROM session_events WHERE kind='captured' UNION SELECT json_extract(payload,'$.caller_key') FROM session_events WHERE kind='captured')
@@ -866,6 +875,8 @@ impl SqliteStore {
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<LfSession>> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         session_in(&conn, id)
     }
@@ -1215,6 +1226,8 @@ impl SqliteStore {
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
@@ -1225,6 +1238,8 @@ impl SqliteStore {
     }
 
     pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
@@ -1319,7 +1334,7 @@ pub(super) fn retain_history_in(
             "SELECT seq,session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
             [&observation.artifact_key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
         let (captured, owner) = captured.ok_or(StoreError::NotFound)?;
-        if owner != session.id {
+        if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
@@ -1449,7 +1464,7 @@ fn capture_in(
         )
         .optional()?;
     if let Some((seq, owner, caller)) = saved {
-        if owner != session.id || caller != session.caller_artifact_key {
+        if owner != session.id.as_str() || caller != session.caller_artifact_key {
             return Err(invalid(
                 "captured artifact has conflicting Session or caller evidence",
             ));

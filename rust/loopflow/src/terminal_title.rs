@@ -88,7 +88,7 @@ impl TerminalTitle {
             attachment: store.session_attachment(&session.id)?,
             name: session_title(&store, &session)?,
             store,
-            session: session.id,
+            session: session.id.to_string(),
             cmux: std::env::var("CMUX_WORKSPACE_ID")
                 .ok()
                 .zip(std::env::var("CMUX_SURFACE_ID").ok())
@@ -209,11 +209,11 @@ mod tests {
             )
             .unwrap();
         let attachment = store
-            .claim_session_attachment(&session.id, None, &process, true)
+            .claim_session_attachment(&session.id.to_string(), None, &process, true)
             .unwrap();
         let title = TerminalTitle {
             store,
-            session: session.id,
+            session: session.id.to_string(),
             attachment: Some(attachment.clone()),
             name: session.title,
             cmux: None,

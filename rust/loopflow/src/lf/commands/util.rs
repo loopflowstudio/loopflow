@@ -313,23 +313,26 @@ fn session_command_status_with_env(
                 .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
             let process = crate::journal::current_lf_process_id()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-            let attachment =
-                crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
-            store.make_session_interactive(&session.id, &attachment)?;
+            let attachment = crate::session_record::resume_session_agent_process(
+                &store,
+                &session.id.to_string(),
+                &process,
+            )?;
+            store.make_session_interactive(&session.id.to_string(), &attachment)?;
             if let Some(owner) = crate::transport::current() {
-                store.bind_session_transport(&session.id, &attachment, owner)?;
+                store.bind_session_transport(&session.id.to_string(), &attachment, owner)?;
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.id.clone()))?,
+                serde_json::to_string(&attachment.caller(session.id.to_string()))?,
             );
             crate::session_record::register_session_attachment_interrupt(
                 &store,
-                session.id.clone(),
+                session.id.to_string(),
                 attachment.clone(),
             );
-            command.attachment = Some((session.id.clone(), attachment.clone()));
-            Some((store, session.id, attachment))
+            command.attachment = Some((session.id.to_string(), attachment.clone()));
+            Some((store, session.id.to_string(), attachment))
         } else {
             None
         };
@@ -1287,7 +1290,7 @@ mod tests {
             let store = SqliteStore::new(&home.join("loopflow.db"))?;
             let session = store.test_session("remote", &crate::session_record::new_artifact_key());
             let original = store.claim_session_attachment(
-                &session.id,
+                &session.id.to_string(),
                 None,
                 &crate::id::LfProcessId::new(),
                 true,
@@ -1296,24 +1299,24 @@ mod tests {
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn_native(
                 command,
-                &(store.clone(), session.id.clone(), original.clone()),
+                &(store.clone(), session.id.to_string(), original.clone()),
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
-                &session.id,
+                &session.id.to_string(),
                 &original,
                 endpoint.to_str().unwrap(),
                 &"thread".into(),
             )?;
             let attached = store.claim_session_attachment(
-                &session.id,
+                &session.id.to_string(),
                 Some(&original),
                 &crate::journal::current_lf_process_id().unwrap(),
                 false,
             )?;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attached.caller(session.id.clone()))?,
+                serde_json::to_string(&attached.caller(session.id.to_string()))?,
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
@@ -1323,7 +1326,7 @@ mod tests {
                 args: vec![],
                 cwd: home.into(),
                 context: None,
-                attachment: Some((session.id.clone(), attached.clone())),
+                attachment: Some((session.id.to_string(), attached.clone())),
                 remote: Some(NativeConnection {
                     relay: home.join("relay.sock"),
                     upstream: endpoint.clone(),
@@ -1345,7 +1348,7 @@ mod tests {
                 session_command_status_with_env(&command, &BTreeMap::new(), None, None, None);
             crate::harness::agent_process::stop_native(
                 &mut provider,
-                Some(&(store, session.id, attached)),
+                Some(&(store, session.id.to_string(), attached)),
             )?;
             assert!(result?.status.success());
             assert!(alive && unchanged);

@@ -159,6 +159,8 @@ fn attachment_in(
     conn: &rusqlite::Connection,
     session: &str,
 ) -> StoreResult<Option<SessionAttachment>> {
+    let canonical = crate::id::canonical_session(session);
+    let session = canonical.as_str();
     let row = conn
         .query_row(
             "SELECT p.attached_lf_process_id,p.attachment_token,p.parent_lf_process_id,p.id
@@ -303,10 +305,11 @@ impl SqliteStore {
         selector: &str,
         repo: Option<&str>,
     ) -> StoreResult<Option<crate::id::WaveId>> {
+        let canonical = crate::id::canonical_uuid(selector);
         self.resolve_work_id(
             "SELECT id FROM wave_addresses WHERE id=?1 OR (slug=?1 AND (?2 IS NULL OR repo=?2))
             ORDER BY (id=?1) DESC,id LIMIT 2",
-            selector,
+            &canonical,
             repo,
         )?
         .map(|id| {
@@ -395,8 +398,10 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Exact identity wins; otherwise require a unique literal, case-sensitive prefix.
+    /// Exact identity wins; otherwise require a unique literal UUID prefix.
     pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<LfProcess>> {
+        let canonical = selector.to_ascii_lowercase();
+        let selector = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         if let Some(process) = conn
             .query_row(
@@ -690,6 +695,8 @@ impl SqliteStore {
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         self.lock_session_fence(session, false)
     }
 
@@ -717,6 +724,8 @@ impl SqliteStore {
     }
 
     pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let file = self.session_fence_file(session)?;
         match file.try_lock_exclusive() {
             Ok(()) => Ok(Some(file)),
@@ -759,6 +768,8 @@ impl SqliteStore {
         expected: &SessionAttachment,
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -870,6 +881,8 @@ impl SqliteStore {
     }
 
     pub fn session_attachment(&self, session: &str) -> StoreResult<Option<SessionAttachment>> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         attachment_in(&conn, session)
     }
@@ -881,6 +894,8 @@ impl SqliteStore {
         process: &LfProcessId,
         replace_provider: bool,
     ) -> StoreResult<SessionAttachment> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -952,6 +967,8 @@ impl SqliteStore {
         process: &LfProcessId,
         close: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<SessionAttachment> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         self.with_session_resume(session, expected, close, |tx| {
             attach_in(tx, session, expected, process, true)
         })
@@ -1050,6 +1067,8 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
     ) -> StoreResult<SessionAttachment> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1076,6 +1095,8 @@ impl SqliteStore {
         outcome: &str,
         close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");

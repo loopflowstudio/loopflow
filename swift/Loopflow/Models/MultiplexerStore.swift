@@ -52,7 +52,8 @@ public final class MultiplexerStore {
     public var canUndoClose: Bool { closedState != nil }
 
     public func pane(forSessionId sessionId: String) -> PaneState? {
-        layout.allPanes.first { pane in
+        let sessionId = StructuredIdentity.session(sessionId)
+        return layout.allPanes.first { pane in
             pane.sessionId == sessionId
         }
     }
@@ -60,6 +61,7 @@ public final class MultiplexerStore {
     /// A fresh record changes the captured location without selecting a pane.
     /// Renew the occurrence so targets captured before a move cannot send input.
     public func updateSessionLocation(_ sessionId: String, location: WorkspaceIdentity?, execution: TaskLocationObservation? = nil) {
+        let sessionId = StructuredIdentity.session(sessionId)
         func update(_ node: LayoutNode) -> LayoutNode {
             guard let pane = node.allPanes.first(where: { $0.sessionId == sessionId }) else { return node }
             let retained = pane.content.location == location ? pane.executionLocation : nil
@@ -86,6 +88,7 @@ public final class MultiplexerStore {
     }
 
     public func reveal(sessionId: String, location: WorkspaceIdentity? = nil) {
+        let sessionId = StructuredIdentity.session(sessionId)
         updateSessionLocation(sessionId, location: location)
         if let pane = pane(forSessionId: sessionId) {
             setFocusedPane(pane.id)
@@ -155,6 +158,7 @@ public final class MultiplexerStore {
     }
 
     public func load(sessionId: String, location: WorkspaceIdentity? = nil) {
+        let sessionId = StructuredIdentity.session(sessionId)
         updateSessionLocation(sessionId, location: location)
         if let openPane = pane(forSessionId: sessionId) {
             if collapsedPaneIds.contains(openPane.id), openPane.id != focusedPaneId,
@@ -208,6 +212,7 @@ public final class MultiplexerStore {
     /// never replacing them. Explicit targets do not follow later focus.
     @discardableResult
     public func show(_ content: PaneContent, beside paneId: String? = nil, focus: Bool = true) -> PaneState? {
+        let content = content.canonicalized
         let existing = layout.allPanes.first { pane in
             switch (pane.content, content) {
             case (.files(let current, _, _), .files(let requested, _, _)),

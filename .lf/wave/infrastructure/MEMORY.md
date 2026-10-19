@@ -232,31 +232,27 @@ Original design: `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart accepted the Machine rename and command-map cutover; October 7
-details:
+Jack Heart accepted the Machine rename and command-map cutover:
 `28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
-this heading. A Machine remains one OS user and Loopflow data directory.
-Released cron keys, job labels, paths, route identity and historical payloads
-survive; no relocation is proved. Jack selected discarding version-1 Desktop
-caches. Current commands use `self`, `config user` and root `open`, without aliases.
+this heading. A Machine is one OS user and Loopflow data directory.
+Released cron keys, job labels, paths, routes and historical payloads survive;
+relocation is unproved. Jack selected dropping version-1 Desktop caches.
+Commands use `self`, `config user` and root `open`, without aliases.
 The GUI-browser capture prohibition and independent Desktop snapshot remain.
 
 October 17 LOO-506: Jack Heart selected canonical structured storage and
-case-invariant input, including Linear IDs. For `home_`, only casing changes;
-prefixes, punctuation and opaque bytes survive. Released Session fences hash IDs;
-receipt names and Trace directories also depend on spelling. SQLite exclusivity
-cannot preserve these addresses. The draft retains owner locators
-and nonblocking fences through commit/rollback. Unknown affected receipt evidence
-never ages into permission. Conversion remains unfinished. Release's entry-point
-lesson requires upgrade/dispatch/installation proof beyond fixture rewrites.
-Case-colliding traces with distinct locators must fail without selecting history.
+case-invariant input, including Linear IDs and `home_` casing; retain prefixes,
+punctuation and opaque bytes. Session fences, receipts and Trace directories depend
+on spelling. Retain owner locators and nonblocking fences through commit/rollback;
+SQLite exclusivity alone is insufficient. Unknown receipts never age into permission;
+Trace locator collisions must fail without choosing history.
 
-LOO-506's October 17 counterexample also shows that an owned ID inside hashed
-evidence is not freely rewriteable. Metric observation digests include Wave
-spelling. Retain original evidence and digest; canonical association belongs on
-the existing owner. Contract-derived readings already separate output identity
-from evidence, but validation/reimport still need proof. This representation
-revision remains draft, not a waiver of Jack's canonical-ID outcome.
+Metric hashes include Wave spelling. Canonicalize association; retain payloads and
+digests, including equal-time ordering. Released-fixture validation/reimport passes;
+full conversion and upgrade/dispatch/installation acceptance remain unfinished.
+Proof limits:
+`3623eae49e:scratch/loo-506-store-structured-ids.md`, Filesystem authority and
+evidence / Content-addressed evidence revision.
 
 Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
 version/identity commands suffice: retain versions when identity fails; report

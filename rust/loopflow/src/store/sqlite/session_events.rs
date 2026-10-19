@@ -778,7 +778,7 @@ mod tests {
             .unwrap();
         for at in 1..=60 {
             let mut session = template.clone();
-            session.id = format!("conversation-{at}");
+            session.id = format!("conversation-{at}").into();
             session.artifact_key = format!("run_{at:032x}");
             session.created_at = at;
             let session = store
@@ -1266,7 +1266,7 @@ mod tests {
                 .session_summaries(&crate::session::SessionFilter::default(), 0)
                 .unwrap();
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].id, session.id);
+            assert_eq!(rows[0].id, session.id.as_str());
             assert!(rows[0].completed_at.is_none());
         }
     }

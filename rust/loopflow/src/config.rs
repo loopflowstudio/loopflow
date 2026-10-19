@@ -205,6 +205,7 @@ pub enum MergeMethod {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct LinearConfig {
     #[serde(default)]
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub team: Option<String>,
 }
 

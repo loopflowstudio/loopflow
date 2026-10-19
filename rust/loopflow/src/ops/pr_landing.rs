@@ -273,7 +273,7 @@ fn admit_ci_fix(
         } else {
             let (provider, model) = crate::config::parse_agent(config.agent());
             crate::session::LfSession {
-                id: format!("session_{}", uuid::Uuid::new_v4().simple()),
+                id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
                 captured: None,
                 artifact_key: crate::session_record::new_artifact_key(),
                 caller_artifact_key: None,

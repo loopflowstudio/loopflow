@@ -1437,12 +1437,10 @@ mod tests {
         let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
         let trace = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?2,1,2)",
-            rusqlite::params![LfProcessId::new(), trace],
+            "INSERT INTO processes(id,trace_id,journal_trace_locator,started_at,completed_at) VALUES(?1,?2,?3,1,2)",
+            rusqlite::params![LfProcessId::new(), trace.to_ascii_lowercase(), trace],
         )
         .unwrap();
-        conn.execute("UPDATE processes SET trace_id=lower(trace_id)", [])
-            .unwrap();
         let retained = traces_root(repo.path()).join(trace);
         std::fs::create_dir_all(&retained).unwrap();
         std::fs::write(retained.join("retained-evidence"), b"unchanged").unwrap();

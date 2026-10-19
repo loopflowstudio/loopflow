@@ -11,8 +11,9 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child::{prefixed_uuid_id, AbandonIntent};
+use crate::child::AbandonIntent;
 pub use crate::durable::TaskId;
+use crate::id::prefixed_uuid_id;
 use crate::id::WaveId;
 use crate::linear::{LinearBindingError, LinearIssueId};
 use crate::pr_landing::PrLandingId;
@@ -46,6 +47,11 @@ pub enum TaskDataError {
 }
 
 prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
+impl TaskPrId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(crate::id::canonical_prefixed(&value.into(), "pr_"))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubPr {

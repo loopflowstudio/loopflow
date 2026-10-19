@@ -106,6 +106,7 @@ impl FlowHeld {
 /// Stable provenance installed in one provider conversation's tool environment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {
+    #[serde(deserialize_with = "crate::id::deserialize_session")]
     pub session_id: String,
     /// Absent in an environment installed before AgentProcess records: such a
     /// caller keeps its causal history and is never the current provider.
@@ -127,7 +128,7 @@ pub struct SessionAttachment {
 impl SessionAttachment {
     pub fn caller(&self, session_id: String) -> AgentCaller {
         AgentCaller {
-            session_id,
+            session_id: crate::id::canonical_session(&session_id),
             agent_process_id: Some(self.agent_process_id.clone()),
             origin_lf_process_id: self.provider_lf_process_id.clone(),
         }

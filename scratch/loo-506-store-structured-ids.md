@@ -1,6 +1,6 @@
 # Store structured IDs canonically and accept any casing
 
-Status: metric evidence representation implemented, 2026-10-17. Jack Heart's product direction remains accepted. The released-fixture proof separates original hashed evidence from canonical Work association without changing wire shapes or reminting observations. The filesystem slice and metric/Wave relational slice remain internal; constructors, complete SQL/JSON conversion, CLI/remote and Swift consumers are unfinished. This branch is not ready for publication.
+Status: accepted outcome; implementation incomplete, reconciled 2026-10-17. Jack Heart's product direction remains accepted. The metric evidence representation is implemented: the released-fixture proof separates original hashed evidence from canonical Work association without changing wire shapes or reminting observations. The filesystem slice and metric/Wave relational slice remain internal; constructors, complete SQL/JSON conversion, CLI/remote and Swift consumers are unfinished. This branch is not ready for publication. No product decision is outstanding.
 
 During LOO-499 review on October 17, Jack Heart requested case-invariant IDs everywhere, including Linear IDs and normalized storage. Later that day Jack Heart authorized autonomous planning, implementation, verification, publication and landing, superseding the earlier design/demo/merge review boundary. The selected Flow is kickoff → pursue → ship.
 
@@ -12,7 +12,8 @@ reopens only landings blocked by the retired timeout policy. It also changes the
 shared migration runner. Integrated through `lf sync --manual origin/main` in `4ab8b24bbb`, after
 checkpoint `5a6407814e` preserved the prior slice and notes. Both drafts and
 runner changes remain; upgrade fixtures start before the complete materialized
-release batch. No identity requirement changed.
+release batch. Reconciliation's fresh `origin/main` read remains at `070e5bb6a4`;
+no further upstream change alters this approach. No identity requirement changed.
 Infrastructure and its immediate Release child's complete goal/memory were read;
 Release is the only immediate child with Markdown in this checkout. Release's
 operation-entry and isolated installation evidence limits remain applicable.
@@ -116,8 +117,8 @@ conversion. Linux gate owns case-sensitive filesystem and isolated installation
 acceptance after the completed conversion.
 
 The draft now rejects distinct raw Trace spellings before retaining their different
-directory locators. The remaining migration inventory and collision scopes are
-unfinished. The shared Session domain must match the recognized released forms used
+directory locators. The inventory below includes historical JSON and collision
+scopes; their full conversion and rollback proofs remain unfinished. The shared Session domain must match the recognized released forms used
 by preflight and storage guards: `session_<32 hex>` and bare 32 hex; other retained
 Session strings remain opaque.
 
@@ -126,10 +127,11 @@ The one draft is `migrations/drafts/canonical_structured_ids.sql`, created throu
 ### Column and JSON inventory (October 17)
 
 Replayed registered migrations through `0.14.4.001_release.sql` in memory, then
-`session_transport`. No installed database was read. This inventory names conversion
-candidates by ownership. SQL conversion, non-Trace collision checks and the populated
-fixture remain unfinished. Brace notation expands named columns; no suffix-based
-rewrite is intended.
+audited the drafts including #1586. No installed database was read. This inventory
+names conversion candidates by ownership. Wave relational conversion and Trace/Wave
+collision checks have populated released-fixture proofs. The other domains, declared
+JSON paths and full conversion fixture remain unfinished. Brace notation expands
+named columns; no suffix-based rewrite is intended.
 
 | Table | Structured columns |
 | --- | --- |
@@ -180,7 +182,7 @@ hashes, names, graph nodes and author/content text. `provider_account_switches.i
 is an integer sequence. Schema history, blob tokens, credentials, profiles, account
 limits and route/import delivery evidence are not structured-ID owners.
 
-| JSON owner | Declared identity paths / remaining audit |
+| JSON owner | Declared identity paths / retained bytes |
 | --- | --- |
 | `tasks.admission_authority` | `$.machine_id`, `$.repository_id` |
 | `projects.{planning_initiatives,planning_teams}`, `pm_projects.{initiative_ids,team_ids}` | Linear UUID array elements |
@@ -252,7 +254,7 @@ JSON conversion remain part of the single unfinished conversion cut.
 
 ### Content-addressed evidence revision — implemented
 
-**October 17 decision and proof:** `MetricObservationIdentity` owns the original
+**October 17 implementation choice under Jack Heart's accepted outcome:** `MetricObservationIdentity` owns the original
 hash input, including Wave spelling. `MetricIdentity` owns canonical Work
 association, with a private Wave string constructed/decoded through the shared
 UUID case function. Non-UUID historical strings and metric names keep their bytes.
@@ -304,6 +306,7 @@ Delete — do not maintain:
 
 * Duplicate normalization in `durable_id!`/`prefixed_uuid_id!`; preserve public domain types/error contracts around one implementation.
 * Removed from metric evidence: shared raw `MetricIdentity` hash/Work representation and direct Wave field construction. Preserve the original `MetricObservationIdentity` hash input and canonical contract association.
+* Removed `metrics.rs::select_current` and separate history scans: `MetricObservationEvidence::from_history` selects by `(source_time, original_digest)` while collecting instrument/qualification evidence. Preserve ordering, qualification and released reimport tests on this path.
 * Unnormalized `from_raw` and derived serde escape paths. Remove redundant constructors or route required adapters through the domain owner.
 * Exactly cased `lf-`/`task_` selector branches and comparison-only patches once shared domain resolution owns them. Preserve ambiguity and original native fallback input.
 * Tests requiring structured case preservation; replace with canonical round trips. Preserve native-token, capture, ancestry, admission, PR-history and A→B→A fencing proofs.
@@ -352,5 +355,9 @@ spellings accepted by the Rust parser and restores only the four guards it needs
 to suspend. The fixture now checks captured-payload immutability after upgrade.
 Historical follow-through fields carry both local and earlier Linear identities;
 assuming every `issue_id` is Linear would miss retained Task references.
+History selection and qualification now share one traversal; ordering still uses
+the original digest and ignores unrelated metric evidence before hashing.
+Migration preflight reuses `id::canonical_uuid` so its change detection cannot
+drift from the retained punctuation/non-UUID policy.
 
-Check result (2026-10-17): `uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(canonical_ids) | test(metrics)' --no-tests fail < /dev/null` — PASS (49 tests); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. `lf context`: scratch within both limits; inherited Wave memory 55 tokens over (read-only here). Gate owns broader regression and isolated installation after full conversion.
+Check result (2026-10-17): `uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(canonical_ids) | test(metrics)' --no-tests fail < /dev/null` — prior PASS (49 tests after reduction); prior `cargo fmt` and `cargo clippy --all-targets -- -D warnings` PASS retained; reconciliation changed prose only, with `git diff --check` PASS and `lf context` within both limits. Gate owns broader regression and isolated installation after full conversion.

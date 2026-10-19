@@ -1,6 +1,5 @@
 //! Wave-owned live metric contracts, observations, and derived readings.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -611,10 +610,11 @@ impl MetricObservation {
         contract: &MetricContract,
         received_at: OffsetDateTime,
     ) -> Result<(), MetricError> {
-        if self.metric_identity() != contract.identity {
+        let identity = self.metric_identity();
+        if identity != contract.identity {
             return Err(MetricError::ObservationIdentityMismatch {
                 expected: contract.identity.clone(),
-                observed: self.metric_identity(),
+                observed: identity,
             });
         }
         let expected_observation_id = self.expected_observation_id()?;
@@ -708,16 +708,23 @@ impl MetricObservationEvidence {
         contract: &MetricContract,
         observations: &[MetricObservation],
     ) -> Result<Self, MetricError> {
-        Ok(Self {
-            current: select_current(contract, observations)?.cloned(),
-            instrumented: observations.iter().any(|observation| {
-                observation.metric_identity() == contract.identity
-                    && observation.contract_revision() == contract.contract_revision
-            }),
-            graduation_qualified: observations
-                .iter()
-                .any(|observation| observation.qualifies_graduation(contract)),
-        })
+        let mut evidence = Self::default();
+        let mut current = None;
+        for observation in observations {
+            if observation.metric_identity() != contract.identity {
+                continue;
+            }
+            // Match through canonical Work, but order by the original evidence digest.
+            let order = (observation.source_time(), observation.digest()?);
+            if current.is_none_or(|(selected, _)| order > selected) {
+                current = Some((order, observation));
+            }
+            evidence.instrumented |= observation.contract_revision() == contract.contract_revision;
+            evidence.graduation_qualified =
+                evidence.graduation_qualified || observation.qualifies_graduation(contract);
+        }
+        evidence.current = current.map(|(_, observation)| observation.clone());
+        Ok(evidence)
     }
 }
 
@@ -1014,31 +1021,6 @@ pub fn compose_metric_portfolio(
         metrics,
         contract_issues,
     })
-}
-
-fn select_current<'a>(
-    contract: &MetricContract,
-    observations: &'a [MetricObservation],
-) -> Result<Option<&'a MetricObservation>, MetricError> {
-    let mut current: Option<(&MetricObservation, [u8; 32])> = None;
-    for observation in observations {
-        if observation.metric_identity() != contract.identity {
-            continue;
-        }
-        let digest = observation.digest()?;
-        let replace =
-            current.as_ref().is_none_or(|(selected, selected_digest)| {
-                match observation.source_time().cmp(&selected.source_time()) {
-                    Ordering::Greater => true,
-                    Ordering::Equal => digest > *selected_digest,
-                    Ordering::Less => false,
-                }
-            });
-        if replace {
-            current = Some((observation, digest));
-        }
-    }
-    Ok(current.map(|(observation, _)| observation))
 }
 
 fn derive_evidence(

@@ -14,19 +14,8 @@ to the released `session_<32 hex>` and bare 32-hex forms; other historical Sessi
 strings retain bytes. These decisions and remaining conversion work live in the
 [design](loo-506-store-structured-ids.md#filesystem-authority-and-evidence).
 
-General constructor and full storage normalization remain unfinished. The earlier
-filesystem tests manually change fixture IDs after retaining locators; the new
-metric tests exercise actual Wave relational conversion through the draft. Neither
-proves the whole conversion. Trace directory aliases and Wave owner collisions
-now roll back without choosing or reminting an identity.
-
-The metric evidence representation is now implemented and proved against released
-SQL through the actual draft. Original observation identity and hashes remain
-opaque evidence; canonical Work association owns reading/validation/qualification.
-Historical JSON and collision inventories are recorded in the design. Their full
-conversion, constructors and consumers remain unfinished together.
-
-Main #1586 is integrated at `4ab8b24bbb`. Its inherited Wave memory is now 55 tokens
-over its target; this implement step has no authority to curate `.lf/wave/`.
-The memory owner can trim superseded landing-timeout/history prose. Scratch stays
-within both limits. No limits were raised.
+The design owns the current implementation, historical JSON/collision inventory
+and remaining acceptance. Filesystem fixture rewrites prove no full conversion;
+metric tests exercise actual Wave relational conversion while retaining hashed
+evidence. Constructors, full storage conversion and consumers remain one unfinished
+cut. Main #1586 is integrated at `4ab8b24bbb`.

@@ -1599,6 +1599,8 @@ pub(super) fn resolve_task_id_in(
     issue: &str,
     repo: Option<&str>,
 ) -> StoreResult<Option<TaskId>> {
+    let canonical = crate::id::canonical_task_selector(issue);
+    let issue = canonical.as_str();
     let prefix = issue
         .strip_prefix("lf-")
         .or_else(|| issue.strip_prefix("task_"))
@@ -1610,7 +1612,7 @@ pub(super) fn resolve_task_id_in(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
          WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-            OR substr(lower(t.id), 6, length(?2))=?2
+            OR substr(t.id, 6, length(?2))=?2
             OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
                 AND json_extract(c.export_json,'$.id')=?1))
          ORDER BY t.id",

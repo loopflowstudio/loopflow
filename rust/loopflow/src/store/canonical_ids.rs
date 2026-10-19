@@ -31,13 +31,11 @@ fn io_error(error: std::io::Error) -> StoreError {
 }
 
 fn changes_uuid(value: &str) -> bool {
-    uuid::Uuid::parse_str(value).is_ok() && value != value.to_ascii_lowercase()
+    value != crate::id::canonical_uuid(value)
 }
 
 fn changes_session(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    let hex = lower.strip_prefix("session_").unwrap_or(&lower);
-    value != lower && hex.len() == 32 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value != crate::id::canonical_session(value)
 }
 
 /// The caller owns the guards until SQLite commits or rolls back. Never wait for

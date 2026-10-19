@@ -1093,7 +1093,7 @@ mod tests {
             let inherited = caller.is_some();
             crate::session::LfSession {
                 captured: None,
-                id: uuid::Uuid::new_v4().to_string(),
+                id: uuid::Uuid::new_v4().to_string().into(),
                 artifact_key: crate::session_record::new_artifact_key(),
                 caller_artifact_key: caller,
                 input_published: true,

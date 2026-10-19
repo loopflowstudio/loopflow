@@ -782,7 +782,7 @@ mod durable_store_tests {
     ) -> LfSession {
         LfSession {
             captured: None,
-            id: uuid::Uuid::new_v4().to_string(),
+            id: uuid::Uuid::new_v4().to_string().into(),
             artifact_key: crate::session_record::new_artifact_key(),
             caller_artifact_key: None,
             input_published: false,
@@ -1322,7 +1322,7 @@ mod durable_store_tests {
     ) -> crate::session::LfSession {
         crate::session::LfSession {
             captured: None,
-            id: uuid::Uuid::new_v4().to_string(),
+            id: uuid::Uuid::new_v4().to_string().into(),
             artifact_key: crate::session_record::new_artifact_key(),
             caller_artifact_key: None,
             input_published: false,
@@ -1655,7 +1655,7 @@ mod durable_store_tests {
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
         let work = store.task_work(&task.id).unwrap();
         assert_eq!(work.sessions.len(), 1);
-        assert_eq!(work.sessions[0].id, session.id);
+        assert_eq!(work.sessions[0].id, session.id.as_str());
         assert!(!store.task_started(&task.id).unwrap());
         assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
@@ -1670,7 +1670,7 @@ mod durable_store_tests {
         let session = store.create_session(conversation, None).unwrap();
         let before = store.task_work(&task_id).unwrap();
         assert_eq!(before.sessions.len(), 1);
-        assert_eq!(before.sessions[0].id, session.id);
+        assert_eq!(before.sessions[0].id, session.id.as_str());
         assert_eq!(session.task_id, None);
         assert!(!store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
@@ -1998,7 +1998,7 @@ mod durable_store_tests {
                 flow_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
-                id: id.to_string(),
+                id: id.to_string().into(),
                 artifact_key: crate::session_record::new_artifact_key(),
                 input_published: true,
                 cwd: "/repo".into(),

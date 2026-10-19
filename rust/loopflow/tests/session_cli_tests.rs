@@ -635,7 +635,7 @@ fn prepare_conversation(
         .create_session(
             loopflow::session::LfSession {
                 captured: None,
-                id: format!("session_{input}"),
+                id: format!("session_{input}").into(),
                 artifact_key: input.clone(),
                 caller_artifact_key: Some(CALLER.into()),
                 input_published: false,
@@ -680,7 +680,7 @@ fn prepare_conversation(
             [&session.id],
         )
         .unwrap();
-    (session.id, input, dir)
+    (session.id.to_string(), input, dir)
 }
 
 #[cfg(unix)]
@@ -1513,7 +1513,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let session = store.session(&id).unwrap().unwrap();
-    assert_eq!(session.id, id);
+    assert_eq!(session.id.as_str(), id);
     let history = store.session_history(&id, 0, 1000).unwrap();
     // Failed and exited starts are retained as their own AgentProcess records.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();

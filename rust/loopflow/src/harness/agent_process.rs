@@ -629,13 +629,13 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("dead", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id.to_string(), None, &LfProcessId::new(), true)
             .unwrap();
         let mut command = Command::new("/usr/bin/true");
         command.env_clear();
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.clone(), attachment.clone()),
+            &(store.clone(), session.id.to_string(), attachment.clone()),
         )
         .unwrap();
         child.wait().unwrap();
@@ -674,7 +674,7 @@ mod tests {
             .unwrap();
         }
         let attachment = store
-            .claim_session_attachment(&session.id, None, &parent, true)
+            .claim_session_attachment(&session.id.to_string(), None, &parent, true)
             .unwrap();
         // Missing birth cannot become permission to signal or replace.
         assert!(super::stop_session_agent(&store, &session.id).is_err());
@@ -686,36 +686,39 @@ mod tests {
         command.env_clear().arg("60");
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.clone(), attachment.clone()),
+            &(store.clone(), session.id.to_string(), attachment.clone()),
         )
         .unwrap();
         store
-            .record_session_terminal(&session.id, &attachment, Some("first-pane"))
+            .record_session_terminal(&session.id.to_string(), &attachment, Some("first-pane"))
             .unwrap();
-        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        let summary = store
+            .session_summary(&session.id.to_string(), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(summary.terminal_id.as_deref(), Some("first-pane"));
         assert_eq!(
             summary.agent_process_evidence,
             crate::journal::ProcessIdentityEvidence::Live
         );
         let replacement = store
-            .claim_session_attachment(&session.id, Some(&attachment), &next, false)
+            .claim_session_attachment(&session.id.to_string(), Some(&attachment), &next, false)
             .unwrap();
         assert!(store
-            .session_summary(&session.id, 1)
+            .session_summary(&session.id.to_string(), 1)
             .unwrap()
             .unwrap()
             .terminal_id
             .is_none());
         assert!(store
-            .record_session_terminal(&session.id, &attachment, Some("stale"))
+            .record_session_terminal(&session.id.to_string(), &attachment, Some("stale"))
             .is_err());
         store
-            .record_session_terminal(&session.id, &replacement, Some("second-pane"))
+            .record_session_terminal(&session.id.to_string(), &replacement, Some("second-pane"))
             .unwrap();
         assert_eq!(
             store
-                .session_summary(&session.id, 1)
+                .session_summary(&session.id.to_string(), 1)
                 .unwrap()
                 .unwrap()
                 .terminal_id
@@ -727,7 +730,10 @@ mod tests {
         let _ = child.kill();
         child.wait().unwrap();
         stopped.unwrap();
-        let summary = store.session_summary(&session.id, 1).unwrap().unwrap();
+        let summary = store
+            .session_summary(&session.id.to_string(), 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             summary.agent_process_evidence,
             crate::journal::ProcessIdentityEvidence::Dead
@@ -771,7 +777,7 @@ mod tests {
             )
             .unwrap();
             let attachment = store
-                .claim_session_attachment(&session.id, None, &parent, true)
+                .claim_session_attachment(&session.id.to_string(), None, &parent, true)
                 .unwrap();
             sql.execute(
                 "UPDATE processes SET spawn_state=?2 WHERE id=?1",
@@ -838,13 +844,13 @@ mod tests {
             )
             .unwrap();
             let attachment = store
-                .claim_session_attachment(&session.id, None, &parent, true)
+                .claim_session_attachment(&session.id.to_string(), None, &parent, true)
                 .unwrap();
             let mut command = Command::new("/usr/bin/true");
             command.env_clear();
             let mut child = super::spawn_native(
                 command,
-                &(store.clone(), session.id.clone(), attachment.clone()),
+                &(store.clone(), session.id.to_string(), attachment.clone()),
             )
             .unwrap();
             child.wait().unwrap();
@@ -861,7 +867,9 @@ mod tests {
             assert!(process.outcome.is_none());
             let current = store.session_attachment(&session.id).unwrap().unwrap();
             assert_eq!(current.lf_process_id.is_none(), ended);
-            let history = store.session_history(&session.id, 0, 0).unwrap();
+            let history = store
+                .session_history(&session.id.to_string(), 0, 0)
+                .unwrap();
             let exits: Vec<_> = history
                 .iter()
                 .filter(|event| event.payload["type"] == "attachment_exit")
@@ -882,9 +890,9 @@ mod tests {
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
         let parent = LfProcessId::new();
         let first = store
-            .claim_session_attachment(&session.id, None, &parent, true)
+            .claim_session_attachment(&session.id.to_string(), None, &parent, true)
             .unwrap();
-        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let command = || {
             let mut command = Command::new("/bin/sleep");
             command.env_clear().arg("60");
@@ -899,9 +907,9 @@ mod tests {
         assert!(exited.completed_at.is_some());
 
         let next = store
-            .prepare_session_agent_process(&session.id, &first)
+            .prepare_session_agent_process(&session.id.to_string(), &first)
             .unwrap();
-        let next_owner = (store.clone(), session.id.clone(), next.clone());
+        let next_owner = (store.clone(), session.id.to_string(), next.clone());
         let mut provider = super::spawn_native(command(), &next_owner).unwrap();
         let recorded = store.process(&next.agent_process_id).unwrap().unwrap();
         // Reusing the current attachment is not permission for a second spawn.
@@ -935,19 +943,28 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
         let first = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id.to_string(), None, &LfProcessId::new(), true)
             .unwrap();
-        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
         let mut child = super::spawn_native(command, &first_owner).unwrap();
         let next = store
-            .claim_session_attachment(&session.id, Some(&first), &LfProcessId::new(), false)
+            .claim_session_attachment(
+                &session.id.to_string(),
+                Some(&first),
+                &LfProcessId::new(),
+                false,
+            )
             .unwrap();
         let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
         let alive = child.try_wait().unwrap().is_none();
         let unchanged = store.process(&first.agent_process_id).unwrap().unwrap();
-        super::stop_native(&mut child, Some(&(store.clone(), session.id, next.clone()))).unwrap();
+        super::stop_native(
+            &mut child,
+            Some(&(store.clone(), session.id.to_string(), next.clone())),
+        )
+        .unwrap();
         assert_eq!(first.agent_process_id, next.agent_process_id);
         assert!(refused && alive);
         assert!(unchanged.completed_at.is_none());
@@ -959,9 +976,9 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id.to_string(), None, &LfProcessId::new(), true)
             .unwrap();
-        let owner = (store.clone(), session.id.clone(), attachment.clone());
+        let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn_native(command, &owner).unwrap();
@@ -988,9 +1005,9 @@ mod tests {
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
         let parent = LfProcessId::new();
         let first = store
-            .claim_session_attachment(&session.id, None, &parent, true)
+            .claim_session_attachment(&session.id.to_string(), None, &parent, true)
             .unwrap();
-        let owner = |attachment| (store.clone(), session.id.clone(), attachment);
+        let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn(command, None, &owner(first.clone())).unwrap();
@@ -1001,10 +1018,10 @@ mod tests {
         // Spawn success alone must not manufacture exit evidence.
         assert!(recorded.completed_at.is_none());
         store
-            .record_agent_process_exit(&session.id, &first, true)
+            .record_agent_process_exit(&session.id.to_string(), &first, true)
             .unwrap();
         let next = store
-            .prepare_session_agent_process(&session.id, &first)
+            .prepare_session_agent_process(&session.id.to_string(), &first)
             .unwrap();
 
         let marker = home.path().join("stale-effect");
@@ -1035,7 +1052,7 @@ mod tests {
             "failed exec is not a provider outcome"
         );
         let retry = store
-            .prepare_session_agent_process(&session.id, &next)
+            .prepare_session_agent_process(&session.id.to_string(), &next)
             .unwrap();
         assert_ne!(retry.agent_process_id, next.agent_process_id);
         assert_eq!(store.process(&next.agent_process_id).unwrap(), Some(failed));
@@ -1052,9 +1069,9 @@ mod tests {
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
         let parent = LfProcessId::new();
         let first = store
-            .claim_session_attachment(&session.id, None, &parent, true)
+            .claim_session_attachment(&session.id.to_string(), None, &parent, true)
             .unwrap();
-        let owner = (store.clone(), session.id.clone(), first.clone());
+        let owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
         let mut child = super::spawn_native(command, &owner).unwrap();
@@ -1063,10 +1080,10 @@ mod tests {
         assert!(recorded.os_started_at.is_some());
         assert_eq!(child.wait().unwrap().code(), Some(42));
         store
-            .record_agent_process_exit(&session.id, &first, true)
+            .record_agent_process_exit(&session.id.to_string(), &first, true)
             .unwrap();
         let next = store
-            .prepare_session_agent_process(&session.id, &first)
+            .prepare_session_agent_process(&session.id.to_string(), &first)
             .unwrap();
         let marker = home.path().join("stale-effect");
         let mut stale = Command::new("/bin/sh");
@@ -1080,7 +1097,7 @@ mod tests {
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
-        let owner = (store.clone(), session.id.clone(), next.clone());
+        let owner = (store.clone(), session.id.to_string(), next.clone());
         let error =
             super::spawn_native(Command::new(home.path().join("absent")), &owner).unwrap_err();
         assert_eq!(
@@ -1134,13 +1151,13 @@ mod tests {
                 )
                 .unwrap();
             let attached = store
-                .claim_session_attachment(&session.id, None, &parent, true)
+                .claim_session_attachment(&session.id.to_string(), None, &parent, true)
                 .unwrap();
             store
-                .record_agent_process_identity(&session.id, &attached, pid, start)
+                .record_agent_process_identity(&session.id.to_string(), &attached, pid, start)
                 .unwrap();
             store
-                .release_session_attachment(&session.id, &attached)
+                .release_session_attachment(&session.id.to_string(), &attached)
                 .unwrap();
         }
         let conflict = super::reap_in(&store, false).unwrap();

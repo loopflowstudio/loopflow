@@ -641,7 +641,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             flow_lf_process_id: None,
             work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
-            id: id.clone(),
+            id: id.clone().into(),
             artifact_key: uuid::Uuid::new_v4().simple().to_string(),
             input_published: true,
             cwd: if foreign_row {

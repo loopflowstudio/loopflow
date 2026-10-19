@@ -9,8 +9,9 @@ pub struct IdError(String);
 
 /// Fold only a structured UUID's ASCII case, retaining its accepted punctuation.
 pub(crate) fn canonical_uuid(value: &str) -> String {
-    if Uuid::parse_str(&value.to_ascii_lowercase()).is_ok() {
-        value.to_ascii_lowercase()
+    let lower = value.to_ascii_lowercase();
+    if Uuid::parse_str(&lower).is_ok() {
+        lower
     } else {
         value.to_owned()
     }
@@ -164,6 +165,12 @@ macro_rules! prefixed_uuid_id {
             pub fn as_str(&self) -> &str {
                 &self.0
             }
+
+            /// Released serde accepted historical strings; normalize without narrowing that contract.
+            #[allow(dead_code)] // Only some domains adapt unparsed store or wire values.
+            pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+                Self(crate::id::canonical_prefixed(&value.into(), $prefix))
+            }
         }
 
         impl Default for $name {
@@ -188,8 +195,7 @@ macro_rules! prefixed_uuid_id {
         impl<'de> serde::Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-                // Released serde accepted historical strings; normalize without narrowing that contract.
-                Ok(Self(crate::id::canonical_prefixed(&value, $prefix)))
+                Ok(Self::from_raw(value))
             }
         }
     };
@@ -207,9 +213,9 @@ macro_rules! uuid_id {
             }
 
             pub fn parse(value: &str) -> Result<Self, IdError> {
-                Uuid::parse_str(&value.to_ascii_lowercase())
-                    .map_err(|error| IdError(error.to_string()))?;
-                Ok(Self(value.to_ascii_lowercase()))
+                let canonical = value.to_ascii_lowercase();
+                Uuid::parse_str(&canonical).map_err(|error| IdError(error.to_string()))?;
+                Ok(Self(canonical))
             }
 
             pub fn as_str(&self) -> &str {

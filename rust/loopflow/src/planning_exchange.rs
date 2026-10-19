@@ -18,7 +18,6 @@ pub struct PlanningMutation {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PlanningSnapshot {
     pub changes: BTreeMap<String, PlanningMutation>,
 }
@@ -28,7 +27,6 @@ impl<'de> Deserialize<'de> for PlanningSnapshot {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Document {
-            #[serde(deserialize_with = "read_changes")]
             changes: BTreeMap<String, PlanningMutation>,
         }
         let document = Document::deserialize(deserializer)?;
@@ -38,33 +36,6 @@ impl<'de> Deserialize<'de> for PlanningSnapshot {
         .canonicalized()
         .map_err(serde::de::Error::custom)
     }
-}
-
-fn read_changes<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<BTreeMap<String, PlanningMutation>, D::Error> {
-    struct Changes;
-    impl<'de> serde::de::Visitor<'de> for Changes {
-        type Value = BTreeMap<String, PlanningMutation>;
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("distinct planning mutation identities")
-        }
-        fn visit_map<M: serde::de::MapAccess<'de>>(
-            self,
-            mut map: M,
-        ) -> Result<Self::Value, M::Error> {
-            let mut changes = BTreeMap::new();
-            while let Some((id, change)) = map.next_entry::<String, PlanningMutation>()? {
-                if changes.insert(id.clone(), change).is_some() {
-                    return Err(serde::de::Error::custom(format!(
-                        "duplicate planning identity {id}"
-                    )));
-                }
-            }
-            Ok(changes)
-        }
-    }
-    deserializer.deserialize_map(Changes)
 }
 
 impl PlanningSnapshot {

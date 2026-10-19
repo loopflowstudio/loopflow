@@ -12,8 +12,8 @@ October 18: `TaskSelector` resolves each Task domain separately; an opaque
 external issue ID is matched byte-exact and as a ticket label only through the
 ticket domain. Command argv in DTOs (`open_argv`) is opaque output.
 
-Proposed Infrastructure memory (not written: main's MEMORY.md is at its 16k token
-budget and this step does not curate Wave memory): "October 17 LOO-506: Jack Heart
+Proposed Infrastructure memory, unwritten because Infrastructure MEMORY.md is at
+its 16k token budget: "October 17 LOO-506: Jack Heart
 selected canonical structured storage and case-invariant input, including Linear
 IDs and `home_` casing; prefixes, punctuation and opaque bytes stay. Identity-named
 files keep owner locators; Unknown receipts never age into permission; metric

@@ -695,8 +695,6 @@ impl SqliteStore {
     // transaction across provider I/O. Do not unlink lock files: another process
     // may already have the inode open. Process exit releases ownership.
     pub(super) fn lock_session_attachment(&self, session: &str) -> StoreResult<File> {
-        let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
         self.lock_session_fence(session, false)
     }
 
@@ -714,7 +712,7 @@ impl SqliteStore {
         let locator: String = conn
             .query_row(
                 "SELECT fence_locator FROM agent_sessions WHERE id=?1",
-                [session],
+                [crate::id::canonical_session(session)],
                 |row| row.get(0),
             )
             .optional()?
@@ -724,8 +722,6 @@ impl SqliteStore {
     }
 
     pub(crate) fn try_lock_session_attachment(&self, session: &str) -> StoreResult<Option<File>> {
-        let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
         let file = self.session_fence_file(session)?;
         match file.try_lock_exclusive() {
             Ok(()) => Ok(Some(file)),
@@ -768,8 +764,6 @@ impl SqliteStore {
         expected: &SessionAttachment,
         write: impl FnOnce() -> StoreResult<T>,
     ) -> StoreResult<T> {
-        let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -881,8 +875,6 @@ impl SqliteStore {
     }
 
     pub fn session_attachment(&self, session: &str) -> StoreResult<Option<SessionAttachment>> {
-        let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         attachment_in(&conn, session)
     }
@@ -1067,8 +1059,6 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
     ) -> StoreResult<SessionAttachment> {
-        let canonical = crate::id::canonical_session(session);
-        let session = canonical.as_str();
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

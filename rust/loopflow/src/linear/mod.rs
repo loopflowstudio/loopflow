@@ -2217,8 +2217,8 @@ impl IssueFields {
         .map_err(|error| LinearError::Message(format!("invalid Linear issue revision: {error}")))?;
         Ok(LinearIssue {
             revision: Some(self.updated_at),
-            id: crate::id::canonical_uuid(&self.id),
-            identifier: crate::id::canonical_task_identifier(&identifier),
+            id: self.id,
+            identifier,
             branch_name: self.branch_name,
             url: self.url,
             name: self.title,
@@ -2229,7 +2229,7 @@ impl IssueFields {
             due_date: self.due_date,
             state: self.state.map(|state| state.r#type),
             project_id,
-            team_id: Some(crate::id::canonical_uuid(&team.id)),
+            team_id: Some(team.id),
             assignee: self.assignee.map(|assignee| assignee.id),
         })
     }
@@ -2414,7 +2414,7 @@ impl ProjectNode {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
         Ok(LinearProject {
             description: Some(content.observed_description()),
-            id: crate::id::canonical_uuid(&self.id),
+            id: self.id,
             revision: self.revision,
             slug: project_slug(&self.name),
             name: self.name,

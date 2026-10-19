@@ -209,7 +209,7 @@ mod tests {
             )
             .unwrap();
         let attachment = store
-            .claim_session_attachment(&session.id.to_string(), None, &process, true)
+            .claim_session_attachment(&session.id, None, &process, true)
             .unwrap();
         let title = TerminalTitle {
             store,

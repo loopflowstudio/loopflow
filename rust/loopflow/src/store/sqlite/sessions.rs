@@ -870,8 +870,6 @@ impl SqliteStore {
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<LfSession>> {
-        let canonical = crate::id::canonical_session(id);
-        let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         session_in(&conn, id)
     }

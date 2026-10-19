@@ -61,12 +61,6 @@ prefixed_uuid_id!(
     DurableDataError::InvalidId
 );
 
-impl ProjectId {
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(crate::id::canonical_prefixed(&value.into(), "proj_"))
-    }
-}
-
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
     pub(crate) fn from_issue(id: &str) -> Self {
@@ -77,9 +71,6 @@ impl TaskId {
             )
         });
         Self(format!("task_{}", uuid.simple()))
-    }
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(crate::id::canonical_prefixed(&value.into(), "task_"))
     }
 }
 

@@ -314,14 +314,11 @@ fn session_command_status_with_env(
                 .ok_or_else(|| anyhow!("Session input {input} is not recorded"))?;
             let process = crate::journal::current_lf_process_id()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
-            let attachment = crate::session_record::resume_session_agent_process(
-                &store,
-                &session.id.to_string(),
-                &process,
-            )?;
-            store.make_session_interactive(&session.id.to_string(), &attachment)?;
+            let attachment =
+                crate::session_record::resume_session_agent_process(&store, &session.id, &process)?;
+            store.make_session_interactive(&session.id, &attachment)?;
             if let Some(owner) = crate::transport::current() {
-                store.bind_session_transport(&session.id.to_string(), &attachment, owner)?;
+                store.bind_session_transport(&session.id, &attachment, owner)?;
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
@@ -1287,7 +1284,7 @@ mod tests {
             let store = SqliteStore::new(&home.join("loopflow.db"))?;
             let session = store.test_session("remote", &crate::session_record::new_artifact_key());
             let original = store.claim_session_attachment(
-                &session.id.to_string(),
+                &session.id,
                 None,
                 &crate::id::LfProcessId::new(),
                 true,
@@ -1300,13 +1297,13 @@ mod tests {
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
-                &session.id.to_string(),
+                &session.id,
                 &original,
                 endpoint.to_str().unwrap(),
                 &"thread".into(),
             )?;
             let attached = store.claim_session_attachment(
-                &session.id.to_string(),
+                &session.id,
                 Some(&original),
                 &crate::journal::current_lf_process_id().unwrap(),
                 false,

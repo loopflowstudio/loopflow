@@ -303,7 +303,7 @@ Delete — do not maintain:
 * Removed: `durable.rs::durable_id!` and `child.rs::prefixed_uuid_id!`; `id.rs::prefixed_uuid_id!` is the one implementation, preserving each domain's error type.
 * Removed from metric evidence: shared raw `MetricIdentity` hash/Work representation and direct Wave field construction. Preserve the original `MetricObservationIdentity` hash input and canonical contract association.
 * Removed `metrics.rs::select_current` and separate history scans: `MetricObservationEvidence::from_history` selects by `(source_time, original_digest)` while collecting instrument/qualification evidence. Preserve ordering, qualification and released reimport tests on this path.
-* Unnormalized `from_raw` and derived serde escape paths. Remove redundant constructors or route required adapters through the domain owner.
+* Removed: unnormalized `from_raw` and derived serde escape paths. `prefixed_uuid_id!` owns the one lenient `from_raw` its serde uses; Linear decode boundaries canonicalize once, and Session attachment normalizes at its fence and attachment sinks.
 * Removed: exactly cased `lf-`/`task_` selector branches, LOO-499's NOCASE/`eq_ignore_ascii_case` ticket patches, `canonical_task_selector` and `deserialize_session`; `TaskSelector` and `LfSessionId` own them. Ambiguity and original native fallback input preserved.
 * Tests requiring structured case preservation; replace with canonical round trips. Preserve native-token, capture, ancestry, admission, PR-history and A→B→A fencing proofs.
 * Removed in the filesystem slice: identity-derived lookup of retained Session fences and Process receipt files. Preserve the surviving locator path, exact-owner evidence and immutable locator guards throughout the remaining conversion.
@@ -401,3 +401,5 @@ Migration preflight reuses `id::canonical_uuid` so its change detection cannot
 drift from the retained punctuation/non-UUID policy.
 
 Check result (2026-10-18, pass 6, `1a810652cb`): focused `canonical_ids` plus receipt/trace/journal/prune/launch-budget 113/113 PASS; earlier PR/task/fixture/comment (1393/1395, both failures since fixed), history/session/project/wave/linear/workflow subsets PASS; Swift identity suites 111/111 PASS; fmt, clippy, `check_migrations.py` PASS. Gate owns the full matrix; CI owns installation.
+
+Check result (2026-10-19, compress): clippy `-D warnings` PASS; focused `canonical_ids|receipt|trace|planning_exchange|session_attachment|linear` nextest 314/314 PASS. Swift untouched by compress; gate owns the full matrix.

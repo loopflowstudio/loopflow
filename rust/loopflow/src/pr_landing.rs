@@ -26,12 +26,6 @@ prefixed_uuid_id!(
     PrLandingDataError::InvalidId
 );
 
-impl PrLandingId {
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(crate::id::canonical_prefixed(&value.into(), "landing_"))
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

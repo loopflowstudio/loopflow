@@ -275,9 +275,11 @@ pub struct TaskPr {
     /// Id of the first-class Linear attachment linking this PR on its owning
     /// issue. `None` until the PR is first published; carried forward so later
     /// publishes update the same attachment in place.
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub linear_attachment_id: Option<String>,
     /// Id of the loopflow-managed Linear comment carrying the PR URL and state.
     /// Its presence switches the writeback from `commentCreate` to `commentUpdate`.
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub linear_comment_id: Option<String>,
     /// `None` when the last Linear linkage writeback succeeded; the last error
     /// string when it degraded. The GitHub publication still succeeded — this only
@@ -575,8 +577,11 @@ pub enum TaskEventKind {
         link: serde_json::Value,
     },
     FollowThroughRelationConfirmed {
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         relation_id: String,
+        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
         source_issue_id: String,
+        #[serde(deserialize_with = "crate::id::deserialize_task_or_uuid")]
         target_issue_id: String,
     },
     FollowThroughDisposition {
@@ -620,6 +625,7 @@ pub enum TaskEventKind {
         reason: String,
     },
     FlowFinished {
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         invocation_id: String,
         flow: String,
         summary: String,

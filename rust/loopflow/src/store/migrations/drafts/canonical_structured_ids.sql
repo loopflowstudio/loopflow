@@ -467,168 +467,168 @@ INSERT INTO canonical_json
 SELECT 'tasks','admission_authority',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.admission_authority AS doc, CASE WHEN path='$.machine_id' THEN 'home_' WHEN path='$.repository_id' THEN 'repo_' END AS domain
- FROM canonical_tasks owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.admission_authority AS doc FROM canonical_tasks source,json_tree(source.admission_authority) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_tasks owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.admission_authority AS doc FROM canonical_tasks source,json_tree(CASE WHEN json_valid(source.admission_authority) THEN source.admission_authority END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'projects','planning_initiatives',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.planning_initiatives AS doc, CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain
- FROM canonical_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.planning_initiatives AS doc FROM canonical_projects source,json_tree(source.planning_initiatives) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.planning_initiatives AS doc FROM canonical_projects source,json_tree(CASE WHEN json_valid(source.planning_initiatives) THEN source.planning_initiatives END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'projects','planning_teams',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.planning_teams AS doc, CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain
- FROM canonical_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.planning_teams AS doc FROM canonical_projects source,json_tree(source.planning_teams) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.planning_teams AS doc FROM canonical_projects source,json_tree(CASE WHEN json_valid(source.planning_teams) THEN source.planning_teams END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'pm_projects','initiative_ids',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.initiative_ids AS doc, CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain
- FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.initiative_ids AS doc FROM canonical_pm_projects source,json_tree(source.initiative_ids) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.initiative_ids AS doc FROM canonical_pm_projects source,json_tree(CASE WHEN json_valid(source.initiative_ids) THEN source.initiative_ids END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'pm_projects','team_ids',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.team_ids AS doc, CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain
- FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.team_ids AS doc FROM canonical_pm_projects source,json_tree(source.team_ids) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.team_ids AS doc FROM canonical_pm_projects source,json_tree(CASE WHEN json_valid(source.team_ids) THEN source.team_ids END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'pm_projects','task_order_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.task_order_json AS doc, CASE WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain
- FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.task_order_json AS doc FROM canonical_pm_projects source,json_tree(source.task_order_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_pm_projects owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.task_order_json AS doc FROM canonical_pm_projects source,json_tree(CASE WHEN json_valid(source.task_order_json) THEN source.task_order_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_comment_deliveries','comment_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.comment_json AS doc, CASE WHEN path='$.id' THEN 'uuid' END AS domain
- FROM canonical_task_comment_deliveries owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.comment_json AS doc FROM canonical_task_comment_deliveries source,json_tree(source.comment_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_comment_deliveries owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.comment_json AS doc FROM canonical_task_comment_deliveries source,json_tree(CASE WHEN json_valid(source.comment_json) THEN source.comment_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_comment_deliveries','conflicting_comment_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.conflicting_comment_json AS doc, CASE WHEN path='$.id' THEN 'uuid' END AS domain
- FROM canonical_task_comment_deliveries owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflicting_comment_json AS doc FROM canonical_task_comment_deliveries source,json_tree(source.conflicting_comment_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_comment_deliveries owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflicting_comment_json AS doc FROM canonical_task_comment_deliveries source,json_tree(CASE WHEN json_valid(source.conflicting_comment_json) THEN source.conflicting_comment_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_transitions','local_plan_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.local_plan_json AS doc, CASE WHEN path='$.wave_id' THEN 'uuid' WHEN path='$.successor_id' THEN 'project_or_uuid' END AS domain
- FROM canonical_project_transitions owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.local_plan_json AS doc FROM canonical_project_transitions source,json_tree(source.local_plan_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_transitions owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.local_plan_json AS doc FROM canonical_project_transitions source,json_tree(CASE WHEN json_valid(source.local_plan_json) THEN source.local_plan_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_transitions','export_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.export_json AS doc, CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain
- FROM canonical_project_transitions owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.export_json AS doc FROM canonical_project_transitions source,json_tree(source.export_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_transitions owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.export_json AS doc FROM canonical_project_transitions source,json_tree(CASE WHEN json_valid(source.export_json) THEN source.export_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_creation_intents','export_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.export_json AS doc, CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain
- FROM canonical_task_creation_intents owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.export_json AS doc FROM canonical_task_creation_intents source,json_tree(source.export_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_creation_intents owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.export_json AS doc FROM canonical_task_creation_intents source,json_tree(CASE WHEN json_valid(source.export_json) THEN source.export_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_changes','value_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.value_json AS doc, CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' END AS domain
- FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.value_json AS doc FROM canonical_task_changes source,json_tree(source.value_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.value_json AS doc FROM canonical_task_changes source,json_tree(CASE WHEN json_valid(source.value_json) THEN source.value_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_changes','base_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.base_json AS doc, CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain
- FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.base_json AS doc FROM canonical_task_changes source,json_tree(source.base_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.base_json AS doc FROM canonical_task_changes source,json_tree(CASE WHEN json_valid(source.base_json) THEN source.base_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_changes','conflict_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.conflict_json AS doc, CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain
- FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflict_json AS doc FROM canonical_task_changes source,json_tree(source.conflict_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflict_json AS doc FROM canonical_task_changes source,json_tree(CASE WHEN json_valid(source.conflict_json) THEN source.conflict_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_changes','value_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.value_json AS doc, CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain
- FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.value_json AS doc FROM canonical_project_changes source,json_tree(source.value_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.value_json AS doc FROM canonical_project_changes source,json_tree(CASE WHEN json_valid(source.value_json) THEN source.value_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_changes','base_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.base_json AS doc, CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain
- FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.base_json AS doc FROM canonical_project_changes source,json_tree(source.base_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.base_json AS doc FROM canonical_project_changes source,json_tree(CASE WHEN json_valid(source.base_json) THEN source.base_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_changes','conflict_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.conflict_json AS doc, CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain
- FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflict_json AS doc FROM canonical_project_changes source,json_tree(source.conflict_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.conflict_json AS doc FROM canonical_project_changes source,json_tree(CASE WHEN json_valid(source.conflict_json) THEN source.conflict_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_changes','order_effects_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.order_effects_json AS doc, CASE WHEN (parent GLOB '$[[]*].before' OR parent GLOB '$[[]*].after') AND typeof(key)='integer' THEN 'task_' WHEN parent GLOB '$[[]*]' AND key='issue' THEN 'uuid' END AS domain
- FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.order_effects_json AS doc FROM canonical_project_changes source,json_tree(source.order_effects_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.order_effects_json AS doc FROM canonical_project_changes source,json_tree(CASE WHEN json_valid(source.order_effects_json) THEN source.order_effects_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'planning_peer_changes','mutation',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.mutation AS doc, CASE WHEN path='$.edit.target' AND owner.record_table='waves' THEN 'uuid' WHEN path='$.edit.target' AND owner.record_table='projects' THEN 'proj_' WHEN path='$.edit.target' AND owner.record_table='tasks' THEN 'task_' WHEN path='$.edit.target' AND owner.record_table='task_comments' THEN 'uuid' WHEN parent='$.parents' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('comment_task') THEN 'task_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('task_identifier') THEN 'label' WHEN parent='$.edit.change.value' AND typeof(key)='integer' AND json_extract(doc,'$.edit.change.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.edit.change.value.machine_id' AND json_extract(doc,'$.edit.change.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.edit.change.value.repository_id' AND json_extract(doc,'$.edit.change.field')='task_admission_authority' THEN 'repo_' END AS domain
- FROM canonical_planning_peer_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.mutation AS doc FROM canonical_planning_peer_changes source,json_tree(source.mutation) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_planning_peer_changes owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.mutation AS doc FROM canonical_planning_peer_changes source,json_tree(CASE WHEN json_valid(source.mutation) THEN source.mutation END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'task_events','kind_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.kind_json AS doc, CASE WHEN path='$.pr_id' THEN 'pr_' WHEN path='$.steer_id' THEN 'uuid' WHEN path='$.invocation_id' THEN 'uuid' WHEN path='$.relation_id' THEN 'uuid' WHEN path='$.source_issue_id' THEN 'uuid' WHEN path='$.target_issue_id' THEN 'uuid' WHEN parent='$.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.intent.project_id' THEN 'project_or_uuid' WHEN path='$.intent.relation_id' THEN 'uuid' WHEN path='$.intent.team_id' THEN 'uuid' WHEN path='$.intent.state_id' THEN 'uuid' WHEN path='$.intent.identifier' THEN 'label' WHEN path='$.link.issue_id' THEN 'task_or_uuid' WHEN path='$.link.project_id' THEN 'project_or_uuid' WHEN path='$.link.relation_id' THEN 'uuid' WHEN path='$.link.team_id' THEN 'uuid' WHEN path='$.link.state_id' THEN 'uuid' WHEN path='$.link.identifier' THEN 'label' END AS domain
- FROM canonical_task_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.kind_json AS doc FROM canonical_task_events source,json_tree(source.kind_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_task_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.kind_json AS doc FROM canonical_task_events source,json_tree(CASE WHEN json_valid(source.kind_json) THEN source.kind_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'project_events','kind_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.kind_json AS doc, CASE WHEN path='$.event.pr_id' THEN 'pr_' WHEN path='$.event.steer_id' THEN 'uuid' WHEN path='$.event.invocation_id' THEN 'uuid' WHEN path='$.event.relation_id' THEN 'uuid' WHEN path='$.event.source_issue_id' THEN 'uuid' WHEN path='$.event.target_issue_id' THEN 'uuid' WHEN parent='$.event.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.event.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.event.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.event.intent.project_id' THEN 'project_or_uuid' WHEN path='$.event.intent.relation_id' THEN 'uuid' WHEN path='$.event.intent.team_id' THEN 'uuid' WHEN path='$.event.intent.state_id' THEN 'uuid' WHEN path='$.event.intent.identifier' THEN 'label' WHEN path='$.event.link.issue_id' THEN 'task_or_uuid' WHEN path='$.event.link.project_id' THEN 'project_or_uuid' WHEN path='$.event.link.relation_id' THEN 'uuid' WHEN path='$.event.link.team_id' THEN 'uuid' WHEN path='$.event.link.state_id' THEN 'uuid' WHEN path='$.event.link.identifier' THEN 'label' WHEN path='$.task_id' THEN 'task_' WHEN path='$.steer_id' THEN 'uuid' END AS domain
- FROM canonical_project_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.kind_json AS doc FROM canonical_project_events source,json_tree(source.kind_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_project_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.kind_json AS doc FROM canonical_project_events source,json_tree(CASE WHEN json_valid(source.kind_json) THEN source.kind_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'pr_landings','retired_supervisor_json',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.retired_supervisor_json AS doc, CASE WHEN path='$.home_id' THEN 'home_' END AS domain
- FROM canonical_pr_landings owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.retired_supervisor_json AS doc FROM canonical_pr_landings source,json_tree(source.retired_supervisor_json) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_pr_landings owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.retired_supervisor_json AS doc FROM canonical_pr_landings source,json_tree(CASE WHEN json_valid(source.retired_supervisor_json) THEN source.retired_supervisor_json END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'pm_project_name_cutover','body',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.body AS doc, CASE WHEN path='$.id' THEN 'uuid' WHEN parent='$.initiative_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.team_ids' AND typeof(key)='integer' THEN 'uuid' END AS domain
- FROM canonical_pm_project_name_cutover owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.body AS doc FROM canonical_pm_project_name_cutover source,json_tree(source.body) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_pm_project_name_cutover owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.body AS doc FROM canonical_pm_project_name_cutover source,json_tree(CASE WHEN json_valid(source.body) THEN source.body END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT INTO canonical_json
 SELECT 'session_events','payload',source_rowid,fullkey,parent,domain,atom FROM (
  SELECT owner.source_rowid,leaf.fullkey,replace(leaf.fullkey,'"','') AS path,
  leaf.parent AS parent,leaf.key,leaf.atom,owner.payload AS doc, CASE WHEN path='$.flow_id' AND json_extract(doc,'$.type') IN ('legacy_flow','legacy_flow_review') THEN 'uuid' END AS domain
- FROM canonical_session_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.payload AS doc FROM canonical_session_events source,json_tree(source.payload) leaf WHERE leaf.type='text') leaf USING(source_rowid)
+ FROM canonical_session_events owner JOIN (SELECT source_rowid,leaf.fullkey,leaf.key,leaf.atom,replace(leaf.fullkey,'"','') AS path,replace(leaf.path,'"','') AS parent,source.payload AS doc FROM canonical_session_events source,json_tree(CASE WHEN json_valid(source.payload) THEN source.payload END) leaf WHERE leaf.type='text') leaf USING(source_rowid)
 ) WHERE domain IS NOT NULL;
 
 INSERT OR IGNORE INTO canonical_values(domain,original) SELECT domain,original FROM canonical_json;
@@ -2194,7 +2194,7 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.edit.target' AND NEW.record_table='waves' THEN 'uuid' WHEN path='$.edit.target' AND NEW.record_table='projects' THEN 'proj_' WHEN path='$.edit.target' AND NEW.record_table='tasks' THEN 'task_' WHEN path='$.edit.target' AND NEW.record_table='task_comments' THEN 'uuid' WHEN parent='$.parents' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('comment_task') THEN 'task_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('task_identifier') THEN 'label' WHEN parent='$.edit.change.value' AND typeof(key)='integer' AND json_extract(doc,'$.edit.change.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.edit.change.value.machine_id' AND json_extract(doc,'$.edit.change.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.edit.change.value.repository_id' AND json_extract(doc,'$.edit.change.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.mutation AS doc
- FROM json_tree(NEW.mutation) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.mutation) THEN NEW.mutation END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2225,7 +2225,7 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.edit.target' AND NEW.record_table='waves' THEN 'uuid' WHEN path='$.edit.target' AND NEW.record_table='projects' THEN 'proj_' WHEN path='$.edit.target' AND NEW.record_table='tasks' THEN 'task_' WHEN path='$.edit.target' AND NEW.record_table='task_comments' THEN 'uuid' WHEN parent='$.parents' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('comment_task') THEN 'task_' WHEN path='$.edit.change.value' AND json_extract(doc,'$.edit.change.field') IN ('task_identifier') THEN 'label' WHEN parent='$.edit.change.value' AND typeof(key)='integer' AND json_extract(doc,'$.edit.change.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.edit.change.value.machine_id' AND json_extract(doc,'$.edit.change.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.edit.change.value.repository_id' AND json_extract(doc,'$.edit.change.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.mutation AS doc
- FROM json_tree(NEW.mutation) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.mutation) THEN NEW.mutation END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2546,7 +2546,7 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN parent='$.initiative_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.team_ids' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.body AS doc
- FROM json_tree(NEW.body) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.body) THEN NEW.body END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2577,7 +2577,7 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN parent='$.initiative_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.team_ids' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.body AS doc
- FROM json_tree(NEW.body) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.body) THEN NEW.body END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2608,15 +2608,15 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.initiative_ids AS doc
- FROM json_tree(NEW.initiative_ids) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.initiative_ids) THEN NEW.initiative_ids END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.team_ids AS doc
- FROM json_tree(NEW.team_ids) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.team_ids) THEN NEW.team_ids END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.task_order_json AS doc
- FROM json_tree(NEW.task_order_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.task_order_json) THEN NEW.task_order_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2647,15 +2647,15 @@ SELECT 'uuid' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.initiative_ids AS doc
- FROM json_tree(NEW.initiative_ids) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.initiative_ids) THEN NEW.initiative_ids END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.team_ids AS doc
- FROM json_tree(NEW.team_ids) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.team_ids) THEN NEW.team_ids END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.task_order_json AS doc
- FROM json_tree(NEW.task_order_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.task_order_json) THEN NEW.task_order_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2806,7 +2806,7 @@ SELECT 'landing_' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.home_id' THEN 'home_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.retired_supervisor_json AS doc
- FROM json_tree(NEW.retired_supervisor_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.retired_supervisor_json) THEN NEW.retired_supervisor_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -2841,7 +2841,7 @@ SELECT 'landing_' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN path='$.home_id' THEN 'home_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.retired_supervisor_json AS doc
- FROM json_tree(NEW.retired_supervisor_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.retired_supervisor_json) THEN NEW.retired_supervisor_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3010,19 +3010,19 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.value_json AS doc
- FROM json_tree(NEW.value_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.value_json) THEN NEW.value_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.base_json AS doc
- FROM json_tree(NEW.base_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.base_json) THEN NEW.base_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflict_json AS doc
- FROM json_tree(NEW.conflict_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflict_json) THEN NEW.conflict_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN (parent GLOB '$[[]*].before' OR parent GLOB '$[[]*].after') AND typeof(key)='integer' THEN 'task_' WHEN parent GLOB '$[[]*]' AND key='issue' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.order_effects_json AS doc
- FROM json_tree(NEW.order_effects_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.order_effects_json) THEN NEW.order_effects_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3055,19 +3055,19 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' WHEN parent='$' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.value_json AS doc
- FROM json_tree(NEW.value_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.value_json) THEN NEW.value_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.base_json AS doc
- FROM json_tree(NEW.base_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.base_json) THEN NEW.base_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' WHEN parent='$.value' AND typeof(key)='integer' THEN 'task_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflict_json AS doc
- FROM json_tree(NEW.conflict_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflict_json) THEN NEW.conflict_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN (parent GLOB '$[[]*].before' OR parent GLOB '$[[]*].after') AND typeof(key)='integer' THEN 'task_' WHEN parent GLOB '$[[]*]' AND key='issue' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.order_effects_json AS doc
- FROM json_tree(NEW.order_effects_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.order_effects_json) THEN NEW.order_effects_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3098,7 +3098,7 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.event.pr_id' THEN 'pr_' WHEN path='$.event.steer_id' THEN 'uuid' WHEN path='$.event.invocation_id' THEN 'uuid' WHEN path='$.event.relation_id' THEN 'uuid' WHEN path='$.event.source_issue_id' THEN 'uuid' WHEN path='$.event.target_issue_id' THEN 'uuid' WHEN parent='$.event.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.event.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.event.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.event.intent.project_id' THEN 'project_or_uuid' WHEN path='$.event.intent.relation_id' THEN 'uuid' WHEN path='$.event.intent.team_id' THEN 'uuid' WHEN path='$.event.intent.state_id' THEN 'uuid' WHEN path='$.event.intent.identifier' THEN 'label' WHEN path='$.event.link.issue_id' THEN 'task_or_uuid' WHEN path='$.event.link.project_id' THEN 'project_or_uuid' WHEN path='$.event.link.relation_id' THEN 'uuid' WHEN path='$.event.link.team_id' THEN 'uuid' WHEN path='$.event.link.state_id' THEN 'uuid' WHEN path='$.event.link.identifier' THEN 'label' WHEN path='$.task_id' THEN 'task_' WHEN path='$.steer_id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.kind_json AS doc
- FROM json_tree(NEW.kind_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.kind_json) THEN NEW.kind_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3129,7 +3129,7 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.event.pr_id' THEN 'pr_' WHEN path='$.event.steer_id' THEN 'uuid' WHEN path='$.event.invocation_id' THEN 'uuid' WHEN path='$.event.relation_id' THEN 'uuid' WHEN path='$.event.source_issue_id' THEN 'uuid' WHEN path='$.event.target_issue_id' THEN 'uuid' WHEN parent='$.event.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.event.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.event.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.event.intent.project_id' THEN 'project_or_uuid' WHEN path='$.event.intent.relation_id' THEN 'uuid' WHEN path='$.event.intent.team_id' THEN 'uuid' WHEN path='$.event.intent.state_id' THEN 'uuid' WHEN path='$.event.intent.identifier' THEN 'label' WHEN path='$.event.link.issue_id' THEN 'task_or_uuid' WHEN path='$.event.link.project_id' THEN 'project_or_uuid' WHEN path='$.event.link.relation_id' THEN 'uuid' WHEN path='$.event.link.team_id' THEN 'uuid' WHEN path='$.event.link.state_id' THEN 'uuid' WHEN path='$.event.link.identifier' THEN 'label' WHEN path='$.task_id' THEN 'task_' WHEN path='$.steer_id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.kind_json AS doc
- FROM json_tree(NEW.kind_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.kind_json) THEN NEW.kind_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3226,11 +3226,11 @@ SELECT 'project_or_uuid' AS domain,NEW.predecessor_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.wave_id' THEN 'uuid' WHEN path='$.successor_id' THEN 'project_or_uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.local_plan_json AS doc
- FROM json_tree(NEW.local_plan_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.local_plan_json) THEN NEW.local_plan_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.export_json AS doc
- FROM json_tree(NEW.export_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.export_json) THEN NEW.export_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3265,11 +3265,11 @@ SELECT 'project_or_uuid' AS domain,NEW.predecessor_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.wave_id' THEN 'uuid' WHEN path='$.successor_id' THEN 'project_or_uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.local_plan_json AS doc
- FROM json_tree(NEW.local_plan_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.local_plan_json) THEN NEW.local_plan_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.export_json AS doc
- FROM json_tree(NEW.export_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.export_json) THEN NEW.export_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3304,11 +3304,11 @@ SELECT 'proj_' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.planning_initiatives AS doc
- FROM json_tree(NEW.planning_initiatives) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.planning_initiatives) THEN NEW.planning_initiatives END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.planning_teams AS doc
- FROM json_tree(NEW.planning_teams) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.planning_teams) THEN NEW.planning_teams END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3343,11 +3343,11 @@ SELECT 'proj_' AS domain,NEW.id AS original
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.planning_initiatives AS doc
- FROM json_tree(NEW.planning_initiatives) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.planning_initiatives) THEN NEW.planning_initiatives END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN parent='$' AND typeof(key)='integer' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.planning_teams AS doc
- FROM json_tree(NEW.planning_teams) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.planning_teams) THEN NEW.planning_teams END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3560,7 +3560,7 @@ SELECT 'session' AS domain,NEW.session_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.flow_id' AND json_extract(doc,'$.type') IN ('legacy_flow','legacy_flow_review') THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.payload AS doc
- FROM json_tree(NEW.payload) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.payload) THEN NEW.payload END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -3599,7 +3599,7 @@ SELECT 'session' AS domain,NEW.session_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.flow_id' AND json_extract(doc,'$.type') IN ('legacy_flow','legacy_flow_review') THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.payload AS doc
- FROM json_tree(NEW.payload) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.payload) THEN NEW.payload END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4000,15 +4000,15 @@ SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.value_json AS doc
- FROM json_tree(NEW.value_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.value_json) THEN NEW.value_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.base_json AS doc
- FROM json_tree(NEW.base_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.base_json) THEN NEW.base_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflict_json AS doc
- FROM json_tree(NEW.conflict_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflict_json) THEN NEW.conflict_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4041,15 +4041,15 @@ SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('comment_task') THEN 'task_' WHEN path='$.value' AND json_extract(doc,'$.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value' AND typeof(key)='integer' AND json_extract(doc,'$.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.machine_id' AND json_extract(doc,'$.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.repository_id' AND json_extract(doc,'$.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.value_json AS doc
- FROM json_tree(NEW.value_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.value_json) THEN NEW.value_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.base_json AS doc
- FROM json_tree(NEW.base_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.base_json) THEN NEW.base_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('wave_project','task_project') THEN 'proj_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('comment_task') THEN 'task_' WHEN path='$.value.value' AND json_extract(doc,'$.value.field') IN ('task_identifier') THEN 'label' WHEN parent='$.value.value' AND typeof(key)='integer' AND json_extract(doc,'$.value.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN path='$.value.value.machine_id' AND json_extract(doc,'$.value.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN path='$.value.value.repository_id' AND json_extract(doc,'$.value.field')='task_admission_authority' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflict_json AS doc
- FROM json_tree(NEW.conflict_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflict_json) THEN NEW.conflict_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4080,11 +4080,11 @@ SELECT 'uuid' AS domain,NEW.comment_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.comment_json AS doc
- FROM json_tree(NEW.comment_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.comment_json) THEN NEW.comment_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflicting_comment_json AS doc
- FROM json_tree(NEW.conflicting_comment_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflicting_comment_json) THEN NEW.conflicting_comment_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4115,11 +4115,11 @@ SELECT 'uuid' AS domain,NEW.comment_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.comment_json AS doc
- FROM json_tree(NEW.comment_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.comment_json) THEN NEW.comment_json END) WHERE type='text')
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.conflicting_comment_json AS doc
- FROM json_tree(NEW.conflicting_comment_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.conflicting_comment_json) THEN NEW.conflicting_comment_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4212,7 +4212,7 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.export_json AS doc
- FROM json_tree(NEW.export_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.export_json) THEN NEW.export_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4247,7 +4247,7 @@ SELECT 'proj_' AS domain,NEW.project_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.id' THEN 'uuid' WHEN path='$.initiative' THEN 'uuid' WHEN path='$.link_id' THEN 'uuid' WHEN path='$.input.id' THEN 'uuid' WHEN path='$.input.teamId' THEN 'uuid' WHEN path='$.input.projectId' THEN 'uuid' WHEN path='$.input.assigneeId' THEN 'uuid' WHEN parent='$.input.teamIds' AND typeof(key)='integer' THEN 'uuid' WHEN (parent GLOB '$.baseline[[]*].value') AND typeof(key)='integer' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('project_initiatives','project_teams') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*].value' AND key='machine_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field') IN ('wave_delegation','project_delegation','task_delegation','task_admission_authority') THEN 'home_' WHEN parent GLOB '$.baseline[[]*].value' AND key='repository_id' AND json_extract(doc,substr(parent,1,length(parent)-6)||'.field')='task_admission_authority' THEN 'repo_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_parent','project_wave','project_linear_id','task_linear_id','task_assignee','task_team') THEN 'uuid' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('wave_project','task_project') THEN 'proj_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('comment_task') THEN 'task_' WHEN parent GLOB '$.baseline[[]*]' AND key='value' AND json_extract(doc,parent||'.field') IN ('task_identifier') THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.export_json AS doc
- FROM json_tree(NEW.export_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.export_json) THEN NEW.export_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4340,7 +4340,7 @@ SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.pr_id' THEN 'pr_' WHEN path='$.steer_id' THEN 'uuid' WHEN path='$.invocation_id' THEN 'uuid' WHEN path='$.relation_id' THEN 'uuid' WHEN path='$.source_issue_id' THEN 'uuid' WHEN path='$.target_issue_id' THEN 'uuid' WHEN parent='$.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.intent.project_id' THEN 'project_or_uuid' WHEN path='$.intent.relation_id' THEN 'uuid' WHEN path='$.intent.team_id' THEN 'uuid' WHEN path='$.intent.state_id' THEN 'uuid' WHEN path='$.intent.identifier' THEN 'label' WHEN path='$.link.issue_id' THEN 'task_or_uuid' WHEN path='$.link.project_id' THEN 'project_or_uuid' WHEN path='$.link.relation_id' THEN 'uuid' WHEN path='$.link.team_id' THEN 'uuid' WHEN path='$.link.state_id' THEN 'uuid' WHEN path='$.link.identifier' THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.kind_json AS doc
- FROM json_tree(NEW.kind_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.kind_json) THEN NEW.kind_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4371,7 +4371,7 @@ SELECT 'task_' AS domain,NEW.task_id AS original
 UNION ALL
 SELECT CASE WHEN path='$.pr_id' THEN 'pr_' WHEN path='$.steer_id' THEN 'uuid' WHEN path='$.invocation_id' THEN 'uuid' WHEN path='$.relation_id' THEN 'uuid' WHEN path='$.source_issue_id' THEN 'uuid' WHEN path='$.target_issue_id' THEN 'uuid' WHEN parent='$.lf_process_ids' AND typeof(key)='integer' THEN 'uuid' WHEN parent='$.exec_ids' AND typeof(key)='integer' THEN 'uuid' WHEN path='$.intent.issue_id' THEN 'task_or_uuid' WHEN path='$.intent.project_id' THEN 'project_or_uuid' WHEN path='$.intent.relation_id' THEN 'uuid' WHEN path='$.intent.team_id' THEN 'uuid' WHEN path='$.intent.state_id' THEN 'uuid' WHEN path='$.intent.identifier' THEN 'label' WHEN path='$.link.issue_id' THEN 'task_or_uuid' WHEN path='$.link.project_id' THEN 'project_or_uuid' WHEN path='$.link.relation_id' THEN 'uuid' WHEN path='$.link.team_id' THEN 'uuid' WHEN path='$.link.state_id' THEN 'uuid' WHEN path='$.link.identifier' THEN 'label' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.kind_json AS doc
- FROM json_tree(NEW.kind_json) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.kind_json) THEN NEW.kind_json END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4892,7 +4892,7 @@ SELECT 'label' AS domain,NEW.issue_identifier AS original
 UNION ALL
 SELECT CASE WHEN path='$.machine_id' THEN 'home_' WHEN path='$.repository_id' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.admission_authority AS doc
- FROM json_tree(NEW.admission_authority) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.admission_authority) THEN NEW.admission_authority END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original
@@ -4941,7 +4941,7 @@ SELECT 'label' AS domain,NEW.issue_identifier AS original
 UNION ALL
 SELECT CASE WHEN path='$.machine_id' THEN 'home_' WHEN path='$.repository_id' THEN 'repo_' END AS domain,atom AS original FROM (
  SELECT replace(fullkey,'"','') AS path,replace(path,'"','') AS parent,key,atom,NEW.admission_authority AS doc
- FROM json_tree(NEW.admission_authority) WHERE type='text')
+ FROM json_tree(CASE WHEN json_valid(NEW.admission_authority) THEN NEW.admission_authority END) WHERE type='text')
 ),decoded AS (
  SELECT domain,original,CASE
  WHEN domain IN ('uuid','label','session') THEN original

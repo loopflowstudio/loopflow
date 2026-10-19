@@ -811,7 +811,7 @@ impl SqliteStore {
                         .map_err(invalid)?;
                     let session = crate::session::HistoryCapture {
                         captured,
-                        id: session_id.clone(),
+                        id: session_id.clone().into(),
                         current_capture: current_input,
                         caller_artifact_key: caller
                             .as_deref()
@@ -2002,7 +2002,7 @@ mod metadata_tests {
                 [],
             )
             .unwrap();
-        filter.after = Some(first[0].id.clone());
+        filter.after = Some(first[0].id.to_string());
         let second = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");

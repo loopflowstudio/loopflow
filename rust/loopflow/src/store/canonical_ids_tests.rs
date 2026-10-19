@@ -767,6 +767,13 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "../../tests/fixtures/migrations/canonical_ids_work.sql"
     ))
     .unwrap();
+    // Corrupt retained evidence is opaque; conversion and later writes never parse it.
+    conn.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+         VALUES(?1,'observed','Case-Receipt',2,'not JSON')",
+        [SESSION],
+    )
+    .unwrap();
     let opaque: (String, String, String) = conn
         .query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -785,6 +792,15 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .collect::<Result<_, _>>()
             .unwrap();
     apply_sqlite(&conn).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT session_id,payload FROM session_events WHERE receipt_key='Case-Receipt'",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        )
+        .unwrap(),
+        (SESSION.to_ascii_lowercase(), "not JSON".to_string())
+    );
     assert_eq!(
         conn.query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| Ok(
             (

@@ -235,7 +235,7 @@ fn native_provider_attachment(
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     if attachment.lf_process_id.as_ref() != Some(&process)
-        || attachment.caller(session.clone()) != caller
+        || attachment.caller(session.clone().into()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
     }
@@ -325,7 +325,7 @@ fn session_command_status_with_env(
             }
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.id.to_string()))?,
+                serde_json::to_string(&attachment.caller(session.id.clone()))?,
             );
             crate::session_record::register_session_attachment_interrupt(
                 &store,
@@ -829,7 +829,7 @@ async fn serve_codex_native(
     let (store, session, attachment) = &owner;
     let mut connection = CodexConnection {
         store: store.clone(),
-        session_id: session.clone(),
+        session_id: session.clone().into(),
         thread_id: launch
             .resume_token
             .clone()
@@ -1313,7 +1313,7 @@ mod tests {
             )?;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attached.caller(session.id.to_string()))?,
+                serde_json::to_string(&attached.caller(session.id.clone()))?,
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {

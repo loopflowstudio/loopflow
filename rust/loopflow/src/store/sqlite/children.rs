@@ -1604,32 +1604,32 @@ pub(super) fn resolve_task_id_in(
     issue: &str,
     repo: Option<&str>,
 ) -> StoreResult<Option<TaskId>> {
-    let canonical = crate::id::canonical_task_selector(issue);
-    let issue = canonical.as_str();
-    let prefix = issue
-        .strip_prefix("lf-")
-        .or_else(|| issue.strip_prefix("task_"))
-        .unwrap_or(issue);
-    let local_prefix = ((4..=32).contains(&prefix.len())
-        && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
-    .then(|| prefix.to_owned());
+    let selector = crate::id::TaskSelector::parse(issue);
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+         WHERE (t.id=?1 OR t.external_issue_id=?3 OR t.issue_identifier=?4
             OR substr(t.id, 6, length(?2))=?2
             OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
-                AND json_extract(c.export_json,'$.id')=?1))
+                AND json_extract(c.export_json,'$.id')=?3))
          ORDER BY t.id",
     )?;
     let mut tasks = statement
-        .query_map(params![issue, local_prefix], |row| {
-            Ok((
-                TaskId::from_raw(row.get::<_, String>(0)?),
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?
+        .query_map(
+            params![
+                selector.id,
+                selector.local_prefix,
+                selector.external,
+                selector.label
+            ],
+            |row| {
+                Ok((
+                    TaskId::from_raw(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if let Some(repo) = repo {
         let canonical = crate::repository::CanonicalRepo::discover(std::path::Path::new(repo)).ok();

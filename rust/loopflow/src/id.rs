@@ -58,23 +58,37 @@ pub(crate) fn canonical_task_identifier(value: &str) -> String {
     value.to_owned()
 }
 
-pub(crate) fn canonical_task_selector(value: &str) -> String {
-    let lower = value.to_ascii_lowercase();
-    let hex = lower
-        .strip_prefix("lf-")
-        .or_else(|| lower.strip_prefix("task_"))
-        .unwrap_or(&lower);
-    if !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return lower;
-    }
-    canonical_task_identifier(&canonical_prefixed(&canonical_uuid(value), "task_"))
+/// One Task selector spelled in each identity domain it may name. A spelling
+/// outside a domain stays intact, so an opaque external ID is never a ticket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskSelector {
+    pub id: String,
+    pub external: String,
+    pub label: String,
+    /// An abbreviated stable Task ID, with or without `lf-`/`task_`.
+    pub local_prefix: Option<String>,
 }
 
-pub(crate) fn deserialize_session<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<String, D::Error> {
-    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-    Ok(canonical_session(&value))
+impl TaskSelector {
+    pub fn parse(value: &str) -> Self {
+        let lower = value.to_ascii_lowercase();
+        let hex = lower
+            .strip_prefix("lf-")
+            .or_else(|| lower.strip_prefix("task_"))
+            .unwrap_or(&lower);
+        Self {
+            id: canonical_prefixed(value, "task_"),
+            external: canonical_uuid(value),
+            label: canonical_task_identifier(value),
+            local_prefix: ((4..=32).contains(&hex.len())
+                && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| hex.to_owned()),
+        }
+    }
+
+    pub fn matches(&self, value: &str) -> bool {
+        value == self.id || value == self.external || value == self.label
+    }
 }
 
 pub(crate) fn deserialize_uuid<'de, D: serde::Deserializer<'de>>(
@@ -82,6 +96,14 @@ pub(crate) fn deserialize_uuid<'de, D: serde::Deserializer<'de>>(
 ) -> Result<String, D::Error> {
     let value = <String as serde::Deserialize>::deserialize(deserializer)?;
     Ok(canonical_uuid(&value))
+}
+
+/// Historical follow-through references name a local Task or a Linear issue.
+pub(crate) fn deserialize_task_or_uuid<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(canonical_prefixed(&canonical_uuid(&value), "task_"))
 }
 
 pub(crate) fn deserialize_uuid_option<'de, D: serde::Deserializer<'de>>(
@@ -293,6 +315,21 @@ impl From<LfSessionId> for String {
         value.0
     }
 }
+impl PartialEq<str> for LfSessionId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+impl PartialEq<&str> for LfSessionId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+impl PartialEq<String> for LfSessionId {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
 impl std::ops::Deref for LfSessionId {
     type Target = str;
     fn deref(&self) -> &str {
@@ -392,7 +429,7 @@ mod tests {
 
 #[cfg(test)]
 mod canonical_tests {
-    use super::{AgentSessionId, AttachmentToken, LfSessionId, WaveId};
+    use super::{AgentSessionId, AttachmentToken, LfSessionId, TaskSelector, WaveId};
     use crate::durable::{MachineId, ProjectId, TaskId};
     use crate::linear::LinearIssueId;
     use crate::pr_landing::PrLandingId;
@@ -470,5 +507,20 @@ mod canonical_tests {
         ] {
             assert_eq!(LfSessionId::from(value).as_str(), value);
         }
+    }
+
+    #[test]
+    fn canonical_ids_task_selector_keeps_each_domain_separate() {
+        let ticket = TaskSelector::parse("lOo-506");
+        assert_eq!(ticket.label, "LOO-506");
+        assert_eq!(ticket.external, "lOo-506");
+        let opaque = TaskSelector::parse("issue-1");
+        assert!(opaque.matches("issue-1"));
+        assert_eq!(opaque.external, "issue-1");
+        let task = TaskSelector::parse("TASK_ABCDEF");
+        assert_eq!(task.local_prefix.as_deref(), Some("abcdef"));
+        let linear = TaskSelector::parse("FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF");
+        assert!(linear.matches("ffffffff-ffff-4fff-8fff-ffffffffffff"));
+        assert_eq!(TaskSelector::parse("lf-ABCD").label, "lf-abcd");
     }
 }

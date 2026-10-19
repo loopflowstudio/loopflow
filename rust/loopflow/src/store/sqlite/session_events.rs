@@ -392,7 +392,7 @@ impl SqliteStore {
             ) = row?;
             Ok(SessionEvent {
                 seq,
-                session_id,
+                session_id: session_id.into(),
                 agent_session,
                 provider_turn,
                 kind: match kind.as_str() {

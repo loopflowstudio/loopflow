@@ -69,11 +69,13 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    let canonical = crate::id::canonical_task_selector(issue);
-    let issue = canonical.as_str();
-    Ok((source.identifier == issue
-        || source.task_id.as_str() == issue
-        || source.issue_id.as_deref() == Some(issue))
+    let selector = crate::id::TaskSelector::parse(issue);
+    Ok((selector.matches(&source.identifier)
+        || selector.matches(source.task_id.as_str())
+        || source
+            .issue_id
+            .as_deref()
+            .is_some_and(|id| selector.matches(id)))
     .then_some(source))
 }
 

@@ -177,7 +177,7 @@ pub(crate) async fn select_connection(
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str()), fresh).await?,
         PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), fresh).await?,
     };
-    Ok(session.id)
+    Ok(session.id.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,7 +263,7 @@ pub struct SessionRecord {
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
-    pub id: String,
+    pub id: crate::id::LfSessionId,
     pub workspace: Option<SessionWorkspace>,
     pub interactive: bool,
     pub work: Option<WorkRef>,
@@ -963,7 +963,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
-        id: session.id.to_string(),
+        id: session.id.clone(),
         workspace: None,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
@@ -1066,7 +1066,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
 /// Resolved identity for confirmation, not a reservation or permission to bind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionBindingPreview {
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub task_id: String,
     pub identifier: String,
     pub title: String,
@@ -1079,7 +1079,7 @@ pub(crate) async fn preview_binding(
 ) -> Result<SessionBindingPreview> {
     let (session, task) = binding_target(store, id, task).await?;
     Ok(SessionBindingPreview {
-        session_id: session.id.to_string(),
+        session_id: session.id.clone(),
         task_id: task.id.to_string(),
         identifier: task.identifier,
         title: task.title,

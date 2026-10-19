@@ -324,7 +324,7 @@ pub struct SessionUsage {
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionHistory {
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,
     pub caller_artifact_key: Option<String>,
@@ -2180,7 +2180,7 @@ impl CaptureHandle {
         let attachment = store.prepare_session_agent_process(&session, expected)?;
         command.env(
             crate::process::AGENT_CALLER_ENV,
-            serde_json::to_string(&attachment.caller(session.clone()))?,
+            serde_json::to_string(&attachment.caller(session.clone().into()))?,
         );
         capture.attachment = Some((session.clone(), attachment.clone()));
         // Keep the capture's settlement snapshot fixed through admission. The
@@ -2265,7 +2265,7 @@ impl CaptureHandle {
         if let Some((session, attachment)) = &capture.attachment {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone()))
+                serde_json::to_string(&attachment.caller(session.clone().into()))
                     .expect("caller provenance serializes"),
             );
         }

@@ -1481,7 +1481,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
                 .claim_session_attachment(&session, None, &origin, true)
                 .unwrap()
         });
-    let caller = serde_json::to_string(&attachment.caller(session.clone())).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.

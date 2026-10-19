@@ -129,7 +129,7 @@ impl SourceUsage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StepContext {
     pub input: String,
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub skill: Option<String>,
     pub harness: String,
     pub observed_at: i64,

@@ -264,6 +264,12 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
         "{call}"
     );
     assert!(!call.contains("--fresh"), "{call}");
+    // cmux starts the workspace from its own environment; this private Home goes with it.
+    let home_arg = format!(
+        " --command env 'LF_HOME={}' ",
+        home.path().canonicalize().unwrap().display()
+    );
+    assert!(call.contains(&home_arg), "{call}");
     assert_eq!(
         sessions(home.path()),
         0,

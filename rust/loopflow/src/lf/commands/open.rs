@@ -188,8 +188,15 @@ impl Resolved {
     }
 
     /// The connect argv as one shell command line, for hosts that type it.
+    /// A host's new shell starts from the host's environment, so a private
+    /// Home travels with the command.
     fn connect_shell(&self, lf: &str) -> Result<String, RouteError> {
-        shlex::try_join(self.connect_argv(lf).iter().map(String::as_str))
+        let mut argv = self.connect_argv(lf);
+        if crate::store::custom_home_selected() {
+            let home = format!("LF_HOME={}", crate::store::lf_home_dir().display());
+            argv.splice(0..0, ["env".to_owned(), home]);
+        }
+        shlex::try_join(argv.iter().map(String::as_str))
             .map_err(|error| RouteError::Definite(error.to_string()))
     }
 

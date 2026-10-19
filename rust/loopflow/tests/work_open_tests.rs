@@ -124,6 +124,33 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
 }
 
 #[test]
+fn standalone_task_link_resolves_by_folder_name() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let created = json(&lf(
+        home.path(),
+        repo.path(),
+        None,
+        &["task", "create", "--title", "Stand alone", "--json"],
+    ));
+    let identifier = created["identifier"].as_str().unwrap();
+    let url = format!("loopflow://{}/task/{identifier}", folder(repo.path()));
+    let links = json(&lf(
+        home.path(),
+        elsewhere.path(),
+        None,
+        &["open", &url, "--link", "--json"],
+    ));
+    assert_eq!(links[0]["url"], url.as_str());
+    assert_eq!(links[0]["target"]["task_id"], created["id"]);
+    assert_eq!(
+        links[0]["label"],
+        format!("{identifier} · Stand alone").as_str()
+    );
+}
+
+#[test]
 fn same_named_repositories_need_a_qualifier_and_change_nothing() {
     let home = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();

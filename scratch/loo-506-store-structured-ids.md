@@ -1,6 +1,6 @@
 # Store structured IDs canonically and accept any casing
 
-Status: accepted outcome; implementation complete pending gate, 2026-10-18. Jack Heart's product direction remains accepted. Pass 6 integrated main through v0.14.7 (`82ae9228fa`), repaired the command proof and finished Session/Linear typing, per-domain Task selectors, history/native selectors, Swift/Desktop CLI transport, docs and the installation proofs. No product decision is outstanding. Gate owns the full Rust/Swift matrix; CI owns the disposable-install run.
+Status: accepted outcome; implementation complete pending gate, reconciled 2026-10-19. Jack Heart's product direction remains accepted. Pass 6 integrated main through v0.14.7 (`82ae9228fa`), repaired the command proof and finished Session/Linear typing, per-domain Task selectors, history/native selectors, Swift/Desktop CLI transport, docs and the installation proofs. No product decision is outstanding. Gate owns the full Rust/Swift matrix; CI owns the disposable-install run.
 
 During LOO-499 review on October 17, Jack Heart requested case-invariant IDs everywhere, including Linear IDs and normalized storage. Later that day Jack Heart authorized autonomous planning, implementation, verification, publication and landing, superseding the earlier design/demo/merge review boundary. The selected Flow is kickoff → pursue → ship.
 
@@ -112,9 +112,8 @@ fixture IDs after retaining locators remain filesystem proofs, **not** the full
 conversion. Linux gate owns case-sensitive filesystem and isolated installation
 acceptance after the completed conversion.
 
-The draft now rejects distinct raw Trace spellings before retaining their different
-directory locators. The inventory below includes historical JSON and collision
-scopes; their full conversion and rollback proofs remain unfinished. The shared Session domain must match the recognized released forms used
+The draft rejects distinct raw Trace spellings before retaining their different
+directory locators. The shared Session domain must match the recognized released forms used
 by preflight and storage guards: `session_<32 hex>` and bare 32 hex; other retained
 Session strings remain opaque.
 
@@ -124,10 +123,9 @@ The one draft is `migrations/drafts/canonical_structured_ids.sql`, created throu
 
 Replayed registered migrations through `0.14.4.001_release.sql` in memory, then
 audited the drafts including #1586. No installed database was read. This inventory
-names conversion candidates by ownership. Wave relational conversion and Trace/Wave
-collision checks have populated released-fixture proofs. The other domains, declared
-JSON paths and full conversion fixture remain unfinished. Brace notation expands
-named columns; no suffix-based rewrite is intended.
+names conversion candidates by ownership; the draft converts and enforces all of it
+(released fixtures `canonical_ids_{work,metrics,authority}.sql`). Brace notation
+expands named columns; no suffix-based rewrite is intended.
 
 | Table | Structured columns |
 | --- | --- |
@@ -245,9 +243,6 @@ Collision inventory (current schema after #1586, including implicit indexes):
   preserve already recorded conflicts and all losing mutations. Identity arrays
   (Task order, Initiative/Team membership) must not acquire duplicate identities.
 
-Trace locator and Wave owner collisions are implemented. The other scopes and
-JSON conversion remain part of the single unfinished conversion cut.
-
 ### Content-addressed evidence revision — implemented
 
 **October 17 implementation choice under Jack Heart's accepted outcome:** `MetricObservationIdentity` owns the original
@@ -273,11 +268,6 @@ same graduated contract, and emit the same canonical reading. Captured Session
 payloads survive and their immutability guard is restored. A Wave collision rolls
 back metrics, locators and the migration ledger. UUID simple/hyphenated/braced/URN
 forms retain punctuation; metric names remain case sensitive.
-
-The draft currently contains the filesystem cut and Wave **relational** conversion
-supporting this proof. It does not yet convert declared Wave JSON references or
-prevent all noncanonical writers; those belong to the complete constructor/SQL cut
-below. The metric representation obstacle is resolved, not the full migration.
 
 Migration sequence:
 
@@ -305,6 +295,7 @@ Delete — do not maintain:
 * Removed `metrics.rs::select_current` and separate history scans: `MetricObservationEvidence::from_history` selects by `(source_time, original_digest)` while collecting instrument/qualification evidence. Preserve ordering, qualification and released reimport tests on this path.
 * Removed: unnormalized `from_raw` and derived serde escape paths. `prefixed_uuid_id!` owns the one lenient `from_raw` its serde uses; Linear decode boundaries canonicalize once, and Session attachment normalizes at its fence and attachment sinks.
 * Removed: exactly cased `lf-`/`task_` selector branches, LOO-499's NOCASE/`eq_ignore_ascii_case` ticket patches, `canonical_task_selector` and `deserialize_session`; `TaskSelector` and `LfSessionId` own them. Ambiguity and original native fallback input preserved.
+* Removed in compress: the branch-added exact duplicate-key visitor on `PlanningSnapshot`; main's decoding returns, and `canonicalized()` alone rejects case-folded key/predecessor collisions.
 * Tests requiring structured case preservation; replace with canonical round trips. Preserve native-token, capture, ancestry, admission, PR-history and A→B→A fencing proofs.
 * Removed in the filesystem slice: identity-derived lookup of retained Session fences and Process receipt files. Preserve the surviving locator path, exact-owner evidence and immutable locator guards throughout the remaining conversion.
 
@@ -385,7 +376,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-Expected: all selected tests pass with canonical references, unchanged opaque bytes and no history/authority loss. The new Swift acceptance scenario consumes the materializer's `LOOPFLOW_TEST_LF` while its source checkout exists; it must fail rather than silently skip when that candidate is unavailable in this gate command. Linux CI owns reconnect tests ignored on macOS. Add the noncanonical-live-owner case to `scripts/test_task_installation.py` and run it in its disposable-account CI environment; `LF_HOME` alone cannot isolate installation. Desktop's headless script builds app/test dependencies; no display, dialog or participant is required. Implementation/compress only build changed code and run their focused proof; broader checks belong to gate.
+Expected: all selected tests pass with canonical references, unchanged opaque bytes and no history/authority loss. The new Swift acceptance scenario consumes the materializer's `LOOPFLOW_TEST_LF` while its source checkout exists; it must fail rather than silently skip when that candidate is unavailable in this gate command. Linux CI owns reconnect tests ignored on macOS. `scripts/test_task_installation.py` includes the noncanonical-live-owner deferral; it runs in its disposable-account CI environment; `LF_HOME` alone cannot isolate installation. Desktop's headless script builds app/test dependencies; no display, dialog or participant is required. Implementation/compress only build changed code and run their focused proof; broader checks belong to gate.
 
 Existing evidence (October 17): the disposable SQLite/`flock`/SHA-256 probe reproduced distinct simultaneous fences for one case-folded Session during an exclusive SQLite transaction and distinct retained/canonical Process receipt basenames. This remains a synthetic counterexample, not production upgrade acceptance. Gate retains full upgrade and isolated installation acceptance.
 
@@ -400,6 +391,4 @@ the original digest and ignores unrelated metric evidence before hashing.
 Migration preflight reuses `id::canonical_uuid` so its change detection cannot
 drift from the retained punctuation/non-UUID policy.
 
-Check result (2026-10-18, pass 6, `1a810652cb`): focused `canonical_ids` plus receipt/trace/journal/prune/launch-budget 113/113 PASS; earlier PR/task/fixture/comment (1393/1395, both failures since fixed), history/session/project/wave/linear/workflow subsets PASS; Swift identity suites 111/111 PASS; fmt, clippy, `check_migrations.py` PASS. Gate owns the full matrix; CI owns installation.
-
-Check result (2026-10-19, compress): clippy `-D warnings` PASS; focused `canonical_ids|receipt|trace|planning_exchange|session_attachment|linear` nextest 314/314 PASS. Swift untouched by compress; gate owns the full matrix.
+Check result (2026-10-19, compress `9d7e94fa5d`; pass 6 Swift identity suites 111/111 unchanged since): clippy `-D warnings` PASS; focused `canonical_ids|receipt|trace|planning_exchange|session_attachment|linear` nextest 314/314 PASS. Swift untouched by compress; gate owns the full matrix.

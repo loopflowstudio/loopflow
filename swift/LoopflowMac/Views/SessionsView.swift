@@ -1057,6 +1057,10 @@ struct SessionsContentView: View {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
             && (currentKey.kind != .task || fileTask?.task.runtime?.started == true || workspace.presentation.content == .terminals)
     }
+    /// Shell, Files and new terminals wait until an unstarted Task starts.
+    private var taskTools: Bool {
+        currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true
+    }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
@@ -1099,9 +1103,9 @@ struct SessionsContentView: View {
             zoom: { _handle(.zoom) }, focusPane: { _handle(.focus($0)) },
             back: { model.goBack() }, forward: { model.goForward() },
             adjacent: { model.cycleWorkingTask($0) }, slot: { model.selectWorkingTask(slot: $0) },
-            shell: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.toggleShell) } : nil,
-            files: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.toggleFiles) } : nil,
-            newTerminal: currentKey.kind == .task && !navigation.showsSelection && fileTask?.task.awaitsStart != true ? { _handle(.newTerminal) } : nil,
+            shell: taskTools ? { _handle(.toggleShell) } : nil,
+            files: taskTools ? { _handle(.toggleFiles) } : nil,
+            newTerminal: taskTools ? { _handle(.newTerminal) } : nil,
             close: { _handle(.close) }, reopen: multiplexer.canUndoClose ? { _handle(.undoClose) } : nil))
         .background {
             Button("Task actions") { actionTaskID = fileTask?.task.id }
@@ -1330,10 +1334,7 @@ struct SessionsContentView: View {
         navigation.restorePaletteFocus = false
         navigation.palette = nil
         switch destination {
-        case .repository, .dashboard, .openRepository, .wave:
-            model.jump(to: destination, source: "palette")
-        case .task:
-            // Opening the Task records it as recent once it resolves.
+        case .repository, .dashboard, .openRepository, .wave, .task:
             model.jump(to: destination, source: "palette")
             return
         case .flow(let name): navigation.palette = .flow(name)

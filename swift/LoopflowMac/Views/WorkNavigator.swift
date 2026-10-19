@@ -296,7 +296,6 @@ struct WorkJumpMenu: View {
     private func choose(_ destination: WorkDestination) {
         dismiss()
         model.jump(to: destination, source: "jump_bar")
-        model.remember(destination)
     }
 }
 

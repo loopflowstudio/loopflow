@@ -598,7 +598,7 @@ LOO-297's attempted read failed on missing Linear credentials; local Task absenc
 did not establish remote absence. Any sentence repair requires a fresh authorized
 issue read. No Task was filed or changed by these records.
 
-## Workspace redesign decisions (reconciled 2026-10-18)
+## Workspace redesign decisions
 
 Jack Heart approved LOO-489's Console hybrid and Swift demo on October 17,
 superseding dashboard/grid, favorites, attention sorting and automatic sidebar
@@ -644,20 +644,17 @@ paused/idle. Jack chose first-wins duplicates and lfdb persistence. First-visibl
 tree traversal is the implementation interpretation; incomplete evidence retains
 geometry/order because reordering can promote duplicates. Hide preserves edits.
 
-Jack accepted implementation/review publication, not merge/completion; Breadcrumbs,
-Attention first, arrivals At the end, Available and cross-repo Cmd K Find Work.
+Jack accepted implementation/review publication, not merge/completion; breadcrumbs,
+Attention first, arrivals at the end, Available and cross-repo Cmd K Find Work.
 Other repos open separate windows; Edit view is separate. Repo scope is implicit;
 backlog selection starts nothing. October 17: independent Dashboards reuse Task
 workspaces; repository/Wave defaults cannot be replaced. Work bindings were removed.
 
-Jack Heart authorized integrating the captured 489 Console in 497 on October 17.
-497 supplies plans, Dashboard navigation/editing and pane/draft persistence;
-489 retains ordinary navigation,
+October 17: Jack Heart had 497 integrate the captured 489 Console.
+497 supplies plans, Dashboards and pane/draft persistence; 489 ordinary navigation,
 416 lifetime, 498 host consumption. October 18: Jack Heart restricted side-by-side
-Tasks to query results in Dashboards, including unsaved queries. Ordinary navigation
-selects one destination; outer splitting/hiding/resizing is removed. Saved/ad hoc
-entry/history share cleanup. Anonymous arrangement remains a draft save-first
-choice. Geometry keys by Dashboard and ordered expression, excluding
+Tasks to query results in Dashboards, including unsaved queries; ordinary navigation
+selects one destination. Anonymous arrangement remains a draft save-first choice. Geometry keys by Dashboard and ordered expression, excluding
 clause IDs; distinct Dashboards need distinct occurrence roots. Intent proves no
 liveness; Waiting's 2:1 weight is provisional.
 
@@ -665,10 +662,9 @@ Jack's October 17 tab decision: each Task has at most one Shell and one Files pa
 shell tabs own independent processes, file tabs share Task/path documents. No
 tear-out, extra tool panes or repo/Wave/Dashboard shells. Creation selects a tab;
 arrangement groups existing panes. Shell identity is independent of pane/selection;
-empty Files retains location. October 18 application tests cover delayed reads
+empty Files keeps location. October 18 application tests cover delayed reads
 merging missing content without replacing newer tabs, selection, geometry or drafts.
-Revision conflicts preserve live and durable edits; explicit reload does not add
-observers or write unchanged intent. Cold shells have no launch command. Native
+Revision conflicts preserve live and durable edits. Cold shells have no launch command. Native
 launch still records no Shell Process ID, so cold attachment and mounted restart/
 cross-machine continuity remain unproved with 416.
 Pane ownership follows Task.repository_id, not optional Project/Wave membership;

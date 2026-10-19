@@ -167,8 +167,11 @@ extension WorkModel {
                 Perf.agentInput("task_click", task: id, detail: "source=" + source)
                 Task { await openPaletteTask(id) }
             }
+            // Opening the Task records it as recent once it resolves.
+            return
         default: return
         }
+        remember(destination)
     }
 }
 

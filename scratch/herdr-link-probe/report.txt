@@ -1,0 +1,129 @@
+# Herdr custom-link probe — LOO-426
+
+October 18, 2026. Jack Heart requested independent cmux and Herdr experiments;
+Rex is deferred. This report concerns Herdr only.
+
+## Finding
+
+**Herdr can intercept a real `loopflow:` OSC 8 hyperlink and supply the exact
+clicked pane, tab, workspace and server socket to a plugin action.** Installed
+Herdr 0.9.3 demonstrated this through both its native link activation API and
+injected Control-click terminal mouse reports into its running TUI. A physical
+mouse click through a native macOS terminal remains unproved: computer use was
+occupied by active user interaction, and the investigation did not contend for it.
+
+The installed executable is `/Users/jack/.local/bin/herdr`; `hrdr` was absent.
+Both existing and isolated servers reported 0.9.3, private protocol 22,
+compatible endpoints. Host OS: macOS 26.0.1 (25A362). Linux is documentation-only
+in this experiment.
+
+## Observed matrix
+
+| Path | Result | Context |
+| --- | --- | --- |
+| OSC 8 `loopflow:`; no plugin | Native activation resolves the URL, returns `handled:false` | No receiver invoked |
+| OSC 8 `loopflow:`; matching plugin | `handled:true`; recorder exits 0 | Full URL, clicked pane/tab/workspace/socket |
+| Bare printed `loopflow:`; matching plugin | `handled:false`, no URL detected | No invocation |
+| OSC 8 HTTPS control; matching plugin | `handled:true` | Same exact host context |
+| Bare HTTPS control; matching plugin | `handled:true` | Same exact host context |
+| Installed TUI + injected SGR Control-click on OSC 8 label | Recorder invoked with actual `loopflow:` URI | `invocation_source=link_click` |
+| Control-click into visible nonfocused second split | Recorder identifies `w1:p2`; `w1:p1` remains focused | Click target, not global focus |
+| Activation API targeting hidden second workspace | `stale_target: pane is no longer visible` | No guessed destination |
+| Direct shell command in owned Herdr pane | Inherits `HERDR_ENV=1`, socket and workspace/tab/pane IDs | Reliable direct-command entry context |
+| `/usr/bin/open -g` to registered surrogate, cold launch from `w1:p2` | Exact URI delivered; receiver inherits Herdr context | `HERDR_PANE_ID=w1:p2` |
+| Same running receiver, second activation from `w1:p1` | Exact second URI delivered; process environment remains stale | Still `HERDR_PANE_ID=w1:p2` |
+| Actual `lf open` | Currently ambiguous between `lf pr open` and `lf desktop open` | Proposed command cannot yet be exercised |
+
+The custom hyperlink was
+`loopflow://loopflow/task/LOO-426?probe=herdr-osc`. The recorder consumed it
+without invoking Loopflow or altering provider attachments. No surrogate scheme
+was used for these successful interception tests. They prove transport, not
+Work resolution: installed Loopflow does not implement the proposed URI grammar.
+
+## Reproducible evidence
+
+An isolated server used `XDG_CONFIG_HOME=/tmp/loo426-herdr-probe/config`,
+`XDG_DATA_HOME=/tmp/loo426-herdr-probe/data`, and `--session probe`.
+A local plugin declared an argv action invoking a recorder and a `link_handlers`
+pattern limited to the test URL. The recorder wrote only explicitly selected
+Herdr context fields. No full environment or secret values were captured.
+
+The native request was:
+
+```json
+{"method":"pane.link.activate","params":{"pane_id":"w1:p1","viewport_row":0,"col":4}}
+```
+
+The installed binary's `herdr api schema --json` supplies this method's
+shape. Its successful response contained:
+
+```json
+{"type":"pane_link_activated","url":"loopflow://loopflow/task/LOO-426?probe=herdr-osc","handled":true}
+```
+
+The plugin received `HERDR_PLUGIN_CLICKED_URL`,
+`HERDR_PLUGIN_LINK_HANDLER_ID=work`, `HERDR_SOCKET_PATH`,
+`HERDR_WORKSPACE_ID=w1`, `HERDR_TAB_ID=w1:t1`, `HERDR_PANE_ID=w1:p1`.
+`HERDR_PLUGIN_CONTEXT_JSON` also supplied `invocation_source=link_click`,
+`clicked_url`, `link_handler_id`, labels, cwd and `focused_pane_id` identifying
+the clicked pane. The second-split experiment returned `w1:p2` while ordinary
+pane inspection still marked `w1:p1` focused.
+
+For the separate TUI test, Herdr ran in a 120×40 PTY. SGR mouse press/release
+`ESC[<16;32;3M` / `ESC[<16;32;3m` hit the first rendered label; row 23 hit the
+second split. Both produced successful recorded plugin invocations. These were
+injected terminal input events, not physical desktop clicks.
+
+Local raw artifacts: `/tmp/loo426-herdr-probe/plugin-context.jsonl`,
+`plugin-env.txt`, `plugin-logs.json`, `layout.json`, `render.sh`, `request.py`,
+and `plugin/herdr-plugin.toml`. The installed schema was captured at
+`/tmp/loo426-herdr-schema.json`. These are disposable evidence, not product code.
+
+## OS dispatch counterexample
+
+The shared disposable macOS receiver registered only `lf426cmuxprobe:`, leaving
+real `loopflow:` registration unchanged. A receiver in `/tmp` initially failed
+scheme-only dispatch with `-10814`; explicit `open -a` worked. Moving/registering
+the temporary bundle under `~/Applications` made scheme-only dispatch work.
+
+Cold launch from `w1:p2` received `?probe=herdr-cold-p2` and inherited its full
+Herdr environment. A subsequent `?probe=herdr-warm-p1` from `w1:p1` reached the
+same receiver, but its per-event environment still named `w1:p2`. Each Apple
+event contained its URL and a distinct sender PID; sender app bundle and path
+could not be resolved. The receiver was parented by launchd (`ppid=1`).
+
+**OS receiver launch environment is not current activation context.** Cold-start
+success conceals an incorrect-source bug on warm activation. These OS results
+use the surrogate scheme; actual `loopflow:` interception was proved separately
+through Herdr's plugin. Raw OS evidence is retained in
+`/tmp/loo426-herdr-probe/system-open-events.jsonl`.
+
+## Contract and integration recommendation
+
+[Herdr's plugin documentation](https://herdr.dev/docs/plugins/#link-handlers)
+documents Control-click on every platform, matching custom link handlers before
+external opening, clicked-URL/context injection, and HTTP(S)-only external
+fallback when capture is enabled. With capture disabled, the outer terminal
+handles explicit hyperlinks; that path must be assessed as the outer terminal's
+behavior. These facts explain the observations; they do not establish Linux or
+arbitrary outer-terminal click parity.
+
+Use a thin Herdr plugin matching `^loopflow:`. Parse its supplied URL as data and
+pass it unchanged to the shared opener through argv, together with bounded
+Herdr invocation context. Keep Desktop-first policy inside that shared opener.
+Use the injected server socket plus pane identity, not whichever workspace is
+currently focused. A persistent OS receiver must not treat its inherited host
+environment as the source of each new URL. Direct `lf open URL` can consume ordinary inherited Herdr
+context. Emit OSC 8 for CLI links; a bare custom-scheme string is insufficient
+here. There is no evidence requiring an origin token in the durable URI.
+
+## Cleanup
+
+The owned TUI detached normally. The temporary plugin was unlinked; the isolated
+server stopped and its named session was deleted, removing its owned panes.
+Readback confirmed the original default Herdr server remains running at 0.9.3
+and its plugin inventory remains empty. Temporary scripts and raw evidence are
+retained under `/tmp/loo426-herdr-probe`; no product code changed. The cmux investigator confirmed its subsequent warm cmux activation also
+retained the stale Herdr pane, then stopped the shared receiver, removed its
+registration and returned its bundle to `/tmp`. No existing provider conversation or attachment was
+changed.

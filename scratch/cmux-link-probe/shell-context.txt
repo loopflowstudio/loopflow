@@ -1,0 +1,8 @@
+CMUX_WORKSPACE_ID=7E44D89A-7598-4C7A-A12B-8E0D6E54062A
+CMUX_SURFACE_ID=8A80CCF3-4D1B-4E79-87C5-2C99D0559181
+CMUX_SOCKET_PATH=/Users/jack/.local/state/cmux/cmux.sock
+TERM_PROGRAM=ghostty
+TERM_PROGRAM_VERSION=1.3.2-HEAD-+324c027
+shell_pid=89407
+shell_ppid=88430
+/Applications/cmux.app/Contents/Resources/bin/open

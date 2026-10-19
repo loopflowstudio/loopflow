@@ -217,3 +217,42 @@ does not select the disposable Machine.
 
 Check: `cargo build --bin lf` and `swift build --package-path swift -Xswiftc -gnone`
 passed; native walkthrough and shared CLI reads above ran on those builds.
+
+## Planning frame performance results — October 19, 2026
+
+Measured on a VACUUM copy of Jack Heart's lfdb in a private `LF_HOME` (the draft
+schema applied by hand), cwd `~/src/loopflow`, debug build, load ~11–15, median of 5.
+621 Tasks, 52 Waves, 55 live checkouts.
+
+| Stage | Commit | Frame | git | Time |
+|---|---|---|---|---|
+| Before (`5e08b6655f`) | | 8.27 MB | 135 | 4.70 s |
+| Latest Flow per Task in one pass | `b2a7d855a0` | 8.27 MB | 135 | 1.35 s |
+| HEAD and Git layout read from disk | `c62099c2d9` | 8.27 MB | 59 | 1.07 s |
+| Roadmap writes each Task once | `f03d7cd21d` | 4.21 MB | 59 | 0.91 s |
+
+Proofs: `every_task_latest_flow_matches_its_own_flows` and the Session-growth step
+check in `process_membership_does_not_read_events_that_name_no_process`;
+`planning_asks_git_once_per_live_checkout` (fails with the disk layout disabled:
+3 commands per checkout); roadmap fixture round-trip in `dto_fixtures.rs`.
+Desktop decodes `roadmap.tasks` once and gives each Wave its share; one Desktop
+test that staged per-Wave Task unavailability alongside an available Wave was removed,
+since that state cannot occur. Full Rust: lib 2038/2040 (`desktop_commands_do_not_route_to_the_execution_machine`,
+`released_work_upgrades_to_saved_intent_without_rewriting_work` also fail on
+`5e08b6655f`); other targets 696/701 (four `data_clones` need an un-nested sandbox,
+one auth process count). Headless Swift: 600 passed.
+
+Leaked Waves: all 30 temp-dir Waves are named `ship`, have no Tasks, and date from
+July 20 and September 3. Source: `controller::wave` test
+`resolve_registry_without_a_store_runs_unregistered` (added `22e34abc54`, deleted
+`418e52ba65` on September 28) resolved the machine registry from the ambient home
+and ensured a `ship` Wave for its temp dir whenever the dev schema matched. No
+Wave was added by a full test run on October 18. Unpinned in-process tests can still
+reach `~/.lf` when a branch has no draft migration; not changed here. Cleanup is
+Jack Heart's call; nothing was deleted. They no longer cost git commands.
+
+Machine-wide vs repository-scoped: keep machine-wide for now. The command palette
+offers every repository's Waves and Tasks; scoping to the window's repository would
+save only ~35% (406 of 621 Tasks are loopflow's). The remaining 4.2 MB is mostly Task
+descriptions (1.47 MB) and PR evidence (0.75 MB), and 439 of 621 Tasks are completed.
+Open: send descriptions on demand, or bound completed Tasks, before scoping.

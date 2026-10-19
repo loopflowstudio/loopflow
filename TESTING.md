@@ -53,6 +53,8 @@ so nested Cargo does not invalidate the parent's build.
 
 These fixtures still invoke the built CLI with disposable Homes. Shared execution
 fixtures seed fixed admission evidence; they do not expose acquisition APIs.
+Queued multi-Wave responses must pin distinct Wave creation times to match their
+newest-first discovery order; same-second creation can hide an ordering mismatch.
 
 CI Rust cache keys include the root workspace's build profiles, which the cache
 action's member-manifest discovery omits. Profile changes get fresh dependency

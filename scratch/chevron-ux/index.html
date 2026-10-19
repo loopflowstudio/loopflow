@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Repo Chevron Study</title>
+<style>
+:root{--bg:#e9e4dc;--paper:#fbf9f5;--side:#f0ebe3;--line:#ddd4c8;--ink:#342e2a;--muted:#81786e;--wine:#723e49;--wine-soft:#ece0e0;--bar:#5e2630;--bar-ink:#f4e9e6;--bar-muted:#d6bfc0;--bar-hover:#ffffff18;--field:#ffffff1a;--amber:#a57a32;--blue:#668b9f;--green:#557969;font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;color:var(--ink)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1a19;--paper:#262221;--side:#2d2826;--line:#3c3532;--ink:#e8e0da;--muted:#9a8f88;--wine:#c98b97;--wine-soft:#3d2a2e;--bar:#43282f;--bar-ink:#ead9d8;--bar-muted:#b39a9d;--field:#ffffff12}}
+:root[data-theme="dark"]{--bg:#1d1a19;--paper:#262221;--side:#2d2826;--line:#3c3532;--ink:#e8e0da;--muted:#9a8f88;--wine:#c98b97;--wine-soft:#3d2a2e;--bar:#43282f;--bar-ink:#ead9d8;--bar-muted:#b39a9d;--field:#ffffff12}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);min-height:100vh}
+button,input{font:inherit;color:inherit}button{border:0;background:transparent;cursor:pointer;border-radius:5px;padding:5px 8px}
+button:focus-visible,input:focus-visible{outline:2px solid var(--wine);outline-offset:1px}
+kbd{font:11px ui-monospace,Menlo,monospace;opacity:.7}
+.study{display:flex;align-items:center;gap:18px;padding:18px 28px 8px;flex-wrap:wrap}
+.study b{font-size:17px;letter-spacing:-.3px}
+#tabs{display:flex;gap:4px;flex-wrap:wrap}
+#tabs button{font-size:12px;padding:7px 13px;border-radius:16px;color:var(--muted)}
+#tabs button.active{background:var(--ink);color:var(--paper)}
+#theme{margin-left:auto;font-size:12px;color:var(--muted)}
+.thesis{padding:4px 28px 16px;max-width:900px}
+.thesis h1{font:600 22px/1.2 -apple-system,system-ui,sans-serif;margin:6px 0 6px;letter-spacing:-.4px}
+.thesis p{margin:3px 0;font-size:13px}.thesis .trade{color:var(--muted)}
+.window{position:relative;margin:0 24px;background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:visible;box-shadow:0 15px 45px #00000018}
+.titlebar{height:44px;display:flex;align-items:center;gap:4px;padding:0 12px;background:var(--bar);color:var(--bar-ink);border-radius:11px 11px 0 0;font-size:13px}
+.titlebar button:hover{background:var(--bar-hover)}
+.traffic{display:flex;gap:7px;margin-right:10px}.traffic i{width:11px;height:11px;border-radius:50%;background:#db8d80}.traffic i:nth-child(2){background:#ddbd76}.traffic i:nth-child(3){background:#9ab398}
+.nav{color:var(--bar-muted);padding:4px 6px}
+.crumbs{display:flex;align-items:center;min-width:0;gap:0}
+.crumbs .seg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+.crumbs .seg.cur{font-weight:600}
+.crumbs .slash{color:var(--bar-muted);padding:0 2px}
+.right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.searchbtn{display:flex;align-items:center;gap:7px;color:var(--bar-muted);font-size:12px}
+.app{display:flex;height:440px;border-radius:0 0 11px 11px;overflow:hidden}
+aside{width:230px;background:var(--side);border-right:1px solid var(--line);padding:12px 10px;overflow:auto;flex:none}
+.label{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 8px 4px}
+.srow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font-size:12px;padding:6px 8px}
+.srow:hover{background:#00000008}.srow.sel{background:var(--wine);color:#fff}
+.dot{width:6px;height:6px;border-radius:50%;background:#b8ada1;flex:none}.dot.running{background:var(--blue)}.dot.available{background:var(--amber)}.dot.done{background:var(--green)}
+main{flex:1;min-width:0;padding:28px 34px;overflow:auto}
+.eyebrow{font:11px ui-monospace,Menlo,monospace;color:var(--muted)}
+main h2{font:600 26px/1.2 -apple-system,system-ui,sans-serif;margin:6px 0 12px;letter-spacing:-.5px}
+main p{color:var(--muted);font-size:13px;max-width:560px}
+.msg{border-left:2px solid var(--line);padding-left:14px;margin:18px 0;font-size:13px;max-width:560px}
+.try{margin:14px 28px 30px;font-size:12px;color:var(--muted);max-width:900px;line-height:1.7}
+.try b{color:var(--ink)}
+/* popovers */
+.pop{position:absolute;z-index:20;width:380px;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px #00000030;overflow:hidden}
+.pop input{width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;padding:11px 14px;font-size:14px;outline:none}
+.pop-head{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:10px 14px 4px}
+.pop-list{max-height:320px;overflow:auto;padding:4px}
+.pop-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;font-size:13px}
+.pop-row.hi{background:var(--wine-soft)}
+.pop-row .kind{font:10px ui-monospace,Menlo,monospace;color:var(--muted);width:64px;flex:none}
+.pop-row .main{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pop-row small{color:var(--muted);font-size:11px;white-space:nowrap}
+.pop-row.action .main{color:var(--wine)}
+.pop-sep{border-top:1px solid var(--line);margin:4px 6px}
+.pop-foot{display:flex;justify-content:space-between;padding:7px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.empty{padding:14px;color:var(--muted);font-size:12px}
+.dialog-pop{left:50%!important;transform:translateX(-50%);width:560px;top:70px!important}
+/* current */
+.repo-chev{color:var(--bar-muted);padding:4px 4px;margin-left:-4px}
+/* A: omnibar */
+.omni{flex:1;max-width:640px;margin:0 auto;display:flex;align-items:center;gap:2px;height:30px;padding:0 6px 0 4px;border-radius:7px;background:var(--field);cursor:text;min-width:0}
+.omni:hover{background:#ffffff22}
+.omni.editing{background:var(--paper);color:var(--ink);box-shadow:0 0 0 2px var(--wine)}
+.omni .chip{white-space:nowrap;padding:2px 7px;border-radius:5px;font-size:12.5px;max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.omni .chip:hover{background:var(--bar-hover)}
+.omni.editing .chip{background:var(--wine-soft);color:var(--wine)}
+.omni .chip .x{margin-left:5px;opacity:.6}
+.omni .gt{color:var(--bar-muted);font-size:12px}
+.omni.editing .gt{color:var(--muted)}
+.omni input{flex:1;min-width:60px;border:0;background:transparent;outline:none;font-size:13px;padding:0 6px}
+.omni .hint{margin-left:auto;color:var(--bar-muted);font-size:12px;display:flex;gap:8px;align-items:center;white-space:nowrap;padding-left:10px}
+.omni.editing .hint{color:var(--muted)}
+/* B: jump bar */
+.jump .seg{padding:4px 6px}
+.jump .seg:hover{text-decoration:underline;text-underline-offset:3px}
+.jump .sep{color:var(--bar-muted);padding:4px 3px;font-size:12px;border-radius:4px;transition:transform .12s}
+.jump .sep:hover,.jump .sep.open{background:var(--bar-hover);color:var(--bar-ink)}
+.jump .sep.open{transform:rotate(90deg)}
+.machine{color:var(--bar-muted);font-size:12px}
+/* C: launcher + search */
+.switcher{display:flex;align-items:center;gap:8px;padding:3px 8px 3px 4px!important;border-radius:7px!important;background:var(--field)}
+.avatar{width:22px;height:22px;border-radius:6px;background:#d9a35f;color:#3b2410;font-weight:700;font-size:12px;display:grid;place-items:center}
+.switcher .n{display:flex;flex-direction:column;line-height:1.05;text-align:left}
+.switcher .n small{font-size:10px;color:var(--bar-muted)}
+.switcher .caret{color:var(--bar-muted);font-size:10px}
+.c-crumbs{margin-left:10px}
+.c-crumbs .seg{padding:4px 5px;color:var(--bar-muted)}.c-crumbs .seg.cur{color:var(--bar-ink)}
+.cfield{margin-left:auto;display:flex;align-items:center;gap:8px;width:300px;height:28px;padding:0 10px!important;border-radius:7px!important;background:var(--field);color:var(--bar-muted);font-size:12px}
+.cfield kbd{margin-left:auto}
+.scopes{display:flex;gap:4px;padding:8px 12px 0}
+.scopes button{font-size:11px;padding:4px 9px;border-radius:12px;border:1px solid var(--line);color:var(--muted)}
+.scopes button.on{background:var(--wine-soft);color:var(--wine);border-color:transparent}
+.repo-row .avatar{width:20px;height:20px;font-size:11px}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#37302b;color:#fff8ef;border-radius:7px;padding:9px 16px;font-size:12px;opacity:0;pointer-events:none;transition:opacity .15s}#toast.show{opacity:1}
+@media (max-width:760px){.study,.thesis{padding-left:16px;padding-right:16px}.window{margin:0 8px}aside{display:none}.traffic{display:none}.cfield{width:auto}.cfield span{display:none}.omni .hint span{display:none}.try{margin:14px 16px}.pop{width:calc(100vw - 32px)!important;left:8px!important;transform:none!important}}
+</style>
+</head>
+<body>
+<header class="study"><b>Repo chevron — three directions</b><nav id="tabs" aria-label="Variants"></nav><button id="theme">Toggle theme</button></header>
+<section class="thesis" id="thesis"></section>
+<div class="window" id="win">
+  <div class="titlebar" id="tb"></div>
+  <div class="app"><aside id="side"></aside><main id="main"></main></div>
+</div>
+<p class="try" id="try"></p>
+<div id="toast" role="status"></div>
+<script>
+const repos=[{id:'loopflow',machine:'this Mac',color:'#d9a35f'},{id:'kata',machine:'this Mac',color:'#8fb0a0'},{id:'fantasia',machine:'mini-heart',color:'#a99bd0'},{id:'etude',machine:'this Mac',color:'#c98b97'}];
+const waves=[['product','loopflow'],['systems','loopflow'],['quality','loopflow'],['mac','loopflow'],['drills','kata'],['scores','fantasia'],['studies','etude']].map(([id,repo])=>({id,repo}));
+const tasks=[
+ ['LOO-497','Drive Desktop through separate selection and arrangement','product','running'],
+ ['LOO-489','Compose retained work in repo and Wave dashboards','product','available'],
+ ['LOO-499','Make opening and continuing work conversations obvious','product','done'],
+ ['LOO-426','Open any Task or Session in the Mac app with one command','product','available'],
+ ['LOO-504','Make opencode 2 reliable and prove parity','systems','running'],
+ ['LOO-506','Store structured IDs canonically','systems','available'],
+ ['LOO-492','Keep terminal text clear of pane borders','quality','done'],
+ ['LOO-502','Keep existing Sessions working after an upgrade','quality','running'],
+ ['LOO-416','Keep Task Sessions seamless across app restart','mac','available'],
+ ['KAT-31','Score drills by tempo stability','drills','running'],
+ ['FAN-12','Rekey MTG card imports','scores','available'],
+].map(([id,title,wave,state])=>({id,title,wave,state,repo:waves.find(w=>w.id===wave).repo}));
+const dashboards=[{id:'review',name:'Review desk',repo:'loopflow'},{id:'watch',name:'Product watch',repo:'loopflow'}];
+
+let variant='current';
+let loc={repo:'loopflow',wave:'product',task:'LOO-497',dash:null};
+let pop=null;
+const $=s=>document.querySelector(s);
+const el=(tag,attrs={},...kids)=>{const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(k==='class')e.className=v;else if(v!==false&&v!=null)e.setAttribute(k,v===true?'':v)}for(const c of kids.flat()){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(c))}return e};
+const task=id=>tasks.find(t=>t.id===id);
+const short=s=>s.length>34?s.slice(0,32)+'…':s;
+function toast(t){const n=$('#toast');n.textContent=t;n.classList.add('show');clearTimeout(n._t);n._t=setTimeout(()=>n.classList.remove('show'),2200)}
+
+function search(q,scope={}){
+  q=q.trim().toLowerCase();const m=s=>!q||s.toLowerCase().includes(q);const out=[];
+  if(!scope.repo)repos.filter(r=>m(r.id)).forEach(r=>out.push({kind:'Repository',label:r.id,sub:r.machine,go:{repo:r.id}}));
+  if(!scope.wave){
+    waves.filter(w=>(!scope.repo||w.repo===scope.repo)&&m(w.id)).forEach(w=>out.push({kind:'Wave',label:w.id,sub:w.repo,go:{repo:w.repo,wave:w.id}}));
+    dashboards.filter(d=>(!scope.repo||d.repo===scope.repo)&&m(d.name)).forEach(d=>out.push({kind:'Dashboard',label:d.name,sub:d.repo,go:{repo:d.repo,dash:d.id}}));
+  }
+  tasks.filter(t=>(!scope.repo||t.repo===scope.repo)&&(!scope.wave||t.wave===scope.wave)&&(m(t.id)||m(t.title))).forEach(t=>out.push({kind:'Task',label:`${t.id}  ${t.title}`,sub:scope.wave?t.state:`${t.wave} · ${t.state}`,go:{repo:t.repo,wave:t.wave,task:t.id}}));
+  return q?out.slice(0,14):out.filter(o=>o.kind!=='Repository'||!scope.repo).slice(0,14);
+}
+
+function navigate(go){
+  if(go.repo!==loc.repo){toast(`Opens ${go.repo} in its own window`);return}
+  loc={repo:go.repo,wave:go.wave||null,task:go.task||null,dash:go.dash||null};render();
+}
+
+// ---------- popover ----------
+function closePop(){if(pop){pop.remove();pop=null;document.querySelectorAll('.sep.open').forEach(s=>s.classList.remove('open'))}}
+function popover(anchor,{placeholder,items,head,foot,width,input,cls,extra}){
+  closePop();
+  const r=anchor.getBoundingClientRect(),w=$('#win').getBoundingClientRect();
+  const box=el('div',{class:'pop '+(cls||'')});
+  box.style.left=Math.max(8,Math.min(r.left-w.left,w.width-(width||380)-8))+'px';
+  box.style.top=(r.bottom-w.top+6)+'px';if(width)box.style.width=width+'px';
+  const field=input||(placeholder?el('input',{placeholder,'aria-label':placeholder}):null);
+  const list=el('div',{class:'pop-list',role:'listbox'});let hi=0,cur=[];
+  const pick=it=>{closePop();it.act?it.act():navigate(it.go)};
+  const draw=()=>{cur=items(field?field.value:'');hi=Math.min(hi,Math.max(0,cur.length-1));
+    list.replaceChildren(...(cur.length?cur.map((it,i)=>it.sep?el('div',{class:'pop-sep'}):el('button',{class:'pop-row'+(i===hi?' hi':'')+(it.act?' action':''),role:'option',onmousedown:e=>e.preventDefault(),onclick:()=>pick(it),onmousemove:()=>{if(hi!==i){hi=i;draw()}}},
+      it.icon||el('span',{class:'kind'},it.kind||''),el('span',{class:'main'},it.label),it.sub?el('small',{},it.sub):null)):[el('div',{class:'empty'},'No matches')]))};
+  const key=e=>{const sel=()=>cur.map((c,i)=>c.sep?-1:i).filter(i=>i>=0);
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();const s=sel();let p=s.indexOf(hi)+(e.key==='ArrowDown'?1:-1);hi=s[(p+s.length)%s.length];draw()}
+    else if(e.key==='Enter'&&cur[hi]&&!cur[hi].sep){e.preventDefault();pick(cur[hi])}
+    else if(e.key==='Escape'){e.preventDefault();closePop();render()}};
+  if(field){field.addEventListener('input',()=>{hi=0;draw()});field.addEventListener('keydown',key)}else box.addEventListener('keydown',key);
+  box.append(head?el('div',{class:'pop-head'},head):'',extra||'',field&&!input?field:'',list,foot?el('div',{class:'pop-foot'},...foot):'');
+  $('#win').append(box);pop=box;pop._redraw=()=>{hi=0;draw()};draw();
+  (field||box).focus();if(!field)box.tabIndex=-1;
+  return box;
+}
+document.addEventListener('mousedown',e=>{if(pop&&!pop.contains(e.target)&&!e.target.closest('.omni,.sep,.switcher,.cfield,.repo-chev,.searchbtn'))closePop()});
+
+// ---------- shared chrome ----------
+const traffic=()=>el('div',{class:'traffic','aria-hidden':'true'},el('i'),el('i'),el('i'));
+const navBtns=()=>[el('button',{class:'nav','aria-label':'Back'},'←'),el('button',{class:'nav','aria-label':'Forward'},'→')];
+const segs=()=>{const s=[{label:loc.repo,go:{repo:loc.repo},level:'repo'}];
+  if(loc.wave)s.push({label:loc.wave,go:{repo:loc.repo,wave:loc.wave},level:'wave'});
+  if(loc.dash)s.push({label:dashboards.find(d=>d.id===loc.dash).name,go:{repo:loc.repo,dash:loc.dash},level:'dash'});
+  if(loc.task)s.push({label:`${loc.task} ${short(task(loc.task).title)}`,go:{...loc},level:'task'});return s};
+const palette=(anchor,scope)=>popover(anchor,{cls:'dialog-pop',width:560,placeholder:'Search Tasks, Waves, Dashboards, repositories…',items:q=>search(q,scope||{}),foot:[el('span',{},'↑↓ choose · ↵ open'),el('span',{},'Esc')]});
+
+// ---------- variants ----------
+const V={};
+V.current={name:'Today',title:'Today: name opens the repo conversation, the chevron opens Find Work',
+ thesis:'The repo name and its chevron are two buttons side by side. The chevron opens the same centered Find Work palette as ⌘K.',
+ trade:'This is what you flagged: a chevron implies a menu of repos, but you get a search dialog that floats away from it.',
+ tryit:'Click the <b>⌄</b> next to loopflow. Then click <b>Find work</b>. Both open the same thing.',
+ bar(tb){const c=el('div',{class:'crumbs'});segs().forEach((s,i)=>{if(i)c.append(el('span',{class:'slash'},'/'));c.append(el('button',{class:'seg'+(i===segs().length-1?' cur':''),onclick:()=>navigate(s.go)},s.label));if(i===0)c.append(el('button',{class:'repo-chev','aria-label':'Find Work',onclick:e=>palette(e.currentTarget)},'⌄'))});
+  tb.append(traffic(),...navBtns(),c,el('div',{class:'right'},el('button',{class:'searchbtn',onclick:e=>palette(e.currentTarget)},'⌕ Find work ',el('kbd',{},'⌘K'))))},
+ cmdk(){palette($('.searchbtn'))}};
+
+V.a={name:'A · Path is the search field',title:'A — The breadcrumb is the search field',
+ thesis:'One field, centered like a browser address bar, that shows where you are as scope chips. Click it or press ⌘K to type in place. The chips stay as the search scope. Backspace removes one, so the search widens from this Wave to the repo, then to every repo.',
+ trade:'Breadcrumbs and search become one control, so the place you are and the place you can go read as the same thing. The risk: clicking a chip navigates, while clicking empty space starts a search.',
+ tryit:'Click the empty part of the field, or press <b>⌘K</b>. Type <b>term</b>. Backspace removes <b>product</b>, then <b>loopflow</b>, and kata/fantasia results appear (they open their own window). Clicking a chip while the field is not active navigates there.',
+ editing:false,scope:null,
+ bar(tb){const self=this;const omni=el('div',{class:'omni'+(self.editing?' editing':''),onclick:e=>{if(!self.editing&&!e.target.closest('.chip'))self.edit()}});
+  if(!self.editing){segs().forEach((s,i)=>{if(i)omni.append(el('span',{class:'gt'},'›'));omni.append(el('button',{class:'chip',onclick:e=>{e.stopPropagation();navigate(s.go)}},s.label))});
+   omni.append(el('span',{class:'hint'},el('span',{},'⌕ Search'),el('kbd',{},'⌘K')))}
+  else{const sc=self.scope;const chips=[];if(sc.repo)chips.push(['repo',sc.repo]);if(sc.wave)chips.push(['wave',sc.wave]);
+   chips.forEach(([k,v],i)=>{if(i)omni.append(el('span',{class:'gt'},'›'));omni.append(el('button',{class:'chip',onclick:e=>{e.stopPropagation();self.drop(k)}},v,el('span',{class:'x'},'×')))});
+   const inp=el('input',{placeholder:sc.repo?(sc.wave?`Search ${sc.wave}…`:`Search ${sc.repo}…`):'Search every repository…','aria-label':'Search'});
+   inp.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!inp.value){e.preventDefault();self.drop(sc.wave?'wave':'repo')}});
+   inp.addEventListener('blur',()=>setTimeout(()=>{if(self.editing&&!pop?.contains(document.activeElement)&&document.activeElement!==inp){self.editing=false;closePop();render()}},120));
+   omni.append(inp,el('span',{class:'hint'},el('kbd',{},'⌫ widen'),el('kbd',{},'esc')));
+   requestAnimationFrame(()=>{popover(omni,{input:inp,width:omni.getBoundingClientRect().width,items:q=>{const r=search(q,sc);if(!q&&sc.wave)r.unshift({kind:'Go to',label:`${sc.wave} Wave`,go:{repo:sc.repo,wave:sc.wave}},{sep:true});return r}});inp.value=self.q||'';pop._redraw();inp.focus()})}
+  tb.append(traffic(),...navBtns(),omni)},
+ edit(){this.editing=true;this.q='';this.scope={repo:loc.repo,wave:loc.wave};render()},
+ drop(k){const inp=document.querySelector('.omni input');this.q=inp?inp.value:'';if(k==='repo')this.scope={};else this.scope={repo:this.scope.repo};render()},
+ cmdk(){this.edit()},leave(){this.editing=false}};
+
+V.b={name:'B · Jump bar',title:'B — Every separator opens a menu',
+ thesis:'This is how Xcode\'s jump bar and the Finder path bar work. A name navigates. The › after it opens a menu of what\'s inside, with a filter at the top. The leading machine crumb lists repositories, so the repo chevron becomes the › between this Mac and loopflow.',
+ trade:'This reads clearly as breadcrumbs, and every level can be browsed. Search is scoped to wherever you open it, so finding something in another Wave takes one more hop. ⌘K opens the menu at the deepest level.',
+ tryit:'Click the <b>›</b> after <b>this Mac</b> for repositories, after <b>loopflow</b> for Waves and Dashboards, or after <b>product</b> for its Tasks. Type in any menu to search that scope. Click a name to go to it.',
+ bar(tb){const c=el('div',{class:'crumbs jump'});const ss=segs();const me=repos.find(r=>r.id===loc.repo).machine;
+  const menu=(btn,level)=>{btn.classList.add('open');
+   if(level==='machine')popover(btn,{head:'Repositories',placeholder:'Filter repositories…',items:q=>[...repos.filter(r=>r.id.includes(q.toLowerCase())).map(r=>({kind:r.machine,label:r.id,sub:r.id===loc.repo?'this window':'new window',go:{repo:r.id}})),{sep:true},{label:'Open repository…',act:()=>toast('Opens a folder picker')},{label:'Clone from GitHub…',act:()=>toast('Opens clone')}]});
+   else if(level==='repo')popover(btn,{head:`In ${loc.repo}`,placeholder:`Search ${loc.repo}…`,items:q=>q?search(q,{repo:loc.repo}):[...waves.filter(w=>w.repo===loc.repo).map(w=>({kind:'Wave',label:w.id,sub:`${tasks.filter(t=>t.wave===w.id&&t.state!=='done').length} open`,go:{repo:w.repo,wave:w.id}})),{sep:true},...dashboards.filter(d=>d.repo===loc.repo).map(d=>({kind:'Dashboard',label:d.name,go:{repo:d.repo,dash:d.id}}))]});
+   else if(level==='wave')popover(btn,{head:`Tasks in ${loc.wave}`,placeholder:`Search ${loc.wave}…`,items:q=>search(q,{repo:loc.repo,wave:loc.wave})})};
+  c.append(el('button',{class:'seg machine',onclick:()=>toast('Machines overview')},me));
+  const mSep=el('button',{class:'sep','aria-label':'Repositories',onclick:e=>menu(e.currentTarget,'machine')},'›');c.append(mSep);
+  ss.forEach((s,i)=>{c.append(el('button',{class:'seg'+(i===ss.length-1?' cur':''),onclick:()=>navigate(s.go)},s.label));
+   if(s.level==='repo'||s.level==='wave'){const b=el('button',{class:'sep','data-level':s.level,'aria-label':`Inside ${s.label}`,onclick:e=>menu(e.currentTarget,s.level)},'›');c.append(b)}});
+  this._menu=menu;tb.append(traffic(),...navBtns(),c)},
+ cmdk(){const seps=[...document.querySelectorAll('.jump .sep')];const b=seps[seps.length-1];this._menu(b,b.dataset.level||'machine')}};
+
+V.c={name:'C · Launcher + search',title:'C — Separate launcher, path and search',
+ thesis:'Three controls that each look like what they do. The repo switcher on the left looks like a workspace switcher, the way Slack and Linear do it, and it\'s the only thing with a caret. The path is plain breadcrumbs. Search is a real field with its scope written in it.',
+ trade:'Nothing is ambiguous, and the switcher has room to show machines and add repositories. It costs titlebar width, and having three controls says these are three separate concepts.',
+ tryit:'Click the <b>loopflow</b> switcher to see repositories grouped by machine. Click the <b>Search loopflow</b> field, or press <b>⌘K</b>, then switch the scope pills between this Wave, loopflow and all repos.',
+ scope:'repo',
+ bar(tb){const self=this;const r=repos.find(x=>x.id===loc.repo);
+  const sw=el('button',{class:'switcher','aria-label':'Switch repository',onclick:e=>self.switcher(e.currentTarget)},el('span',{class:'avatar',style:`background:${r.color}`},r.id[0].toUpperCase()),el('span',{class:'n'},r.id,el('small',{},r.machine)),el('span',{class:'caret'},'▾'));
+  const c=el('div',{class:'crumbs c-crumbs'});const ss=segs().slice(1);
+  ss.forEach((s,i)=>{if(i)c.append(el('span',{class:'slash'},'/'));c.append(el('button',{class:'seg'+(i===ss.length-1?' cur':''),onclick:()=>navigate(s.go)},s.label))});
+  if(!ss.length)c.append(el('span',{class:'seg cur'},'Repository conversation'));
+  const f=el('button',{class:'cfield',onclick:e=>self.find(e.currentTarget)},'⌕ ',el('span',{},`Search ${loc.repo}`),el('kbd',{},'⌘K'));
+  tb.append(traffic(),sw,...navBtns(),c,f)},
+ switcher(btn){const byM={};repos.forEach(r=>(byM[r.machine]??=[]).push(r));const items=[];
+  Object.entries(byM).forEach(([m,rs],gi)=>{if(gi)items.push({sep:true});rs.forEach(r=>items.push({icon:el('span',{class:'avatar',style:`background:${r.color}`},r.id[0].toUpperCase()),label:r.id,sub:r.id===loc.repo?'✓ this window':m,go:{repo:r.id}}))});
+  items.push({sep:true},{label:'Open repository…',act:()=>toast('Opens a folder picker')},{label:'Clone from GitHub…',act:()=>toast('Opens clone')});
+  popover(btn,{head:'Repositories',width:300,items:()=>items,foot:[el('span',{},'⌘1–9 switch'),el('span',{},'⌘⇧O')]})},
+ find(anchor){const self=this;const pills=el('div',{class:'scopes'});
+  const opts=[['wave',loc.wave?`${loc.wave}`:null],['repo',loc.repo],['all','All repositories']].filter(o=>o[1]);
+  if(!opts.find(o=>o[0]===self.scope))self.scope='repo';
+  const paint=()=>pills.replaceChildren(...opts.map(([k,l])=>el('button',{class:self.scope===k?'on':'',onmousedown:e=>e.preventDefault(),onclick:()=>{self.scope=k;paint();pop._redraw()}},l)));paint();
+  const sc=()=>self.scope==='all'?{}:self.scope==='wave'?{repo:loc.repo,wave:loc.wave}:{repo:loc.repo};
+  popover(anchor,{width:440,extra:pills,placeholder:'Search Tasks, Waves, Dashboards…',items:q=>search(q,sc()),foot:[el('span',{},'⇥ change scope'),el('span',{},'↵ open')]});
+  pop.querySelector('input').addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();const i=opts.findIndex(o=>o[0]===self.scope);self.scope=opts[(i+(e.shiftKey?-1:1)+opts.length)%opts.length][0];paint();pop._redraw()}})},
+ cmdk(){this.find($('.cfield'))}};
+
+// ---------- page ----------
+function render(){
+  const v=V[variant];closePop();
+  $('#tabs').replaceChildren(...Object.entries(V).map(([k,x])=>el('button',{class:k===variant?'active':'',onclick:()=>{V[variant].leave?.();variant=k;try{localStorage.setItem('chev-variant',k)}catch{}render()}},x.name)));
+  $('#thesis').replaceChildren(el('h1',{},v.title),el('p',{},v.thesis),el('p',{class:'trade'},v.trade));
+  $('#try').innerHTML='<b>Try:</b> '+v.tryit+' Switching repositories never replaces this window; another repo opens its own.';
+  const tb=$('#tb');tb.replaceChildren();v.bar(tb);
+  const side=$('#side');const sel=(go)=>JSON.stringify(go)===JSON.stringify({repo:loc.repo,wave:loc.wave,task:loc.task,dash:loc.dash});
+  side.replaceChildren(el('div',{class:'label'},'Working'),...tasks.filter(t=>t.repo===loc.repo&&t.state!=='done').map(t=>el('button',{class:'srow'+(loc.task===t.id?' sel':''),onclick:()=>navigate({repo:t.repo,wave:t.wave,task:t.id})},el('span',{class:`dot ${t.state}`}),`${t.id} ${short(t.title)}`)),
+    el('div',{class:'label'},'Waves'),...waves.filter(w=>w.repo===loc.repo).map(w=>el('button',{class:'srow'+(loc.wave===w.id&&!loc.task?' sel':''),onclick:()=>navigate({repo:w.repo,wave:w.id})},'◇ '+w.id)),
+    el('div',{class:'label'},'Dashboards'),...dashboards.filter(d=>d.repo===loc.repo).map(d=>el('button',{class:'srow'+(loc.dash===d.id?' sel':''),onclick:()=>navigate({repo:d.repo,dash:d.id})},'▦ '+d.name)));
+  const main=$('#main');const t=loc.task&&task(loc.task);
+  const path=[loc.repo,loc.wave,loc.dash&&dashboards.find(d=>d.id===loc.dash).name,loc.task].filter(Boolean).join(' › ');
+  main.replaceChildren(el('div',{class:'eyebrow'},path),
+    el('h2',{},t?t.title:loc.dash?dashboards.find(d=>d.id===loc.dash).name:loc.wave?`${loc.wave} Wave`:`${loc.repo} conversation`),
+    el('p',{},t?`${t.state} · Task conversation`:loc.dash?'Saved Dashboard':loc.wave?'Wave conversation and plan':'Repository conversation'),
+    el('div',{class:'msg'},'Sample conversation content. Only the titlebar differs between variants.'));
+}
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();V[variant].cmdk()}
+  if(!e.metaKey&&!e.ctrlKey&&!e.altKey&&document.activeElement.tagName!=='INPUT'&&['1','2','3','4'].includes(e.key)){V[variant].leave?.();variant=Object.keys(V)[+e.key-1];render()}});
+$('#theme').onclick=()=>{const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;r.dataset.theme=dark?'light':'dark'};
+try{const s=localStorage.getItem('chev-variant');if(s&&V[s])variant=s}catch{}
+render();
+</script>
+</body>
+</html>

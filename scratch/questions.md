@@ -28,3 +28,22 @@ October 17 implementation assumption: unsaved ad hoc query destinations remain
 read-only compositions until saved as an independently named Dashboard. Their
 Task panes/drafts still share Work ownership; this avoids inventing another
 arrangement store for anonymous queries.
+
+October 18 (evening), Jack Heart on unstarted Tasks in queries: “i am ok with it
+looking something like what you get with the "move this conversation here" -- the
+task session window just becomes a thing you cna click to start the system”. An
+unstarted Task's tile/workspace shows a start placeholder in the Session slot
+(modeled on LOO-491's move-here offer); clicking it starts the Task. Selection
+alone still starts nothing. Unstarted Tasks stay in queries; this replaces the
+exclude-unstarted leaning and the empty Brief/Changes workspace.
+
+October 18 (evening), repo chevron: of the three prototypes in
+`scratch/chevron-ux/index.html`, Jack Heart said “i think B is the closest” —
+the jump bar: a crumb name navigates; the › after it opens a filterable menu of
+what's inside (machine › repositories, repo › Waves/Dashboards, Wave › Tasks);
+typing in a menu searches that scope. Details beyond "closest" are not yet agreed.
+
+October 18 (evening), scope: Jack Heart agreed LOO-497 becomes the Dashboards
+outcome (demo, review and merge on PR #1580). The scripting-API acceptance from the
+original brief (state readback oracle, exit statuses, scoped context) moves to a new
+Task coordinated with LOO-453 (readiness wait/events).

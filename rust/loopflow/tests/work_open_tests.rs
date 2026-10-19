@@ -327,6 +327,61 @@ fn refused_host_reports_cause_and_the_usable_command() {
     assert!(text.contains(&format!("Run: lf open {url}")), "{text}");
 }
 
+/// Automatic opening goes where the caller is, before installed Desktop.
+#[test]
+fn automatic_route_opens_where_the_caller_is() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let url = format!("loopflow://{}", folder(repo.path()));
+    let route = |env: &[(&str, &str)]| {
+        let links = json(&lf_with(
+            home.path(),
+            repo.path(),
+            None,
+            env,
+            &["open", &url, "--link", "--json"],
+        ));
+        links[0]["route"].clone()
+    };
+    let desktop: &[&str] = if cfg!(target_os = "macos") {
+        &["desktop"]
+    } else {
+        &[]
+    };
+    let order = |first: &[&str]| {
+        let hosts: Vec<&str> = first
+            .iter()
+            .chain(desktop)
+            .chain(&["terminal"])
+            .copied()
+            .collect();
+        serde_json::json!(hosts)
+    };
+    let herdr = [
+        ("HERDR_ENV", "1"),
+        ("HERDR_SOCKET_PATH", "/tmp/herdr.sock"),
+        ("HERDR_PANE_ID", "w1:p1"),
+    ];
+    assert_eq!(route(&herdr)["hosts"], order(&["herdr"]));
+    assert_eq!(route(&[])["hosts"], order(&[]));
+    if cfg!(target_os = "macos") {
+        let cmux = [
+            ("CMUX_WORKSPACE_ID", "w"),
+            ("CMUX_SOCKET_PATH", "/tmp/cmux.sock"),
+        ];
+        assert_eq!(route(&cmux)["hosts"], order(&["cmux"]));
+        let inside = route(&[("LF_DESKTOP", "1")]);
+        assert_eq!(inside["hosts"], order(&[]));
+        assert!(
+            inside["reason"]
+                .as_str()
+                .unwrap()
+                .contains("this Desktop window"),
+            "{inside}"
+        );
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn linux_automatic_route_never_selects_desktop() {

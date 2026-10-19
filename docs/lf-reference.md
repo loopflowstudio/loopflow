@@ -1022,7 +1022,7 @@ Open Work's conversation in Desktop, this cmux/Herdr host or a terminal
 | Argument | What it does |
 |---|---|
 | `<url>` | Work address, such as loopflow://loopflow/task/LOO-507 |
-| `--host` | Presentation destination; auto prefers Desktop, then this cmux/Herdr host, then a terminal Default: auto. |
+| `--host` | Presentation destination; auto opens in this Herdr/cmux host, then Desktop, then a terminal Default: auto. |
 | `--available` | Open every conversation available for you to work with Default: false. |
 | `--session` | Open this exact Session rather than its Work's primary conversation |
 | `--diff` | Show the Task's Changes browser beside its conversation (Desktop) Default: false. |

@@ -708,24 +708,15 @@ Desktop launch, or a local fallback when the execution owner is unavailable.
 
 ## Remaining implementation — one complete delivery
 
-**Accepted, not built (concept review, October 18).** Jack Heart chose
-"where you are" over "installed preference": reorder `route()` in `open.rs` so
-Herdr/cmux context precedes Desktop. Cut over together: the `--host` help text,
-`docs/lf.md`/`lf-reference.md` examples, the skills' destination wording, and
-`work_open_tests` (a cmux caller with Desktop present opens in cmux; an OS
-click with host context stripped still reaches Desktop). The link receiver and
-Desktop's scheme ownership are unchanged. Desktop becomes a detected current
-host: its terminals carry a Desktop marker and also drop inherited `HERDR_*`
-(today only `CMUX_*` is stripped in `ProcessEnvironment.swift`, so a Desktop
-launched from Herdr would route its conversations to Herdr). Test: a Desktop
-terminal with inherited Herdr variables opens in Desktop. Linux (Jack Heart asked, October 18): Herdr is
-detected the same way there, since `in_herdr()` reads only `HERDR_*` and has no
-platform gate, and `install_herdr` runs on every OS; add a Linux test where a
-Herdr caller opens in Herdr. cmux is macOS-only, so Linux needs no cmux branch.
-Linux order: the Herdr you're in, then a plain terminal (in place when typing). Clicks are unchanged: a click without per-activation
-context has no "where", so it goes to Desktop. Tradeoff accepted: Desktop gets
-fewer automatic opens from cmux sessions, which the Desktop KR must earn
-through `--host desktop` or by working in Desktop.
+**Built (concept review, October 18): open where you are.** `route()` puts the
+caller's Herdr/cmux host before Desktop; Desktop sets `LF_DESKTOP=1` on every
+child and drops inherited `HERDR_*` with `CMUX_*`, so its conversations open in
+Desktop. The link receiver strips `LF_DESKTOP` with other host context, so a
+click without per-activation context still goes to Desktop. Linux: the Herdr
+you're in, then a plain terminal. Tests: `automatic_route_opens_where_the_caller_is`,
+`launchEnvironmentDropsLauncherTerminal`. Tradeoff accepted: Desktop gets fewer
+automatic opens from cmux sessions; the Desktop KR earns them through
+`--host desktop` or by working in Desktop.
 
 Built in the first pass (October 18):
 
@@ -816,7 +807,7 @@ draft, correct owner, truthful receipt, at most one focus; qualified links pick
 one repository, ambiguous links change nothing; same-Session, other-Session-on-
 same-Task and missing-caller relations.
 
-Covered (October 18): `work_open_tests` (11) — folder-name links, Wave-less standalone Task, ambiguity,
+Covered (October 18): `work_open_tests` (12) — folder-name links, Wave-less standalone Task, ambiguity,
 cmux/Herdr dispatch, refused host, Linux auto, available-without-question and
 running tool, live-workspace reopen, race/repeat, conversation relations,
 unreachable owner; `WorkOpeningCLITests` — ambiguity and Task/Wave delivery

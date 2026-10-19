@@ -740,11 +740,8 @@ fn route(requested: OpenHost) -> OpenRoute {
     }
     let mut hosts = Vec::new();
     let mut reasons = Vec::new();
-    if cfg!(target_os = "macos") {
-        hosts.push(OpenHost::Desktop);
-        reasons.push("Desktop when Launch Services finds it");
-    }
-    // A Herdr pane inside a cmux terminal is the innermost, current host.
+    // Open where the caller is. A Herdr pane inside a cmux or Desktop terminal
+    // is the innermost, current host.
     if in_herdr() {
         hosts.push(OpenHost::Herdr);
         reasons.push("this Herdr pane");
@@ -752,6 +749,14 @@ fn route(requested: OpenHost) -> OpenRoute {
     if in_cmux() {
         hosts.push(OpenHost::Cmux);
         reasons.push("this cmux workspace");
+    }
+    if cfg!(target_os = "macos") {
+        hosts.push(OpenHost::Desktop);
+        reasons.push(if in_desktop() {
+            "this Desktop window"
+        } else {
+            "Desktop when Launch Services finds it"
+        });
     }
     hosts.push(OpenHost::Terminal);
     reasons.push("a plain terminal");
@@ -771,6 +776,8 @@ const HERDR_ENV: &str = "HERDR_ENV";
 const HERDR_SOCKET: &str = "HERDR_SOCKET_PATH";
 const HERDR_WORKSPACE: &str = "HERDR_WORKSPACE_ID";
 const HERDR_PANE: &str = "HERDR_PANE_ID";
+/// Set by Loopflow Desktop on every child, including its terminals' agents.
+const DESKTOP: &str = "LF_DESKTOP";
 
 /// Terminal-host context a direct caller carries. The link receiver removes
 /// it: an OS receiver's environment belongs to its first launch, not the click.
@@ -781,10 +788,15 @@ pub(crate) const HOST_CONTEXT: &[&str] = &[
     HERDR_SOCKET,
     HERDR_WORKSPACE,
     HERDR_PANE,
+    DESKTOP,
 ];
 
 fn in_cmux() -> bool {
     set(CMUX_WORKSPACE) && set(CMUX_SOCKET)
+}
+
+fn in_desktop() -> bool {
+    set(DESKTOP)
 }
 
 fn in_herdr() -> bool {
@@ -1358,7 +1370,7 @@ fn drain(pipe: Option<impl std::io::Read>) -> String {
 pub struct OpenArgs {
     /// Work address, such as loopflow://loopflow/task/LOO-507
     pub url: Option<String>,
-    /// Presentation destination; auto prefers Desktop, then this cmux/Herdr host, then a terminal
+    /// Presentation destination; auto opens in this Herdr/cmux host, then Desktop, then a terminal
     #[arg(long, value_enum, default_value = "auto")]
     pub host: OpenHost,
     /// Open every conversation available for you to work with

@@ -840,11 +840,13 @@ It never carries a path, Session or host. Several registered repositories with
 one folder name need `?repository=<id>`; an unqualified link to them changes
 nothing and lists the qualified links. Emitted links add the qualifier when needed.
 
-`--host auto` tries Loopflow Desktop when installed (macOS), then a new
-workspace in this Herdr pane or cmux workspace, then a plain terminal: this
-terminal for a person at a prompt, otherwise a new Terminal window on macOS or
-the desktop's terminal launcher on Linux. A host is current only through its own
-caller context (`HERDR_*`, `CMUX_*`); nothing scans running applications. An
+`--host auto` opens where you are: a new workspace in this Herdr pane or cmux
+workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
+this terminal for a person at a prompt, otherwise a new Terminal window on macOS
+or the desktop's terminal launcher on Linux. A host is current only through its
+own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+running applications. A clicked link carries no caller, so it opens in Desktop.
+Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
 explicit `--host` wins. A destination that refuses lets the next one try; an
 unanswered request is reported and never repeated elsewhere.
 

@@ -1,6 +1,6 @@
 # LOO-538: Loopflow footprint, budget and hourly cleanup
 
-Status: accepted direction from Jack's 2026-10-20 steers; implemented, awaiting gate.
+Status: accepted direction from Jack's 2026-10-20 steers; implemented and gated.
 
 ## Outcome
 
@@ -43,3 +43,5 @@ per-process primitives `lf disk clean` composes.
 
 Check (after compress; realign rebuilt and confirmed `lf disk clean|rotate --help` name store copies under a disposable LF_HOME): `cargo test -p loopflow --lib disk::` 4 pass; clippy clean; dry runs on an APFS clone of
 Jack's ~/.lf: footprint 107.8G (55s), clean would free 13.1G, rotation floor 28.5G.
+
+Gate (2026-10-20, HEAD be2c5d4ec9): `cargo fmt --check` ok; `cargo clippy --all-targets -- -D warnings` ok; `cargo test -p loopflow --lib disk::` 4 pass; `--test integration documented_commands` 4 pass; `bash -n scripts/disk-cleanup.sh` ok (shellcheck not installed, deferred to review).

@@ -168,7 +168,7 @@ pub enum OwnershipKind {
     Claim,
     /// Moves the claim to `machine_id`, keeping the person.
     Handoff,
-    Release,
+    Unclaim,
     /// What a Machine knew before ownership existed; never delivered.
     Recorded,
 }
@@ -178,14 +178,14 @@ impl OwnershipKind {
         match self {
             Self::Claim => "claim",
             Self::Handoff => "handoff",
-            Self::Release => "release",
+            Self::Unclaim => "unclaim",
             Self::Recorded => "recorded",
         }
     }
 }
 
 /// One immutable entry in a Task's ownership log. `machine_id` names the
-/// claimant, the handoff target, or the releasing Machine.
+/// claimant, the handoff target, or the unclaiming Machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskOwnershipEntry {
     pub id: OwnershipEntryId,

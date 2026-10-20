@@ -1,4 +1,4 @@
-//! Claim, hand off and release a Task. Commands already run on the Task's
+//! Claim, hand off and unclaim a Task. Commands already run on the Task's
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
@@ -11,7 +11,7 @@ pub enum OwnershipChange {
     Claim,
     /// A registered Machine label or a Machine id.
     Handoff(String),
-    Release,
+    Unclaim,
 }
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -49,8 +49,8 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .handoff_task(&task.id, &target)
                     .map_err(message)?;
             }
-            OwnershipChange::Release => {
-                store.sqlite.release_task(&task.id).map_err(message)?;
+            OwnershipChange::Unclaim => {
+                store.sqlite.unclaim_task(&task.id).map_err(message)?;
             }
         }
         let repository = super::task::repository_for_task(&store, &task)?;

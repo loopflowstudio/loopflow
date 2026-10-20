@@ -5,7 +5,7 @@ CREATE TABLE task_ownership (
     id TEXT PRIMARY KEY CHECK (id GLOB 'own_*'),
     -- Entries outlive their Task, so the log carries no foreign key.
     task_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('claim', 'handoff', 'release', 'recorded')),
+    kind TEXT NOT NULL CHECK (kind IN ('claim', 'handoff', 'unclaim', 'recorded')),
     person TEXT,
     machine_id TEXT,
     at INTEGER NOT NULL,

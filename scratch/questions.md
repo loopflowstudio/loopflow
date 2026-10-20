@@ -9,18 +9,18 @@
    Machines that never connect through a provider do not share the Task. The
    losing worker is not cancelled and stays the owner on its own Machine. It
    learns of the later claim from status and its context block, then decides.
-   Its local claim ends only through its own release or handoff.
-3. **A claim moves Linear to `started`; a release clears the assignee and leaves
-   the state alone.** The alternative is for release to queue `unstarted`.
-4. **Completion writes no release.** A Done Task shows its last owner as history.
+   Its local claim ends only through its own unclaim or handoff.
+3. **A claim moves Linear to `started`; an unclaim clears the assignee and leaves
+   the state alone.** The alternative is for unclaim to queue `unstarted`.
+4. **Completion writes no unclaim.** A Done Task shows its last owner as history.
 5. **Decided by Jack Heart (2026-10-19): Linear can never push an unassignment
    to a Machine that thinks it owns the Task.** A Linear assignee edit creates no
    ownership entry. When a claiming Machine sees that Linear no longer shows
    it as assignee, it tells Linear again by re-queueing its assignee. It does
    this only while it has seen no later claim. Git works the same way: a
-   foreign `release` or `handoff` of a local open claim makes the owner append
+   foreign `unclaim` or `handoff` of a local open claim makes the owner append
    a fresh claim.
-6. **Cross-person handoff is deferred.** Release followed by the other person's
+6. **Cross-person handoff is deferred.** Unclaim followed by the other person's
    claim covers it for now.
 
 ## Implementation choices (2026-10-19, needs Jack's review)
@@ -55,5 +55,6 @@
 13. **Renaming a Wave does not rewrite `machines.waves.<name>` in `.lf/config.yaml`.**
     The entry is keyed by name, so a rename leaves it pointing at the old name until
     someone edits config. Alternative: key by Wave id (less readable).
-14. **`lf release` shortcut became ambiguous** once `lf task release` existed; docs and
-    the release-run skill now say `lf repo release`.
+14. **The ownership verbs are `claim`, `handoff` and `unclaim`** (Jack Heart, 2026-10-20).
+    `lf task release` made `lf release` ambiguous; `unclaim` pairs with `claim` and
+    keeps the shorthand.

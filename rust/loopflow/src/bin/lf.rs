@@ -910,12 +910,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Claim { issue, json }
         | TaskCommand::Handoff { issue, json, .. }
-        | TaskCommand::Release { issue, json } => {
+        | TaskCommand::Unclaim { issue, json } => {
             use loopflow::ops::task_ownership::{change, render, OwnershipChange};
             let requested = match command {
                 TaskCommand::Claim { .. } => OwnershipChange::Claim,
                 TaskCommand::Handoff { machine, .. } => OwnershipChange::Handoff(machine.clone()),
-                _ => OwnershipChange::Release,
+                _ => OwnershipChange::Unclaim,
             };
             let ownership = change(repo, issue, requested)?;
             if *json {

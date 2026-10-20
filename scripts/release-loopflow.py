@@ -9,7 +9,7 @@ environment variables (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER). Locally,
 it uses whatever Developer ID Application identity is in the keychain.
 
 Publisher preparation retains the submitted DMG and Apple submission ID outside
-the generated checkout. Retry the same `lf repo release run` after a wait timeout;
+the generated checkout. Retry the same `lf release run` after a wait timeout;
 it resumes that submission and staples a copy of the exact submitted image.
 """
 

@@ -1350,7 +1350,7 @@ impl SharedPlan {
 }
 
 #[test]
-fn task_ownership_follows_claim_handoff_and_release_through_the_writer() {
+fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
     use loopflow::durable::{OwnershipKind, TaskExecutionSource};
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
@@ -1397,16 +1397,16 @@ fn task_ownership_follows_claim_handoff_and_release_through_the_writer() {
         laptop
     );
 
-    // The laptop now writes; release keeps the history and leaves it unowned.
-    let released = fixture.json(&[
+    // The laptop now writes; unclaim keeps the history and leaves it unowned.
+    let unclaimed = fixture.json(&[
         "--repository",
         plan.repository.as_str(),
         "task",
-        "release",
+        "unclaim",
         task.as_str(),
         "--json",
     ]);
-    assert!(released["owner"].is_null());
+    assert!(unclaimed["owner"].is_null());
     plan.to_remote();
     for store in [&plan.local, &plan.remote] {
         let ownership = store.task_ownership(&task).unwrap();
@@ -1416,7 +1416,7 @@ fn task_ownership_follows_claim_handoff_and_release_through_the_writer() {
             [
                 OwnershipKind::Claim,
                 OwnershipKind::Handoff,
-                OwnershipKind::Release
+                OwnershipKind::Unclaim
             ]
         );
     }
@@ -1461,7 +1461,7 @@ fn task_ownership_double_claim_keeps_the_first_claimant_and_names_the_later_clai
 }
 
 #[test]
-fn task_ownership_owner_reclaims_after_a_stale_release_elsewhere() {
+fn task_ownership_owner_reclaims_after_a_stale_unclaim_elsewhere() {
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
@@ -1469,11 +1469,11 @@ fn task_ownership_owner_reclaims_after_a_stale_release_elsewhere() {
     let mini = plan.remote.local_machine().unwrap().id;
     plan.local.claim_task(&task).unwrap().unwrap();
     plan.to_remote();
-    // A stale reading on mini treats the Task as its own and releases it there,
-    // delivering the release as mini would: a marked comment in the journal.
+    // A stale reading on mini treats the Task as its own and unclaims it there,
+    // delivering the unclaim as mini would: a marked comment in the journal.
     let entry = serde_json::json!({
         "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
-        "task_id": task.as_str(), "kind": "release", "person": "Kim",
+        "task_id": task.as_str(), "kind": "unclaim", "person": "Kim",
         "machine_id": mini.as_str(),
         "at": time::OffsetDateTime::now_utc().unix_timestamp() + 5,
     });
@@ -1482,7 +1482,7 @@ fn task_ownership_owner_reclaims_after_a_stale_release_elsewhere() {
             &task,
             &loopflow::work::task::comment::TaskComment {
                 id: uuid::Uuid::new_v4().to_string(),
-                body: format!("Kim released this\n\n<!-- loopflow-ownership:{entry} -->"),
+                body: format!("Kim unclaimed this\n\n<!-- loopflow-ownership:{entry} -->"),
                 author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
                 created_at: Some(
                     (time::OffsetDateTime::now_utc() + time::Duration::seconds(5))

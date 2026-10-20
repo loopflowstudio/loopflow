@@ -3,17 +3,17 @@
 ```bash
 mkdir -p release/unreleased
 $EDITOR release/unreleased/DECISIONS.md
-lf repo release run 0.1.0             # first release; no seed tag needed
-lf repo release run patch
-lf repo release notes 0.13.0 --preview  # inspect the cycle since v0.12.0
-lf repo release run minor             # close the patch cycle, then publish its minor
+lf release run 0.1.0             # first release; no seed tag needed
+lf release run patch
+lf release notes 0.13.0 --preview  # inspect the cycle since v0.12.0
+lf release run minor             # close the patch cycle, then publish its minor
 find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
 scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
 lf cron history --wave infrastructure --days 35
-lf repo release history --wave infrastructure --days 35 --json
+lf release history --wave infrastructure --days 35 --json
 ```
 
 ```bash
@@ -46,7 +46,7 @@ it does not restart Tasks or Flows.
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
 
-`lf repo release run` owns the portable lifecycle: exact change evidence, version
+`lf release run` owns the portable lifecycle: exact change evidence, version
 intent, an isolated release PR, the tag, and observed completion. This
 repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
@@ -54,13 +54,13 @@ secrets in its workflows and scripts.
 
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.
-Blocked repairs retain their checkout so `lf repo release run` can resume the work.
+Blocked repairs retain their checkout so `lf release run` can resume the work.
 The scheduled `release-run` Flow executes the release operation directly;
 its failed result cannot be hidden by a successful agent report.
 
 The repository names the logical `loopflow-release-publisher` command. The
 maintained Machine supplies that executable on PATH and keeps its credential
-provider and selectors untracked. `lf repo release run` invokes its read-only
+provider and selectors untracked. `lf release run` invokes its read-only
 `check` before changing release state, so missing host authority fails closed.
 
 | Path | What it does |
@@ -242,12 +242,12 @@ the requested version owns the release. Notes and previews use the same initial
 range when no target tag exists, unless `--prev-tag` supplies a base.
 
 Subsequent minor releases summarize a completed patch cycle. When changes remain,
-`lf repo release run minor` publishes the next patch first. When the latest completed
+`lf release run minor` publishes the next patch first. When the latest completed
 patch already contains everything, it reuses that patch. The minor uses the
 same product snapshot; version metadata and release notes change. Patch notes
 compare against the preceding release, while minor notes compare against the
 preceding `.0` tag. A missing cycle baseline is reported explicitly.
-An explicit minor version such as `lf repo release run 0.13.0` follows the same policy
+An explicit minor version such as `lf release run 0.13.0` follows the same policy
 once the target has release history.
 
 The selected pair and snapshot survive interruption in
@@ -263,7 +263,7 @@ context. Unreleased versions end at HEAD.
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 
 Interactive runs may append those decisions as they happen. Headless runs do
-not. If `release/unreleased/` exists, `lf repo release run` promotes it to
+not. If `release/unreleased/` exists, `lf release run` promotes it to
 `release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and
 writes the final notes to both `RELEASE_NOTES.md` and
 `release/v<version>/NOTES.md`. The exact first-parent commit range is always
@@ -278,6 +278,6 @@ the resulting notes/merge-queue body at 60 KiB; omission counts travel with the
 agent context. Unknown skill failures, stale-version output, missing output,
 and oversized notes still block the release gate.
 
-`lf repo release status` reports narrative notes, degraded-but-safe deterministic
+`lf release status` reports narrative notes, degraded-but-safe deterministic
 notes, missing unsafe notes, or an unmarked legacy archive separately from the
 workflow and GitHub Release status.

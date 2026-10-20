@@ -120,7 +120,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
             cmd:
                 TaskCommand::Claim { issue, .. }
                 | TaskCommand::Handoff { issue, .. }
-                | TaskCommand::Release { issue, .. },
+                | TaskCommand::Unclaim { issue, .. },
         }) => Some(issue.as_str()),
         _ => cli.task.as_deref(),
     }
@@ -151,7 +151,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         Some(Commands::Task {
             cmd: TaskCommand::Claim { .. }
                 | TaskCommand::Handoff { .. }
-                | TaskCommand::Release { .. }
+                | TaskCommand::Unclaim { .. }
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.

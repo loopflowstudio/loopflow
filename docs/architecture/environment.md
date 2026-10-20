@@ -71,7 +71,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 | `LF_TRACE` | `ops::trace` | Emit operation traces instead of executing. |
 | `LOOPFLOW_DEV_WAVE_REPO` | Metrics, Desktop portfolio discovery | Repository a development app opens. |
 | `LOOPFLOW_BUILD_*`, `LOOPFLOW_MIGRATION_AUTHORITY`, `LOOPFLOW_RELEASE_TAG` | `build.rs`, release scripts | Build provenance, compiled in. |
-| `LF_RELEASE_*` | Release scripts | Inputs from `lf repo release` to its scripts. |
+| `LF_RELEASE_*` | Release scripts | Inputs from `lf release` to its scripts. |
 
 `LF_TEST_*`, `LF_PROBE_*`, `LOOPFLOW_UI_TEST_*` and
 `LOOPFLOW_TEST_*` exist only in tests and their fixtures. The three

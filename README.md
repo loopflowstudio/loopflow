@@ -178,7 +178,7 @@ conversation IDs, names, slugs and paths stay exactly as written.
 ```bash
 lf task claim LOO-506          # you, on this Machine
 lf task handoff LOO-506 mini   # same person, on mini
-lf task release LOO-506        # unowned again
+lf task unclaim LOO-506        # unowned again
 ```
 
 A Task is owned by a person on a Machine, or unowned; `lf task run` claims an

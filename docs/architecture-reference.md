@@ -276,7 +276,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, connect, bind and rename; historical feedback/completion retained |
 | `tasks` | Project, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`release` entries (`own_…`) with person, Machine and time; migration-only `recorded` entries are never delivered |
+| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`) with person, Machine and time; migration-only `recorded` entries are never delivered |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Flow and planning facts |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
@@ -645,8 +645,8 @@ effects. The unconditional-update race remains a protocol limit.
 | **Conversation context** — refreshed source block and authoring targets | Fixed additions preserve native instructions; skill/request/clipboard form the first turn. Saved source identities reread checkout files at startup and compaction, within 10,000 rendered UTF-8 bytes. Configured budgets measure authored memory/scratch, never gate launch. | [`ContextDelivery`](../rust/loopflow/src/context_block.rs), [`ContextBudgets`](../rust/loopflow/src/prompt/context_budget.rs), [`ContextBudgetReport`](../rust/loopflow/src/prompt/context_budget.rs) | Checkout sources and complete private references under `.lf/prompts/`; no measurement store | `lf __context-block` serves provider startup/compaction hooks; foreground size reporting. Missing optional capture payload does not erase native resume identity; malformed retained payload still fails | `lf context` | — |
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
 | **Store change revision** — which displayed domain a commit changed | Derived inside the writer's transaction by schema triggers, never authored and never bumped at a call site. Transcript lines move nothing; usage moves only its own revision, which Wave detail follows at most every 10 s. The Work reader pins revisions and database-derived joins in one read transaction; nested readers use savepoints. Events only say when to compare revisions. Post-command checkpoints confirm delivery after affected subscriptions catch up, without forcing unchanged queries; explicit Retry still forces reads. OS/Git/file observations are not transactional facts. | [`StoreRevisions`](../rust/loopflow/src/store/sqlite/revisions.rs), [`WorkFrame`](../rust/loopflow/src/lf/commands/work_watch.rs) | `store_revisions` | Store transaction | `lf monitor work` | — |
-| **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf repo release` | `process:sh` (release hooks) |
-| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends: the owner's Machine, or the owning Machine while unowned or the owner's Machine is unknown. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf task handoff`, `lf task release`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
+| **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `process:sh` (release hooks) |
+| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends: the owner's Machine, or the owning Machine while unowned or the owner's Machine is unknown. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf task handoff`, `lf task unclaim`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
 | **Portfolio** — repository selection on one Machine | Rust owns folder discovery and manual membership; Desktop reads and changes the same selection. Removing membership preserves files and retained Work. | [`Portfolio`](../rust/loopflow/src/portfolio.rs), `PortfolioMode`, `PortfolioRepo` | Machine-local config.yaml; locked atomic writes | Foreground CLI; Portfolio controls call its API | `lf portfolio` | — |
 | **Desktop workspace** — retained presentation of repository, Wave or Task | Work identity selects one repository window and retained workspaces through the sidebar. Pane contents own Machine locations; exact window/content/surface lifetimes fence mutations. Reads acquire no client and receipts promise no readiness. | `WorkWorkspaceKey`, `DesktopInspection`, `DesktopPaneTarget`, `DesktopPaneReceipt` | Window-owned registry, multiplexer and native surfaces; no second Work database | Loopflow.app on macOS | `lf desktop` | Apple events |
 <!-- architecture-map:end -->
@@ -754,7 +754,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf wt`, `commit`, `sync`, `scratch`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf monitor`, `usage`, `ps`, `top`, `mon prune`, `doctor` | Execution and process observation | Current Machine only |
 | `lf machine` | Machine identity | Current Machine unless routed explicitly |
-| `lf task claim`, `handoff`, `release` | Task ownership | The writer Machine, reached over `lf --machine` |
+| `lf task claim`, `handoff`, `unclaim` | Task ownership | The writer Machine, reached over `lf --machine` |
 | `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |
 | Loopflow.app | Swift projections and user interaction | Queries the same DTOs and remote routes; owns no lifecycle |
 
@@ -1152,11 +1152,11 @@ so single-Machine use needs no configuration. Cron install reads the same resolv
 lf machine add jack@mini.local --label mini
 lf task claim LOO-523
 lf task handoff LOO-523 mini
-lf task release LOO-523
+lf task unclaim LOO-523
 ```
 
 A Task is owned by (person, Machine) or unowned. Its `task_ownership` log holds
-`claim`, `handoff` and `release` entries that are never updated or deleted; the
+`claim`, `handoff` and `unclaim` entries that are never updated or deleted; the
 later entry wins in provider order (Linear comment time, or the Git planning
 journal order, where each local append sorts after every entry its Machine has seen).
 A handoff moves the claim to its target Machine and keeps the person; it needs
@@ -1164,7 +1164,7 @@ only the target's identity, not a connection.
 
 Exactly one Machine may append the next entry: the owner's Machine, or the
 owning Machine while the Task is unowned or its owner's Machine is unknown.
-`lf task claim|handoff|release`, `lf task run` and `lf task checkout` route to
+`lf task claim|handoff|unclaim`, `lf task run` and `lf task checkout` route to
 that writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
 `task_execution_route` returns the owner's Machine (source `owner`) or the
 owning Machine (`owning_machine:wave:<name>`, `owning_machine:default`,
@@ -1175,16 +1175,16 @@ Each local entry is delivered as a marked Task comment ("Jack Heart claimed this
 on mini" plus a `loopflow-ownership` HTML comment carrying the entry) through
 ordinary comment delivery to Linear or the Git planning journal; inbound comments
 are parsed into the log. With Linear, a claim sets the assignee to that Machine's
-Linear viewer and moves backlog, triage or `unstarted` to `started`; release clears
+Linear viewer and moves backlog, triage or `unstarted` to `started`; unclaim clears
 the assignee; handoff leaves it. Assignee changes write no entries; the owning
 Machine re-asserts its assignee while its claim is unsuperseded.
 
-An inbound entry never ends this Machine's own open claim; only its own release or
+An inbound entry never ends this Machine's own open claim; only its own unclaim or
 handoff does. When another Machine claims later, every other Machine shows the
 later claim while the earlier claimant still owns it locally, reports
 `superseded_by` and steers its live Sessions. Nothing is cancelled. If the log
 stops showing this Machine as owner for any other reason, such as a stale
-Machine's release, the owner claims again.
+Machine's unclaim, the owner claims again.
 
 The target uses its own store, repository, provider homes, OS locks and payload
 directory. Reads remain Machine-local. Foreground SSH may explicitly forward

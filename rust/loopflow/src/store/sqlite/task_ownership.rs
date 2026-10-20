@@ -3,7 +3,7 @@
 //! The later entry wins, in provider order. Exactly one Machine may append the
 //! next entry: the owner's Machine, or the configured owning Machine while the
 //! Task is unowned or its owner's Machine is unknown. An inbound entry never
-//! ends this Machine's own open claim; only its own release or handoff does.
+//! ends this Machine's own open claim; only its own unclaim or handoff does.
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
@@ -63,7 +63,7 @@ type Holder = (Option<String>, Option<MachineId>);
 
 fn holder_after(entry: &TaskOwnershipEntry) -> Option<Holder> {
     match entry.kind {
-        OwnershipKind::Release => None,
+        OwnershipKind::Unclaim => None,
         _ => Some((entry.person.clone(), entry.machine_id.clone())),
     }
 }
@@ -88,7 +88,7 @@ fn read_log(rows: &[Row], local: &MachineId) -> Reading {
         } else if row.written_here
             && matches!(
                 row.entry.kind,
-                OwnershipKind::Release | OwnershipKind::Handoff
+                OwnershipKind::Unclaim | OwnershipKind::Handoff
             )
         {
             local_claim = None;
@@ -262,7 +262,7 @@ fn describe_in(conn: &Connection, entry: &TaskOwnershipEntry) -> StoreResult<Str
     Ok(match entry.kind {
         OwnershipKind::Claim => format!("{who} claimed this on {place}"),
         OwnershipKind::Handoff => format!("{who} handed this off to {place}"),
-        OwnershipKind::Release => format!("{who} released this on {place}"),
+        OwnershipKind::Unclaim => format!("{who} unclaimed this on {place}"),
         OwnershipKind::Recorded => format!("{who} was recorded on {place}"),
     })
 }
@@ -356,7 +356,7 @@ fn append_in(
                     super::task_state_delivery::queue_in(conn, task, "started")?;
                 }
             }
-            OwnershipKind::Release => {
+            OwnershipKind::Unclaim => {
                 super::planning_changes::PlanningChanges::Task(task)
                     .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
             }
@@ -447,7 +447,7 @@ fn notify_superseded_in(
     };
     let text = format!(
         "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
-         nothing was cancelled. Keep going, or run `lf task release` or \
+         nothing was cancelled. Keep going, or run `lf task unclaim` or \
          `lf task handoff` to end this claim."
     );
     let steer = super::steers::save_in(
@@ -558,7 +558,7 @@ impl SqliteStore {
         Ok(entry)
     }
 
-    pub fn release_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {
+    pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let local = require_writer_in(&tx, task)?;
@@ -567,7 +567,7 @@ impl SqliteStore {
                 "Task {task} is already unowned"
             )));
         }
-        let entry = append_in(&tx, task, OwnershipKind::Release, person()?, &local)?;
+        let entry = append_in(&tx, task, OwnershipKind::Unclaim, person()?, &local)?;
         tx.commit()?;
         Ok(entry)
     }
@@ -637,18 +637,18 @@ mod tests {
     }
 
     #[test]
-    fn only_the_local_release_or_handoff_ends_the_local_claim() {
+    fn only_the_local_unclaim_or_handoff_ends_the_local_claim() {
         let (laptop, mini) = (MachineId::new(), MachineId::new());
         let mut rows = vec![
             row(OwnershipKind::Claim, "Jack", &laptop, true),
-            row(OwnershipKind::Release, "Kim", &mini, false),
+            row(OwnershipKind::Unclaim, "Kim", &mini, false),
         ];
         let reading = read_log(&rows, &laptop);
         assert_eq!(reading.owner, holder("Jack", &laptop));
         assert!(reading.reassert);
         rows.push(row(OwnershipKind::Handoff, "Jack", &mini, true));
         assert_eq!(read_log(&rows, &laptop).owner, holder("Jack", &mini));
-        rows.push(row(OwnershipKind::Release, "Jack", &mini, false));
+        rows.push(row(OwnershipKind::Unclaim, "Jack", &mini, false));
         assert_eq!(read_log(&rows, &laptop).owner, None);
     }
 

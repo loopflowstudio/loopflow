@@ -17,7 +17,7 @@ Loopflow carries these release boundaries:
 ```text
 .github/workflows/nightly-packages.yml   # scheduled, credential-free package proof
 .github/workflows/release.yml            # tag-triggered, credential-free native matrix
-release-run                              # built-in daily entry point: lf repo release run patch
+release-run                              # built-in daily entry point: lf release run patch
 scripts/publish_release.py               # credentialed publisher and completion receipt
 scripts/deploy_website.py                # exact-tag deploy, proof, and rollback
 scripts/install.py                       # local lf + desktop app build entry
@@ -32,7 +32,7 @@ produces the CLI and app together into a per-worktree `local-bin/`.
 
 - Nightly jobs prove release artifacts without deploying them.
 - GitHub workflows use no Doppler, signing, registry, R2, or deployment credentials.
-- Daily publishing uses the canonical `lf repo release run patch` path, including the `release-notes` step and `release/unreleased/DECISIONS.md` narrative context. Do not duplicate release-note generation in workflow YAML.
+- Daily publishing uses the canonical `lf release run patch` path, including the `release-notes` step and `release/unreleased/DECISIONS.md` narrative context. Do not duplicate release-note generation in workflow YAML.
 - A release is complete only after the tagged website is healthy and the GitHub Release is non-draft.
 - Failed website proof restores the previous image. The next daily run resumes an incomplete successful tag build.
 - Release-note generation reads the full release context, groups repetition, preserves decisions and unique facts, and never substitutes first-N commits or lines for summarization.

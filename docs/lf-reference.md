@@ -1761,9 +1761,9 @@ Hand the Task to another Machine; you stay its person
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task release
+## lf task unclaim
 
-Release the Task; it is unowned again, with its history intact
+Unclaim the Task; it is unowned again, with its history intact
 
 | Argument | What it does |
 |---|---|

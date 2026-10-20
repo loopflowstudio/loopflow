@@ -132,12 +132,12 @@ moves local Workflows or transfers a started Task to another Machine.
 ```bash
 lf task claim TASK               # you, on this Machine
 lf task handoff TASK mini        # same person, on mini
-lf task release TASK             # unowned again, history intact
+lf task unclaim TASK             # unowned again, history intact
 lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by a person on a Machine, or unowned. `task checkout` and `task run`
-claim an unowned Task when they allocate its checkout. Claim, handoff, release, run
+claim an unowned Task when they allocate its checkout. Claim, handoff, unclaim, run
 and checkout run on the Task's writer over `lf --machine`: the owner's Machine, or
 the owning Machine while the Task is unowned or its owner's Machine is unknown.
 Handoff needs only the target's identity, not a connection. Completion, abandonment
@@ -157,7 +157,7 @@ this Machine, so one Machine needs no configuration. Cron install reads the same
 Each change is posted as a Task comment ("Jack Heart claimed this on mini") that
 rides ordinary comment delivery to Linear or Git planning. With Linear, a claim
 assigns the Task to that Machine's Linear viewer and moves backlog to started;
-release clears the assignee. When another Machine claims later, nothing is
+unclaim clears the assignee. When another Machine claims later, nothing is
 cancelled: the earlier claimant keeps its claim locally, `lf task status` reports
 "Also claimed later by Kim on mini" and its live Sessions get a steer.
 

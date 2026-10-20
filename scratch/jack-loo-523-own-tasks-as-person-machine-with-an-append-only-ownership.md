@@ -18,7 +18,7 @@ travels:
 - First-start admission (`tasks.admission_authority`, `task_admissions`) makes
   the *creating* Machine a permanent coordinator. Starting a laptop-created Task
   on the mini therefore needs SSH up to the laptop, and an admission can never
-  be handed off or released.
+  be handed off or unclaimed.
 
 Linear never learns who took the Task. A reopened PR silently moves a Done Task
 back to Linear `unstarted`. Jack Heart: first-start authority "doesn't sound like
@@ -33,13 +33,13 @@ lf task create "ownership demo"        # status: Unowned
 lf task run <id>                       # claims, then runs: "Jack Heart on <laptop>"
 lf task status <id>                    # ownership.owner + log[claim]; Linear assignee = Jack
 lf task handoff <id> mini              # log[claim, handoff → mini]; owner "Jack Heart on mini"
-lf task release <id>                   # routes over `lf --machine mini`; writes release there
-lf task status <id>                    # Unowned; log keeps claim, handoff, release; Linear unassigned
+lf task unclaim <id>                   # routes over `lf --machine mini`; writes unclaim there
+lf task status <id>                    # Unowned; log keeps claim, handoff, unclaim; Linear unassigned
 ```
 
 Desktop shows the same owner line in the Task row ("Jack Heart on mini" or
 "Unowned"), and the log in Task detail. If mini is unreachable, the fallback
-reverses the last two steps: release before handoff, then hand off to a
+reverses the last two steps: unclaim before handoff, then hand off to a
 registered fixture Machine id. A handoff needs only the target's identity, not
 a connection to it.
 
@@ -62,13 +62,13 @@ transport between Machines.
 `TaskOwnershipEntry { id: OwnershipEntryId ("own_…"), task_id, kind, person:
 Option<String>, machine_id: Option<MachineId>, at }`
 
-- The kinds are `claim`, `handoff` and `release`. A fourth kind, `recorded`,
+- The kinds are `claim`, `handoff` and `unclaim`. A fourth kind, `recorded`,
   exists only for migration: it holds what was known before this change.
 - **The later entry wins** (Jack Heart, 2026-10-19). The log follows the
   provider's order. In Linear, that is the comment `createdAt`. In Git, it is
   the journal's existing causal order, with clock and mutation-ID ties. Entries
   not yet delivered sort after every delivered one, by local `at`.
-- The owner is the last entry, unless that entry is a `release`.
+- The owner is the last entry, unless that entry is an `unclaim`.
   `TaskOwner { person, machine: MachineRef { id, label } }`, where a missing
   `machine_id` displays as "Machine unknown".
 - There is no contested state and no `supersedes` link. If two workers claim,
@@ -84,7 +84,7 @@ Option<String>, machine_id: Option<MachineId>, at }`
   - The Session context block carries the same line while this Machine has live
     work.
 
-  It then decides: keep going, or `lf task release` or `lf task handoff`, which
+  It then decides: keep going, or `lf task unclaim` or `lf task handoff`, which
   ends its local claim. Re-claiming makes its claim the later one everywhere.
 - The table is `task_ownership`, append-only. Triggers abort UPDATE and DELETE,
   following the `task_workflow_moves` precedent. Rows outlive Task deletion,
@@ -120,7 +120,7 @@ Exactly one Machine may append the next entry:
 - If the Task is unowned, or its owner's Machine is unknown, the inherited
   owning Machine.
 
-`claim`, `handoff` and `release` resolve the writer first. If the writer isn't
+`claim`, `handoff` and `unclaim` resolve the writer first. If the writer isn't
 this Machine, the command reruns there through the existing `work_route`
 dispatch (`lf --machine <writer>`). An unconnected writer fails with "LOO-9 is
 owned by home_… (no connection); `lf machine add` it". The local append runs in
@@ -135,7 +135,7 @@ Writers:
 - `place_task`, the checkout allocation used by `lf task run` and
   `lf task checkout`, claims an unowned Task in the same transaction. This is
   the "actual work reservation" that used to set Started.
-- `lf task claim`, `lf task handoff <task> <machine>` and `lf task release`
+- `lf task claim`, `lf task handoff <task> <machine>` and `lf task unclaim`
   are explicit. A handoff target may be any well-formed MachineId or a
   registered label. A handoff keeps the person.
 - Completion, abandonment and reopening write no entries. A Done Task shows
@@ -153,12 +153,12 @@ every entry its Machine has seen. (Planned: a dedicated WorkValue; see
 existing receipts:
 
 1. A Task comment, "Jack Heart claimed this on mini" (or "handed off to …" /
-   "released"), followed by `<!-- loopflow-ownership:{entry json} -->`. It uses
+   "unclaimed"), followed by `<!-- loopflow-ownership:{entry json} -->`. It uses
    the existing comment delivery. Inbound comment refresh parses the marker into
    `task_ownership` (INSERT OR IGNORE), the same way steers already ride on
    marked comments. `is_direction_comment` excludes the marker.
 2. `TaskAssignee`: set to the Linear viewer id on claim, left unchanged on
-   handoff, cleared on release. The viewer id is cached per Machine, and the
+   handoff, cleared on unclaim. The viewer id is cached per Machine, and the
    query already exists (`linear/mod.rs:590`). If it can't be resolved, the
    assignee is left alone with a warning; the entry still saves.
 3. On a claim, if the planning state is `unstarted` or backlog, the existing
@@ -167,7 +167,7 @@ existing receipts:
 Linear can never push an unassignment to a Machine that thinks it owns the Task
 (Jack Heart, 2026-10-19). Inbound observations never end a local open claim.
 This covers assignee clears and changes, state changes, and ownership comments
-written elsewhere. Only that Machine's own `release` or `handoff` ends the
+written elsewhere. Only that Machine's own `unclaim` or `handoff` ends the
 claim. An inbound assignee change writes no ownership entry.
 
 The owner re-asserts itself (Jack Heart, 2026-10-19). When a Machine holds an
@@ -184,11 +184,11 @@ assignee.
 
 Git works the same way. An owner re-asserts whenever the provider's ordered log
 stops showing it as owner for any reason other than a later claim. The usual
-case is a stale Machine writing a `release` or `handoff` of a claim it did not
+case is a stale Machine writing a `unclaim` or `handoff` of a claim it did not
 own. In Git, re-asserting appends a fresh `claim` entry, which is then the later
 one. In Linear, it re-queues the assignee and, if the last ownership comment is
 someone else's, appends a claim comment. Either way it is one rule in one
-place: the ownership refresh that sets `superseded_by`. A person who wants the Task off that Machine releases it
+place: the ownership refresh that sets `superseded_by`. A person who wants the Task off that Machine unclaims it
 there.
 
 ### Consumers cut over
@@ -289,7 +289,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   FlowProcess and session-event rows, plus a controller pull path. Stamping
   without a pull path would be dead data. The ownership demo needs neither.
 - **Cross-person handoff:** this needs a Machine → person registry and
-  resolving the person to a Linear user. Today a person releases and the other
+  resolving the person to a Linear user. Today a person unclaims and the other
   person claims.
 
 ## Delete — do not maintain
@@ -359,9 +359,9 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
    append/read/ordered-owner logic, the writer rule, the config resolver, and
    `place_task` claiming. Focused test:
    `cargo test -p loopflow ownership` (store unit tests for claim → handoff →
-   release, wrong-writer refusal, a later delivered claim winning, and
+   unclaim, wrong-writer refusal, a later delivered claim winning, and
    migration from the released frontier).
-2. Routing and CLI: `task_execution_route`, `claim`/`handoff`/`release` with
+2. Routing and CLI: `task_execution_route`, `claim`/`handoff`/`unclaim` with
    `work_route` forwarding, and deletion of the peer-scan and admission CLI.
 3. Transport: the Git WorkValue, Linear comment + assignee + state delivery,
    and inbound parse.
@@ -378,11 +378,11 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   shows Jack as assignee and the state started.
 - `handoff` appends an entry superseding the claim. A run on the old Machine
   routes to the new owner instead of allocating a checkout.
-- `release`, initiated from the laptop, executes on the owner, clears the Linear
+- `unclaim`, initiated from the laptop, executes on the owner, clears the Linear
   assignee, and leaves a three-entry log.
 - While a Task is claimed, clearing its assignee in Linear leaves the claim
   open, and the next refresh on the owner restores the assignee. In Git, a
-  stale Machine's release of that claim is followed, after exchange, by the
+  stale Machine's unclaim of that claim is followed, after exchange, by the
   owner's fresh claim.
 - Two Machines that share Git planning and the same `machines.waves` entry
   cannot both claim: the non-owning one forwards to the owner. With no
@@ -399,7 +399,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
 ## Acceptance at gate (headless)
 
 ```
-cargo test -p loopflow --test integration task_ownership   # two-Home claim/forward/handoff/release, Git exchange
+cargo test -p loopflow --test integration task_ownership   # two-Home claim/forward/handoff/unclaim, Git exchange
 cargo test -p loopflow ownership                           # store + migration
 cargo test -p loopflow --test dto_fixtures                 # status / wave show shapes
 uv run python scripts/check_migrations.py

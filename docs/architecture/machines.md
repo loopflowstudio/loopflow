@@ -82,12 +82,12 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ```bash
 lf task claim LOO-123              # you, on this Machine
 lf task handoff LOO-123 mini       # same person, mini's Machine
-lf task release LOO-123            # unowned, history intact
+lf task unclaim LOO-123            # unowned, history intact
 lf task status LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim`, `handoff` and `release` entries; the later entry wins in provider
+holds `claim`, `handoff` and `unclaim` entries; the later entry wins in provider
 order. A handoff moves the claim to its target Machine and keeps the person; it
 needs only the target's identity, not a connection. `lf task run` and
 `lf task checkout` claim an unowned Task when they allocate its checkout.
@@ -109,7 +109,7 @@ so single-Machine use needs no configuration. Cron install and `lf wave show`'s
 
 Exactly one Machine may append the next entry: the owner's Machine, or the owning
 Machine while the Task is unowned or its owner's Machine is unknown. Claim,
-handoff, release, `task run`, `task checkout` and global `--task` route to that
+handoff, unclaim, `task run`, `task checkout` and global `--task` route to that
 writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
 Routing reports its source: `owner`, `owning_machine:wave:<name>`,
 `owning_machine:default` or `owning_machine:this_machine`. Ownership does not move
@@ -166,16 +166,16 @@ owned-line transport and retain drafts on disconnect. Missing or stale ownership
 prepares nothing and never falls back to local paths. Headless fixtures cover
 these paths; configured SSH and mounted native usability remain unproved.
 
-An inbound entry never ends this Machine's own open claim; only its own release
+An inbound entry never ends this Machine's own open claim; only its own unclaim
 or handoff does. If another Machine claims later, every other Machine shows the
 later claim, while the earlier claimant still owns it locally, reports
 `superseded_by` ("Also claimed later by Kim on mini" in `lf task status`) and
 steers its live Sessions. Nothing is cancelled. If the log stops showing this
-Machine as owner for any other reason, such as a stale Machine's release, the
+Machine as owner for any other reason, such as a stale Machine's unclaim, the
 owner claims again.
 
 With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
-backlog, triage or `unstarted` to `started`; release clears the assignee; handoff
+backlog, triage or `unstarted` to `started`; unclaim clears the assignee; handoff
 leaves it. The assignee is not a second ownership store: assignee changes write no
 entries, and the owning Machine re-asserts its assignee while its claim is
 unsuperseded.

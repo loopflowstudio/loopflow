@@ -1280,8 +1280,8 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Release the Task; it is unowned again, with its history intact
-    Release {
+    /// Unclaim the Task; it is unowned again, with its history intact
+    Unclaim {
         issue: String,
         #[arg(long)]
         json: bool,
@@ -1468,7 +1468,7 @@ impl TaskCommand {
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Handoff { issue, .. }
-            | Self::Release { issue, .. }
+            | Self::Unclaim { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1511,7 +1511,7 @@ impl TaskCommand {
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Handoff { issue, .. }
-            | Self::Release { issue, .. }
+            | Self::Unclaim { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }

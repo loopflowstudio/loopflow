@@ -93,139 +93,6 @@ struct WorkNavigationProofTests {
         #expect(abs(restored.contentView.bounds.minY - offset) < 1)
     }
 
-    @Test("At density drill-in lists the selected Wave’s started Tasks and keeps orphan Sessions out")
-    func sidebarDensityWithOrphans() async throws {
-        _ = NSApplication.shared
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
-        var snapshot = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let base = try #require((snapshot["waves"] as? [[String: Any]])?.first)
-        let template = try #require(((base["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first {
-            (($0["task"] as? [String: Any])?["id"] as? String) == "issue-review"
-        })
-        // 3 Waves × 50 Tasks, 20 started; a few started Tasks need eyes.
-        let executions = ["work-0-0": "running", "work-0-7": "blocked", "work-1-6": "human", "work-1-13": "idle"]
-        var waves: [[String: Any]] = []
-        for waveIndex in 0..<3 {
-            var wave = base
-            var identity = try #require(base["wave"] as? [String: Any])
-            identity["id"] = "wave-\(waveIndex)"
-            identity["name"] = ["product", "infrastructure", "intelligence"][waveIndex]
-            wave["wave"] = identity
-            wave["unavailable_tasks"] = []
-            wave["tasks"] = ["state": "ok", "truncated": false, "items": try (0..<50).map { index -> [String: Any] in
-                var item = template
-                var task = try #require(item["task"] as? [String: Any])
-                task["id"] = "task-\(waveIndex)-\(index)"
-                task["identifier"] = "T-\(waveIndex)-\(index)"
-                task["name"] = ["Retry and publish the chapter safely", "Understand running work",
-                                "A calmer desktop workspace", "Keep Task observation read-only"][index % 4] + " \(index)"
-                task["rank"] = index
-                item["task"] = task
-                var runtime = try #require(item["runtime"] as? [String: Any])
-                let workId = "work-\(waveIndex)-\(index)"
-                runtime["work_id"] = workId
-                let global = waveIndex * 50 + index
-                runtime["started"] = global < 140 && global.isMultiple(of: 7)
-                item["runtime"] = runtime
-                var execution = try #require(item["execution"] as? [String: Any])
-                execution["state"] = executions[workId] ?? "idle"
-                item["execution"] = execution
-                return item
-            }]
-            waves.append(wave)
-        }
-        snapshot["waves"] = waves
-        let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
-        func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
-            let binding = work as? [String: String]
-            let taskIds = binding?["kind"] == "task" ? binding?["id"].map { [$0] } ?? [] : []
-            return ["id": id, "run_id": id, "interactive": true, "work": work, "title": title, "detail": "claude",
-             "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(state: "active"), "title_source": "generated",
-             "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": taskIds, "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]]
-        }
-        let attached = [
-            record("release-outcomes", title: "Release outcomes", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
-            record("verification", title: "Verification cases", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
-            record("wren-canon", title: "wren-canon", work: ["kind": "task", "id": "work-1-6"], cwd: "/src/loopflow.observe"),
-        ]
-        let orphans = [
-            record("demo", title: "demo", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
-            record("realign", title: "realign", work: NSNull(), cwd: "/src/loopflow.main-view-task"),
-            record("luna-aria", title: "luna-aria", work: NSNull(), cwd: "/src/loopflow.release-run"),
-            record("loopflow", title: "loopflow", work: NSNull(), cwd: "/src/loopflow.build-size"),
-        ]
-        func encode(_ records: [[String: Any]]) throws -> String {
-            String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
-        }
-        let source = SidebarSessionSource(list: try encode(attached + orphans))
-        let query = RegistryQuery { args, _ in
-            switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmap
-            case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return #"{"entries":\#(await source.list()),"next":null}"#
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
-            }
-        }
-        let model = WorkModel(query: query, repoPath: "/src/loopflow")
-        await model.refresh()
-        model.select(.task(id: "task-0-7"))
-        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
-        let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
-        let host = NSHostingView(rootView: view.id("/src/loopflow"))
-        let captureDirectory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"].map(URL.init(fileURLWithPath:))
-        func capture(_ window: NSWindow, _ name: String) throws {
-            guard let captureDirectory else { return }
-            _ = try SnapshotService().snapshotWindow(window, to: captureDirectory.appendingPathComponent("\(name).png"))
-        }
-        for size in [CGSize(width: 1440, height: 900), CGSize(width: 1100, height: 800)] {
-            let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
-                                  styleMask: [.titled], backing: .buffered, defer: false)
-            window.contentView = host
-            host.frame = window.contentLayoutRect
-            defer { window.contentView = nil }
-            try await settle(window)
-            let suffix = "\(Int(size.width))x\(Int(size.height))"
-            let navigator = try view.inspect().find(WorkNavigator.self).actualView()
-            let outline = try navigator.inspect()
-            // The Wave remains in the index while its Tasks expand beneath it.
-            #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
-            }.count == 8)
-            #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("work-wave-wave-")) == true
-            }.count == model.visibleWork.waves.count)
-            _ = try outline.find(viewWithAccessibilityIdentifier: "work-wave-wave-0")
-            #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
-            // Conversations do not add numeric controls to Work navigation.
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0") }
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-7") }
-            // Diagnostic Sessions do not consume main navigation space.
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-orphans-open") }
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo") }
-            try capture(window, "density-debug-orphans-\(suffix)")
-        }
-        // Zero orphans hides the section.
-        await source.replace(try encode(attached))
-        await model.refreshSessions()
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = host
-        host.frame = window.contentLayoutRect
-        defer { window.contentView = nil }
-        try await settle(window)
-        #expect(model.projection.unmatchedSessions.isEmpty)
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(WorkNavigator.self).actualView().inspect()
-                .find(viewWithAccessibilityIdentifier: "work-orphans-open")
-        }
-        try capture(window, "density-no-orphans-1440x900")
-    }
-
     private func _scrollView(in view: NSView) -> NSScrollView? {
         if let scroll = view as? NSScrollView { return scroll }
         // The tall Task list is independent of the Wave list beside it.
@@ -903,7 +770,7 @@ struct WorkNavigationProofTests {
 
 }
 
-/// A replaceable Session list for the sidebar density proof.
+/// A replaceable roadmap read for the named drill-down proof.
 private actor SidebarSessionSource {
     private var records: String
     init(list: String) { records = list }

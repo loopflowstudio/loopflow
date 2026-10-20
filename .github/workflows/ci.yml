@@ -356,7 +356,7 @@ jobs:
         run: uv run python scripts/swift_cache.py restore
       - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
-        run: /usr/bin/time -l cargo build -p loopflow --bin lf
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf --bin lf-world
       - name: Test checkout observation's read-only sandbox
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes

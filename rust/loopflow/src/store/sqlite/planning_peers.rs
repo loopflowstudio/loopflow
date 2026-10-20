@@ -257,6 +257,7 @@ impl SqliteStore {
             }
             pending = retry;
         }
+        let heads = merged.heads_by_key();
         for (&(table, target), edits) in &grouped {
             if conflicts.contains_key(&(table, target)) {
                 continue;
@@ -294,10 +295,7 @@ impl SqliteStore {
                 planning_write::observe(
                     &tx,
                     edit,
-                    merged
-                        .heads()
-                        .filter(|(_, change)| change.edit.key() == edit.key())
-                        .map(|(id, _)| id),
+                    heads.get(&edit.key()).into_iter().flatten().copied(),
                 )?;
             }
         }

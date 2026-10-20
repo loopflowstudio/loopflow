@@ -965,5 +965,6 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.10.001_release.sql"),
+        reader_floor: None,
     },
 ];

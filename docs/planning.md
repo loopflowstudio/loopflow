@@ -135,8 +135,8 @@ Projects to Linear Projects; see [Waves](waves.md).
 
 Tasks live in one Asana project. Asana has no task numbers, so Loopflow writes the
 Task's identifier into the description's last line. A Wave's Projects appear as
-sections of the project. Asana tasks are only open or complete, so starting work
-adds a comment naming the branch.
+sections of the project. Asana tasks are only open or complete, so work in
+progress shows through the PR comment.
 
 ### Notion
 

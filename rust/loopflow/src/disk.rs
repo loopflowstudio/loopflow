@@ -13,7 +13,6 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
@@ -528,11 +527,13 @@ pub fn rotate_home(
     }))
 }
 
-/// Start a detached `lf disk rotate` when the last one began over an hour ago.
-/// Called as Loopflow produces new captures, so Home stays within budget
-/// without anyone running a cleanup.
+/// Rotate Home on a background thread when the last rotation began over an hour
+/// ago. Called as Loopflow produces new captures, so Home stays within budget
+/// without anyone running a cleanup. Rotation runs in this process rather than a
+/// spawned `lf`, so it adds no Process history; one cut short by exit resumes on
+/// the next due capture.
 pub(crate) fn rotate_when_due(home: &Path) {
-    // Unit tests capture into scratch homes; a detached lf must not follow them.
+    // Unit tests capture into scratch homes; rotation must not follow them.
     if cfg!(test) {
         return;
     }
@@ -545,23 +546,18 @@ pub(crate) fn rotate_when_due(home: &Path) {
             return;
         }
     }
-    let started = (|| -> Result<()> {
-        fs::create_dir_all(stamp.parent().expect("stamp has a directory"))?;
-        File::create(&stamp)?;
-        let mut command = Command::new(crate::os_process::resolve_lf_binary()?);
-        command
-            .args(["disk", "rotate", "--quiet"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
-        let mut child = command.spawn()?;
-        std::thread::spawn(move || child.wait());
-        Ok(())
-    })();
-    if let Err(error) = started {
-        tracing::warn!(error = %format!("{error:#}"), "automatic Home rotation did not start");
-    }
+    let home = home.to_path_buf();
+    std::thread::spawn(move || {
+        let rotated = (|| -> Result<()> {
+            fs::create_dir_all(stamp.parent().expect("stamp has a directory"))?;
+            File::create(&stamp)?;
+            rotate_home(&home, budget_bytes()?, None, false)?;
+            Ok(())
+        })();
+        if let Err(error) = rotated {
+            tracing::warn!(error = %format!("{error:#}"), "automatic Home rotation failed");
+        }
+    });
 }
 
 #[cfg(test)]

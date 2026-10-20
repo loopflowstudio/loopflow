@@ -58,46 +58,14 @@ design iterates to implement; one with no product choice advances to
   literally, a headless pursue would stop at every concept review. Resolution
   below.
 
-## Chosen approach
+## Approach
 
-1. `rust/loopflow/src/builtins/task/skill/concept-review.md`: replace the
-   closing "not a routine headless loop step" paragraph with a headless/Flow
-   section:
-   - Without a person, run the same review against the accepted design and
-     the implemented change. Make implementation-level clarifications that
-     follow from accepted product decisions (names, concept consolidation,
-     deletable machinery) by updating the working design as the next
-     implement direction — do not rewrite code in this step.
-   - Record each genuine product choice (one that changes what the product
-     should be and is not settled by an accepted decision) as unresolved in
-     the working design with the exact question and evidence. Never invent
-     approval for it.
-   - No changes and no open product choice → say so briefly; the decider
-     advances. Design changed → the decider iterates to implement. Open
-     product choice → the decider returns Blocked with that question.
-   - Keep: do not create a Task, publish, merge, or choose navigation.
-   - Update the frontmatter `requires:` so it no longer demands a person
-     (e.g. "the intended experience, the current product design, and a person
-     when a product choice must be made").
-2. `rust/loopflow/src/builtins/task/flow/pursue.yaml`: Jack's sequence above.
-3. `.lf/flows/pursue-auto.yaml`: insert `concept-review` + `loop: implement`
-   after the first loop, before `gate` (assumption in `scratch/questions.md`).
-4. Tests that enumerate pursue:
-   - `flow/graph.rs` `pursue_loops_to_a_published_pr`: labels gain
-     `concept-review`, `loop-or-next`; returns become two pairs both pointing
-     at `implement` (indices 4 and 6); `sources` index for realign unchanged.
-   - `flow/mod.rs` ~1298: `edges(&pursue)` becomes
-     `[("loop-or-next", 4), ("loop-or-next", 4)]` (verify the actual target
-     index the compiler emits).
-5. Prose that enumerates pursue's steps:
-   - `docs/authoring.md` ~217–221 ("One pass runs implement, compress,
-     refresh … and loop-or-next … Advance leaves the loop and publishes") and
-     ~45 ("Use `concept-review` … with someone present") — add that pursue
-     runs it headless after the implement loop.
-   - `builtins/task/skill/launch-plan.md` ~108 ("enters implement → compress →
-     refresh → loop-or-next … Advance publishes").
-   - Skim `docs/lf.md`, `docs/lf-reference.md`, `task_operate.md`,
-     `advance.md` for step lists; they currently only name the Flow.
+`concept-review.md` gains an "In a Flow without a person" section: settle what
+accepted decisions imply as implement direction, record genuine product
+choices as unresolved, and report advance / iterate / blocked evidence for the
+following `loop-or-next`. `pursue.yaml` takes Jack's sequence;
+`.lf/flows/pursue-auto.yaml` inserts the same pair before `gate`. Detail is in
+commit 7f77629862.
 
 ## Alternatives considered
 

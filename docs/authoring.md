@@ -43,9 +43,8 @@ update them in place rather than creating a report per pass. Test skills
 standalone, midstream, and on repeated use.
 
 Use `concept-review` to reconsider the product with someone present, on request
-or in the ongoing Wave conversation. In `pursue` it runs headless after the
-implement loop: it records clarifications for implement and leaves genuine
-product choices unresolved for loop-or-next to block on. Realign reconciles the plan, code, and identified Wave memory.
+or in the ongoing Wave conversation; `pursue` also runs it headless (below).
+Realign reconciles the plan, code, and identified Wave memory.
 Draft the affected usage docs and skill guidance first, then follow the simpler
 interaction through types, APIs, and infrastructure. Product clarity is valuable
 even without deleting code.

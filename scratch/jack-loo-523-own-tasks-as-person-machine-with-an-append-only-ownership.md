@@ -450,6 +450,7 @@ The live Linear demo above is a demo/review step, not gate.
 
 ## Remaining work
 
+- Separate Session Machine from Task Machine (Jack Heart, 2026-10-20): `lf machine use <m> [wave|--repo] --session` sets and moves the scope's primary Session; without it, `lf machine use` sets where the scope's Tasks run and the Session follows the Tasks' Machine unless a Session Machine is set. Store it as a sibling scope default; `lf machine list` shows both; Wave/repo connects route to the Session Machine. Demo: Wave Session on laptop, `lf task run` of a Wave Task lands on mini.
 - Context-resolved connects and remote primaries in `lf open`
   (`scratch/questions.md` item 18).
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).

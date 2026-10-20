@@ -119,3 +119,10 @@ should say `lf machine use` instead of the Machine-local `lf wave machine`.
 19. **Decided by Jack Heart (2026-10-20): bare `lf machine use` in a moved Task's
     worktree forwards to the Task's writer**, exactly as `--task` does
     (`work_route::worktree_handoff_task`); it never refuses.
+- **Decided by Jack Heart (2026-10-20): a Wave's Session Machine and its Tasks'
+  Machine are separate.** `lf machine use mini infrastructure` sets where the Wave's
+  Tasks run; `lf machine use laptop infrastructure --session` sets where its Wave
+  Session runs (and moves it). Without a `--session` setting the Session follows the
+  Tasks' Machine. Same for the repo (`--repo --session`). Use case: run the Wave
+  Session on the laptop and delegate its Tasks to mini. Rental-compute pools are a
+  follow-up Task.

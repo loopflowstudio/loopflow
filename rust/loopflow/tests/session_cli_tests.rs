@@ -640,7 +640,7 @@ fn prepare_conversation(
             loopflow::session::LfSession {
                 captured: None,
                 id: format!("session_{input}").into(),
-                artifact_key: input.clone(),
+                artifact_key: Some(input.clone()),
                 caller_artifact_key: Some(CALLER.into()),
                 input_published: false,
                 cwd: cwd.into(),
@@ -754,7 +754,10 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
-        assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+        assert_eq!(
+            store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
+            Some(&input)
+        );
     }
 }
 
@@ -878,7 +881,7 @@ for line in sys.stdin:
     assert_eq!(after.skill, before.skill);
     assert_eq!(after.task_id, before.task_id);
     assert_eq!(after.wave_id, before.wave_id);
-    assert_ne!(after.artifact_key, input);
+    assert_ne!(after.artifact_key.as_ref(), Some(&input));
     assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
     assert!(store
         .session_history(&id, 0, 0)
@@ -888,8 +891,8 @@ for line in sys.stdin:
         &std::fs::read(
             home.path()
                 .join("runs")
-                .join(&after.artifact_key[..2])
-                .join(&after.artifact_key)
+                .join(&after.artifact_key.as_deref().unwrap()[..2])
+                .join(after.artifact_key.as_ref().unwrap())
                 .join("manifest.json"),
         )
         .unwrap(),
@@ -1251,7 +1254,7 @@ exit 2
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();
-                let input = store.session(&id).unwrap().unwrap().artifact_key;
+                let input = store.session(&id).unwrap().unwrap().artifact_key.unwrap();
                 record_native(home.path(), &id, &input, &native);
             }
             fs::write(home.path().join("release"), "done").unwrap();
@@ -1585,7 +1588,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
             "{error}"
         );
         let retained = store.session(&id).unwrap().unwrap();
-        assert_eq!(retained.artifact_key, input);
+        assert_eq!(retained.artifact_key.as_ref(), Some(&input));
         assert_eq!(retained.provider, before.provider);
         assert_eq!(retained.title, before.title);
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -1612,7 +1615,10 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
         "{}",
         String::from_utf8_lossy(&prepared.stderr)
     );
-    assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    assert_eq!(
+        store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
+        Some(&input)
+    );
     install_codex_fixture(home.path(), None);
     let recovered = connect(false);
     assert!(

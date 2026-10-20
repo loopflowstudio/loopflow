@@ -81,7 +81,7 @@ async fn name_codex_session(id: &str, title: &str) -> anyhow::Result<()> {
         tokio::net::UnixStream::connect(home.join("app-server-control/app-server-control.sock"))
             .await
             .context("Codex shared app-server unavailable")?;
-    let (mut connection, _) = tokio_tungstenite::client_async("ws://localhost", socket).await?;
+    let mut connection = super::codex_connection::connect_upstream(socket).await?;
     rpc_request(
         &mut connection,
         "initialize",

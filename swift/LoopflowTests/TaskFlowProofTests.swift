@@ -175,7 +175,7 @@ struct TaskFlowTests {
         #expect(FlowLoopGeometry.below(1) > FlowLoopGeometry.below(0))
     }
 
-    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions")
+    @Test("Task navigation opens Work only; an explicit Session link keeps the Workflow and companions", .requiresDisplay)
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -213,8 +213,10 @@ struct TaskFlowTests {
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
-            case ("session", "connect"):
+            case ("session", "connect") where args.contains("--task"):
                 return try await reader.ensure(issue: args[3])
+            case ("session", "attach"):
+                return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
             case ("session", "list"): return try await reader.inventory()
             case ("wave", "show"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
@@ -341,7 +343,7 @@ private final class ScriptedReader {
         }, cancel: { continuation.finish() })
     }
 
-    /// `lf connect --task --prepare`: the Task gets one conversation, its primary.
+    /// `lf session connect --task --prepare`: the Task gets one conversation, its primary.
     func ensure(issue: String) throws -> String {
         let roadmap = try JSONDecoder().decode(
             RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: try #require(planning["roadmap"])))

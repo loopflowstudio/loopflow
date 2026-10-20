@@ -899,6 +899,14 @@ pub enum SessionCommand {
         id: String,
         #[arg(long)]
         observe: bool,
+        /// Refuse to replace another viewer's input control
+        #[arg(long, conflicts_with = "observe")]
+        if_free: bool,
+        /// Return an attach-only terminal command without acquiring control
+        #[arg(long)]
+        prepare: bool,
+        #[arg(long, requires = "prepare")]
+        json: bool,
     },
     /// Save a steer for this Session without starting a turn
     Steer { id: String, message: String },
@@ -988,6 +996,10 @@ pub enum SessionCommand {
         /// Ask the provider to resume even when another client is active
         #[arg(long = "try", conflicts_with = "takeover")]
         try_open: bool,
+        /// Resume every conversation a restart or crash interrupted; never one
+        /// someone left. Terminals attach when they open them.
+        #[arg(long, conflicts_with_all = ["id", "takeover", "try_open", "fresh", "message", "prepare"])]
+        all: bool,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {

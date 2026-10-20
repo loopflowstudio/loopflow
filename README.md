@@ -237,7 +237,15 @@ Sessions, Flows and Task shells survive closing their terminal. Reattach to a
 Session with `lf session attach SESSION`;
 `--observe` leaves input control unchanged. `lf resume` opens the retained native
 terminal, or explicitly transitions a structured Run to native UI without replaying
-its input. [Transport details and restoration limits](rust/loopflow/src/transport/README.md).
+its input. Ctrl+] steps away without stopping it.
+
+```bash
+lf resume --all     # after a reboot or crash: reopen every interrupted conversation
+```
+
+It skips anything running or left on purpose and reports each Session, flagging a
+turn the restart cut off. Desktop runs it at launch.
+[Transport details and restoration limits](rust/loopflow/src/transport/README.md).
 
 Codex terminal Sessions receive context and the first message through the provider
 protocol. Claude loads context from a system instructions file and the first
@@ -284,6 +292,10 @@ A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
+
+Task creation also saves its primary conversation. Wave admission saves the Wave
+and repository conversations. These Sessions survive the creating command without
+starting a provider or marking a Task Started; the first input connecting reserves does.
 
 `lf connect` opens this scope's ongoing conversation, creating one when absent.
 From the canonical checkout or the repository's persistent checkout it opens the

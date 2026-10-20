@@ -153,7 +153,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let mut session = store.test_session("conversation", &new_artifact_key());
         session.provider = Some("codex".into());
-        session.artifact_key = new_artifact_key();
+        session.artifact_key = Some(new_artifact_key());
         let session = store
             .replace_session_input(session.captured, session)
             .unwrap();
@@ -176,7 +176,7 @@ mod tests {
         // Next-launch settings and current capture do not reassign the old process.
         let mut next = session.clone();
         next.provider = Some("claude".into());
-        next.artifact_key = new_artifact_key();
+        next.artifact_key = Some(new_artifact_key());
         store.replace_session_input(session.captured, next).unwrap();
         store
             .rename_session(&session.id, "Renamed", TitleSource::Human)

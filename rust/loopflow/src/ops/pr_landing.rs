@@ -275,7 +275,7 @@ fn admit_ci_fix(
             crate::session::LfSession {
                 id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
                 captured: None,
-                artifact_key: crate::session_record::new_artifact_key(),
+                artifact_key: Some(crate::session_record::new_artifact_key()),
                 caller_artifact_key: None,
                 input_published: false,
                 cwd: landing.worktree.clone(),
@@ -608,7 +608,7 @@ fn process_ci_fix(
                     source: crate::session::WorkSource::Declared,
                 }),
         },
-        session.artifact_key.clone(),
+        session.input_key().map_err(repair_error)?.clone(),
         Some(request),
         &context,
         |_| store.sqlite.publish_capture(&session.id, session.captured),

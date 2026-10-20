@@ -53,7 +53,7 @@ Open Loopflow or run its CLI
 | `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
+| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -476,6 +476,9 @@ Attach to the current execution without restarting or submitting input
 |---|---|
 | `<id>` | id |
 | `--observe` | observe Default: false. |
+| `--if-free` | Refuse to replace another viewer's input control Default: false. |
+| `--prepare` | Return an attach-only terminal command without acquiring control Default: false. |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session steer
@@ -560,6 +563,7 @@ Open the ongoing conversation of this scope, or an exact Session
 | `--json` | json Default: false. |
 | `--takeover` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
+| `--all` | Resume every conversation a restart or crash interrupted; never one someone left. Terminals attach when they open them Default: false. |
 | `--help / -h` | Print help |
 
 ## lf session rename

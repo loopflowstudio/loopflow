@@ -109,21 +109,25 @@ fn observe_native(
         let session = store
             .session(&adapter.session)?
             .ok_or_else(|| crate::store::StoreError::InvalidData("Pi Session missing".into()))?;
+        let input = session
+            .input_key()
+            .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?
+            .clone();
         let source = format!("pi-native:{}", uuid::Uuid::new_v4());
         store.retain_session_observation(
             &session,
             &crate::session::SessionObservation {
-                artifact_key: session.artifact_key.clone(),
+                artifact_key: input.clone(),
                 source: source.clone(),
                 observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 task_id: session.task_id.clone(),
                 wave_id: session.wave_id.clone(),
-                payload: json!({"input_id":session.artifact_key,"source":source,"evidence":value}),
+                payload: json!({"input_id":input,"source":source,"evidence":value}),
             },
         )?;
         if startup {
             crate::session_record::write_provider_session(
-                &crate::session_record::capture_dir(&session.artifact_key)
+                &crate::session_record::capture_dir(&input)
                     .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?,
                 &thread,
                 None,

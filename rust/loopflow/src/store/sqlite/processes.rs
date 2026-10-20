@@ -1267,7 +1267,7 @@ mod discovery_tests {
             .claim_session_attachment(&session.id, None, &first, true)
             .unwrap();
         let mut next = session.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         let before = store.session_history(&session.id, 0, 0).unwrap();
         assert!(store
@@ -1282,7 +1282,7 @@ mod discovery_tests {
         );
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
         assert!(store
-            .session_for_artifact(&next.artifact_key)
+            .session_for_artifact(next.input_key().unwrap())
             .unwrap()
             .is_none());
 
@@ -1302,7 +1302,7 @@ mod discovery_tests {
         );
         assert_eq!(reserved.parent_lf_process_id.as_ref(), Some(&second));
         assert!(reserved.completed_at.is_none());
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         assert!(store
             .claim_session_input(next, Some(&claimed), &first, || panic!(
                 "reserved process needs no close"

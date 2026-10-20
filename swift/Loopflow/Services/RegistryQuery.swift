@@ -317,6 +317,16 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// Reopen every conversation on this Machine that a restart or crash cut off,
+    /// each in its own owner with no viewer; panes attach when they show it.
+    public func resumeInterrupted() async throws {
+        if let start {
+            try await start(["resume", "--all"], nil)
+        } else {
+            _ = try await run(["resume", "--all"], nil)
+        }
+    }
+
     /// Put the Task at a node of its Workflow without running anything.
     public func moveTask(issue: String, node: String, cwd: String?) async throws {
         _ = try await run(["task", "workflow", "move", issue, node], cwd)
@@ -447,6 +457,13 @@ public struct RegistryQuery: Sendable {
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
         let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Reattach only; neither preparation nor the returned command can resume execution.
+    /// Nil when nothing is running to attach to.
+    public func prepareSessionAttachment(id: String, cwd: String? = nil) async throws -> SessionRecord? {
+        try Self.decode(SessionRecord?.self, from: await run(
+            ["session", "attach", id, "--if-free", "--prepare", "--json"], cwd))
     }
 
     /// Prepare one Session’s terminal command without starting its provider.

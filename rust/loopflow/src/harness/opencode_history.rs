@@ -331,7 +331,7 @@ mod tests {
         let steer = history.steer().unwrap();
         let previous = store.session("session").unwrap().unwrap();
         let mut next = previous.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         store
             .replace_session_input(previous.captured, next.clone())
             .unwrap();
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(usage.output_tokens, Some(10));
         assert_eq!(
             store
-                .input_history(next.artifact_key.as_str())
+                .input_history(next.input_key().unwrap().as_str())
                 .unwrap()
                 .usage
                 .input_tokens,

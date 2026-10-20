@@ -32,8 +32,9 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args.prefix(2) == ["session", "connect"] {
-            guard args.count == 5, args[2] == sessionId, args[3] == "--prepare", args[4] == "--json" else {
+        if args.prefix(2) == ["session", "connect"] || args.prefix(2) == ["session", "attach"] {
+            guard args == ["session", "connect", sessionId, "--prepare", "--json", "--try"]
+                || args == ["session", "attach", sessionId, "--if-free", "--prepare", "--json"] else {
                 throw RegistryQueryError("Only the owned Session may connect")
             }
             let output = try await Task.detached { try capture([cli] + args) }.value

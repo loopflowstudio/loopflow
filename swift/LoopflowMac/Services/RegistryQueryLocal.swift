@@ -8,9 +8,7 @@ import Loopflow
 
 enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
-        try await Task.detached(priority: .userInitiated) {
-            try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
-        }.value
+        try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
     }, watchFiles: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
@@ -44,9 +42,7 @@ enum RegistryQueryLocal {
             let started = ContinuousClock.now
             var ok = false
             defer { LaunchJournal.home.read(args, ms: started.elapsedMs, ok: ok) }
-            let output = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
-            }.value
+            let output = try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
             ok = true
             return output
         }

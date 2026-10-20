@@ -232,7 +232,8 @@ struct DesktopPerformanceTests {
         link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
         link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo)]
         router.deliver(try #require(link.url), repository: "fixture-plan")
-        let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
+        let view = RepoView(portfolioService: PortfolioService(), sessionWorkspaces: SessionsWorkspaceRegistry(),
+                            initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                        styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -1355,7 +1356,8 @@ extension DesktopPerformanceTests {
                 return try result.get()
             }
             let router = WorkLinkRouter()
-            let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: repo,
+            let view = RepoView(portfolioService: PortfolioService(), sessionWorkspaces: SessionsWorkspaceRegistry(),
+                                  initialRepoPath: repo,
                                   query: query, taskLinks: router, repository: "fixture-plan")
             let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -1471,7 +1473,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session connect" || verb == "machine id"
+            if let fixture, verb == "session connect" || verb == "session attach" || verb == "machine id"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }

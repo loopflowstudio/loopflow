@@ -14,10 +14,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{
-    accept_async, client_async,
-    tungstenite::{error::ProtocolError, Error, Message},
+    accept_async_with_config, client_async_with_config,
+    tungstenite::{error::ProtocolError, protocol::WebSocketConfig, Error, Message},
     WebSocketStream,
 };
+
+// Codex sends single frames larger than tungstenite's defaults: plugin/list
+// carries the whole curated marketplace (7,000+ plugins, over 16 MiB). The
+// relay forwards between two Codex endpoints and imposes no limit of its own.
+fn relay_config() -> Option<WebSocketConfig> {
+    Some(
+        WebSocketConfig::default()
+            .max_message_size(None)
+            .max_frame_size(None),
+    )
+}
+
+pub(super) async fn connect_upstream(
+    socket: UnixStream,
+) -> Result<WebSocketStream<UnixStream>, Error> {
+    Ok(
+        client_async_with_config("ws://localhost", socket, relay_config())
+            .await?
+            .0,
+    )
+}
 
 use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
@@ -65,7 +86,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
         }
         Err(error) => return Err(error.into()),
     };
-    let (mut upstream, _) = client_async("ws://localhost", socket).await?;
+    let mut upstream = connect_upstream(socket).await?;
     rpc_request(
         &mut upstream,
         "initialize",
@@ -253,7 +274,10 @@ impl CodexConnection {
             .iter()
             .rev()
             .find(|event| {
-                event.payload["input_id"] == session.artifact_key
+                session
+                    .artifact_key
+                    .as_deref()
+                    .is_some_and(|key| event.payload["input_id"] == key)
                     && event.payload["source"] == "codex_submission"
             })
             .map(|event| {
@@ -298,8 +322,7 @@ impl CodexConnection {
             .thread_id
             .as_ref()
             .ok_or_else(|| anyhow!("Conversation has no native history yet"))?;
-        let (mut upstream, _) =
-            client_async("ws://localhost", UnixStream::connect(endpoint).await?).await?;
+        let mut upstream = connect_upstream(UnixStream::connect(endpoint).await?).await?;
         rpc_request(
             &mut upstream,
             "initialize",
@@ -370,7 +393,7 @@ impl CodexConnection {
             .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
         let diagnostics = RelayDiagnostics {
             connection: self,
-            input: session.artifact_key,
+            input: session.input_key()?.clone(),
             attachment: self
                 .attachment
                 .clone()
@@ -392,13 +415,13 @@ impl CodexConnection {
         initial: Option<Arc<tokio::sync::Mutex<NativeInput>>>,
         diagnostics: &RelayDiagnostics<'_>,
     ) -> Result<()> {
-        let mut client = accept_async(client)
+        let mut client = accept_async_with_config(client, relay_config())
             .await
             .context(RelayOperation::new("handshake", "client_to_relay"))?;
         let socket = UnixStream::connect(endpoint)
             .await
             .context(RelayOperation::new("connect", "relay_to_provider"))?;
-        let (mut upstream, _) = client_async("ws://localhost", socket)
+        let mut upstream = connect_upstream(socket)
             .await
             .context(RelayOperation::new("handshake", "relay_to_provider"))?;
         let input_key = &diagnostics.input;
@@ -561,7 +584,7 @@ impl CodexConnection {
                                     let session = self.store.session(&self.session_id)?
                                         .ok_or_else(|| anyhow!("Session disappeared during native startup"))?;
                                     crate::session_record::write_provider_session(
-                                        &crate::session_record::capture_dir(&session.artifact_key)?, thread, self.account_id.clone())?;
+                                        &crate::session_record::capture_dir(session.input_key()?)?, thread, self.account_id.clone())?;
                                 }
                             }
                             super::dispatch::off_reactor(|| {
@@ -819,7 +842,8 @@ mod tests {
             .session(&connection.session_id)
             .unwrap()
             .unwrap()
-            .artifact_key;
+            .artifact_key
+            .unwrap();
         let diagnostics = super::RelayDiagnostics {
             connection: &connection,
             input,
@@ -1547,7 +1571,8 @@ mod tests {
             .session("conversation")
             .unwrap()
             .unwrap()
-            .artifact_key;
+            .artifact_key
+            .unwrap();
         let (upstream, result) = connection
             .send(
                 upstream,

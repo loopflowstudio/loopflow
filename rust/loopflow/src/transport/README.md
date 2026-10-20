@@ -10,7 +10,9 @@ lf transport attach PROCESS
 ```
 
 Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
-program. Closing a terminal leaves execution, provider requests and capture
+program. A Task step's live controls (`/status`, `/interrupt`, `/detach`,
+messages) are shown to each controlling viewer as it attaches; headless output
+and observers never see them. Closing a terminal leaves execution, provider requests and capture
 settlement with the detached owner. Observing takes no input claim; a controlling
 attachment revokes the previous viewer's input token. `--if-free` refuses when
 another viewer controls input. Desktop uses it for restoration; it never displaces

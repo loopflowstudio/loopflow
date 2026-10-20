@@ -138,6 +138,36 @@ Writers:
 - Completion, abandonment and reopening write no entries. A Done Task shows
   its last owner as history.
 
+### Primary Sessions follow the Machine (Jack Heart asked, 2026-10-20)
+
+Today only `--task` connects route (global `--task` → `work_route::dispatch` →
+owner). Primary pointers (`agent_sessions.primary_scope`, `tasks.primary_session_id`)
+are per-Machine, so each Machine can hold its own "one" primary. Decisions:
+
+- **Wave Sessions route to your Wave Machine.** `lf connect --wave`, context
+  connects resolving to a Wave, and `--fresh`/Desktop `resetSession --wave` route
+  through `lf --machine` to the personal Wave Machine (this Machine when unset).
+  `--repo` stays on this Machine (no personal repo Machine yet; see questions).
+- **Moving a Wave Session.** `lf wave machine <wave> <m>` completes the source
+  primary on the old Machine and admits a successor on `<m>` through the existing
+  `ensure_primary_session_in` replace path. Native provider history stays on the
+  old Machine (it lives in that Machine's files); the successor gets fresh Wave
+  context, like `--fresh`.
+- **Task primaries follow the claim.** A handoff completes the Task's primary on
+  the source Machine; the target admits a fresh one on first connect. One primary
+  per scope across a person's Machines.
+- **One location source.** Routing and location reads both use the ownership
+  Machine: `observe_task_location` stops requiring `checkout_machine_id == local`
+  on the owner; opening a claimed Task with no checkout on its Machine creates it
+  there (`ensure_task` already runs on the routed owner).
+- **No unclaimed local checkouts.** `ensure_task`/`admit_workspace` reached from a
+  context connect route to the owner like `--task`; on an unowned Task they claim
+  (actual work reservation), so a checkout never appears on a non-owner Machine.
+- **`lf open` reads remote primaries.** `primary` and `elsewhere` liveness for a
+  remote Task come from the owner Machine, not the local store.
+- **Docs:** creation no longer admits a primary (`docs/architecture-reference.md:333`,
+  `README.md:303`); say primaries are admitted lazily on the owner Machine.
+
 ### Transport (ownership must travel in both modes)
 
 **Git planning (as built):** the same marked comment as Linear. The comment is
@@ -409,6 +439,7 @@ The live Linear demo above is a demo/review step, not gate.
 
 - Personal Wave Machine (above): `lf wave machine`, copy to own Machines, Wave Session move; delete committed `machines:` config and update docs, `scratch/questions.md` item 1, and the integration tests that use `machines.waves`.
 - Writer rule: forward only within the person's own Machines.
+- Primary Sessions follow the Machine (section above).
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.

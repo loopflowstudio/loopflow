@@ -83,3 +83,8 @@
   the person's Wave Machine default on this Machine and copies it to their other
   registered Machines over `lf --machine`. Setting it also moves that person's Wave
   Session to the Machine, restarting it there if it does not already live there.
+- **Repo Session Machine (open):** Wave Sessions follow a personal Wave Machine;
+  the repo Session stays on whichever Machine runs it. A personal repo Machine
+  (`lf repo machine`) would mirror the Wave setting; deferred until wanted.
+- **Moving a Session leaves its native history behind** on the old Machine; the
+  successor starts with fresh Wave context, like `--fresh`.

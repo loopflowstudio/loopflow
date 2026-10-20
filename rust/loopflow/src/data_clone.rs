@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use anyhow::{bail, Context, Result};
 use clap::Subcommand;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 const MARKER: &str = "clone.json";
@@ -184,21 +184,11 @@ fn create(
         fs::create_dir_all(manifest.directory.join(name))?;
     }
     fs::copy(std::env::current_exe()?, manifest.directory.join("bin/lf"))?;
-    let source_db = Connection::open_with_flags(
-        manifest.source.join("loopflow.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY,
+    crate::store::copy::snapshot(
+        &manifest.source.join("loopflow.db"),
+        &manifest.directory.join("loopflow.db"),
     )?;
-    source_db.busy_timeout(std::time::Duration::from_secs(15))?;
-    // Hold one WAL snapshot so concurrent Session writes cannot restart the
-    // incremental backup between batches.
-    source_db.execute_batch("BEGIN; SELECT count(*) FROM sqlite_schema;")?;
-    let mut destination = Connection::open(manifest.directory.join("loopflow.db"))?;
-    rusqlite::backup::Backup::new(&source_db, &mut destination)?.run_to_completion(
-        256,
-        std::time::Duration::from_millis(10),
-        None,
-    )?;
-    drop(source_db);
+    let destination = Connection::open(manifest.directory.join("loopflow.db"))?;
     crate::store::migrations::prepare_clone_sqlite(&destination)?;
     manifest.sessions = destination
         .prepare("SELECT id FROM agent_sessions ORDER BY id")?

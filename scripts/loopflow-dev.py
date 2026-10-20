@@ -11,7 +11,7 @@ Commands:
     test            Build and run tests
     ghostty-build   Build the pinned patched GhosttyKit
     run             Build and launch the app
-    run-debug       Build and run with stdout visible
+    run-debug       Build and run with stdout visible (--world <dir> opens an lf-world)
     release         Build release .app and .dmg (delegates to release-loopflow.py)
     clean           Remove dev app and reset permissions
     xcode           Open in Xcode
@@ -26,6 +26,7 @@ Streaming logs (long-running commands):
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import plistlib
 import shutil
@@ -56,13 +57,15 @@ GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf7-theme-readback1.xcframework.zip"
 
 
-def _app_environment(repo: Path) -> dict[str, str]:
+def _app_environment(repo: Path, world: Path | None = None) -> dict[str, str]:
     env = {
         "LOOPFLOW_DEV_WAVE_REPO": str(repo),
         "LF_BIN": str(DEV_APP / "Contents/MacOS/lf"),
     }
     if value := os.environ.get("LF_HOME"):
         env["LF_HOME"] = value
+    if world:
+        env.update(json.loads((world / "env.json").read_text()))
     return env
 
 
@@ -342,11 +345,11 @@ def cmd_run() -> int:
     return 0
 
 
-def _check_repository_opening(repo: Path) -> bool:
+def _check_repository_opening(repo: Path, world: Path | None = None) -> bool:
     cli = DEV_APP / "Contents" / "MacOS" / "lf"
     # Match an app launch, not the enclosing agent's Task or process context.
     env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
-    env.update(_app_environment(repo))
+    env.update(_app_environment(repo, world))
     print(f"Checking repository opening through {cli}...", flush=True)
     try:
         result = subprocess.run(
@@ -382,13 +385,16 @@ def _print_run_debug_checklist() -> None:
     print("  3. Verify Task conditions and PR delivery refresh from lf wave status.")
 
 
-def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
-    """Build and run with stdout visible. `repo` is the repo the app opens."""
+def cmd_run_debug(repo: Path = REPO_ROOT, world: Path | None = None) -> int:
+    """Build and run with stdout visible. `repo` is the repo the app opens;
+    `world` is an `lf-world build` directory whose data and repo it opens instead."""
+    if world:
+        repo = world / "repo"
     print("Building and running Loopflow (debug mode with logs)...")
     result = cmd_install()
     if result != 0:
         return result
-    if not _check_repository_opening(repo):
+    if not _check_repository_opening(repo, world):
         return 1
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
@@ -407,7 +413,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
         args=["--repo", str(repo)],
         # Repository discovery collapses this checkout to its authoritative
         # main checkout before displaying or reading it.
-        env=_app_environment(repo),
+        env=_app_environment(repo, world),
     )
 
 
@@ -731,6 +737,11 @@ def main() -> int:
                 default=REPO_ROOT,
                 help="Repo the app opens on launch (default: this checkout)",
             )
+            sub.add_argument(
+                "--world",
+                type=lambda p: Path(p).expanduser().resolve(),
+                help="lf-world directory: open its repo with its LF_HOME and provider homes",
+            )
         if name == "setup":
             sub.add_argument(
                 "--install",
@@ -757,7 +768,7 @@ def main() -> int:
 
     func, _ = COMMANDS[args.command]
     if args.command == "run-debug":
-        return func(repo=args.repo)
+        return func(repo=args.repo, world=args.world)
     if args.command == "setup":
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":

@@ -110,6 +110,10 @@ canonicalizing 1 draft(s) into 0.15.0.001_release:
 lf < 0.15.0 can no longer open the store (raised by: drop_waves)
 ```
 
+Rename, drop and reshape directly; the floor rises to that release and the
+cut says so. We do not stage reader-first rollouts (add, dual-write, drop
+later) yet, so a floor only ever stays put or rises to the release being cut.
+
 A raised floor goes to `release/unreleased/BREAKING.md`, from there into the
 release notes and the release PR title, and `lf install promote` prints it
 before advancing. It is visibility, not a gate. Releases cut before floors

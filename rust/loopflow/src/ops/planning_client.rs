@@ -16,47 +16,43 @@ use crate::provider_auth::Provider;
 
 use super::{OpsError, OpsResult};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PlanningProvider {
-    Linear,
-    Asana { project: String },
-}
-
-/// The configured remote provider, if any. Unreadable configuration selects none:
+/// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
-pub(crate) fn provider(repo: &Path) -> Option<PlanningProvider> {
-    configured(repo).map(|(provider, _)| provider)
+fn transport(repo: &Path) -> Option<PlanningConfig> {
+    Some(
+        crate::config::load_config(Some(repo))
+            .ok()?
+            .unwrap_or_default()
+            .planning_transport(),
+    )
 }
 
-/// The configured provider and its product name.
-pub(crate) fn configured(repo: &Path) -> Option<(PlanningProvider, &'static str)> {
-    let transport = crate::config::load_config(Some(repo))
-        .ok()?
-        .unwrap_or_default()
-        .planning_transport();
-    let name = transport.remote_name()?;
-    let provider = match transport {
-        PlanningConfig::Git { .. } => return None,
-        PlanningConfig::Linear {} => PlanningProvider::Linear,
-        PlanningConfig::Asana { project } => PlanningProvider::Asana { project },
-    };
-    Some((provider, name))
+/// The configured remote provider's product name; Git planning has none.
+pub(crate) fn remote_name(repo: &Path) -> Option<&'static str> {
+    transport(repo)?.remote_name()
 }
 
 pub(crate) fn connected(repo: &str) -> bool {
-    provider(Path::new(repo)).is_some()
+    remote_name(Path::new(repo)).is_some()
 }
 
 pub(crate) fn is_linear(repo: &str) -> bool {
-    provider(Path::new(repo)) == Some(PlanningProvider::Linear)
+    matches!(transport(Path::new(repo)), Some(PlanningConfig::Linear {}))
+}
+
+fn asana_project(repo: &Path) -> Option<String> {
+    match transport(repo)? {
+        PlanningConfig::Asana { project } => Some(project),
+        _ => None,
+    }
 }
 
 /// The provider scope every repository Task belongs to: a Linear Team or the
 /// repository's Asana project.
 pub(crate) fn repository_scope(repo: &Path) -> OpsResult<String> {
-    match provider(repo) {
-        Some(PlanningProvider::Asana { project }) => Ok(project),
-        _ => super::linear::repository_team_id(repo),
+    match asana_project(repo) {
+        Some(project) => Ok(project),
+        None => super::linear::repository_team_id(repo),
     }
 }
 
@@ -69,17 +65,17 @@ pub(crate) enum PlanningClient {
 impl PlanningClient {
     /// Repository-scoped access; Linear validates the repository's Team claim.
     pub(crate) async fn for_repository(repo: &Path) -> OpsResult<Self> {
-        match provider(repo) {
-            Some(PlanningProvider::Asana { project }) => asana(project).await,
-            _ => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
+        match asana_project(repo) {
+            Some(project) => asana(project).await,
+            None => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
         }
     }
 
     /// Exact-item access for a Task that already names its planning identity.
     pub(crate) async fn for_items(repo: &Path) -> OpsResult<Self> {
-        match provider(repo) {
-            Some(PlanningProvider::Asana { project }) => asana(project).await,
-            _ => Ok(Self::Linear(
+        match asana_project(repo) {
+            Some(project) => asana(project).await,
+            None => Ok(Self::Linear(
                 super::linear::issue_client().await?.for_repository(repo),
             )),
         }

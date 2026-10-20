@@ -328,7 +328,7 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             None => None,
         };
         let repository = super::task::repository_for_task(store, &task)?;
-        let Some((_, provider)) = super::planning_client::configured(&repository) else {
+        let Some(provider) = super::planning_client::remote_name(&repository) else {
             return Ok(());
         };
         let client = super::planning_client::PlanningClient::for_items(&repository).await?;

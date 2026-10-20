@@ -3213,7 +3213,7 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        let Some((_, provider)) = super::planning_client::configured(repo) else {
+        let Some(provider) = super::planning_client::remote_name(repo) else {
             return Err(task_error(
                 "Task repository has no remote planning provider",
             ));

@@ -245,14 +245,10 @@ struct WorkMachineControl: View {
 
     var body: some View {
         WorkMachineMenu(reading: reading, error: error, parent: model.breadcrumb?.wave?.roadmap.wave.displayName,
-                        waveName: waveName) { placement in
+                        waveName: { model.wave(id: $0)?.wave.displayName }) { placement in
             Task { await place(placement) }
         }
         .task(id: target) { await load() }
-    }
-
-    private var waveName: (String) -> String? {
-        { id in model.wave(id: id)?.wave.displayName }
     }
 
     private func load() async {

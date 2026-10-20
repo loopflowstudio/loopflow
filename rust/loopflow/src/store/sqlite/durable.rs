@@ -158,11 +158,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_ready_work(&tx, work)?;
-        tx.query_row(
-            "SELECT 1 FROM machines WHERE id=?1",
-            [machine_id.as_str()],
-            |_| Ok(()),
-        )?;
         write_delegation_in(&tx, work, Some(machine_id))?;
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
@@ -186,13 +181,6 @@ impl SqliteStore {
             return Err(StoreError::InvalidAuthority(format!(
                 "Task {task} has started; it stays on its Machine and moving it is explicit takeover"
             )));
-        }
-        if let Some(machine_id) = machine_id {
-            tx.query_row(
-                "SELECT 1 FROM machines WHERE id=?1",
-                [machine_id.as_str()],
-                |_| Ok(()),
-            )?;
         }
         write_delegation_in(&tx, &work, machine_id)?;
         let machine = work_machine_in(&tx, &work)?;
@@ -564,13 +552,20 @@ pub(super) fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Pla
     }
 }
 
-/// Write or clear (`None`) Work's own Machine assignment. Reaffirming an
-/// explicit choice keeps its timestamp.
+/// Write or clear (`None`) Work's own Machine assignment. The Machine must be
+/// known; reaffirming an explicit choice keeps its timestamp.
 fn write_delegation_in(
     conn: &Connection,
     work: &WorkRef,
     machine_id: Option<&MachineId>,
 ) -> StoreResult<()> {
+    if let Some(machine_id) = machine_id {
+        conn.query_row(
+            "SELECT 1 FROM machines WHERE id=?1",
+            [machine_id.as_str()],
+            |_| Ok(()),
+        )?;
+    }
     let current = find_placement_in(conn, work)?;
     let unchanged = match machine_id {
         Some(machine_id) => current.as_ref().is_some_and(|assignment| {

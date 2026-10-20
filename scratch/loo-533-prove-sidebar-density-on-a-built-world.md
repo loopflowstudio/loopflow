@@ -84,13 +84,13 @@ Sessions stay out of the main navigation. It then binds the orphans with
      (`LF_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), scrubbed PATH, `LF_BIN`, and
      `GIT_*` isolation. The default cwd is `<world>/repo`.
    - `WorkModel(query:repoPath: <world>/repo)`, then `refresh()`. Select the product
-     Task named "Work item 7" (found by name from `model.visibleWork`; IDs are
+     Task "Keep Task observation read-only 7" (found by name from `model.visibleWork`; IDs are
      generated). Inspect `WorkNavigator(model:onOpenSession:)` directly.
    - It makes the same assertions as today, with real ids: 8 `work-task-*` buttons;
      one `work-wave-<id>` per visible Wave; no `WaveLensView`; no `work-session-count-*`;
      no `work-orphans-open`, `session-row-<orphan id>` or `debug-orphan-session-<orphan id>`.
      Also assert `unmatchedSessions.count == 4` before binding.
-   - Phase two runs `lf session bind <orphan> --task <Work item 7>` for each orphan through
+   - Phase two runs `lf session bind <orphan> --task <that Task>` for each orphan through
      the same runner, then calls `refreshSessions()`. `unmatchedSessions` is empty, and
      `work-orphans-open` is still absent.
 4. **Build `lf-world` wherever the swift suite builds `lf`.** Add `--bin lf-world` to
@@ -139,9 +139,9 @@ Sessions stay out of the main navigation. It then binds the orphans with
 
 - In `sidebarDensityWithOrphans`: the `roadmap_snapshot.json` cloning loop, the
   `executions` map, `record(...)`, the `attached`/`orphans` arrays, `encode`, the
-  `SidebarSessionSource` instance and stub `RegistryQuery`, the NSWindow size loop,
+  Session-list actor instance and stub `RegistryQuery`, the NSWindow size loop,
   `capture`, and the test's place in the `.requiresDisplay` suite.
-- Keep: `SidebarSessionSource` (still used at line 295), `_scrollView`, `settle`,
+- Keep: the replaceable roadmap actor (now `RoadmapSource`, used by the named drill-down proof), `_scrollView`, `settle`,
   and the other display tests in that file.
 
 ## Exclusions

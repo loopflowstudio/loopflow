@@ -159,10 +159,10 @@ struct WorkNavigationProofTests {
         items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self)
-        let planning = SidebarSessionSource(list: roadmap)
+        let planning = RoadmapSource(roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("wave", "show"): return await planning.list()
+            case ("wave", "show"): return await planning.read()
             case ("wave", "list"): return "[]"
             case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             case ("session", "list"): return try await named.page(args)
@@ -770,12 +770,12 @@ struct WorkNavigationProofTests {
 
 }
 
-/// A replaceable roadmap read for the named drill-down proof.
-private actor SidebarSessionSource {
-    private var records: String
-    init(list: String) { records = list }
-    func replace(_ list: String) { records = list }
-    func list() -> String { records }
+/// A replaceable `lf wave show` read for the named drill-down proof.
+private actor RoadmapSource {
+    private var roadmap: String
+    init(_ roadmap: String) { self.roadmap = roadmap }
+    func replace(_ roadmap: String) { self.roadmap = roadmap }
+    func read() -> String { roadmap }
 }
 
 /// The shared Session authority for the named drill-down proof.

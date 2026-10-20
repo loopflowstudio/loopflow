@@ -29,19 +29,26 @@ website:
     delay: 8
     output: website/static/roadmap.png
 
-# Stable Wave-surface proof, rendered offline from fixtures at both widths.
+# Stable Wave-surface proof at both widths. Populated states read an
+# `lf-world` world through the real registry; loading and error are the
+# `mock-waves` states no data can produce.
 wave-proof:
   - name: metrics-portfolio-wide
-    mode: mock-waves
+    mode: live
+    world: portfolio
     view: portfolio
-    wave: infrastructure
+    wave: desktop
     width: 1440
 
   - name: control-room-selected-narrow
-    mode: mock-waves
+    mode: live
+    world: portfolio
+    wave: desktop
     width: 900
   - name: control-room-selected-wide
-    mode: mock-waves
+    mode: live
+    world: portfolio
+    wave: desktop
     width: 1440
 
   - name: control-room-loading-narrow

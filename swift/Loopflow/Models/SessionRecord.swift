@@ -264,7 +264,7 @@ extension SessionRecord {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         preview = try values.decodeIfPresent(SessionPreview.self, forKey: .preview)
         primaryScope = try values.decodeIfPresent(String.self, forKey: .primaryScope)
-        attention = try values.decodeIfPresent(SessionAttention.self, forKey: .attention)
+        availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
         agentProcessId = (try values.decodeIfPresent(String.self, forKey: .agentProcessId)).map { StructuredIdentity.uuid($0) }
         taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)

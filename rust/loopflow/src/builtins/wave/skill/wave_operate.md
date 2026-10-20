@@ -223,7 +223,7 @@ the point. Where links may not activate, add the `lf open '<url>'` it prints.
 Use this ID-first form in operational lists; in prose, shorten later
 references when unambiguous.
 
-Take the readable title from `task.name`. Give the Task's disposition as its status, not
+Take the identifier from `task.identifier` and the readable title from `task.name`. Give the Task's disposition as its status, not
 `runtime.status` alone, and take the next owner from `next_move.owner`. An
 owner of `wave` names work this pass acts on, not a handoff: report its result.
 Link the Task's optional `pr` using its recorded GitHub number and URL; omit

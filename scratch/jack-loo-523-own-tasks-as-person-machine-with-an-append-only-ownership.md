@@ -143,7 +143,7 @@ the destination resolves its own checkout.
 
 - Owned by you and its Machine is another of your Machines: the command reruns
   there through `work_route` (`lf --machine <machine>`).
-- Unowned: your claim is written on your Wave Machine for that Task (forwarded
+- Unowned: your claim is written on the Tasks Machine resolved for that Task (forwarded
   there when it is not this Machine).
 - Owned by someone else: never route to their Machine. A claim is written on
   your own Machine; the later claim wins, as decided.
@@ -163,35 +163,20 @@ Writers:
 - Completion, abandonment and reopening write no entries. A Done Task shows
   its last owner as history.
 
-### Primary Sessions follow the Machine (Jack Heart asked, 2026-10-20)
+### Primary Sessions follow the Machine (Jack Heart, 2026-10-20; implemented)
 
-Today only `--task` connects route (global `--task` → `work_route::dispatch` →
-owner). Primary pointers (`agent_sessions.primary_scope`, `tasks.primary_session_id`)
-are per-Machine, so each Machine can hold its own "one" primary. Decisions:
+Primary pointers (`agent_sessions.primary_scope`, `tasks.primary_session_id`) are
+per-Machine; routing keeps one primary per scope across a person's Machines.
 
-- **Wave Sessions route to your Wave Machine.** `lf connect --wave`, context
-  connects resolving to a Wave, and `--fresh`/Desktop `resetSession --wave` route
-  through `lf --machine` to the personal Wave Machine (this Machine when unset).
-  `--repo` routes to the personal repo Machine once it exists (remaining).
-- **Moving a Wave Session.** `lf machine use <m> <wave>` completes the source
-  primary on the old Machine and admits a successor on `<m>` through the existing
-  `ensure_primary_session_in` replace path. Native provider history stays on the
-  old Machine (it lives in that Machine's files); the successor gets fresh Wave
-  context, like `--fresh`.
-- **Task primaries follow the claim.** A handoff completes the Task's primary on
-  the source Machine; the target admits a fresh one on first connect. One primary
-  per scope across a person's Machines.
-- **One location source.** Routing and location reads both use the ownership
-  Machine: `observe_task_location` stops requiring `checkout_machine_id == local`
-  on the owner; opening a claimed Task with no checkout on its Machine creates it
-  there (`ensure_task` already runs on the routed owner).
-- **No unclaimed local checkouts.** `ensure_task`/`admit_workspace` reached from a
-  context connect route to the owner like `--task`; on an unowned Task they claim
-  (actual work reservation), so a checkout never appears on a non-owner Machine.
-- **`lf open` reads remote primaries.** `primary` and `elsewhere` liveness for a
-  remote Task come from the owner Machine, not the local store.
-- **Docs:** creation no longer admits a primary (`docs/architecture-reference.md:333`,
-  `README.md:303`); say primaries are admitted lazily on the owner Machine.
+- Wave and repository Sessions route to that scope's Session Machine
+  (`work_route`, see `lf machine use` above), including `--fresh`.
+- Setting a Session Machine completes the primary on the other Machines and
+  admits one on the target (`machine_use::move_primary_session`).
+- A handoff completes the Task's primary in the same transaction
+  (`handoff_task`); the target admits a fresh one on first connect.
+- Routing and `observe_task_location` both read the ownership Machine; a claimed
+  Task with no checkout on its Machine gets one there on the routed connect.
+- Docs say primaries are admitted lazily on the owner Machine.
 
 ### Transport (ownership must travel in both modes)
 
@@ -410,7 +395,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
 
 1. **This slice:** the draft migration plus the store layer, which deletes
    admission, placement and `started_at`. It adds `task_ownership` with
-   append/read/ordered-owner logic, the writer rule, the Wave Machine resolver, and
+   append/read/ordered-owner logic, the writer rule, the scope-default resolver, and
    `place_task` claiming. Focused test:
    `cargo test -p loopflow ownership` (store unit tests for claim → handoff →
    unclaim, wrong-writer refusal, a later delivered claim winning, and
@@ -438,9 +423,9 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   open, and the next refresh on the owner restores the assignee. In Git, a
   stale Machine's unclaim of that claim is followed, after exchange, by the
   owner's fresh claim.
-- Two of your Machines that share Git planning and the same Wave Machine
+- Two of your Machines that share Git planning and the same Tasks Machine
   cannot both claim: the non-owning one forwards to the owner. With no
-  Wave Machine set, both claims are delivered and, after exchange, each
+  Tasks Machine set, both claims are delivered and, after exchange, each
   other Machine shows the second claim as owner. The first claimant still shows
   itself as owner, with `superseded_by` naming the second. Its running Flow is
   untouched, and its context block reports the later claim. The integration test covers this
@@ -471,11 +456,7 @@ The live Linear demo above is a demo/review step, not gate.
   lands on mini while `lf connect --wave infrastructure` stays on the laptop (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
-Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at`
-(every reading fell to Unavailable); it now reads ownership. The main merge left
-`world/mod.rs` calling the old three-argument `record_flow_process`; fixed.
-Realign (2026-10-20, second): steers 352e4d61, b5619b52, b36e4435, 8bb9b532, 26f247a2, ba3528a6 and
-9ae7038b are all implemented as described above (`machine_use.rs`, `scope_defaults`, no
-`machines.repo`, no `lf wave machine`/`lf task handoff`); PR #1610 head matches the branch.
-Check results (2026-10-20, implement 2): integration `machine_commands ownership dto_fixtures documented_commands` 80/80; lib `machine_defaults ownership task_location commands::open` 30/30; fmt + clippy clean.
-Compress (2026-10-20): `lf connect` routing opens the store once; `lf open` resolves a remote Session Machine in one match; deleted `unavailable_execution_owner_opens_nothing_locally` (it asserted the checkout-Machine refusal ownership removed). `machine_commands` 29/29, `work_open` 11/11, clippy clean.
+Realign (2026-10-20, third): no upstream drift; PR #1610 head = branch. All steers through
+0e7f8d38/90189371 (`--session`/`--tasks`) are implemented; the Primary Sessions section now
+describes what exists. Wave memory still names `lf wave machine` (MEMORY.md:754; proposal in questions.md).
+Check (2026-10-20): `lf help --all --json` → `generate_cli_reference.py` regenerates docs/lf-reference.md byte-identical.

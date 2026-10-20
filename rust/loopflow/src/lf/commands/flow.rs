@@ -121,11 +121,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
             unreachable!("named definitions are skills or Flows")
         }
     };
-    let mut args = cli.step_args();
-    if let Some(wave) = &cli.wave {
-        args.extend(["--wave".to_owned(), wave.clone()]);
-    }
-    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
+    let args = task_run_args(cli, issue, owner, flow);
     let lf = crate::os_process::resolve_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
@@ -172,6 +168,21 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
         );
         attempt += 1;
     }
+}
+
+/// The Flow child a Task run starts. A person takes part at the Workflow's
+/// nodes, in the Task conversation, so an edge's Flow runs headless even from
+/// a terminal unless the caller asks for `-i`.
+fn task_run_args(cli: &Cli, issue: &str, owner: &str, flow: &str) -> Vec<String> {
+    let mut args = cli.step_args();
+    if !cli.interactive && !cli.batch {
+        args.push("--batch".to_owned());
+    }
+    if let Some(wave) = &cli.wave {
+        args.extend(["--wave".to_owned(), wave.clone()]);
+    }
+    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
+    args
 }
 
 /// Drive the Flow in this process, bracketed by flow journal events.
@@ -749,7 +760,7 @@ fn print_step_progress(progress: Option<StepProgress>, name: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::render_pipeline_lines;
+    use super::{render_pipeline_lines, task_run_args};
     use crate::flow::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
@@ -903,5 +914,24 @@ mod tests {
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
+    }
+
+    #[test]
+    fn a_task_runs_its_edge_headless_unless_asked_for_a_terminal() {
+        use clap::Parser;
+        let mode = |argv: &[&str]| {
+            let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
+            let args = task_run_args(&cli, "INF-1", "flow", "autonomous");
+            assert!(
+                args.ends_with(&["--task", "INF-1", "flow", "--", "autonomous"].map(String::from))
+            );
+            (
+                args.contains(&"--batch".to_owned()),
+                args.contains(&"--interactive".to_owned()),
+            )
+        };
+        assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (true, false));
+        assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
+        assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
     }
 }

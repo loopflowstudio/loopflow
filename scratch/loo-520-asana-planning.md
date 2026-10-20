@@ -193,3 +193,19 @@ after 43a1f85ce3.
 - `cargo test --lib -- asana notion planning_client provider_auth::tests` (LF_* unset): 96 passed.
   Live: Asana rich text stored exactly; Notion client create/body/edit/status/archive
   passed (links gain a `/` after the host once). clippy clean. Broader suites → gate. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.
+
+## Decision 2026-10-20: every provider names a team
+
+Jack Heart: a Linear team maps to an Asana team, not a project, and the three
+provider schemas should be as similar as possible. Accepted shape:
+
+```yaml
+planning:
+  provider: linear | asana | notion
+  team: <id or URL>
+```
+
+- `linear.team` moves into `planning.team`, with no fallback. `lf repo connect` writes the team for every provider.
+- Asana: the team. Every Task lives in the team project named after the repository. A Task in a Wave Project is also added to that Project, since Asana lets a task belong to several projects. Wave Projects become Asana projects, and sections are dropped. Waves become Portfolios where the plan allows them.
+- Notion (Jack chose this option): a page that holds a Tasks database and a Projects database, linked by a `Project` relation, like Notion's Projects & Tasks template. Loopflow finds or creates both.
+- Remaining: rewrite the config and scope for all three, the Asana team model, and the Notion page model. Update docs/planning.md to match.

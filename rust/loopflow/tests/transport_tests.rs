@@ -725,8 +725,8 @@ read -r answer < /dev/tty
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    // A restart: every remaining owner and provider dies without a word.
-    for (owner, line) in owners.iter().zip(&started).take(2) {
+    // A restart: the owner, its lf and the provider die without a word.
+    let crash = |owner: &str, line: &str| {
         let receipt: Value = serde_json::from_slice(
             &std::fs::read(
                 fixture
@@ -755,6 +755,9 @@ read -r answer < /dev/tty
                 unsafe { libc::kill(pid as libc::pid_t, signal) };
             }
         }
+    };
+    for (owner, line) in owners.iter().zip(&started).take(2) {
+        crash(owner, line);
     }
     std::thread::sleep(Duration::from_millis(200));
     // The first was mid-turn when the machine went down; the second was waiting.
@@ -822,7 +825,20 @@ read -r answer < /dev/tty
     // Rerunning finds nothing to do and starts no provider.
     assert_eq!(resume_all(), json!([]));
     std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(launches(5).len(), 5);
+    let reopened = launches(5);
+    assert_eq!(reopened.len(), 5);
+    // Resumed owners outlive the command; stop them with the fixture.
+    for line in &reopened[3..] {
+        let owner: String = sql
+            .query_row(
+                "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN session_events e
+                 ON e.session_id=s.id WHERE e.kind='captured' AND e.receipt_key=?1",
+                [line.split(':').nth(1).unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        crash(&owner, line);
+    }
 }
 
 #[test]

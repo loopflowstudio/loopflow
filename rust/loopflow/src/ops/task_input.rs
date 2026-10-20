@@ -6,7 +6,7 @@ use crate::store::SharedStore;
 use crate::work::project::Project;
 use crate::work::task::Task;
 use anyhow::{anyhow, Result};
-use std::io::BufRead;
+use std::io::{BufRead, IsTerminal};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -65,6 +65,7 @@ impl std::fmt::Debug for TaskInput {
 struct Controls {
     interrupt: i64,
     receiver: Option<tokio::sync::mpsc::UnboundedReceiver<String>>,
+    hint: Option<crate::transport::InputHint>,
     next_interrupt: Instant,
 }
 
@@ -76,6 +77,7 @@ impl TaskInput {
             controls: Arc::new(tokio::sync::Mutex::new(Controls {
                 interrupt: seed.interrupt,
                 receiver: None,
+                hint: None,
                 next_interrupt: Instant::now(),
             })),
         }
@@ -88,24 +90,34 @@ impl TaskInput {
         let Controls {
             interrupt,
             receiver,
+            hint,
             next_interrupt,
         } = &mut *controls;
-        let receiver = receiver.get_or_insert_with(|| {
-            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-            std::thread::spawn(move || {
-                for line in std::io::stdin().lock().lines() {
-                    let Ok(line) = line else { break };
-                    if sender.send(line).is_err() {
-                        break;
+        let receiver = match receiver {
+            Some(receiver) => receiver,
+            None => {
+                let (sender, new_receiver) = tokio::sync::mpsc::unbounded_channel();
+                std::thread::spawn(move || {
+                    for line in std::io::stdin().lock().lines() {
+                        let Ok(line) = line else { break };
+                        if sender.send(line).is_err() {
+                            break;
+                        }
                     }
+                });
+                // Only a person who can type sees the controls: each attaching
+                // viewer, or the terminal running a command without an owner.
+                let text = format!(
+                    "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
+                    task.identifier
+                );
+                *hint = crate::transport::input_hint(text.clone());
+                if hint.is_none() && std::io::stdin().is_terminal() {
+                    println!("{text}");
                 }
-            });
-            println!(
-                "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-                task.identifier
-            );
-            receiver
-        });
+                receiver.insert(new_receiver)
+            }
+        };
         while let Ok(line) = receiver.try_recv() {
             handle_attachment(store, task, harness, line).await?;
         }

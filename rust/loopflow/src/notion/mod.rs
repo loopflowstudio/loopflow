@@ -748,9 +748,15 @@ fn is_canceled(option: &str) -> bool {
 fn state_value(schema: &Schema, target: &str) -> LinearResult<Value> {
     match &schema.state {
         StateProperty::Checkbox(_) => Ok(json!({"checkbox": completed(target)?})),
-        StateProperty::Status { todo, complete, .. } => {
+        StateProperty::Status {
+            todo,
+            started,
+            complete,
+            ..
+        } => {
             let choice = match target {
                 "unstarted" => todo.first(),
+                "started" => started.first().or(todo.first()),
                 "completed" => complete
                     .iter()
                     .find(|option| !is_canceled(option))
@@ -803,7 +809,7 @@ fn observed_state(schema: &Schema, page: &Value) -> &'static str {
 fn completed(target: &str) -> LinearResult<bool> {
     match target {
         "completed" | "canceled" => Ok(true),
-        "unstarted" => Ok(false),
+        "unstarted" | "started" => Ok(false),
         other => Err(message(format!("Notion has no Task state `{other}`"))),
     }
 }

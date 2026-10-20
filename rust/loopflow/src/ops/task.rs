@@ -970,7 +970,12 @@ fn prepare_task(
                 .map_err(task_error)?;
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
-            place_prepared_task(&store, &task.id, placement).await?
+            let placed = place_prepared_task(&store, &task.id, placement).await?;
+            store
+                .sqlite
+                .start_task_planning(&placed.id)
+                .map_err(task_error)?;
+            placed
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
                 stack_existing_task(&store, &task, parent).await?;

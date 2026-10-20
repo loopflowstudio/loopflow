@@ -708,3 +708,22 @@ fn notion_pages_coworkers_archive_leave_the_plan() {
         assert!(tasks.iter().all(|task| task.id != saved.id));
     });
 }
+
+#[test]
+fn notion_pages_move_to_in_progress_when_work_starts() {
+    with_notion(|runtime, fixture, repo, state| {
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("Start here".into()), None).unwrap();
+        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        // Checkout marks the Task started; the fixture has no fetchable origin.
+        fixture.store.sqlite.start_task_planning(&saved.id).unwrap();
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        assert_eq!(
+            mirrored(runtime, &state, &id)["properties"]["Status"]["status"]["name"],
+            "In progress"
+        );
+    });
+}

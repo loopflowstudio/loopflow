@@ -374,6 +374,28 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Work began on the Task: its planning state moves to started, once, while
+    /// nobody has moved it past not-started. A connected tracker shows it.
+    pub(crate) fn start_task_planning(&self, id: &TaskId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (state, completed): (Option<String>, bool) = tx.query_row(
+            "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if !completed
+            && matches!(
+                state.as_deref(),
+                None | Some("triage" | "backlog" | "unstarted")
+            )
+        {
+            super::task_state_delivery::queue_in(&tx, id, "started")?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Reopen planning without touching Workflow, placement, PR or Process history.
     pub(crate) fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

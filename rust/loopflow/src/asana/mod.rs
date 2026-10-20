@@ -453,7 +453,8 @@ pub(crate) fn comment_markdown(text: &str) -> String {
 fn completed(target: &str) -> LinearResult<bool> {
     match target {
         "completed" | "canceled" => Ok(true),
-        "unstarted" => Ok(false),
+        // Asana tasks are open or complete; work in progress is open.
+        "unstarted" | "started" => Ok(false),
         other => Err(message(format!("Asana has no Task state `{other}`"))),
     }
 }

@@ -1,3 +1,4 @@
+-- draft: session_admission
 -- A conversation can exist before any input is reserved. Admission alone does
 -- not start backlog work; the first capture (or a bind of existing work) does.
 DROP TRIGGER task_first_conversation_insert;

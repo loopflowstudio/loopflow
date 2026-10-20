@@ -15,10 +15,14 @@ use tokio::sync::Mutex;
 use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
 use super::LINEAR_TEST_CONTEXT;
 
+const TEAM: &str = "1100000000000001";
+/// The gid the stand-in gives the repository's team project when Loopflow creates it.
 const PROJECT: &str = "1200000000000001";
 
 #[derive(Default)]
 struct Asana {
+    /// The team's projects.
+    projects: Vec<Value>,
     tasks: BTreeMap<String, Value>,
     stories: BTreeMap<String, Vec<Value>>,
     creations: usize,
@@ -139,6 +143,24 @@ async fn update(
     data(task.clone())
 }
 
+async fn team_projects(State(state): State<Shared>, Segment(team): Segment<String>) -> Response {
+    assert_eq!(team, TEAM);
+    data(json!(state.lock().await.projects))
+}
+
+async fn create_project(
+    State(state): State<Shared>,
+    Segment(team): Segment<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    assert_eq!(team, TEAM);
+    let mut asana = state.lock().await;
+    let gid = format!("12000000000000{:02}", asana.projects.len() + 1);
+    let project = json!({"gid": gid, "name": body["data"]["name"]});
+    asana.projects.push(project.clone());
+    data(project)
+}
+
 async fn project_tasks(State(state): State<Shared>) -> Response {
     let asana = state.lock().await;
     if asana.offline {
@@ -184,6 +206,10 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new()
+        .route(
+            "/teams/{team}/projects",
+            get(team_projects).post(create_project),
+        )
         .route("/tasks", axum::routing::post(create))
         .route("/projects/{project}/tasks", get(project_tasks))
         .route("/tasks/{gid}", get(read).put(update).delete(remove))
@@ -197,7 +223,7 @@ async fn asana_repo(fixture: &Fixture) -> PathBuf {
     let (repo, _) = fixture.planning_repo().await;
     std::fs::write(
         repo.join(".lf/config.yaml"),
-        format!("planning:\n  provider: asana\n  project: \"{PROJECT}\"\n"),
+        format!("planning:\n  provider: asana\n  team: \"https://app.asana.com/0/team/{TEAM}/overview\"\n"),
     )
     .unwrap();
     let mut credential = token("asana-access", "asana-refresh", now() + 86_400);
@@ -248,6 +274,12 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         assert!(id.replace('-', "").starts_with(&saved.identifier));
         let task = mirrored(runtime, &state, id);
         assert_eq!(task["name"], "Ship the Asana provider");
+        // The Task lives in the team project Loopflow made for the repository.
+        assert_eq!(
+            runtime.block_on(state.lock()).projects,
+            [json!({"gid": PROJECT, "name": "fixture"})]
+        );
+        assert_eq!(task["memberships"], json!([{"project": {"gid": PROJECT}}]));
         // Asana renders rich text, so markdown arrives formatted.
         assert_eq!(
             task["html_notes"],
@@ -397,6 +429,11 @@ fn asana_tasks_coworkers_create_become_tasks() {
     with_asana(|runtime, fixture, repo, state| {
         runtime.block_on(async {
             let mut asana = state.lock().await;
+            // The team already has the repository's project, beside others.
+            asana.projects = vec![
+                json!({"gid": "1200000000000009", "name": "Roadmap"}),
+                json!({"gid": PROJECT, "name": "fixture"}),
+            ];
             let modified = asana.tick();
             asana.tasks.insert(
                 "coworker".into(),
@@ -423,6 +460,7 @@ fn asana_tasks_coworkers_create_become_tasks() {
         let asana = runtime.block_on(state.lock());
         let id = task.linear_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
+        assert_eq!(asana.projects.len(), 2, "the existing project was reused");
     });
 }
 

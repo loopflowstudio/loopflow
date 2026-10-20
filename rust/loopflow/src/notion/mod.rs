@@ -1,14 +1,16 @@
 //! Notion delivery and observation. Work owns local content; this adapter owns provider facts.
 //!
-//! The repository's Notion database is the planning scope, and each Task is one
-//! of its pages. Notion accepts no caller IDs, so every exported page carries its
+//! The repository's planning scope is a Notion page, its team. The page holds a
+//! Tasks database and a Projects database linked by a `Project` relation, the
+//! shape of Notion's Projects & Tasks template; Loopflow finds both on first use
+//! by title, or creates them. Each Task is one page of the Tasks database. Notion accepts no caller IDs, so every exported page carries its
 //! Loopflow UUID in a `Loopflow ID` text property and every request finds the
 //! page by that exact value. The Task's planning identity stays the one Loopflow
 //! assigned, and a lost creation reply is resolved by lookup rather than a second
 //! create. Notion returns the shared planning observations, so acceptance,
 //! receipts and steering stay one path with Linear and Asana.
 //!
-//! The database adapts to the mirror on first use: Loopflow adds the `Loopflow ID`
+//! The Tasks database adapts to the mirror on first use: Loopflow adds the `Loopflow ID`
 //! property, and a `Status` property when the database tracks no state. A status
 //! property's Notion groups (To-do, In progress, Complete) carry Task state; a
 //! checkbox works too. A `date` property named Due and a `people` property
@@ -30,6 +32,9 @@ use crate::linear::{
 const NOTION_BASE_URL: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2022-06-28";
 const IDENTITY_PROPERTY: &str = "Loopflow ID";
+const PROJECT_PROPERTY: &str = "Project";
+const TASKS: &str = "Tasks";
+const PROJECTS: &str = "Projects";
 /// Notion's largest page, and its largest children append.
 const PAGE_SIZE: usize = 100;
 
@@ -37,10 +42,18 @@ const PAGE_SIZE: usize = 100;
 pub struct NotionClient {
     client: reqwest::Client,
     token: String,
-    /// The repository's Notion database: its planning scope, like a Linear Team.
-    database: String,
+    /// The team page holding the databases: the planning scope, like a Linear Team.
+    team: String,
     base_url: String,
+    databases: Arc<OnceCell<Databases>>,
     schema: Arc<OnceCell<Schema>>,
+}
+
+/// The team page's two databases.
+#[derive(Debug, Clone)]
+struct Databases {
+    tasks: String,
+    projects: String,
 }
 
 /// The database properties the mirror reads and writes.
@@ -65,16 +78,17 @@ enum StateProperty {
 }
 
 impl NotionClient {
-    pub fn new(token: String, database: String) -> Self {
-        Self::with_base_url(token, database, NOTION_BASE_URL.to_string())
+    pub fn new(token: String, team: &str) -> Self {
+        Self::with_base_url(token, team, NOTION_BASE_URL.to_string())
     }
 
-    pub(crate) fn with_base_url(token: String, database: String, base_url: String) -> Self {
+    pub(crate) fn with_base_url(token: String, team: &str, base_url: String) -> Self {
         Self {
             client: reqwest::Client::new(),
             token,
-            database: database_id(&database),
+            team: notion_id(team),
             base_url,
+            databases: Arc::default(),
             schema: Arc::default(),
         }
     }
@@ -98,7 +112,7 @@ impl NotionClient {
                 Method::POST,
                 "/pages",
                 Some(json!({
-                    "parent": {"database_id": self.database},
+                    "parent": {"database_id": self.tasks().await?},
                     "properties": properties,
                     "children": first,
                 })),
@@ -234,7 +248,7 @@ impl NotionClient {
             let found: Value = self
                 .send(
                     Method::POST,
-                    &format!("/databases/{}/query", self.database),
+                    &format!("/databases/{}/query", self.tasks().await?),
                     Some(query),
                 )
                 .await?;
@@ -299,7 +313,7 @@ impl NotionClient {
     /// Whether the page at `url` is archived or in the trash.
     pub(crate) async fn removed(&self, url: Option<&str>) -> LinearResult<bool> {
         let Some(page) = url
-            .map(database_id)
+            .map(notion_id)
             .filter(|id| uuid::Uuid::parse_str(id).is_ok())
         else {
             return Ok(false);
@@ -324,7 +338,7 @@ impl NotionClient {
         let found: Value = self
             .send(
                 Method::POST,
-                &format!("/databases/{}/query", self.database),
+                &format!("/databases/{}/query", self.tasks().await?),
                 Some(json!({
                     "filter": {"property": IDENTITY_PROPERTY, "rich_text": {"equals": id}},
                     "page_size": 2,
@@ -370,9 +384,10 @@ impl NotionClient {
             ));
         }
         let state = observed_state(schema, page);
+        let tasks = self.tasks().await?;
         let in_scope = page["parent"]["database_id"]
             .as_str()
-            .is_some_and(|parent| database_id(parent) == self.database);
+            .is_some_and(|parent| notion_id(parent) == tasks);
         Ok(LinearIssue {
             revision: page["last_edited_time"].as_str().map(str::to_owned),
             id: id.to_string(),
@@ -391,7 +406,7 @@ impl NotionClient {
             }),
             state: Some(state.into()),
             project_id: None,
-            team_id: in_scope.then(|| self.database.clone()),
+            team_id: in_scope.then(|| self.team.clone()),
             assignee: schema.assignee.as_ref().and_then(|assignee| {
                 properties[assignee]["people"][0]["id"]
                     .as_str()
@@ -479,13 +494,97 @@ impl NotionClient {
         user["name"].as_str().map(str::to_owned)
     }
 
-    // ── Database ────────────────────────────────────────────────────
+    // ── Databases ───────────────────────────────────────────────────
 
-    /// Read the database once per client, adding the mirror's missing properties.
+    async fn tasks(&self) -> LinearResult<&str> {
+        Ok(&self.databases().await?.tasks)
+    }
+
+    /// The team page's Tasks and Projects databases, found by title or created
+    /// once per client. A database people made keeps its own properties.
+    async fn databases(&self) -> LinearResult<&Databases> {
+        self.databases
+            .get_or_try_init(|| async {
+                let children = self.children(&self.team).await?;
+                let titled = |title: &str| -> LinearResult<Option<String>> {
+                    let found: Vec<&Value> = children
+                        .iter()
+                        .filter(|block| {
+                            block["type"] == "child_database"
+                                && block["child_database"]["title"]
+                                    .as_str()
+                                    .is_some_and(|name| name.trim().eq_ignore_ascii_case(title))
+                        })
+                        .collect();
+                    match found.as_slice() {
+                        [] => Ok(None),
+                        [database] => object_id(database).map(Some),
+                        _ => Err(message(format!(
+                            "Notion page holds several {title} databases; rename all but one"
+                        ))),
+                    }
+                };
+                let (tasks, projects) = (titled(TASKS)?, titled(PROJECTS)?);
+                let projects = match projects {
+                    Some(projects) => projects,
+                    None => {
+                        self.create_database(
+                            PROJECTS,
+                            json!({
+                                "Name": {"title": {}},
+                                "Status": {"status": {}},
+                                IDENTITY_PROPERTY: {"rich_text": {}},
+                            }),
+                        )
+                        .await?
+                    }
+                };
+                let tasks = match tasks {
+                    Some(tasks) => tasks,
+                    None => {
+                        self.create_database(
+                            TASKS,
+                            json!({
+                                "Name": {"title": {}},
+                                "Status": {"status": {}},
+                                "Due": {"date": {}},
+                                "Assignee": {"people": {}},
+                                IDENTITY_PROPERTY: {"rich_text": {}},
+                                PROJECT_PROPERTY: relation(&projects),
+                            }),
+                        )
+                        .await?
+                    }
+                };
+                Ok(Databases {
+                    tasks: notion_id(&tasks),
+                    projects: notion_id(&projects),
+                })
+            })
+            .await
+    }
+
+    async fn create_database(&self, title: &str, properties: Value) -> LinearResult<String> {
+        let database: Value = self
+            .send(
+                Method::POST,
+                "/databases",
+                Some(json!({
+                    "parent": {"type": "page_id", "page_id": self.team},
+                    "title": blocks::plain(title),
+                    "properties": properties,
+                })),
+            )
+            .await?;
+        object_id(&database)
+    }
+
+    /// Read the Tasks database once per client, adding the mirror's missing properties.
     async fn schema(&self) -> LinearResult<&Schema> {
         self.schema
             .get_or_try_init(|| async {
-                let path = format!("/databases/{}", self.database);
+                let databases = self.databases().await?;
+                let path = format!("/databases/{}", databases.tasks);
                 let mut database: Value = self.send(Method::GET, &path, None).await?;
                 let mut missing = serde_json::Map::new();
                 if database["properties"][IDENTITY_PROPERTY]["type"] != "rich_text" {
@@ -493,6 +592,9 @@ impl NotionClient {
                 }
                 if state_property(&database["properties"]).is_none() {
                     missing.insert("Status".into(), json!({"status": {}}));
+                }
+                if database["properties"][PROJECT_PROPERTY]["type"] != "relation" {
+                    missing.insert(PROJECT_PROPERTY.into(), relation(&databases.projects));
                 }
                 if !missing.is_empty() {
                     database = self
@@ -620,8 +722,13 @@ pub(crate) fn comment_markdown(text: &str) -> String {
     blocks::rich_text_markdown(&blocks::spans(text))
 }
 
+/// A two-way relation to the Projects database, as Notion's template links them.
+fn relation(projects: &str) -> Value {
+    json!({"relation": {"database_id": projects, "type": "dual_property", "dual_property": {}}})
+}
+
 /// Notion IDs appear hyphenated, bare, or at the end of a page URL.
-pub(crate) fn database_id(raw: &str) -> String {
+pub(crate) fn notion_id(raw: &str) -> String {
     let hex: String = raw
         .rsplit(['/', '-', '?', '#'])
         .find(|part| part.len() == 32 && part.chars().all(|ch| ch.is_ascii_hexdigit()))
@@ -936,12 +1043,12 @@ mod tests {
     }
 
     #[test]
-    fn database_ids_read_from_urls_and_bare_ids() {
+    fn notion_ids_read_from_urls_and_bare_ids() {
         let id = "3fff8f99-3d81-8141-bd3d-f63d878a7c74";
-        assert_eq!(database_id(id), id);
-        assert_eq!(database_id("3fff8f993d818141bd3df63d878a7c74"), id);
+        assert_eq!(notion_id(id), id);
+        assert_eq!(notion_id("3fff8f993d818141bd3df63d878a7c74"), id);
         assert_eq!(
-            database_id("https://www.notion.so/team/Demo-3fff8f993d818141bd3df63d878a7c74?v=1"),
+            notion_id("https://www.notion.so/team/Demo-3fff8f993d818141bd3df63d878a7c74?v=1"),
             id
         );
     }

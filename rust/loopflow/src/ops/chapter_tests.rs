@@ -488,7 +488,11 @@ fn fixture_repo(root: &std::path::Path) -> std::path::PathBuf {
             .unwrap()
             .success());
     }
-    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
+    std::fs::write(
+        repo.join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: team-1\n",
+    )
+    .unwrap();
     for wave in ["a", "b"] {
         std::fs::create_dir_all(repo.join(format!(".lf/wave/{wave}"))).unwrap();
         std::fs::write(

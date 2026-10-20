@@ -15,10 +15,13 @@ use tokio::sync::Mutex;
 use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
 use super::LINEAR_TEST_CONTEXT;
 
+/// The team page, and the Tasks database people already made on it.
+const TEAM: &str = "2aaa8f99-3d81-8141-bd3d-f63d878a7c74";
 const DATABASE: &str = "3fff8f99-3d81-8141-bd3d-f63d878a7c74";
 
 struct Notion {
-    properties: Value,
+    /// Properties by database.
+    databases: BTreeMap<String, Value>,
     pages: BTreeMap<String, Value>,
     /// Child blocks by parent page or block, without their own children.
     children: BTreeMap<String, Vec<Value>>,
@@ -33,23 +36,32 @@ impl Default for Notion {
     fn default() -> Self {
         Self {
             // A database people made: a title, and Status with Notion's default groups.
-            properties: json!({
-                "Name": {"type": "title", "title": {}},
-                "Status": {"type": "status", "status": {
-                    "options": [
-                        {"id": "s1", "name": "Not started"},
-                        {"id": "s2", "name": "In progress"},
-                        {"id": "s3", "name": "Done"}
-                    ],
-                    "groups": [
-                        {"name": "To-do", "option_ids": ["s1"]},
-                        {"name": "In progress", "option_ids": ["s2"]},
-                        {"name": "Complete", "option_ids": ["s3"]}
-                    ]
-                }},
-            }),
+            databases: BTreeMap::from([(
+                DATABASE.to_string(),
+                json!({
+                    "Name": {"type": "title", "title": {}},
+                    "Status": {"type": "status", "status": {
+                        "options": [
+                            {"id": "s1", "name": "Not started"},
+                            {"id": "s2", "name": "In progress"},
+                            {"id": "s3", "name": "Done"}
+                        ],
+                        "groups": [
+                            {"name": "To-do", "option_ids": ["s1"]},
+                            {"name": "In progress", "option_ids": ["s2"]},
+                            {"name": "Complete", "option_ids": ["s3"]}
+                        ]
+                    }},
+                }),
+            )]),
             pages: BTreeMap::new(),
-            children: BTreeMap::new(),
+            children: BTreeMap::from([(
+                TEAM.to_string(),
+                vec![json!({
+                    "id": DATABASE, "type": "child_database", "has_children": false,
+                    "child_database": {"title": "Tasks"},
+                })],
+            )]),
             comments: BTreeMap::new(),
             creations: 0,
             ids: 0,
@@ -125,21 +137,62 @@ fn offline() -> Response {
     StatusCode::SERVICE_UNAVAILABLE.into_response()
 }
 
-async fn database(State(state): State<Shared>) -> Response {
+/// Properties as Notion reports them, each carrying its type. A new status
+/// property takes Notion's default options and groups.
+fn typed(properties: &Value) -> serde_json::Map<String, Value> {
+    let default_status = Notion::default().databases[DATABASE]["Status"]["status"].clone();
+    properties
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, property)| {
+            let kind = property.as_object().unwrap().keys().next().unwrap().clone();
+            let mut config = property[&kind].clone();
+            if kind == "status" && config == json!({}) {
+                config = default_status.clone();
+            }
+            (name.clone(), json!({"type": kind, kind.clone(): config}))
+        })
+        .collect()
+}
+
+async fn database(State(state): State<Shared>, Segment(db): Segment<String>) -> Response {
     let notion = state.lock().await;
     if notion.offline {
         return offline();
     }
-    Json(json!({"id": DATABASE, "properties": notion.properties})).into_response()
+    match notion.databases.get(&db) {
+        Some(properties) => Json(json!({"id": db, "properties": properties})).into_response(),
+        None => missing(),
+    }
 }
 
-async fn update_database(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn update_database(
+    State(state): State<Shared>,
+    Segment(db): Segment<String>,
+    Json(body): Json<Value>,
+) -> Response {
     let mut notion = state.lock().await;
-    for (name, property) in body["properties"].as_object().unwrap() {
-        let kind = property.as_object().unwrap().keys().next().unwrap().clone();
-        notion.properties[name] = json!({"type": kind, kind.clone(): property[&kind]});
+    let properties = notion.databases.get_mut(&db).unwrap();
+    for (name, property) in typed(&body["properties"]) {
+        properties[name] = property;
     }
-    Json(json!({"id": DATABASE, "properties": notion.properties})).into_response()
+    Json(json!({"id": db, "properties": properties})).into_response()
+}
+
+async fn create_database(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let mut notion = state.lock().await;
+    let id = notion.id();
+    let parent = body["parent"]["page_id"].as_str().unwrap().to_string();
+    let title = body["title"][0]["text"]["content"].clone();
+    notion
+        .databases
+        .insert(id.clone(), Value::Object(typed(&body["properties"])));
+    notion.children.entry(parent).or_default().push(json!({
+        "id": id, "type": "child_database", "has_children": false,
+        "child_database": {"title": title},
+    }));
+    Json(json!({"object": "database", "id": id})).into_response()
 }
 
 async fn query(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -294,6 +347,7 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new()
+        .route("/databases", post(create_database))
         .route("/databases/{db}", get(database).patch(update_database))
         .route("/databases/{db}/query", post(query))
         .route("/pages", post(create))
@@ -309,12 +363,12 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
 
 async fn notion_repo(fixture: &Fixture) -> PathBuf {
     let (repo, _) = fixture.planning_repo().await;
-    // People paste the database URL; the bare ID it carries is the scope.
+    // People paste the team page's URL; the bare ID it carries is the scope.
     std::fs::write(
         repo.join(".lf/config.yaml"),
         format!(
-            "planning:\n  provider: notion\n  database: \"https://www.notion.so/team/Plan-{}?v=1\"\n",
-            DATABASE.replace('-', "")
+            "planning:\n  provider: notion\n  team: \"https://www.notion.so/acme/Engineering-{}\"\n",
+            TEAM.replace('-', "")
         ),
     )
     .unwrap();
@@ -397,11 +451,42 @@ fn notion_task_create_mirrors_task_as_a_database_page() {
                 "bulleted_list_item"
             ]
         );
-        // The database adapted to the mirror instead of refusing it.
+        // The Tasks database adapted to the mirror instead of refusing it, and
+        // the page gained the Projects database its relation links to.
+        let notion = runtime.block_on(state.lock());
+        let tasks = &notion.databases[DATABASE];
+        assert_eq!(tasks["Loopflow ID"]["type"], "rich_text");
+        let projects = tasks["Project"]["relation"]["database_id"]
+            .as_str()
+            .unwrap();
+        assert_eq!(notion.databases[projects]["Name"]["type"], "title");
         assert_eq!(
-            runtime.block_on(state.lock()).properties["Loopflow ID"]["type"],
-            "rich_text"
+            notion.children[TEAM][1]["child_database"]["title"],
+            "Projects"
         );
+    });
+}
+
+#[test]
+fn notion_team_page_without_databases_gains_tasks_and_projects() {
+    with_notion(|runtime, _fixture, repo, state| {
+        runtime.block_on(async {
+            let mut notion = state.lock().await;
+            notion.children.clear();
+            notion.databases.clear();
+        });
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("First Task".into()), None).unwrap();
+        let page = mirrored(runtime, &state, saved.linear_id.as_ref().unwrap().as_str());
+        let notion = runtime.block_on(state.lock());
+        let titles: Vec<&Value> = notion.children[TEAM]
+            .iter()
+            .map(|block| &block["child_database"]["title"])
+            .collect();
+        assert_eq!(titles, [&json!("Projects"), &json!("Tasks")]);
+        let tasks = notion.children[TEAM][1]["id"].as_str().unwrap();
+        assert_eq!(page["parent"]["database_id"], tasks);
+        assert_eq!(notion.databases[tasks]["Project"]["type"], "relation");
     });
 }
 

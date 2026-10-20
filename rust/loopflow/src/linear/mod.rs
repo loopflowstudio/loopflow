@@ -896,7 +896,7 @@ impl LinearClient {
     fn require_team_id(&self) -> LinearResult<String> {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
-                "Linear write requires repository `linear.team` in .lf/config.yaml; \
+                "Linear write requires `planning.team` in .lf/config.yaml; \
                  run `lf repo connect <wave> --team-key <KEY>`"
                     .to_string(),
             )

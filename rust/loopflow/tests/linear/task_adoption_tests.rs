@@ -21,7 +21,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         let repo = TestRepo::new();
         repo.create_file(
             ".lf/config.yaml",
-            "agent: claude\nlinear:\n  team: team-1\n",
+            "agent: claude\nplanning:\n  provider: linear\n  team: team-1\n",
         );
         repo.create_file(
             ".lf/wave/product/GOAL.md",
@@ -299,7 +299,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             // admission. A connection edit must not strand this adopted Task.
             fs::write(
                 checkout.join(".lf/config.yaml"),
-                "agent: claude\nlinear:\n  team: another-team\n",
+                "agent: claude\nplanning:\n  provider: linear\n  team: another-team\n",
             )
             .unwrap();
             let output = run(repo.path(), &["-b", "--task", "FIX-1", "flow", "adoption"]);

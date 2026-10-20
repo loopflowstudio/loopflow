@@ -898,7 +898,7 @@ fn prepare_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(&main, issue, super::linear::LinearRefresh::Auto)
                         .await?
                 }
@@ -4482,7 +4482,7 @@ pub(crate) async fn resolve_saved_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear {} => {
+                crate::config::PlanningConfig::Linear { .. } => {
                     super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
                         .await?
                 }

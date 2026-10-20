@@ -435,7 +435,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         std::fs::write(
             repo.join(".lf/config.yaml"),
-            format!("linear:\n  team: {team}\n"),
+            format!("planning:\n  provider: linear\n  team: {team}\n"),
         )
         .unwrap();
     }

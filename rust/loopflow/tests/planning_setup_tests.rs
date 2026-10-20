@@ -119,7 +119,7 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\nlinear:\n  team: unavailable-fixture\n",
+        "planning:\n  provider: linear\n  team: unavailable-fixture\n",
     )
     .unwrap();
     let output = invoke_lf(
@@ -170,7 +170,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
     initialize(home.path());
     repo.create_file(
         ".lf/config.yaml",
-        "planning:\n  provider: git\n  shared: fixture\nlinear:\n  team: retained-team\n",
+        "planning:\n  provider: git\n  shared: fixture\n",
     );
     repo.create_file(
         ".lf/wave/product/GOAL.md",

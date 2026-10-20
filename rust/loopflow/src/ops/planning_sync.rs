@@ -62,7 +62,7 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             .unwrap_or_default();
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
-            crate::config::PlanningConfig::Linear {}
+            crate::config::PlanningConfig::Linear { .. }
             | crate::config::PlanningConfig::Asana { .. }
             | crate::config::PlanningConfig::Notion { .. } => {
                 // Export attempts have individual deadlines. A shared deadline

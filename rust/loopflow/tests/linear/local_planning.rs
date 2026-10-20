@@ -1107,7 +1107,10 @@ fn project_creation_binding_and_activation_save_offline() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -1316,7 +1319,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "planning:\n  provider: linear\nlinear:\n  team: team\n",
+                "planning:\n  provider: linear\n  team: team\n",
             )
             .unwrap();
         }
@@ -1483,7 +1486,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -1763,7 +1766,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -2141,7 +2144,10 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -2547,7 +2553,10 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         if connected {
-            repo.create_file(".lf/config.yaml", "linear:\n  team: fixture-team\n");
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let path = home.path().join("loopflow.db");
         let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
@@ -2802,7 +2811,7 @@ fn wave_documents_follow_files_while_workflows_remain_stored() {
         if connected {
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -2936,7 +2945,7 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
             std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
             std::fs::write(
                 repo.path().join(".lf/config.yaml"),
-                "linear:\n  team: fixture-team\n",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
             )
             .unwrap();
         }
@@ -3146,7 +3155,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
     std::fs::write(
         repo.path().join(".lf/config.yaml"),
-        "linear:\n  team: fixture-team\n",
+        "planning:\n  provider: linear\n  team: fixture-team\n",
     )
     .unwrap();
     lf(

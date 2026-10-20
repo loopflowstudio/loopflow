@@ -1115,7 +1115,7 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "linear:\n  team: team-product\n",
+        "planning:\n  provider: linear\n  team: team-product\n",
     )
     .unwrap();
     home.plan(1);
@@ -1213,7 +1213,7 @@ fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("config.yaml"),
-        "linear:\n  team: team-product\n",
+        "planning:\n  provider: linear\n  team: team-product\n",
     )
     .unwrap();
     home.plan(1);

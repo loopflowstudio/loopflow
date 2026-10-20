@@ -7,12 +7,19 @@
 //! lookup rather than a second create. Asana returns the shared planning
 //! observations, so acceptance, receipts and steering stay one path.
 //! Descriptions and comments travel as Asana rich text (see [`rich_text`]).
+//!
+//! The repository's planning scope is an Asana team, like a Linear Team. Every
+//! Task lives in the team project named after the repository; Loopflow finds
+//! that project on first use, or creates it.
 
 mod rich_text;
+
+use std::sync::Arc;
 
 use reqwest::{Method, StatusCode};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tokio::sync::OnceCell;
 
 use crate::linear::{
     local_identifier, LinearComment, LinearError, LinearIssue, LinearIssueObservation,
@@ -23,6 +30,7 @@ const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
 const STORY_FIELDS: &str =
     "gid,created_at,html_text,resource_subtype,created_by.gid,created_by.name";
+const PROJECT_FIELDS: &str = "gid,name,permalink_url";
 /// Asana's largest page; a long-lived Task can outgrow one.
 const PAGE_LIMIT: &str = "100";
 
@@ -30,8 +38,12 @@ const PAGE_LIMIT: &str = "100";
 pub struct AsanaClient {
     client: reqwest::Client,
     token: String,
-    /// The repository's Asana project: its planning scope, like a Linear Team.
-    project: String,
+    /// The repository's Asana team: its planning scope, like a Linear Team.
+    team: String,
+    /// The repository's name, which names its team project.
+    repository: String,
+    /// The team project's gid, resolved once per client.
+    project: Arc<OnceCell<String>>,
     base_url: String,
 }
 
@@ -63,6 +75,12 @@ struct Task {
     memberships: Vec<Membership>,
 }
 
+#[derive(Debug, Deserialize)]
+struct Project {
+    gid: String,
+    name: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct External {
     gid: Option<String>,
@@ -90,17 +108,57 @@ struct Story {
 }
 
 impl AsanaClient {
-    pub fn new(token: String, project: String) -> Self {
-        Self::with_base_url(token, project, ASANA_BASE_URL.to_string())
+    pub fn new(token: String, team: &str, repository: String) -> Self {
+        Self::with_base_url(token, team, repository, ASANA_BASE_URL.to_string())
     }
 
-    pub(crate) fn with_base_url(token: String, project: String, base_url: String) -> Self {
+    pub(crate) fn with_base_url(
+        token: String,
+        team: &str,
+        repository: String,
+        base_url: String,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             token,
-            project,
+            team: team_gid(team),
+            repository,
+            project: Arc::default(),
             base_url,
         }
+    }
+
+    /// The team project named after the repository, created when the team has none.
+    async fn project(&self) -> LinearResult<&str> {
+        self.project
+            .get_or_try_init(|| async {
+                let path = format!("/teams/{}/projects?archived=false", self.team);
+                let named: Vec<Project> = self
+                    .pages(&path)
+                    .await?
+                    .into_iter()
+                    .filter(|project: &Project| project.name == self.repository)
+                    .collect();
+                match named.as_slice() {
+                    [project] => Ok(project.gid.clone()),
+                    [] => {
+                        let project: Project = self
+                            .send(
+                                Method::POST,
+                                &format!("/teams/{}/projects", self.team),
+                                Some(json!({"name": self.repository})),
+                            )
+                            .await?;
+                        Ok(project.gid)
+                    }
+                    _ => Err(message(format!(
+                        "Asana team {} holds several projects named `{}`; rename all but one",
+                        self.team, self.repository
+                    ))),
+                }
+            })
+            .await
+            .map(String::as_str)
     }
 
     /// Create the exported task in the repository project. `input` is the saved
@@ -110,10 +168,10 @@ impl AsanaClient {
             .as_str()
             .ok_or_else(|| message("Asana export has no Loopflow identity"))?;
         let mut data = task_fields(input)?;
-        data["projects"] = json!([self.project]);
+        data["projects"] = json!([self.project().await?]);
         data["external"] = json!({"gid": id});
         let task: Task = self.send(Method::POST, "/tasks", Some(data)).await?;
-        Ok(self.response(id, task))
+        self.response(id, task).await
     }
 
     pub(crate) async fn task(&self, id: &str) -> LinearResult<Option<LinearIssue>> {
@@ -121,7 +179,7 @@ impl AsanaClient {
             .send::<Task>(Method::GET, &format!("/tasks/external:{id}"), None)
             .await
         {
-            Ok(task) => Ok(Some(self.issue(id, task)?)),
+            Ok(task) => Ok(Some(self.issue(id, task).await?)),
             Err(AsanaFailure::NotFound) => Ok(None),
             Err(AsanaFailure::Provider(error)) => Err(error),
         }
@@ -137,7 +195,7 @@ impl AsanaClient {
         let task: Task = self
             .send(Method::PUT, &format!("/tasks/external:{id}"), Some(data))
             .await?;
-        Ok(self.response(id, task))
+        self.response(id, task).await
     }
 
     /// Asana has open and completed tasks; a canceled Task is closed there too.
@@ -149,7 +207,7 @@ impl AsanaClient {
                 Some(json!({"completed": completed(target)?})),
             )
             .await?;
-        self.issue(id, task)
+        self.issue(id, task).await
     }
 
     pub(crate) async fn delete_task(&self, id: &str) -> LinearResult<()> {
@@ -215,23 +273,11 @@ impl AsanaClient {
         live: &[String],
         finished: &[String],
     ) -> LinearResult<Vec<(LinearIssue, LinearIssueObservation)>> {
-        let mut tasks: Vec<Task> = Vec::new();
-        let mut offset = None;
-        loop {
-            let mut path = format!("/projects/{}/tasks?limit={PAGE_LIMIT}", self.project);
-            if let Some(since) = since {
-                path.push_str(&format!("&modified_since={since}"));
-            }
-            if let Some(offset) = &offset {
-                path.push_str(&format!("&offset={offset}"));
-            }
-            let page: Envelope<Vec<Task>> = self.request(Method::GET, &path, None).await?;
-            tasks.extend(page.data);
-            match page.next_page {
-                Some(next) => offset = Some(next.offset),
-                None => break,
-            }
+        let mut path = format!("/projects/{}/tasks", self.project().await?);
+        if let Some(since) = since {
+            path.push_str(&format!("?modified_since={since}"));
         }
+        let tasks: Vec<Task> = self.pages(&path).await?;
         let mut changes = Vec::new();
         for mut task in tasks {
             let known = task.external.as_ref().and_then(|e| e.gid.clone());
@@ -251,27 +297,14 @@ impl AsanaClient {
                     .await?;
             }
             let observation = self.observation(task.clone()).await?;
-            changes.push((self.issue(&id, task)?, observation));
+            changes.push((self.issue(&id, task).await?, observation));
         }
         Ok(changes)
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
     async fn comments(&self, gid: &str) -> LinearResult<Vec<LinearComment>> {
-        let mut stories = Vec::new();
-        let mut offset = None;
-        loop {
-            let mut path = format!("/tasks/{gid}/stories?limit={PAGE_LIMIT}");
-            if let Some(offset) = &offset {
-                path.push_str(&format!("&offset={offset}"));
-            }
-            let page: Envelope<Vec<Story>> = self.request(Method::GET, &path, None).await?;
-            stories.extend(page.data);
-            match page.next_page {
-                Some(next) => offset = Some(next.offset),
-                None => break,
-            }
-        }
+        let stories: Vec<Story> = self.pages(&format!("/tasks/{gid}/stories")).await?;
         Ok(stories
             .into_iter()
             .filter(|story| story.resource_subtype.as_deref() == Some("comment_added"))
@@ -286,33 +319,35 @@ impl AsanaClient {
             .collect())
     }
 
-    fn response(&self, id: &str, task: Task) -> PlanningResponse {
-        let item = self.issue_unchecked(id, task);
-        PlanningResponse::Task {
+    async fn response(&self, id: &str, task: Task) -> LinearResult<PlanningResponse> {
+        let item = self.issue_unchecked(id, task).await?;
+        Ok(PlanningResponse::Task {
             issue: Box::new(OrderedIssue {
                 item,
                 priority_sort_order: 0.0,
                 sort_order: 0.0,
             }),
             project: None,
-        }
+        })
     }
 
-    fn issue(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+    async fn issue(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
         if task.external.as_ref().and_then(|e| e.gid.as_deref()) != Some(id) {
             return Err(message(
                 "Asana returned a task with a different Loopflow identity",
             ));
         }
-        Ok(self.issue_unchecked(id, task))
+        self.issue_unchecked(id, task).await
     }
 
-    fn issue_unchecked(&self, id: &str, task: Task) -> LinearIssue {
+    /// A task in the repository's team project belongs to the team's plan.
+    async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
+        let project = self.project().await?;
         let in_scope = task
             .memberships
             .iter()
-            .any(|m| m.project.as_ref().is_some_and(|p| p.gid == self.project));
-        LinearIssue {
+            .any(|m| m.project.as_ref().is_some_and(|p| p.gid == project));
+        Ok(LinearIssue {
             revision: Some(task.modified_at),
             id: id.to_string(),
             identifier: local_identifier(id),
@@ -333,9 +368,29 @@ impl AsanaClient {
                 .into(),
             ),
             project_id: None,
-            team_id: in_scope.then(|| self.project.clone()),
+            team_id: in_scope.then(|| self.team.clone()),
             assignee: task.assignee.map(|assignee| assignee.gid),
+        })
+    }
+
+    /// Every page of a list read, at Asana's largest page size.
+    async fn pages<T: serde::de::DeserializeOwned>(&self, path: &str) -> LinearResult<Vec<T>> {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let mut items = Vec::new();
+        let mut offset = None;
+        loop {
+            let mut page_path = format!("{path}{separator}limit={PAGE_LIMIT}");
+            if let Some(offset) = &offset {
+                page_path.push_str(&format!("&offset={offset}"));
+            }
+            let page: Envelope<Vec<T>> = self.request(Method::GET, &page_path, None).await?;
+            items.extend(page.data);
+            match page.next_page {
+                Some(next) => offset = Some(next.offset),
+                None => break,
+            }
         }
+        Ok(items)
     }
 
     async fn send<T: serde::de::DeserializeOwned>(
@@ -356,6 +411,8 @@ impl AsanaClient {
         let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let fields = if route.ends_with("/stories") {
             STORY_FIELDS
+        } else if route.ends_with("/projects") {
+            PROJECT_FIELDS
         } else {
             TASK_FIELDS
         };
@@ -429,6 +486,20 @@ impl From<AsanaFailure> for LinearError {
             AsanaFailure::Provider(error) => error,
         }
     }
+}
+
+/// An Asana team gid, bare or read from a team URL
+/// (`https://app.asana.com/0/team/<gid>/…` or `…/team/<gid>`).
+pub(crate) fn team_gid(raw: &str) -> String {
+    let segments: Vec<&str> = raw.trim().split(['/', '?', '#']).collect();
+    let numeric =
+        |segment: &str| !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit());
+    segments
+        .iter()
+        .position(|segment| *segment == "team")
+        .and_then(|team| segments.get(team + 1).copied().filter(|gid| numeric(gid)))
+        .or_else(|| segments.iter().rev().copied().find(|gid| numeric(gid)))
+        .map_or_else(|| raw.trim().to_string(), str::to_string)
 }
 
 /// The Loopflow identity of a task first created in Asana.
@@ -515,5 +586,18 @@ mod tests {
             json!({"name": "Ship", "html_notes": "<body>Notes</body>", "due_on": null, "completed": true})
         );
         assert!(task_fields(&json!({"projectId": "section"})).is_err());
+    }
+
+    #[test]
+    fn team_gids_read_from_urls_and_bare_ids() {
+        assert_eq!(team_gid("1209876543210"), "1209876543210");
+        assert_eq!(
+            team_gid("https://app.asana.com/0/team/1209876543210/overview"),
+            "1209876543210"
+        );
+        assert_eq!(
+            team_gid("https://app.asana.com/1/1100000000000001/team/1209876543210/all"),
+            "1209876543210"
+        );
     }
 }

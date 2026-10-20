@@ -164,24 +164,18 @@ pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
             OpsError::Message(format!("failed to read planning configuration: {error}"))
         })?
         .unwrap_or_default();
-    if !matches!(
-        config.planning_transport(),
-        crate::config::PlanningConfig::Linear {}
-    ) {
-        return Ok(None);
-    }
-    Ok(crate::config::load_repo_config(repo)
-        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
-        .unwrap_or_default()
-        .linear
-        .team
-        .filter(|team| !team.trim().is_empty()))
+    Ok(match config.planning_transport() {
+        crate::config::PlanningConfig::Linear { team } => {
+            team.filter(|team| !team.trim().is_empty())
+        }
+        _ => None,
+    })
 }
 
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `linear.team`. \
+            ".lf/config.yaml has no repository `planning.team`. \
              Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
@@ -545,12 +539,7 @@ async fn connect_async(
     let repo_id = repository_id(repo)?;
     let existing_initiative = read_initiative(repo, &wave);
     // Connecting selects a transport; it must first preserve the existing binding.
-    let existing_team = crate::config::load_repo_config(repo)
-        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
-        .unwrap_or_default()
-        .linear
-        .team
-        .filter(|team| !team.trim().is_empty());
+    let existing_team = selected_linear_team(repo)?;
 
     let summary = crate::work::wave::config::read_wave_summary(repo, &wave)?;
     let title = title_case(&wave);
@@ -1031,7 +1020,7 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no repository `linear.team`. \
+            ".lf/config.yaml has no repository `planning.team`. \
              Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
@@ -1492,7 +1481,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no repository `linear.team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no repository `planning.team`; run `lf repo connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message.clone());
         blocking.push(message);
     }
@@ -1807,21 +1796,12 @@ fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool>
             path.display()
         ))
     })?;
-    let linear_key = serde_yaml_ng::Value::String("linear".to_string());
-    let mut linear = root_map
-        .get(&linear_key)
-        .and_then(serde_yaml_ng::Value::as_mapping)
-        .cloned()
-        .unwrap_or_default();
-    linear.insert(
-        serde_yaml_ng::Value::String("team".to_string()),
-        serde_yaml_ng::Value::String(team_id.to_string()),
-    );
-    root_map.insert(linear_key, serde_yaml_ng::Value::Mapping(linear));
     root_map.insert(
         "planning".into(),
-        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {})
-            .map_err(|error| OpsError::Message(error.to_string()))?,
+        serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+            team: Some(team_id.to_string()),
+        })
+        .map_err(|error| OpsError::Message(error.to_string()))?,
     );
     if root == previous {
         return Ok(false);
@@ -2324,8 +2304,11 @@ mod tests {
     #[test]
     fn connect_overrides_personal_git_without_rebinding_the_repository() {
         with_pm_home(|home, runtime| {
-            std::fs::write(home.path().join("config.yaml"),
-                "planning:\n  provider: git\n  remote: personal\n  shared: private\nlinear:\n  team: personal-team\n").unwrap();
+            std::fs::write(
+                home.path().join("config.yaml"),
+                "planning:\n  provider: git\n  remote: personal\n  shared: private\n",
+            )
+            .unwrap();
             runtime.block_on(async {
                 let fixture = test_fixture::Fixture::new().await;
                 let (repo, wave) = fixture.planning_repo().await;
@@ -2364,7 +2347,9 @@ mod tests {
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
                         assert_eq!(
                             config.planning_transport(),
-                            crate::config::PlanningConfig::Linear {}
+                            crate::config::PlanningConfig::Linear {
+                                team: Some("team-1".into())
+                            }
                         );
                         assert_eq!(
                             selected_linear_team(&repo).unwrap().as_deref(),
@@ -2401,10 +2386,11 @@ mod tests {
         let config = crate::config::load_repo_config(repo.path())
             .unwrap()
             .unwrap();
-        assert_eq!(config.linear.team.as_deref(), Some("team-product"));
         assert_eq!(
             config.planning_transport(),
-            crate::config::PlanningConfig::Linear {}
+            crate::config::PlanningConfig::Linear {
+                team: Some("team-product".into())
+            }
         );
         assert_eq!(config.agent.as_deref(), Some("codex"));
         let updated = std::fs::read_to_string(goal).unwrap();
@@ -2420,7 +2406,10 @@ mod tests {
     #[test]
     fn repository_team_config_is_the_only_normal_authority() {
         with_pm_home(|repo, runtime| {
-            write_repo_config(repo.path(), "linear:\n  team: team-loo\n");
+            write_repo_config(
+                repo.path(),
+                "planning:\n  provider: linear\n  team: team-loo\n",
+            );
             write_goal(
                 repo.path(),
                 "product",
@@ -2481,7 +2470,7 @@ mod tests {
             runtime.block_on(async {
                 write_repo_config(
                     repo.path(),
-                    "linear:\n  team: team-loo\n",
+                    "planning:\n  provider: linear\n  team: team-loo\n",
                 );
                 write_goal(
                     repo.path(),
@@ -2731,7 +2720,7 @@ mod tests {
             runtime.block_on(async {
                 write_repo_config(
                     repo.path(),
-                    "linear:\n  team: team-loo\n",
+                    "planning:\n  provider: linear\n  team: team-loo\n",
                 );
                 write_goal(
                     repo.path(),

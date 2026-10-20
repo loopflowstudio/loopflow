@@ -202,15 +202,9 @@ pub enum MergeMethod {
     Rebase,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct LinearConfig {
-    #[serde(default)]
-    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
-    pub team: Option<String>,
-}
-
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
+/// Every remote provider names the team that owns the repository's Tasks.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlanningConfig {
@@ -221,16 +215,16 @@ pub enum PlanningConfig {
         #[serde(default)]
         shared: Option<String>,
     },
-    Linear {},
-    /// Tasks mirror into one Asana project, the repository's planning scope.
-    Asana {
-        project: String,
+    /// The Linear Team's ID; `lf repo connect` finds or creates it.
+    Linear {
+        #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
+        team: Option<String>,
     },
-    /// Tasks mirror into one Notion database, the repository's planning scope.
-    /// Accepts the database ID or its Notion URL.
-    Notion {
-        database: String,
-    },
+    /// The Asana team's gid or URL. Tasks live in the team project named
+    /// after the repository; Wave Projects are Asana projects in the team.
+    Asana { team: String },
+    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
+    Notion { team: String },
 }
 
 fn default_planning_remote() -> String {
@@ -242,7 +236,7 @@ impl PlanningConfig {
     pub fn remote_name(&self) -> Option<&'static str> {
         match self {
             Self::Git { .. } => None,
-            Self::Linear {} => Some("Linear"),
+            Self::Linear { .. } => Some("Linear"),
             Self::Asana { .. } => Some("Asana"),
             Self::Notion { .. } => Some("Notion"),
         }
@@ -260,13 +254,7 @@ impl Default for PlanningConfig {
 
 impl Config {
     pub fn planning_transport(&self) -> PlanningConfig {
-        self.planning.clone().unwrap_or_else(|| {
-            if self.linear.team.is_some() {
-                PlanningConfig::Linear {}
-            } else {
-                PlanningConfig::default()
-            }
-        })
+        self.planning.clone().unwrap_or_default()
     }
 }
 
@@ -364,10 +352,6 @@ pub struct Config {
     #[serde(default)]
     pub release: ReleaseConfig,
 
-    /// Repository binding used by Linear synchronization.
-    #[serde(default)]
-    pub linear: LinearConfig,
-
     /// Run provider conversations in the selected account's own home rather
     /// than the provider's native one. `--shared` overrides it per launch.
     #[serde(default)]
@@ -420,7 +404,6 @@ impl Default for Config {
             summaries: Vec::new(),
             summary_tokens: default_summary_tokens(),
             release: ReleaseConfig::default(),
-            linear: LinearConfig::default(),
             isolate: false,
         }
     }
@@ -681,17 +664,13 @@ mod tests {
     }
 
     #[test]
-    fn config_parses_linear_settings() {
-        let yaml = r#"
-linear:
-  team: "9876543210"
-"#;
-
+    fn config_parses_planning_team() {
+        let yaml = "planning:\n  provider: asana\n  team: \"9876543210\"\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
-            config.linear,
-            LinearConfig {
-                team: Some("9876543210".to_string()),
+            config.planning_transport(),
+            PlanningConfig::Asana {
+                team: "9876543210".to_string(),
             }
         );
     }
@@ -1063,21 +1042,6 @@ supported_harnesses:
         let config = load_config_or_default(Some(temp.path()));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
-
-    #[test]
-    fn load_repo_config_reads_linear_team() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let config_dir = temp.path().join(".lf");
-        std::fs::create_dir_all(&config_dir).expect("create .lf dir");
-        std::fs::write(
-            config_dir.join("config.yaml"),
-            "linear:\n  team: team-loo\n",
-        )
-        .expect("write config");
-
-        let config = load_repo_config(temp.path()).unwrap().unwrap();
-        assert_eq!(config.linear.team.as_deref(), Some("team-loo"));
-    }
 }
 
 #[cfg(test)]
@@ -1090,20 +1054,15 @@ mod planning_config_tests {
             "planning:\n  provider: git\n  remote: private\n  shared: solo\n",
         )
         .unwrap();
-        let repository = serde_yaml_ng::from_str("planning:\n  provider: linear\n").unwrap();
+        let repository =
+            serde_yaml_ng::from_str("planning:\n  provider: linear\n  team: team\n").unwrap();
         let config: Config =
             serde_yaml_ng::from_value(merge_config_values(Some(personal), Some(repository)))
                 .unwrap();
-        assert_eq!(config.planning_transport(), PlanningConfig::Linear {});
-        let selected: Config = serde_yaml_ng::from_str(
-            "linear:\n  team: team\nplanning:\n  provider: git\n  shared: employees\n",
-        )
-        .unwrap();
         assert_eq!(
-            selected.planning_transport(),
-            PlanningConfig::Git {
-                remote: "origin".into(),
-                shared: Some("employees".into())
+            config.planning_transport(),
+            PlanningConfig::Linear {
+                team: Some("team".into())
             }
         );
         assert_eq!(

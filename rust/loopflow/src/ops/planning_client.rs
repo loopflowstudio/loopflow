@@ -38,17 +38,32 @@ pub(crate) fn connected(repo: &str) -> bool {
 }
 
 pub(crate) fn is_linear(repo: &str) -> bool {
-    matches!(transport(Path::new(repo)), Some(PlanningConfig::Linear {}))
+    matches!(
+        transport(Path::new(repo)),
+        Some(PlanningConfig::Linear { .. })
+    )
 }
 
-/// The provider scope every repository Task belongs to: a Linear Team, the
-/// repository's Asana project or its Notion database.
+/// The team every repository Task belongs to: a Linear Team, an Asana team or
+/// the Notion page that holds the Tasks database.
 pub(crate) fn repository_scope(repo: &Path) -> OpsResult<String> {
     match transport(repo) {
-        Some(PlanningConfig::Asana { project }) => Ok(project),
-        Some(PlanningConfig::Notion { database }) => Ok(crate::notion::database_id(&database)),
+        Some(PlanningConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
+        Some(PlanningConfig::Notion { team }) => Ok(crate::notion::notion_id(&team)),
         _ => super::linear::repository_team_id(repo),
     }
+}
+
+/// The repository's name, which names its Asana team project: the origin's
+/// repository name, else the main checkout's directory.
+fn repository_name(repo: &Path) -> String {
+    if let Ok(id) = crate::repository::RepoId::discover(repo) {
+        return id.name().to_string();
+    }
+    let main = crate::git::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    main.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "loopflow".into())
 }
 
 #[derive(Debug, Clone)]
@@ -62,8 +77,8 @@ impl PlanningClient {
     /// Repository-scoped access; Linear validates the repository's Team claim.
     pub(crate) async fn for_repository(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { project }) => asana(project).await,
-            Some(PlanningConfig::Notion { database }) => notion(database).await,
+            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(PlanningConfig::Notion { team }) => notion(&team).await,
             _ => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
         }
     }
@@ -71,8 +86,8 @@ impl PlanningClient {
     /// Exact-item access for a Task that already names its planning identity.
     pub(crate) async fn for_items(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { project }) => asana(project).await,
-            Some(PlanningConfig::Notion { database }) => notion(database).await,
+            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(PlanningConfig::Notion { team }) => notion(&team).await,
             _ => Ok(Self::Linear(
                 super::linear::issue_client().await?.for_repository(repo),
             )),
@@ -255,30 +270,33 @@ pub(crate) enum StateScope<'a> {
     Team(&'a str),
 }
 
-async fn asana(project: String) -> OpsResult<PlanningClient> {
+async fn asana(repo: &Path, team: &str) -> OpsResult<PlanningClient> {
     let token = super::linear::resolve_planning_token(Provider::Asana).await?;
+    let repository = repository_name(repo);
     #[cfg(test)]
     if let Ok(url) =
         super::linear::LINEAR_TEST_CONTEXT.try_with(|context| context.graphql_url.clone())
     {
         return Ok(PlanningClient::Asana(AsanaClient::with_base_url(
-            token, project, url,
+            token, team, repository, url,
         )));
     }
-    Ok(PlanningClient::Asana(AsanaClient::new(token, project)))
+    Ok(PlanningClient::Asana(AsanaClient::new(
+        token, team, repository,
+    )))
 }
 
-async fn notion(database: String) -> OpsResult<PlanningClient> {
+async fn notion(team: &str) -> OpsResult<PlanningClient> {
     let token = super::linear::resolve_planning_token(Provider::Notion).await?;
     #[cfg(test)]
     if let Ok(url) =
         super::linear::LINEAR_TEST_CONTEXT.try_with(|context| context.graphql_url.clone())
     {
         return Ok(PlanningClient::Notion(NotionClient::with_base_url(
-            token, database, url,
+            token, team, url,
         )));
     }
-    Ok(PlanningClient::Notion(NotionClient::new(token, database)))
+    Ok(PlanningClient::Notion(NotionClient::new(token, team)))
 }
 
 /// A comment without Loopflow's hidden `<!-- loopflow-… -->` markers, which

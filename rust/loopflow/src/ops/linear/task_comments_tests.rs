@@ -183,7 +183,11 @@ async fn task_comments_read_and_publish_without_starting_work() {
             .unwrap()
             .success());
     }
-    std::fs::write(repo.join(".lf/config.yaml"), "linear:\n  team: team-1\n").unwrap();
+    std::fs::write(
+        repo.join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: team-1\n",
+    )
+    .unwrap();
     for (wave, initiative) in [("product", "initiative-1"), ("other", "initiative-2")] {
         std::fs::write(
             repo.join(format!(".lf/wave/{wave}/GOAL.md")),

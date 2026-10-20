@@ -1,7 +1,7 @@
 # LOO-523 open questions (decided provisionally; Jack reviews before landing)
 
 1. **Superseded by Jack Heart (2026-10-20):** the committed `machines:` block is
-   deleted; each person's Wave Machine is Machine-local (`lf wave machine`).
+   deleted; each person's Machine defaults are Machine-local (`lf machine use`).
 2. **Decided by Jack Heart (2026-10-19): an unconfigured repository resolves to
    "this Machine".** Both claims push to the provider, and the second claim wins.
    Machines that never connect through a provider do not share the Task. The
@@ -46,6 +46,8 @@
 
 Applied during compress (2026-10-20): infrastructure MEMORY.md drops placement,
 admission and Started claims and records LOO-523 in the LOO-412 section.
+Proposed (not applied; this Flow does not maintain Wave memory): MEMORY.md:754
+should say `lf machine use` instead of the Machine-local `lf wave machine`.
 
 14. **The ownership verbs are `claim`, `handoff` and `unclaim`** (Jack Heart, 2026-10-20).
     `lf task release` made `lf release` ambiguous; `unclaim` pairs with `claim` and
@@ -71,37 +73,50 @@ admission and Started claims and records LOO-523 in the LOO-412 section.
   Machines.** Your laptop routes ownership commands to your mini. Another person
   never routes to your Machine; their claim is written on their own Machine and the
   later claim wins. The Machine in the Linear claim comment is informational only.
-- **Decided by Jack Heart (2026-10-20): `lf wave machine <wave> <machine>`** stores
-  the person's Wave Machine default on this Machine and copies it to their other
-  registered Machines over `lf --machine`. Setting it also moves that person's Wave
-  Session to the Machine, restarting it there if it does not already live there.
-- **Decided by Jack Heart (2026-10-20): `lf repo machine <machine>`** mirrors
-  `lf wave machine`: a personal default for the repo Session and for Tasks with no
-  Wave, stored on this Machine and copied to the person's other Machines over
-  `lf --machine`. Setting it moves the person's repo Session there (complete the old
-  primary, admit on the target). `lf connect --repo` and repo `--fresh`/resetSession
-  route to it. Resolution: Wave → parent Waves → repo Machine → this Machine.
+- **Decided by Jack Heart (2026-10-20): `lf machine use <machine> [wave] [--task <task>] [--repo]`**
+  is the one command that places work (replaces `lf wave machine`, the proposed
+  `lf repo machine`, and `lf task handoff`). Scope: `--task` hands off that Task
+  (appends a `handoff`); `--repo` sets this repository's default; a Wave argument
+  sets that Wave's default; bare, the worktree's Task, else its Wave, else the
+  repository. The flags conflict with each other and with a Wave argument. The
+  output names the scope it set. A default is stored on this Machine and copied
+  to the person's other Machines over `lf --machine`; setting it moves the Wave or
+  repo Session there (complete the old primary, admit on the target). `lf machine
+  list` shows the defaults naming each Machine. Resolution for a new Task:
+  Wave → parent Waves → repository → this Machine.
+- **Decided by Jack Heart (2026-10-20): Machine and account are configured as
+  siblings.** Defaults live in the personal SQLite store (`scope_defaults`, keyed by
+  Wave or repository identity; never `~/.lf/config.yaml`, whose repos are keyed by
+  per-Machine paths), under one shared scope type (`DefaultScope`) and resolver
+  (`store/sqlite/scope_defaults.rs`). Machine is the first setting; LOO-540 moves
+  account routes onto it. A Task-scoped Machine is the ownership claim, not a default.
 - **Decided by Jack Heart (2026-10-20): the Machine registry is personal, not
   repo-scoped.** `lf machine add/list/remove`, labels and routes belong to the
-  person across all repositories: no repository column or repo-keyed lookup on
-  `machines`, and no repository content. Wave and repo Machine defaults stay keyed
-  by Wave or repository in the personal store. Remove existing repo scoping
-  (`machines.repo`, `remove_machine` clearing it) in this change.
+  person across all repositories. Done: `machines.repo` is dropped in the draft,
+  `lf machine add --repo` is gone, `remove_machine` clears only the label, and
+  `lf --machine` names the caller's repository by identity (`--repository`) so the
+  destination resolves its own checkout; outside a repository or before
+  `lf repo identity`, the command runs in the remote home directory.
 - **Moving a Session leaves its native history behind** on the old Machine; the
   successor starts with fresh Wave context, like `--fresh`.
 
 ## Implementation choices (2026-10-20, needs Jack's review)
 
-15. **`wave_machines` is keyed by Wave id alone.** A Machine's store belongs to one
-    person, so "the person's" Wave Machine needs no person column. Copies travel by
-    Wave name with `--repository`, since Wave ids are per Machine.
-16. **Setting the Wave Machine admits, not launches, the Wave Session there.** The
-    target admits a primary (`ensure`, as `--prepare` does); the provider starts on
-    the next connect. Other Machines complete their Wave primary. `--unset` moves no
-    Session: every Machine then runs its own.
+15. **Defaults carry no person column.** A Machine's store belongs to one person,
+    so "the person's" default needs none. Copies travel by Wave name or `--repo`
+    with `--repository`, since Wave ids are per Machine while repository ids are shared.
+16. **Setting a default admits, not launches, the Session there.** The target admits
+    a primary (`ensure`, as `--prepare` does); the provider starts on the next
+    connect. Other Machines complete their primary for that scope. There is no
+    `--unset`: Jack's command shape has none, and `lf machine use <this-machine>`
+    restores local runs. Add one if clearing a default turns out to matter.
 17. **Recorded entries (no person) count as yours**, and so does every entry when
     this Machine has no participant name; single-person use needs no name.
 18. **Deferred from "primary Sessions follow the Machine":** context-resolved
-    connects (no `--wave`) routing to the Wave Machine, `observe_task_location`
-    reading the owner Machine, and `lf open` reading remote primaries. Explicit
-    `--wave`/`--task` connects already route.
+    connects (no `--wave`/`--repo`) routing to the default Machine, and `lf open`
+    reading remote primaries. Explicit `--wave`, `--task`, and `--repo`/`--repository`
+    connects route.
+19. **Bare `lf machine use` in a handed-off Task's worktree does not forward.** An
+    explicit `--task` routes to the Task's writer like `lf task claim`; the implicit
+    worktree Task runs locally and refuses with "run the command there" when this
+    Machine is no longer its writer.

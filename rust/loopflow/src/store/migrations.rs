@@ -3120,6 +3120,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(retired, 0);
+        // The Machine registry is the person's: a label survives, a checkout does not.
+        let label: String = conn
+            .query_row(
+                "SELECT label FROM machines WHERE id='home_labeled'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(label, "mini");
+        assert!(conn.prepare("SELECT repo FROM machines").is_err());
         let journal: Vec<String> = conn
             .prepare("SELECT id FROM planning_peer_changes ORDER BY id")
             .unwrap()

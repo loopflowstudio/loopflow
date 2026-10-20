@@ -2,6 +2,8 @@
 INSERT INTO repository_plans(id,repo,selected) VALUES('repo_owned','/repo',1);
 INSERT INTO machines(id,route,created_at,observed_at)
 VALUES('home_checkout','ssh://checkout',1,1),('home_admitted','ssh://admitted',1,1);
+INSERT INTO machines(id,route,created_at,observed_at,label,repo)
+VALUES('home_labeled','ssh://mini',1,1,'mini','src/project');
 INSERT INTO tasks(id,repository_id,issue_identifier,created_at,workspace_slug,worktree,checkout_machine_id)
 VALUES('task_started','repo_owned','OWN-1',10,'',NULL,NULL),
       ('task_checkout','repo_owned','OWN-2',11,'','/repo.checkout','home_checkout'),

@@ -33,12 +33,11 @@ impl Store {
         machine_id: &MachineId,
         target: &str,
         label: &str,
-        repo: &str,
     ) -> StoreResult<Machine> {
         let machine_id = machine_id.clone();
-        let (target, label, repo) = (target.to_string(), label.to_string(), repo.to_string());
+        let (target, label) = (target.to_string(), label.to_string());
         run_sqlite(&self.sqlite, move |store| {
-            store.add_machine(&machine_id, &target, &label, &repo)
+            store.add_machine(&machine_id, &target, &label)
         })
         .await
     }
@@ -176,12 +175,9 @@ mod tests {
     async fn removing_connection_preserves_identity() {
         let (store, _) = wave_work().await;
         let id = crate::durable::MachineId::new();
-        let added = store
-            .add_machine(&id, "mini", "builder", "/projects/repo")
-            .await
-            .unwrap();
+        let added = store.add_machine(&id, "mini", "builder").await.unwrap();
         assert!(store
-            .add_machine(&crate::durable::MachineId::new(), "other", "builder", ".")
+            .add_machine(&crate::durable::MachineId::new(), "other", "builder")
             .await
             .is_err());
         store.rename_machine("builder", "mini").await.unwrap();
@@ -192,7 +188,6 @@ mod tests {
         assert_eq!(retained.created_at, added.created_at);
         assert_eq!(retained.route, "mini");
         assert!(retained.label.is_none());
-        assert!(retained.repo.is_none());
     }
 
     #[tokio::test]
@@ -201,7 +196,7 @@ mod tests {
         let local = store.local_machine().await.unwrap();
 
         assert!(matches!(
-            store.add_machine(&local.id, "ssh://jack@elsewhere", "ssh://jack@elsewhere", ".").await,
+            store.add_machine(&local.id, "ssh://jack@elsewhere", "ssh://jack@elsewhere").await,
             Err(StoreError::InvalidData(message)) if message.contains("cannot add the local machine")
         ));
         assert_eq!(store.local_machine().await.unwrap(), local);

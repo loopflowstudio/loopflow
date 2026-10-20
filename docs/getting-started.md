@@ -262,18 +262,18 @@ lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave list --json
 lf --machine mini --wave shipper wave-operate
-lf task handoff LOO-123 mini            # move one Task's ownership to mini
+lf machine use mini --task LOO-123  # move one Task's ownership to mini
 ```
 
 Pick the Machine that runs your new Tasks for a Wave:
 
 ```bash
-lf wave machine shipper mini            # stored here and on your other Machines
-lf session connect --wave shipper       # your Wave Session, now on mini
+lf machine use mini shipper        # stored here and on your other Machines
+lf session connect --wave shipper  # your Wave Session, now on mini
 ```
 
 The choice is yours alone and never committed. Existing Tasks stay put; move one
-with `lf task handoff`.
+with `lf machine use <machine> --task <task>`.
 
 The target Machine proves its identity before running the command and keeps the
 resulting execution locally.

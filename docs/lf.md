@@ -131,7 +131,7 @@ moves local Workflows or transfers a started Task to another Machine.
 
 ```bash
 lf task claim TASK               # you, on this Machine
-lf task handoff TASK mini        # same person, on mini
+lf machine use mini --task TASK  # same person, on mini
 lf task unclaim TASK             # unowned again, history intact
 lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
@@ -142,9 +142,9 @@ target's identity, not a connection. Completion, abandonment and reopening leave
 ownership alone; a Done Task shows its last owner.
 
 ```bash
-lf wave machine infrastructure mini     # your Machine for this Wave's new Tasks
-lf wave machine infrastructure          # show it ("mini", or "this Machine")
-lf wave machine infrastructure --unset  # back to whichever Machine runs the command
+lf machine use mini infrastructure  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo          # this repository's default
+lf machine list                     # each Machine with the defaults naming it
 ```
 
 Your Wave Machine is a personal choice, never committed. It is stored in this
@@ -160,7 +160,7 @@ Session and the new Machine admits a fresh one, with fresh Wave context as with
 `lf session connect --wave <wave>` routes to your Wave Machine.
 
 A Task's Machine is the one in its claim. Changing the Wave Machine moves no
-existing Task; `lf task handoff <task> <machine>` moves one, completing its primary
+existing Task; `lf machine use <machine> --task <task>` moves one, completing its primary
 Session on the old Machine. The new Machine admits one on first connect.
 
 Claim, handoff, unclaim, run and checkout pick their writer within your own Machines:
@@ -1139,7 +1139,7 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ## Work on another machine
 
 ```bash
-lf machine add mini --repo '~/src/project'
+lf machine add mini
 lf machine status mini
 lf machine connect mini codex work@example.com
 lf --machine mini --repo loopflow session list

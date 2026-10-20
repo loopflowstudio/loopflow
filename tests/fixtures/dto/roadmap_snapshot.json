@@ -1092,8 +1092,7 @@
           "route": "ssh://jack@mini-heart",
           "created_at": "1970-01-01T00:00:00Z",
           "observed_at": "1970-01-01T00:00:00Z",
-          "label": "mini",
-          "repo": "src/project"
+          "label": "mini"
         }
       },
       "metric_portfolio": {

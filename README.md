@@ -176,14 +176,14 @@ UUID and `SESSION_…` select the same records and print canonical IDs. Provider
 conversation IDs, names, slugs and paths stay exactly as written.
 
 ```bash
-lf task claim LOO-506          # you, on this Machine
-lf task handoff LOO-506 mini   # same person, on mini
-lf task unclaim LOO-506        # unowned again
+lf task claim LOO-506               # you, on this Machine
+lf machine use mini --task LOO-506  # same person, on mini
+lf task unclaim LOO-506             # unowned again
 ```
 
 A Task is owned by a person on a Machine, or unowned; `lf task run` claims an
 unowned Task. Ownership travels with shared planning as Task comments.
-`lf wave machine <wave> mini` picks your Machine for a Wave's new Tasks; it is
+`lf machine use mini <wave>` picks your Machine for a Wave's new Tasks; it is
 yours, never committed. Connection settings and execution records remain Machine-local.
 
 Task comments in Linear reach the Task's next useful boundary: before a Flow step,

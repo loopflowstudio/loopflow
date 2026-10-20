@@ -89,10 +89,6 @@ fn wave_detail_preserves_flow_and_machine() {
         Some("mini")
     );
     assert_eq!(
-        snapshot.wave.machine.as_ref().unwrap().repo.as_deref(),
-        Some("src/project")
-    );
-    assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );

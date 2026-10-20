@@ -29,19 +29,25 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_task_ownership_update AFTER UPDATE ON task_ownership
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
--- This person's Machine for each Wave's unowned Tasks. Personal, never planning
--- content: each of the person's Machines holds its own copy.
-CREATE TABLE wave_machines (
-    wave_id TEXT PRIMARY KEY,
-    machine_id TEXT NOT NULL CHECK (machine_id GLOB 'home_*'),
-    set_at INTEGER NOT NULL
+-- This person's defaults, by Wave or repository; a Task's own Machine is its
+-- ownership claim. Personal, never planning content: each of the person's
+-- Machines holds its own copy. Machine is the first setting; each is optional.
+CREATE TABLE scope_defaults (
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('wave', 'repository')),
+    scope_id TEXT NOT NULL,
+    machine_id TEXT CHECK (machine_id GLOB 'home_*'),
+    set_at INTEGER NOT NULL,
+    PRIMARY KEY (scope_kind, scope_id),
+    CHECK (scope_kind != 'repository' OR scope_id GLOB 'repo_*')
 );
-CREATE TRIGGER store_revision_wave_machines_insert AFTER INSERT ON wave_machines
+CREATE TRIGGER store_revision_scope_defaults_insert AFTER INSERT ON scope_defaults
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_wave_machines_update AFTER UPDATE ON wave_machines
+CREATE TRIGGER store_revision_scope_defaults_update AFTER UPDATE ON scope_defaults
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_wave_machines_delete AFTER DELETE ON wave_machines
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- The Machine registry is the person's, across every repository: a Machine
+-- names no checkout, and `lf --machine` addresses the repository by identity.
+ALTER TABLE machines DROP COLUMN repo;
 
 -- One entry records what each Machine knew. It invents no person, and a Machine
 -- it cannot name stays unknown. These entries are local evidence, never delivered.

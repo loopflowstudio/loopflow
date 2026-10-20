@@ -2478,7 +2478,7 @@ mod tests {
         let assigned = crate::durable::MachineId::new();
         for (id, label) in [(&owner, "build-server"), (&assigned, "new-default")] {
             store
-                .add_machine(id, &format!("{label}.invalid"), label, "/remote/repo")
+                .add_machine(id, &format!("{label}.invalid"), label)
                 .await
                 .unwrap();
         }

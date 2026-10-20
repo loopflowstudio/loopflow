@@ -5184,7 +5184,7 @@ mod tests {
         fixture
             .store
             .sqlite
-            .add_machine(&remote, "worker", "worker", "/repo")
+            .add_machine(&remote, "worker", "worker")
             .unwrap();
         let mut pr = runtime
             .block_on(fixture.store.active_task_pr(&fixture.task.id))
@@ -5331,7 +5331,7 @@ mod tests {
         fixture
             .store
             .sqlite
-            .add_machine(&remote, "remote", "remote", "/repo")
+            .add_machine(&remote, "remote", "remote")
             .unwrap();
         let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
         connection
@@ -5656,7 +5656,7 @@ mod tests {
         let peer = crate::durable::MachineId::new();
         fixture
             .store
-            .add_machine(&peer, "peer", "peer", "/repo")
+            .add_machine(&peer, "peer", "peer")
             .await
             .unwrap();
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();

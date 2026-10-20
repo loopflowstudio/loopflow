@@ -45,6 +45,7 @@ pub(crate) mod project_selection;
 mod project_transitions;
 mod repositories;
 mod revisions;
+mod scope_defaults;
 mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_ownership;

@@ -846,7 +846,7 @@ fn unavailable_execution_owner_opens_nothing_locally() {
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let peer = loopflow::durable::MachineId::new();
     store
-        .add_machine(&peer, "must-not-contact.invalid", "peer", "/repo")
+        .add_machine(&peer, "must-not-contact.invalid", "peer")
         .unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()

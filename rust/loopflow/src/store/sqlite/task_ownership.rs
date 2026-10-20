@@ -7,8 +7,8 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
-    MachineId, MachineRef, OwnershipEntryId, OwnershipKind, OwningMachineSource,
-    TaskExecutionSource, TaskId, TaskOwner, TaskOwnership, TaskOwnershipEntry,
+    MachineId, MachineRef, OwnershipEntryId, OwnershipKind, TaskExecutionSource, TaskId, TaskOwner,
+    TaskOwnership, TaskOwnershipEntry,
 };
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::comment::{TaskComment, TaskCommentAuthor};
@@ -118,7 +118,7 @@ fn read_log(rows: &[Row], local: &MachineId) -> Reading {
     }
 }
 
-fn local_machine_in(conn: &Connection) -> StoreResult<MachineId> {
+pub(super) fn local_machine_in(conn: &Connection) -> StoreResult<MachineId> {
     Ok(super::durable::map_local_machine(conn)?.id)
 }
 
@@ -182,29 +182,6 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(reading_in(conn, task)?.1.owner.is_some())
 }
 
-fn resolve_owning_machine(
-    conn: &Connection,
-    mut wave: Option<String>,
-) -> StoreResult<(MachineId, OwningMachineSource)> {
-    let mut visited = std::collections::HashSet::new();
-    while let Some(id) = wave.filter(|id| visited.insert(id.clone())) {
-        let (name, parent, machine): (String, Option<String>, Option<String>) = conn.query_row(
-            "SELECT w.name,w.parent_wave_id,m.machine_id FROM waves w
-             LEFT JOIN wave_machines m ON m.wave_id=w.id WHERE w.id=?1",
-            [&id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        if let Some(machine) = machine {
-            return Ok((
-                MachineId::from_raw(machine),
-                OwningMachineSource::Wave(name),
-            ));
-        }
-        wave = parent;
-    }
-    Ok((local_machine_in(conn)?, OwningMachineSource::ThisMachine))
-}
-
 /// This Machine, or one registered with `lf machine add`.
 fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool> {
     Ok(conn
@@ -241,14 +218,12 @@ pub(super) fn writer_in(
             }
         }
     }
-    // Your Machine for an unowned Task: its Wave's or a parent Wave's setting,
-    // then this Machine.
-    let wave: Option<String> = conn.query_row(
-        "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+    let (wave, repository): (Option<String>, Option<String>) = conn.query_row(
+        "SELECT p.wave_id,t.repository_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
         [task.as_str()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    let (machine, source) = resolve_owning_machine(conn, wave)?;
+    let (machine, source) = super::scope_defaults::owning_machine_in(conn, wave, repository)?;
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 
@@ -481,7 +456,7 @@ fn notify_superseded_in(
     let text = format!(
         "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
          nothing was cancelled. Keep going, or run `lf task unclaim` or \
-         `lf task handoff` to end this claim."
+         `lf machine use <machine> --task` to end this claim."
     );
     let steer = super::steers::save_in(
         conn,
@@ -521,34 +496,6 @@ pub(super) fn reassert_in(
 }
 
 impl SqliteStore {
-    /// Your Machine for a Wave's unowned Tasks.
-    pub fn wave_owning_machine(
-        &self,
-        wave: &crate::id::WaveId,
-    ) -> StoreResult<(MachineId, OwningMachineSource)> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        resolve_owning_machine(&snapshot, Some(wave.to_string()))
-    }
-
-    /// Set or clear your Machine for a Wave. Existing Tasks keep their claims.
-    pub fn set_wave_machine(
-        &self,
-        wave: &crate::id::WaveId,
-        machine: Option<&MachineId>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        match machine {
-            Some(machine) => conn.execute(
-                "INSERT INTO wave_machines(wave_id,machine_id,set_at) VALUES(?1,?2,?3)
-                 ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id,set_at=excluded.set_at",
-                params![wave.as_str(), machine.as_str(), crate::store::rows::now_unix()],
-            )?,
-            None => conn.execute("DELETE FROM wave_machines WHERE wave_id=?1", [wave.as_str()])?,
-        };
-        Ok(())
-    }
-
     pub fn task_ownership(&self, task: &TaskId) -> StoreResult<TaskOwnership> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;

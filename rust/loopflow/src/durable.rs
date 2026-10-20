@@ -147,10 +147,31 @@ pub enum TaskExecutionSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
 pub enum OwningMachineSource {
-    /// `lf wave machine`, set on the Task's Wave or a parent Wave.
+    /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// No Wave Machine is set: the Machine running the command.
+    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    Repository,
+    /// No default is set: the Machine running the command.
     ThisMachine,
+}
+
+/// Where a person sets a default above a single Task. A Task's own Machine is
+/// its ownership claim, not a default. Resolution walks Wave → parent Waves →
+/// repository → the setting's fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum DefaultScope {
+    Wave(crate::id::WaveId),
+    Repository(RepositoryId),
+}
+
+/// One of your Machine defaults, with the scope's name on this Machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineDefault {
+    pub scope: DefaultScope,
+    /// The Wave's name, or the repository's path on this Machine.
+    pub name: String,
+    pub machine_id: MachineId,
 }
 
 prefixed_uuid_id!(
@@ -230,7 +251,6 @@ pub struct TaskOwnership {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Machine {
     pub label: Option<String>,
-    pub repo: Option<String>,
     pub id: MachineId,
     pub route: String,
     #[serde(with = "time::serde::rfc3339")]

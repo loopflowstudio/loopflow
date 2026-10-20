@@ -129,7 +129,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
     fs::write(&source_db, b"source must not be opened").unwrap();
     let marker = loopflow::durable::MachineId::new();
     store
-        .add_machine(&marker, "ssh://proof@example.invalid", "proof", "~/project")
+        .add_machine(&marker, "ssh://proof@example.invalid", "proof")
         .unwrap();
     for args in [
         vec!["machine", "rename", "proof", "renamed"],
@@ -1259,12 +1259,7 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
             "remote" => {
                 let remote = loopflow::durable::MachineId::new();
                 store
-                    .add_machine(
-                        &remote,
-                        "must-not-contact.invalid",
-                        "fixture-peer",
-                        "/peer/repo",
-                    )
+                    .add_machine(&remote, "must-not-contact.invalid", "fixture-peer")
                     .unwrap();
                 db.execute("UPDATE tasks SET checkout_machine_id=?1", [remote.as_str()])
                     .unwrap();
@@ -2885,16 +2880,16 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     );
     let remote = loopflow::durable::MachineId::new();
     store
-        .add_machine(
+        .add_machine(&remote, "must-not-contact.invalid", "fixture-peer")
+        .unwrap();
+    store
+        .set_machine_default(
+            &loopflow::durable::DefaultScope::Wave(
+                loopflow::id::WaveId::parse(&destination_wave).unwrap(),
+            ),
             &remote,
-            "must-not-contact.invalid",
-            "fixture-peer",
-            "/peer/repo",
         )
         .unwrap();
-    db.execute("INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at,provenance)
-        VALUES(?1,?2,1,1,'explicit') ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id",
-        rusqlite::params![destination_wave, remote.as_str()]).unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     let before = fs::read(&path).unwrap();
     let remote = read("destination");
@@ -3133,7 +3128,7 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
             "remote" => {
                 let peer = loopflow::durable::MachineId::new();
                 store
-                    .add_machine(&peer, "must-not-contact.invalid", "peer", "/repo")
+                    .add_machine(&peer, "must-not-contact.invalid", "peer")
                     .unwrap();
                 db.execute("UPDATE tasks SET checkout_machine_id=?1", [peer.as_str()])
                     .unwrap();

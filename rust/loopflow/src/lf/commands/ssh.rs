@@ -38,7 +38,6 @@ pub fn run(
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
-                | crate::lf::TaskCommand::Handoff { .. }
                 | crate::lf::TaskCommand::Unclaim { .. }
                 | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
@@ -48,6 +47,8 @@ pub fn run(
                 | crate::lf::TaskCommand::Save { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
+        }) | Some(crate::lf::Commands::Machine {
+            cmd: crate::lf::MachineCommand::Use { .. }
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;
@@ -75,16 +76,23 @@ pub fn run(
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
             return Err(anyhow!(
-                "Task is owned on Machine {}, not {}; `lf task handoff` moves it",
+                "Task is owned on Machine {}, not {}; `lf machine use <machine> --task` moves it",
                 route.machine_id,
                 target.id
             ));
         }
     }
-    let repository = cli
+    // A Machine names no checkout: the destination resolves the repository's
+    // own checkout from its identity. A path/name stays the caller's selection.
+    let repository = match cli
         .repository
-        .as_ref()
-        .or(work_route.as_ref().map(|route| &route.repository_id));
+        .clone()
+        .or(work_route.as_ref().map(|route| route.repository_id.clone()))
+    {
+        Some(repository) => Some(repository),
+        None if cli.repo.is_some() => None,
+        None => current_repository()?,
+    };
     // Preview forwards only authored selectors. Account lookup/connection and
     // isolation preparation belong to launch, on neither side of this read.
     let selection = if preview || resident_operation {
@@ -122,7 +130,7 @@ pub fn run(
     }
     let mut cmd = vec!["lf".to_string()];
     if cli.repository.is_none() {
-        if let Some(repository) = repository {
+        if let Some(repository) = &repository {
             cmd.extend(["--repository".into(), repository.to_string()]);
         }
     }
@@ -162,8 +170,6 @@ pub fn run(
         );
         if !record.open_argv.is_empty() {
             let script = build_preamble(
-                &target.route,
-                None,
                 &record.open_argv,
                 &[(EXPECTED_MACHINE_ID_ENV, target.id.as_str())],
             );
@@ -179,16 +185,7 @@ pub fn run(
         }
         return Ok(());
     }
-    let preamble = build_preamble(
-        &target.route,
-        if repository.is_some() || cli.repo.is_some() {
-            None
-        } else {
-            target.repo.as_deref()
-        },
-        &cmd,
-        &extra_env,
-    );
+    let preamble = build_preamble(&cmd, &extra_env);
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
@@ -339,29 +336,10 @@ pub(super) async fn resolve_target(
     Ok(machine)
 }
 
-fn build_preamble(
-    host: &str,
-    repo: Option<&str>,
-    cmd: &[String],
-    extra_env: &[(&str, &str)],
-) -> String {
+fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
     let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
-    }
-    if let Some(repo) = repo {
-        let path = if repo.starts_with('/') {
-            sh_quote(repo)
-        } else {
-            format!(
-                "\"$HOME\"/{}",
-                sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
-            )
-        };
-        lines.push(format!(
-            "cd -- {path} || {{ echo {} >&2; exit 1; }}",
-            sh_quote(&format!("no repo {repo} on {host}"))
-        ));
     }
     lines.push(format!(
         "exec {}",
@@ -371,6 +349,18 @@ fn build_preamble(
             .join(" ")
     ));
     lines.join("\n") + "\n"
+}
+
+/// The caller's repository by identity; `None` outside a repository or before
+/// `lf repo identity`, when the destination runs in its home directory.
+fn current_repository() -> anyhow::Result<Option<crate::durable::RepositoryId>> {
+    let Some(repo) = crate::repository::CanonicalRepo::current()? else {
+        return Ok(None);
+    };
+    let Some(store) = crate::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    Ok(store.sqlite.repository_id(&repo.to_string())?)
 }
 
 /// POSIX single-quote escaping: wrap in `'…'`, and render any embedded single
@@ -453,12 +443,7 @@ pub(crate) async fn request(
     let cmd = std::iter::once("lf".to_string())
         .chain(args.iter().cloned())
         .collect::<Vec<_>>();
-    let preamble = build_preamble(
-        &machine.route,
-        None,
-        &cmd,
-        &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())],
-    );
+    let preamble = build_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
     let mut child = tokio::process::Command::new("ssh");
     child
         .args(crate::machine_route::bounded_ssh_args(
@@ -484,7 +469,7 @@ mod tests {
     use super::{build_preamble, command_result, parse_remote_command, resident_args};
 
     #[test]
-    fn repository_addressed_transport_preserves_arguments_without_entering_machine_default() {
+    fn repository_addressed_transport_preserves_arguments_in_the_home_directory() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join(".local/bin");
@@ -493,8 +478,6 @@ mod tests {
         std::fs::write(&lf, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
         std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = build_preamble(
-            "fixture",
-            None,
             &[
                 "lf".into(),
                 "--repository".into(),

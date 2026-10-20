@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
+use crate::lf::{Cli, Commands, MachineCommand, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -117,11 +117,13 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         }) => issue.as_deref().or(cli.task.as_deref()),
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
-            cmd:
-                TaskCommand::Claim { issue, .. }
-                | TaskCommand::Handoff { issue, .. }
-                | TaskCommand::Unclaim { issue, .. },
+            cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unclaim { issue, .. },
         }) => Some(issue.as_str()),
+        Some(Commands::Machine {
+            cmd: MachineCommand::Use {
+                task: Some(task), ..
+            },
+        }) => Some(task.as_str()),
         _ => cli.task.as_deref(),
     }
 }
@@ -130,7 +132,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(selector) = launch_task(cli) else {
-        return dispatch_wave_session(cli, args);
+        return dispatch_primary_session(cli, args);
     };
     let Some(store) = read_registry()? else {
         return Ok(false);
@@ -149,9 +151,9 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     if matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Claim { .. }
-                | TaskCommand::Handoff { .. }
-                | TaskCommand::Unclaim { .. }
+            cmd: TaskCommand::Claim { .. } | TaskCommand::Unclaim { .. }
+        }) | Some(Commands::Machine {
+            cmd: MachineCommand::Use { .. }
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.
@@ -186,9 +188,9 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     Ok(true)
 }
 
-/// A Wave's Session lives on your Machine for that Wave. The destination runs
-/// it wherever it arrives, even if its own copy of the choice differs.
-fn dispatch_wave_session(cli: &Cli, args: &[String]) -> Result<bool> {
+/// A Wave's or repository's Session lives on your Machine for it. The
+/// destination runs it wherever it arrives, even if its own copy differs.
+fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let (
         Some(Commands::Session {
             cmd:
@@ -198,33 +200,62 @@ fn dispatch_wave_session(cli: &Cli, args: &[String]) -> Result<bool> {
                     ..
                 },
         }),
-        Some(wave),
         None,
-    ) = (&cli.command, cli.wave.as_deref(), cli.task.as_deref())
+    ) = (&cli.command, cli.task.as_deref())
     else {
         return Ok(false);
     };
-    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+    let repository_session = cli.wave.is_none() && (cli.repo.is_some() || cli.repository.is_some());
+    if (cli.wave.is_none() && !repository_session)
+        || std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
+    {
         return Ok(false);
     }
     let Some(store) = read_registry()? else {
         return Ok(false);
     };
     let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
-    let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
-        return Ok(false);
+    let repository = match (&cli.repository, repo.as_deref()) {
+        (Some(repository), _) => Some(repository.clone()),
+        (None, Some(repo)) => store.repository_id(repo)?,
+        (None, None) => None,
     };
-    let (machine, _) = store.wave_owning_machine(&wave_id)?;
+    let (machine, scope) = match cli.wave.as_deref() {
+        Some(wave) => {
+            let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
+                return Ok(false);
+            };
+            (
+                store.wave_owning_machine(&wave_id)?.0,
+                format!("Wave {wave}"),
+            )
+        }
+        None => {
+            let Some(repository) = &repository else {
+                return Ok(false);
+            };
+            (
+                store.repository_owning_machine(repository)?.0,
+                "this repository".to_string(),
+            )
+        }
+    };
     if machine == store.local_machine()?.id {
         return Ok(false);
     }
-    let mut forwarded = args[1..].to_vec();
-    if cli.repository.is_none() {
-        let repository = match repo.as_deref() {
-            Some(repo) => store.repository_id(repo)?,
-            None => None,
+    // The destination finds its own checkout by identity, never by this path.
+    let mut forwarded = Vec::new();
+    let mut iter = args[1..].iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--repo" {
+            iter.next();
+        } else if !arg.starts_with("--repo=") {
+            forwarded.push(arg.clone());
         }
-        .ok_or_else(|| anyhow!("Wave {wave} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
+    }
+    if cli.repository.is_none() {
+        let repository = repository
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
         forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;

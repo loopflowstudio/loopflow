@@ -372,9 +372,9 @@ when that choice is omitted.
 Which Machine runs your work for a Wave is your choice, never repository content:
 
 ```bash
-lf wave machine product mini      # your Machine for this Wave's new Tasks
-lf wave machine product           # show it
-lf wave machine product --unset   # back to whichever Machine runs the command
+lf machine use mini product  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo   # this repository's default
+lf machine list              # each Machine with the defaults naming it
 ```
 
 It does not edit the goal or launch work. It moves your Wave Session to the new

@@ -128,6 +128,9 @@ pub fn explain(
         TaskExecutionSource::OwningMachine(OwningMachineSource::Wave(wave)) => {
             format!("owning_machine:wave:{wave}")
         }
+        TaskExecutionSource::OwningMachine(OwningMachineSource::Repository) => {
+            "owning_machine:repository".into()
+        }
         TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine) => {
             "owning_machine:this_machine".into()
         }
@@ -164,7 +167,6 @@ mod tests {
         let machine = Machine {
             id: reading.machine_id.clone(),
             label: Some("peer".into()),
-            repo: None,
             route: "peer".into(),
             created_at: time::OffsetDateTime::UNIX_EPOCH,
             observed_at: time::OffsetDateTime::UNIX_EPOCH,

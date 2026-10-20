@@ -1244,7 +1244,6 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
-| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1265,6 +1264,19 @@ Check reachability and version without prompting
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine use
+
+Run work on a Machine: hand off a Task, or set a Wave's or this repository's default. Bare, it applies to the worktree's Task or Wave, else this repository
+
+| Argument | What it does |
+|---|---|
+| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
+| `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
+| `--task` | Hand this Task to the Machine; you stay its person |
+| `--repo` | Set this repository's default for its Session and Tasks with no Wave default Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1551,17 +1563,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `--sync` | Refresh planning from Linear before reading Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave machine
-
-Choose your Machine for a Wave's new Tasks and its Wave Session
-
-| Argument | What it does |
-|---|---|
-| `<wave>` | wave |
-| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id; omit to show the current choice |
-| `--unset` | Start the Wave's Tasks on whichever Machine runs them Default: false. |
-| `--help / -h` | Print help |
-
 ## lf wave rename
 
 Rename or relocate an authored Wave and its provider mapping
@@ -1767,17 +1768,6 @@ Claim the Task for you on this Machine
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task handoff
-
-Hand the Task to another Machine; you stay its person
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<machine>` | Registered Machine label or Machine id |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

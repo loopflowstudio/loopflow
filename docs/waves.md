@@ -190,7 +190,7 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-`lf wave machine <wave> <machine>` picks your Machine for the Wave; it is personal,
+`lf machine use <machine> <wave>` picks your Machine for the Wave; it is personal,
 never committed. Use `lf cron`
 for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
@@ -313,18 +313,18 @@ lf --machine <machine-id> wave status shipper --json
 ```
 
 ```bash
-lf wave machine shipper mini            # your Machine for this Wave's new Tasks
-lf wave machine shipper                 # show it ("mini", or "this Machine")
-lf wave machine shipper --unset         # back to whichever Machine runs the command
+lf machine use mini shipper  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo   # this repository's default
+lf machine list              # each Machine with the defaults naming it
 ```
 
 A Machine is a stable machine identity with a replaceable route. Your Wave Machine
 is your own choice, stored locally and copied to your other added Machines; an
 unreachable one gets a warning, so rerun later. An unowned Task resolves through its
-Wave, its parent Waves, then the Machine running the command. Your Wave Machine runs
+Wave, its parent Waves, its repository, then the Machine running the command. Your Wave Machine runs
 the Wave's crons, receives your unowned Tasks and hosts your Wave Session: setting it
 completes the old Machine's Wave primary and admits a fresh one there, leaving native
-history behind. Existing Tasks keep the Machine in their claim; `lf task handoff`
+history behind. Existing Tasks keep the Machine in their claim; `lf machine use <machine> --task <task>`
 moves one. It does not start a process or confer signal authority. Readers operate on the selected Machine;
 they never silently aggregate other Machines.
 

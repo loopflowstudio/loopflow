@@ -458,50 +458,67 @@ mod tests {
     }
 
     #[test]
-    fn wave_machine_routes_unowned_tasks_until_one_is_claimed() {
-        use crate::durable::{OwningMachineSource, TaskExecutionSource};
+    fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
+        use crate::durable::{DefaultScope, OwningMachineSource, TaskExecutionSource};
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
         let repo = repo.to_str().unwrap();
-        let mini = MachineId::new();
+        let (mini, worker) = (MachineId::new(), MachineId::new());
         let project = store.ensure_wave_project(repo, "work").unwrap();
         let wave = project.wave_id.clone();
-        store.set_wave_machine(&wave, Some(&mini)).unwrap();
-        let task = store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository(repo).unwrap(),
-                id: TaskId::new(),
-                project_id: Some(project.id),
-                title: "Owned elsewhere".into(),
-                description: String::new(),
-                due_date: None,
-            })
+        let repository = store.ensure_repository(repo).unwrap();
+        let new_task = |title: &str| {
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: repository.clone(),
+                    id: TaskId::new(),
+                    project_id: Some(project.id.clone()),
+                    title: title.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+        };
+        // Unset: this Machine takes the Task, and the claim is captured.
+        let local = store.local_machine().unwrap().id;
+        let claimed = new_task("Claimed here");
+        store.claim_task(&claimed.id).unwrap().unwrap();
+
+        store
+            .set_machine_default(&DefaultScope::Repository(repository.clone()), &worker)
+            .unwrap();
+        let task = new_task("Routed");
+        let route = store.task_execution_route(&task.id).unwrap();
+        assert_eq!(
+            (route.machine_id, route.source),
+            (
+                worker.clone(),
+                TaskExecutionSource::OwningMachine(OwningMachineSource::Repository)
+            )
+        );
+        // The Wave's default outranks the repository's.
+        store
+            .set_machine_default(&DefaultScope::Wave(wave.clone()), &mini)
             .unwrap();
         let route = store.task_execution_route(&task.id).unwrap();
-        assert_eq!(route.machine_id, mini);
         assert_eq!(
-            route.source,
-            TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
+            (route.machine_id, route.source),
+            (
+                mini,
+                TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
+            )
         );
         // Only your Machine for the Wave claims; this one refuses without writing.
         assert!(store.claim_task(&task.id).is_err());
         assert!(store.task_ownership(&task.id).unwrap().log.is_empty());
-
-        store.set_wave_machine(&wave, None).unwrap();
-        let local = store.local_machine().unwrap().id;
-        assert_eq!(
-            store.task_execution_route(&task.id).unwrap().machine_id,
-            local
-        );
-        store.claim_task(&task.id).unwrap().unwrap();
-        // Captured, not inherited: a later Wave Machine moves no claimed Task.
-        store.set_wave_machine(&wave, Some(&mini)).unwrap();
-        let route = store.task_execution_route(&task.id).unwrap();
+        // Captured, not inherited: a later default moves no claimed Task.
+        let route = store.task_execution_route(&claimed.id).unwrap();
         assert_eq!(
             (route.machine_id, route.source),
             (local, TaskExecutionSource::Owner)
         );
+        assert_eq!(store.machine_defaults().unwrap().len(), 2);
     }
 
     #[test]

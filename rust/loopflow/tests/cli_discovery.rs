@@ -819,7 +819,8 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "list",
             "remove",
             "rename",
-            "status"
+            "status",
+            "use"
         ]
     );
     let help =

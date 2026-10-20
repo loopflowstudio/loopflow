@@ -876,7 +876,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             unreachable!("read commands dispatch separately")
         }
         WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
-        WaveCommand::Machine { .. } => loopflow::lf::commands::wave_machine::run(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -909,13 +908,10 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Claim { issue, json }
-        | TaskCommand::Handoff { issue, json, .. }
-        | TaskCommand::Unclaim { issue, json } => {
+        TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
             use loopflow::ops::task_ownership::{change, render, OwnershipChange};
             let requested = match command {
                 TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                TaskCommand::Handoff { machine, .. } => OwnershipChange::Handoff(machine.clone()),
                 _ => OwnershipChange::Unclaim,
             };
             let ownership = change(repo, issue, requested)?;
@@ -2468,6 +2464,11 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
+        Some(Commands::Machine {
+            cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
+        }) => in_directory_runtime(args, |repo| {
+            loopflow::lf::commands::machine_use::run(repo, cmd)
+        }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
             cmd:
@@ -2505,7 +2506,7 @@ fn execute_command(
         }
 
         Some(Commands::Wave {
-            cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Machine { .. }),
+            cmd: cmd @ WaveCommand::Rename { .. },
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
             cmd: cmd @ WaveCommand::Workflow { .. },

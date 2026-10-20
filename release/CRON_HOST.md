@@ -4,7 +4,7 @@ Run the infrastructure Wave's declared telemetry and release jobs on your Wave
 Machine for it. That setting is the authority; a hostname in a document is not.
 
 ```bash
-lf wave machine infrastructure mini
+lf machine use mini infrastructure
 lf machine id
 lf wave status infrastructure --json | jq -r '.wave.machine.id'
 scripts/bootstrap-cron-host.sh infrastructure

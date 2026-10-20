@@ -9,7 +9,7 @@ Opaque `home_…` IDs, existing scheduled-job keys and historical evidence retai
 their stored spelling. Live commands and DTOs use `machine` and `machine_id`.
 
 ```bash
-lf machine add mini --repo '~/src/project'
+lf machine add mini
 lf machine list
 lf machine status mini
 lf --machine mini session list
@@ -80,10 +80,10 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ## Own Tasks
 
 ```bash
-lf task claim LOO-123              # you, on this Machine
-lf task handoff LOO-123 mini       # same person, mini's Machine
-lf task unclaim LOO-123            # unowned, history intact
-lf task status LOO-123 --json      # ownership: {owner, superseded_by, log}
+lf task claim LOO-123               # you, on this Machine
+lf machine use mini --task LOO-123  # same person, mini's Machine
+lf task unclaim LOO-123             # unowned, history intact
+lf task status LOO-123 --json       # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
@@ -98,15 +98,18 @@ Which Machine runs a person's Wave work is that person's choice, never
 repository content:
 
 ```bash
-lf wave machine infrastructure mini     # your Machine for this Wave's new Tasks
-lf wave machine infrastructure          # show it ("mini", or "this Machine")
-lf wave machine infrastructure --unset  # back to whichever Machine runs the command
+lf machine use mini infrastructure  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo          # this repository's default
+lf machine list                     # each Machine with the defaults naming it
 ```
 
-The setting lives in Machine-local SQLite `wave_machines` and is copied to the
+Bare `lf machine use mini` applies to the worktree's Task (a handoff), else its
+Wave, else this repository; `--task`, `--repo` or a Wave argument always wins.
+A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
+repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
 mini receives the runs. An unreachable Machine gets a warning; rerun later.
-Resolution for an unowned Task walks its Wave, its parent Waves, then this Machine,
+Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
 so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
 field read the same resolver.
 
@@ -116,7 +119,7 @@ Session and the new Machine admits a fresh one (fresh Wave context, as with
 and Desktop's Wave Session route to the Wave Machine over `lf --machine`.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
-moves no existing Task; `lf task handoff <task> <machine>` moves one and completes
+moves no existing Task; `lf machine use <machine> --task <task>` moves one and completes
 its primary Session on the old Machine. The new Machine admits a primary on first
 connect.
 

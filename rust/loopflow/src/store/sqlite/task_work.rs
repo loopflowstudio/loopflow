@@ -1033,7 +1033,7 @@ mod tests {
         let remote = crate::durable::MachineId::new();
         store
             .sqlite
-            .add_machine(&remote, "worker", "worker", "/repo")
+            .add_machine(&remote, "worker", "worker")
             .unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),

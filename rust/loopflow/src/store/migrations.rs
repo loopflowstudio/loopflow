@@ -1362,7 +1362,9 @@ fn admitted_newer_floor(
     let floor = highest_floor(floors).expect("a newer tail has at least one floor");
     if parse_release(&floor).is_some_and(|floor| floor > reader) {
         return Err(StoreError::InvalidData(format!(
-            "this store needs lf {floor} or newer; install it with lf install"
+            "this store needs lf {floor} or newer (it has {}; latest known {}); install it with lf install",
+            applied.last().expect("a newer tail is not empty"),
+            known.last().map(String::as_str).unwrap_or("none"),
         )));
     }
     Ok(Some(floor))

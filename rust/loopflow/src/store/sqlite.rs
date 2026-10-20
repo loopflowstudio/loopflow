@@ -2297,9 +2297,8 @@ mod frontier_tests {
             .expect_err("a breaking newer release locks this lf out")
             .to_string();
         assert!(
-            refusal.contains(&format!(
-                "this store needs lf {release} or newer; install it with lf install"
-            )),
+            refusal.contains(&format!("this store needs lf {release} or newer (it has "))
+                && refusal.ends_with("install it with lf install"),
             "{refusal}"
         );
     }

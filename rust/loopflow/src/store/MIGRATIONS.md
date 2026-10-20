@@ -118,7 +118,7 @@ existed count as breaking at their own version.
 An ordinary open accepts a newer tail when its highest floor is at or below the
 running lf, and then requires every object this build expects to be present
 unchanged; tables may have gained columns. Otherwise it refuses with
-`this store needs lf 0.15.0 or newer; install it with lf install`.
+`this store needs lf 0.15.0 or newer (it has 0.15.0.001_release; latest known 0.14.9.001_release); install it with lf install`.
 Promotion never applies history it does not know; selecting an older lf the
 floor admits, as a rollback does, applies nothing and is allowed.
 

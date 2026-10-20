@@ -878,7 +878,7 @@ mod compatibility_tests {
         assert!(matches!(
             read_store_evidence(&breaking),
             Compatibility::Incompatible { reason }
-                if reason.ends_with(&format!("this store needs lf {release} or newer; install it with lf install"))
+                if reason.contains(&format!("this store needs lf {release} or newer (it has "))
         ));
     }
 

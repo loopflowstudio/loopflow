@@ -4,8 +4,6 @@
 lf session attach SESSION
 lf session attach SESSION --observe
 lf --machine build session attach SESSION
-lf transport start --terminal -- /bin/bash -l
-lf transport attach PROCESS
 ```
 
 Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
@@ -35,8 +33,9 @@ both screen buffers are not supported. Headless observation retains a bounded ou
 tail and preserves stdout/stderr on delivery. Slow viewers disconnect; execution
 continues draining.
 
-`transport serve` owns a command's PTY or pipes and is normally launched by `start`.
-It records an ordinary Process. Session rows name that Process; viewer tokens and
+An execution command delegates to a detached owner, which holds its PTY or pipes
+and records an ordinary Process. Loopflow launches that owner itself; it has no
+public command. Session rows name that Process; viewer tokens and
 terminal bytes remain in memory. Native clients retain their original provider
 channels, including pending request identities. Flow steps share their Flow's
 terminal owner through explicit child handoff, retaining their own Process results.

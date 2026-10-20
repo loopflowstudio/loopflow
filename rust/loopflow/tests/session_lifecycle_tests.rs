@@ -47,7 +47,10 @@ impl Fixture {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (key, _) in std::env::vars_os() {
             let key = key.to_string_lossy().into_owned();
-            if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_")
+            // An inherited cmux workspace would receive the fixture Session's name.
+            if ["LF_", "LOOPFLOW_", "LINEAR_", "CMUX_"]
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
             {
                 command.env_remove(key);
             }

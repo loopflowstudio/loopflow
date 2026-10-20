@@ -280,6 +280,9 @@ pub fn emit_block(
         return Ok(());
     }
     let delivery = load_delivery(delivery, &input)?;
+    if moment == crate::context_block::ContextMoment::Stop {
+        return acquire_planning(&delivery);
+    }
     emit_context(delivery, input, moment)
 }
 
@@ -404,8 +407,7 @@ fn emit_context(
 }
 
 /// Native turn hooks consume the same team freshness as CLI and watcher reads.
-pub fn check_planning(path: Option<&std::path::Path>) -> Result<()> {
-    let delivery = load_delivery(path, &read_callback()?)?;
+fn acquire_planning(delivery: &crate::context_block::ContextDelivery) -> Result<()> {
     let database = delivery.home.join("loopflow.db");
     if !database.exists() {
         return Ok(());

@@ -16,7 +16,6 @@ mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
 mod lf_tag;
-pub(crate) mod native_titles;
 pub mod opencode;
 pub(crate) mod opencode_history;
 mod opencode_mapping;

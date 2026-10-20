@@ -53,7 +53,7 @@ Open Loopflow or run its CLI
 | `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
+| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -73,44 +73,6 @@ Open Loopflow or run its CLI
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
-
-## lf transport
-
-Retain command execution independently of terminal viewers
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf transport start
-
-Start an independently owned command and print its Process identity
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport serve
-
-Own a command's transport until it exits (normally launched by start)
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport attach
-
-Attach to an existing execution; Ctrl+] detaches without stopping it
-
-| Argument | What it does |
-|---|---|
-| `<process>` | process |
-| `--observe` | observe Default: false. |
-| `--help / -h` | Print help |
 
 ## lf clone
 
@@ -2104,4 +2066,13 @@ Run a skill explicitly
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf skill customize
+
+Print the repository file that defines a skill, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |

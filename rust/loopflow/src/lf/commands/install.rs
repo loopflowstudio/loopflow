@@ -2693,14 +2693,6 @@ pub fn promote(
         let current = fs::canonicalize(std::env::current_exe()?)?;
         promote_published_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
-    // A settled retry must repair a failed hook write even when no binary changes.
-    if sync_skills && !preview_only {
-        if let Err(error) = crate::installation::account_home()
-            .and_then(|home| crate::harness::native_titles::install_native_hooks(&home))
-        {
-            eprintln!("warning: native title hook installation failed ({error:#})");
-        }
-    }
     Ok(())
 }
 

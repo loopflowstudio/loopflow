@@ -25,6 +25,8 @@ pub enum ContextMoment {
     Start,
     Compact,
     Tool,
+    /// A turn ended: acquire Linear changes, which become steers for the next boundary.
+    Stop,
 }
 
 /// Captured source identities, not frozen context. Hooks reread scratch and Wave
@@ -227,13 +229,8 @@ impl ContextDelivery {
             quote(&self.home),
             quote(&executable),
         );
-        let check = format!(
-            "env LF_HOME={} {} __planning-check",
-            quote(&self.home),
-            quote(&executable),
-        );
         Ok(serde_json::json!({
-            "Stop": [{"hooks":[{"type":"command","command":check,"timeout":10}]}],
+            "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [

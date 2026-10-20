@@ -1,8 +1,8 @@
 # Hidden `__*` entry points: audit
 
 Jack asked for this audit on 2026-10-20 because hidden commands are a smell. Counts are from the
-`processes` table in `~/.lf/loopflow.db` over the last 7 days, 598,520 rows in total. Nothing
-below has been changed yet.
+`processes` table in `~/.lf/loopflow.db` over the last 7 days, 598,520 rows in total. Rows marked
+"Done on this branch" have been changed; the rest are proposals.
 
 | Command | Invoked by | Runs / 7d | Proposed verdict |
 |---|---|---|---|
@@ -21,6 +21,14 @@ below has been changed yet.
 | `__transport-serve` | `transport::start` | 256 | Keep. A detached owner must exec as its own process. |
 | install `*-switch` / `promote` / `rollback` | Installer | 17 in 30 days | Keep. These cross versions on purpose. |
 | `cron run --scheduled`, `--parent-pid`, `--request` | launchd, Desktop | — | Keep. |
+
+Known limit: each provider launch leaves an empty `~/.lf/steers/seen/<agent process>` marker that
+nothing removes yet. Process reaping could remove it.
+
+Gate (2026-10-20): `cargo fmt --check` and `cargo clippy --all-targets -D warnings` passed. Focused
+`cargo nextest` runs passed 120/120 for context/steer/skills/cron/pi/cli_reference and 37/37 for the
+transport and session_lifecycle binaries. Under plain `cargo test`, three unlocked `LF_HOME` tests race
+each other; they pass alone and under nextest, which CI uses.
 
 History noise: hook rows are about 6% of the ledger. Desktop `task file` and `task diff` polling
 is about 90% and is the bigger source.

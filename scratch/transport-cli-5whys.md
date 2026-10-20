@@ -62,13 +62,13 @@ worktree. This branch removes the public command group.
   that is in flight across the upgrade, which is accepted under "no slow rollouts".
 - Updated the transport README, the architecture reference and the regenerated `docs/lf-reference.md`.
   The shipped release notes are left as they are.
+- **CLI-tree changes are visible in PRs.** The `cli_reference` integration test fails when
+  `docs/lf-reference.md` differs from the compiled Clap tree (`UPDATE_CLI_REFERENCE=1` rewrites it),
+  replacing the hand-run `scripts/generate_cli_reference.py`. The repository `pr-message` skill
+  lists added and removed `## lf …` headings under "What changes". This gives visibility, not a gate.
 
 ## Proposed (not approved)
 
-- **Make CLI-tree changes visible in PRs.** `pr-message` diffs `lf help --json --all` between
-  base and head and lists added or removed command paths under "What changes". This gives
-  visibility rather than a gate. Proof: a branch that adds a subcommand produces a PR body
-  naming it.
 - **Hide `__*` hook commands from `lf history list` by default.** They crowd out real commands, as
   they did in step 2. Proof: a fixture with 60 hook rows and one failed command shows the failure
   on page one.

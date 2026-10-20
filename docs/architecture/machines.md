@@ -98,13 +98,18 @@ Which Machine runs a person's Wave work is that person's choice, never
 repository content:
 
 ```bash
-lf machine use mini infrastructure  # your Machine for this Wave's new Tasks and Session
-lf machine use mini --repo          # this repository's default
-lf machine list                     # each Machine with the defaults naming it
+lf machine use mini infrastructure            # this Wave's new Tasks and its Session
+lf machine use laptop infrastructure --session  # only the Wave Session
+lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf machine list                               # each Machine with the defaults naming it
 ```
 
 Bare `lf machine use mini` applies to the worktree's Task (a handoff), else its
 Wave, else this repository; `--task`, `--repo` or a Wave argument always wins.
+A Wave or repository has two settings, where its new Tasks run and where its
+primary Session runs. `--tasks` or `--session` sets one (bare, it skips the
+worktree's Task); neither sets both. Each resolves on its own, with no fallback
+from one to the other.
 A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
 repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
@@ -113,10 +118,12 @@ Resolution for an unowned Task walks its Wave, its parent Waves, its repository,
 so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
 field read the same resolver.
 
-Setting it moves the Wave Session: the old Machine completes its Wave primary
+Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one (fresh Wave context, as with
-`--fresh`; native provider history stays behind). `lf session connect --wave <w>`
-and Desktop's Wave Session route to the Wave Machine over `lf --machine`.
+`--fresh`; native provider history stays behind). `lf session connect --wave <w>`,
+a bare connect resolving to a Wave or the repository, and Desktop's Wave Session
+route to the Session Machine over `lf --machine`. `lf open` reads a primary on
+another of your Machines through that connect, never from this Machine's copy.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
 moves no existing Task; `lf machine use <machine> --task <task>` moves one and completes

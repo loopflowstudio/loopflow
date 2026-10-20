@@ -183,8 +183,8 @@ lf task unclaim LOO-506             # unowned again
 
 A Task is owned by a person on a Machine, or unowned; `lf task run` claims an
 unowned Task. Ownership travels with shared planning as Task comments.
-`lf machine use mini <wave>` picks your Machine for a Wave's new Tasks; it is
-yours, never committed. Connection settings and execution records remain Machine-local.
+`lf machine use mini <wave>` picks your Machine for a Wave's new Tasks and its
+Session (`--tasks` or `--session` sets one); it is yours, never committed. Connection settings and execution records remain Machine-local.
 
 Task comments in Linear reach the Task's next useful boundary: before a Flow step,
 after an agent turn, when showing planning, and before a Linear write. Team checks

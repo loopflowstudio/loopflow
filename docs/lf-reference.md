@@ -1277,6 +1277,8 @@ Run work on a Machine: hand off a Task, or set a Wave's or this repository's def
 | `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
 | `--task` | Hand this Task to the Machine; you stay its person |
 | `--repo` | Set this repository's default for its Session and Tasks with no Wave default Default: false. |
+| `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
+| `--tasks` | Set only where the scope's new Tasks run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

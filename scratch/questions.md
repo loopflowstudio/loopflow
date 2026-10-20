@@ -112,17 +112,20 @@ should say `lf machine use` instead of the Machine-local `lf wave machine`.
     restores local runs. Add one if clearing a default turns out to matter.
 17. **Recorded entries (no person) count as yours**, and so does every entry when
     this Machine has no participant name; single-person use needs no name.
-18. **Deferred from "primary Sessions follow the Machine":** context-resolved
-    connects (no `--wave`/`--repo`) routing to the default Machine, and `lf open`
-    reading remote primaries. Explicit `--wave`, `--task`, and `--repo`/`--repository`
-    connects route.
+18. **Done (2026-10-20):** context-resolved connects route like explicit ones
+    (`connection_scope` decides the scope), and `lf open` defers a primary on another
+    of your Machines to the routed connect instead of probing it over SSH.
 19. **Decided by Jack Heart (2026-10-20): bare `lf machine use` in a moved Task's
     worktree forwards to the Task's writer**, exactly as `--task` does
     (`work_route::worktree_handoff_task`); it never refuses.
-- **Decided by Jack Heart (2026-10-20): a Wave's Session Machine and its Tasks'
-  Machine are separate.** `lf machine use mini infrastructure` sets where the Wave's
-  Tasks run; `lf machine use laptop infrastructure --session` sets where its Wave
-  Session runs (and moves it). Without a `--session` setting the Session follows the
-  Tasks' Machine. Same for the repo (`--repo --session`). Use case: run the Wave
-  Session on the laptop and delegate its Tasks to mini. Rental-compute pools are a
-  follow-up Task.
+20. **Decided by Jack Heart (2026-10-20, final): a scope's Session Machine and its
+    Tasks' Machine are separate settings.** `--session` sets (and moves) only the
+    primary Session; `--tasks` sets only where new Tasks run; neither sets both. No
+    "Session follows Tasks" fallback: each unset one is this Machine. `--task` takes
+    neither. Use case: Wave Session on the laptop, its Tasks on mini. Rental-compute
+    pools are a follow-up Task.
+21. **Choices (2026-10-20, needs Jack's review):** the Session setting walks the same
+    chain as Tasks (Wave → parent Waves → repository), so `lf machine use mini --repo`
+    also places Wave Sessions with no own setting. Bare `--session`/`--tasks` in a Task
+    worktree set its Wave or repository rather than refusing. Crons and `lf wave show`'s
+    `machine` read the Tasks setting.

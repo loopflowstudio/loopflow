@@ -142,11 +142,14 @@ target's identity, not a connection. Completion, abandonment and reopening leave
 ownership alone; a Done Task shows its last owner.
 
 ```bash
-lf machine use mini infrastructure  # your Machine for this Wave's new Tasks and Session
-lf machine use mini --repo          # this repository's default
-lf machine list                     # each Machine with the defaults naming it
+lf machine use mini infrastructure            # this Wave's new Tasks and its Session
+lf machine use laptop infrastructure --session  # only the Wave Session
+lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf machine list                               # each Machine with the defaults naming it
 ```
 
+A Wave's Tasks and its Session each have their own Machine: `--tasks` or
+`--session` sets one, neither sets both, and each unset one is this Machine.
 Your Wave Machine is a personal choice, never committed. It is stored in this
 Machine's local store and copied to your other Machines (`lf machine add`) over
 `lf --machine`, so the laptop knows to launch there and mini knows to receive the
@@ -154,10 +157,11 @@ runs. An unreachable Machine gets a warning; rerun later. An unowned Task resolv
 through its Wave, then parent Waves, then this Machine, so one Machine needs no
 setup. `lf cron` installs a Wave's crons for the same Machine.
 
-Setting it moves your Wave Session: the old Machine completes its Wave primary
+Setting the Session Machine moves your Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one, with fresh Wave context as with
 `--fresh`; native provider history stays on the old Machine.
-`lf session connect --wave <wave>` routes to your Wave Machine.
+`lf session connect --wave <wave>`, and a bare connect in the Wave's worktree or
+the repository, route to your Session Machine for it.
 
 A Task's Machine is the one in its claim. Changing the Wave Machine moves no
 existing Task; `lf machine use <machine> --task <task>` moves one, completing its primary

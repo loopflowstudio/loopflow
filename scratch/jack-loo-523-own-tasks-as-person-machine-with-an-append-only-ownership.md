@@ -100,23 +100,37 @@ in a Wave has a Wave Session for it. Which Machine runs them is that person's
 choice. Nothing about Machines is committed.
 
 ```
-lf machine use mini infrastructure   # this Wave's default
-lf machine use mini --repo           # this repository's default
+lf machine use mini infrastructure   # this Wave's default: its new Tasks and its Session
+lf machine use laptop infrastructure --session   # only the Wave Session (and move it)
+lf machine use mini --repo --tasks   # only the repository's new Tasks
 lf machine use mini --task LOO-523   # hand off one Task
 lf machine use mini                  # the worktree's Task (routed to its writer), else its Wave, else the repository
 lf machine list                      # each Machine with the defaults naming it
 ```
 
+- A Wave or repository has two Machine settings (`MachineSetting::{Tasks, Session}`,
+  Jack Heart, 2026-10-20): `--tasks` or `--session` sets one, neither sets both. Each
+  is its own stored default with no fallback to the other; unset resolves to this
+  Machine. `--task` (a handoff) takes neither. Bare `--session`/`--tasks` in a Task
+  worktree set the worktree's Wave or repository.
 - Defaults live in `scope_defaults` (personal SQLite, keyed by Wave or repository
-  identity) under one `DefaultScope` and resolver in `store/sqlite/scope_defaults.rs`.
+  identity; columns `tasks_machine_id`, `session_machine_id`) under one `DefaultScope`
+  and resolver in `store/sqlite/scope_defaults.rs`.
   Machine is the first setting; LOO-540 moves account routes onto the same scope.
 - A default is copied to the person's other registered Machines over
-  `lf --machine` and moves the matching Wave or repo Session: complete the old
-  primary, admit on the target. Native history stays behind.
-- Resolution for a new Task: Wave → parent Waves → repository → this Machine.
+  `lf --machine`. Setting the Session Machine moves the matching Wave or repo
+  Session: complete the old primary, admit on the target. Native history stays behind.
+- Resolution, per setting: Wave → parent Waves → repository → this Machine. New
+  Tasks, crons and `lf wave show`'s `machine` read Tasks; connects and `lf open` read Session.
 - Captured, not inherited: a Task's Machine is the one in its claim. Changing a
   default moves no existing Task; `--task` hands one off.
-- `lf session connect --wave` and `--repo`/`--repository` route to the default.
+- `lf session connect --wave`, `--repo`/`--repository`, and a bare connect resolving
+  (by `connection_scope`) to a Wave or the repository route to the Session Machine.
+  A bare connect in a Task worktree routes to the Task's Machine, like `--task`.
+- `lf open` reads a primary only from this Machine's store when the Work's Machine
+  (Task claim, or Session Machine) is this one; otherwise it reports the Machine and
+  lets the routed connect reuse the primary there. A remote owner without a local
+  checkout record no longer refuses: the owner creates the checkout on connect.
 
 ### Machine registry is personal
 
@@ -450,12 +464,11 @@ The live Linear demo above is a demo/review step, not gate.
 
 ## Remaining work
 
-- Separate Session Machine from Task Machine (Jack Heart, 2026-10-20): `lf machine use <m> [wave|--repo] --session` sets and moves the scope's primary Session; without it, `lf machine use` sets where the scope's Tasks run and the Session follows the Tasks' Machine unless a Session Machine is set. Store it as a sibling scope default; `lf machine list` shows both; Wave/repo connects route to the Session Machine. Demo: Wave Session on laptop, `lf task run` of a Wave Task lands on mini.
-- Context-resolved connects and remote primaries in `lf open`
-  (`scratch/questions.md` item 18).
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).
 - Live Linear demo on a throwaway Task, plus `lf machine use mini` /
-  `lf machine use mini infrastructure` against the real mini (demo/review step).
+  `lf machine use mini infrastructure` against the real mini, and the Session split:
+  `lf machine use laptop infrastructure --session`, then `lf task run` of a Wave Task
+  lands on mini while `lf connect --wave infrastructure` stays on the laptop (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
 Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at`
@@ -464,5 +477,4 @@ Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at
 Realign (2026-10-20, second): steers 352e4d61, b5619b52, b36e4435, 8bb9b532, 26f247a2, ba3528a6 and
 9ae7038b are all implemented as described above (`machine_use.rs`, `scope_defaults`, no
 `machines.repo`, no `lf wave machine`/`lf task handoff`); PR #1610 head matches the branch.
-Check results (2026-10-20, compress): `--test integration machine_commands` 28/28; fmt + clippy clean.
-Check results (2026-10-20, implement): lib `machine_defaults ownership task_location` + CLI/skill/ssh/migrations pass; integration `machine_commands ownership dto_fixtures` 74/74; fmt + clippy clean; `native_runner_*_foreground` hang without a terminal (CI).
+Check results (2026-10-20, implement 2): integration `machine_commands ownership dto_fixtures documented_commands` 80/80; lib `machine_defaults ownership task_location commands::open` 30/30; fmt + clippy clean.

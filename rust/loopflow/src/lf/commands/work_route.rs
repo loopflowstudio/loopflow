@@ -128,21 +128,35 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     }
 }
 
-/// Bare `lf machine use` in a Task's worktree hands that Task off, so it routes
-/// to the Task's writer exactly as `--task` does.
-fn worktree_handoff_task(cli: &Cli) -> Result<Option<String>> {
-    let Some(Commands::Machine {
-        cmd:
-            MachineCommand::Use {
-                wave: None,
-                task: None,
-                repo: false,
-                ..
-            },
-    }) = &cli.command
-    else {
-        return Ok(None);
+/// Bare `lf machine use` and bare `lf connect` in a Task's worktree act on that
+/// Task, so they route to its Machine exactly as `--task` does. `--session` and
+/// `--tasks` set the worktree's Wave or repository instead.
+fn worktree_task(cli: &Cli) -> Result<Option<String>> {
+    let bare = match &cli.command {
+        Some(Commands::Machine {
+            cmd:
+                MachineCommand::Use {
+                    wave: None,
+                    task: None,
+                    repo: false,
+                    session: false,
+                    tasks: false,
+                    ..
+                },
+        }) => true,
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    all: false,
+                    ..
+                },
+        }) => cli.wave.is_none() && cli.repo.is_none() && cli.repository.is_none(),
+        _ => false,
     };
+    if !bare || cli.task.is_some() {
+        return Ok(None);
+    }
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
@@ -164,7 +178,7 @@ fn worktree_handoff_task(cli: &Cli) -> Result<Option<String>> {
 /// Return whether dispatch completed remotely. No Workflow or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
-    let worktree_task = worktree_handoff_task(cli)?;
+    let worktree_task = worktree_task(cli)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
         return dispatch_primary_session(cli, args);
     };
@@ -224,7 +238,9 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
 }
 
 /// A Wave's or repository's Session lives on your Session Machine for it. The
-/// destination runs it wherever it arrives, even if its own copy differs.
+/// destination runs it wherever it arrives, even if its own copy differs. A
+/// bare connect resolves its scope from the worktree exactly as the local
+/// connect would, then routes the same way.
 fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let (
         Some(Commands::Session {
@@ -240,22 +256,33 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     else {
         return Ok(false);
     };
-    let repository_session = cli.wave.is_none() && (cli.repo.is_some() || cli.repository.is_some());
-    if (cli.wave.is_none() && !repository_session)
-        || std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Ok(false);
     }
-    let Some(store) = read_registry()? else {
+    let Some(registry) = crate::store::read_existing_registry()? else {
         return Ok(false);
     };
+    let store = &registry.sqlite;
     let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
         (Some(repository), _) => Some(repository.clone()),
         (None, Some(repo)) => store.repository_id(repo)?,
         (None, None) => None,
     };
-    let (machine, scope) = match cli.wave.as_deref() {
+    let wave = match cli.wave.clone() {
+        Some(wave) => Some(wave),
+        None if cli.repo.is_some() || cli.repository.is_some() => None,
+        None => match context_scope(registry, repo.as_deref())? {
+            Some(ContextScope::Wave(name)) => Some(name),
+            Some(ContextScope::Repository) => None,
+            // A Task's Session follows its claim; unresolved context stays local.
+            _ => return Ok(false),
+        },
+    };
+    let Some(store) = read_registry()? else {
+        return Ok(false);
+    };
+    let (machine, scope) = match wave.as_deref() {
         Some(wave) => {
             let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
                 return Ok(false);
@@ -292,6 +319,11 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
             forwarded.push(arg.clone());
         }
     }
+    if cli.wave.is_none() {
+        if let Some(wave) = &wave {
+            forwarded.splice(0..0, ["--wave".into(), wave.clone()]);
+        }
+    }
     if cli.repository.is_none() {
         let repository = repository
         .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
@@ -299,6 +331,42 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;
     Ok(true)
+}
+
+/// The scope a bare connect here opens, when it is a Wave or the repository.
+#[derive(Debug)]
+enum ContextScope {
+    Wave(String),
+    Repository,
+}
+
+/// Resolve as the local connect does. Task worktrees and unassociated ones are
+/// `None`: a Task routes by its claim, and an error belongs to the local connect.
+fn context_scope(
+    registry: crate::store::Store,
+    repo: Option<&str>,
+) -> Result<Option<ContextScope>> {
+    let Some(repo) = repo else {
+        return Ok(None);
+    };
+    let store: crate::store::SharedStore = std::sync::Arc::new(registry);
+    let cwd = std::env::current_dir()?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        use crate::ops::human_session::{connection_scope, SessionTarget};
+        use crate::session::PrimaryScope;
+        Ok(
+            match connection_scope(&store, &cwd, SessionTarget::Context).await {
+                Ok(PrimaryScope::Wave(id)) => store
+                    .list_waves(Some(repo))
+                    .await?
+                    .into_iter()
+                    .find(|wave| wave.id() == &id)
+                    .map(|wave| ContextScope::Wave(wave.name().to_string())),
+                Ok(PrimaryScope::Repository(_)) => Some(ContextScope::Repository),
+                Ok(PrimaryScope::Task(_)) | Err(_) => None,
+            },
+        )
+    })
 }
 
 /// Inspect known Work only. Provider acquisition and plan exchange have their

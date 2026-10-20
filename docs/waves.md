@@ -313,17 +313,19 @@ lf --machine <machine-id> wave status shipper --json
 ```
 
 ```bash
-lf machine use mini shipper  # your Machine for this Wave's new Tasks and Session
-lf machine use mini --repo   # this repository's default
+lf machine use mini shipper                 # this Wave's new Tasks and its Session
+lf machine use laptop shipper --session     # only the Wave Session
+lf machine use mini --repo                  # this repository's default
 lf machine list              # each Machine with the defaults naming it
 ```
 
 A Machine is a stable machine identity with a replaceable route. Your Wave Machine
 is your own choice, stored locally and copied to your other added Machines; an
 unreachable one gets a warning, so rerun later. An unowned Task resolves through its
-Wave, its parent Waves, its repository, then the Machine running the command. Your Wave Machine runs
-the Wave's crons, receives your unowned Tasks and hosts your Wave Session: setting it
-completes the old Machine's Wave primary and admits a fresh one there, leaving native
+Wave, its parent Waves, its repository, then the Machine running the command. Your Machine
+for the Wave's Tasks runs its crons and receives your unowned Tasks; your Session Machine
+hosts your Wave Session (`--tasks` or `--session` sets one, neither sets both). Setting
+the Session Machine completes the old Machine's Wave primary and admits a fresh one there, leaving native
 history behind. Existing Tasks keep the Machine in their claim; `lf machine use <machine> --task <task>`
 moves one. It does not start a process or confer signal authority. Readers operate on the selected Machine;
 they never silently aggregate other Machines.

@@ -313,6 +313,60 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
 }
 
 #[test]
+fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
+    let fixture = Machines::new();
+    let machine = fixture.json(&["machine", "add", "mini", "--json"]);
+    let repo = loopflow_test_support::TestRepo::new();
+    let path = repo.path().canonicalize().unwrap();
+    let identity = fixture
+        .command(&["repo", "identity"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&identity);
+    let repository = String::from_utf8(identity.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let set = fixture
+        .command(&["machine", "use", "mini", "--repo", "--session"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&set);
+    assert!(String::from_utf8_lossy(&set.stdout).contains("its Session runs on mini"));
+
+    let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    record["workspace"]["machine_id"] = machine["id"].clone();
+    let log = fixture.root.path().join("remote/arguments");
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\ncat <<'RECORD'\n{record}\nRECORD\n",
+            log.display()
+        ),
+    );
+    let opened = fixture
+        .command(&["connect", "--prepare", "--json"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&opened);
+    let arguments = fs::read_to_string(&log).unwrap();
+    let arguments = arguments.lines().collect::<Vec<_>>();
+    let at = arguments
+        .iter()
+        .position(|arg| *arg == "--repository")
+        .unwrap();
+    assert_eq!(arguments[at + 1], repository);
+    assert!(arguments.contains(&"connect"), "{arguments:?}");
+}
+
+#[test]
 fn add_alias_rename_connect_and_remove_preserve_identity() {
     let fixture = Machines::new();
     let added = fixture.json(&["machine", "add", "mini", "--json"]);

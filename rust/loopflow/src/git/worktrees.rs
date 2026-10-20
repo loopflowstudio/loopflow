@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -422,12 +423,60 @@ const GIT_WORKERS: usize = 16;
 const GITHUB_BRANCHES_PER_REQUEST: usize = 16;
 
 /// Why a remote gave no usable answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RemoteFailure {
-    /// It failed, could not start, or answered something unreadable.
-    Unavailable,
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub(crate) enum RemoteFailure {
+    /// `gh` needs a login (it exits 4), or the token was refused.
+    Auth { detail: String },
+    /// GitHub refused the request for its rate limit.
+    RateLimited { detail: String },
     /// It was stopped at its limit.
     TimedOut,
+    /// It failed, could not start, or answered something unreadable.
+    Unavailable { detail: String },
+}
+
+impl std::fmt::Display for RemoteFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auth { detail } => write!(f, "authentication failed (gh exit 4): {detail}"),
+            Self::RateLimited { detail } => write!(f, "rate limited: {detail}"),
+            Self::TimedOut => write!(f, "timed out after {}s", REMOTE_LIMIT.as_secs()),
+            Self::Unavailable { detail } => write!(f, "unavailable: {detail}"),
+        }
+    }
+}
+
+impl RemoteFailure {
+    fn unavailable(detail: impl Into<String>) -> Self {
+        Self::Unavailable {
+            detail: detail.into(),
+        }
+    }
+
+    /// Name a failed command's cause from its exit code and output.
+    ///
+    /// GraphQL reports a rate limit inside a JSON body on stdout; REST and
+    /// secondary limits say so on stderr.
+    fn classify(code: Option<i32>, stdout: &str, stderr: &str) -> Self {
+        let detail = stderr
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or("no error output")
+            .to_string();
+        let lowered = format!("{stdout}\n{stderr}").to_lowercase();
+        if lowered.contains("rate limit") || stdout.contains("RATE_LIMITED") {
+            Self::RateLimited { detail }
+        } else if code == Some(4)
+            || lowered.contains("bad credentials")
+            || lowered.contains("gh auth login")
+        {
+            Self::Auth { detail }
+        } else {
+            Self::Unavailable { detail }
+        }
+    }
 }
 
 /// How remote enrichment ended for one listing.
@@ -442,11 +491,13 @@ pub enum RemoteOutcome {
     TimedOut,
 }
 
-impl From<RemoteFailure> for RemoteOutcome {
-    fn from(failure: RemoteFailure) -> Self {
+impl From<&RemoteFailure> for RemoteOutcome {
+    fn from(failure: &RemoteFailure) -> Self {
         match failure {
-            RemoteFailure::Unavailable => Self::Unavailable,
             RemoteFailure::TimedOut => Self::TimedOut,
+            RemoteFailure::Auth { .. }
+            | RemoteFailure::RateLimited { .. }
+            | RemoteFailure::Unavailable { .. } => Self::Unavailable,
         }
     }
 }
@@ -456,31 +507,43 @@ fn remote_stdout(command: &mut Command, limit: Duration) -> Result<String, Remot
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| RemoteFailure::Unavailable)?;
-    let mut stdout = child.stdout.take().ok_or(RemoteFailure::Unavailable)?;
+        .map_err(|error| RemoteFailure::unavailable(error.to_string()))?;
+    // A transport helper can outlive its stopped parent and keep the pipes
+    // open, so the readers are never joined.
+    let stdout = read_in_background(child.stdout.take().expect("stdout is piped"));
+    let stderr = read_in_background(child.stderr.take().expect("stderr is piped"));
+    let deadline = Instant::now() + limit;
+    let remaining = || deadline.saturating_duration_since(Instant::now());
+    let (Ok(stdout), Ok(stderr)) = (
+        stdout.recv_timeout(remaining()),
+        stderr.recv_timeout(remaining()),
+    ) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(RemoteFailure::TimedOut);
+    };
+    let [stdout, stderr] =
+        [stdout, stderr].map(|bytes| String::from_utf8_lossy(&bytes).to_string());
+    let status = child
+        .wait()
+        .map_err(|error| RemoteFailure::unavailable(error.to_string()))?;
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(RemoteFailure::classify(status.code(), &stdout, &stderr))
+    }
+}
+
+fn read_in_background(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<Vec<u8>> {
     let (sender, receiver) = std::sync::mpsc::channel();
-    // A transport helper can outlive its stopped parent and keep the pipe
-    // open, so the reader is never joined.
     thread::spawn(move || {
         let mut bytes = Vec::new();
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut bytes);
+        let _ = pipe.read_to_end(&mut bytes);
         let _ = sender.send(bytes);
     });
-    match receiver.recv_timeout(limit) {
-        Ok(bytes) => child
-            .wait()
-            .ok()
-            .filter(|status| status.success())
-            .map(|_| String::from_utf8_lossy(&bytes).to_string())
-            .ok_or(RemoteFailure::Unavailable),
-        Err(_) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            Err(RemoteFailure::TimedOut)
-        }
-    }
+    receiver
 }
 
 /// Apply `work` to every item on a bounded set of threads, keeping input order.
@@ -754,22 +817,47 @@ pub fn diff_shortstats(
         .collect()
 }
 
-fn branch_heads(repo: &Path) -> HashMap<String, String> {
+pub(crate) fn branch_heads(repo: &Path) -> HashMap<String, String> {
     local_branches(repo)
         .into_iter()
         .map(|(name, branch)| (name, branch.head))
         .collect()
 }
 
-/// What GitHub knows about each branch: the current head's PR state and
-/// whether the branch still exists there.
+/// One GitHub PR whose head branch has a given name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PullRequestNode {
+    pub number: u64,
+    pub head: String,
+    pub state: PullRequestState,
+}
+
+/// The PR that speaks for one branch head: an open PR wins over a merged
+/// one, and a merged one over a closed one. Branch names are reusable, so
+/// only PRs at this exact head count.
+pub(crate) fn head_pull_request<'a>(
+    nodes: &'a [PullRequestNode],
+    head: &str,
+) -> Option<&'a PullRequestNode> {
+    let at = |state| {
+        nodes
+            .iter()
+            .find(|node| node.head == head && node.state == state)
+    };
+    at(PullRequestState::Open)
+        .or_else(|| at(PullRequestState::Merged))
+        .or_else(|| at(PullRequestState::Closed))
+}
+
+/// What GitHub knows about each branch name: every PR with that head branch,
+/// and whether the branch still exists there.
 #[derive(Debug, Default, PartialEq)]
 struct GithubBranches {
-    pull_requests: HashMap<String, PullRequestState>,
+    pull_requests: HashMap<String, Vec<PullRequestNode>>,
     existing: HashSet<String>,
 }
 
-/// Read every branch's PR state and existence from GitHub.
+/// Read every branch's PRs and existence from GitHub.
 ///
 /// GitHub's answer time grows with the branches in one query, so the branches
 /// are asked `GITHUB_BRANCHES_PER_REQUEST` at a time, side by side. A failure
@@ -778,13 +866,51 @@ struct GithubBranches {
 fn github_branches(
     repo: &Path,
     (owner, name): (String, String),
-    branch_heads: &[(String, String)],
+    branches: &[String],
 ) -> Result<GithubBranches, RemoteFailure> {
-    let requests: Vec<&[(String, String)]> =
-        branch_heads.chunks(GITHUB_BRANCHES_PER_REQUEST).collect();
-    whole_github_answer(concurrently(&requests, |branch_heads| {
-        github_request(repo, &owner, &name, branch_heads)
+    let requests: Vec<&[String]> = branches.chunks(GITHUB_BRANCHES_PER_REQUEST).collect();
+    whole_github_answer(concurrently(&requests, |branches| {
+        github_request(repo, &owner, &name, branches)
     }))
+}
+
+/// Every PR GitHub has for each named branch, or why GitHub could not say.
+pub(crate) fn github_pull_requests(
+    repo: &Path,
+    branches: &[String],
+) -> Result<HashMap<String, Vec<PullRequestNode>>, RemoteFailure> {
+    let nwo = github_repo_nwo(repo)
+        .ok_or_else(|| RemoteFailure::unavailable("origin is not a GitHub repository"))?;
+    github_branches(repo, nwo, branches).map(|github| github.pull_requests)
+}
+
+/// GitHub's GraphQL budget for this account; reading it costs none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GraphqlBudget {
+    pub remaining: u64,
+    pub limit: u64,
+    /// Unix seconds when the budget refills.
+    pub reset: i64,
+}
+
+pub(crate) fn github_graphql_budget(repo: &Path) -> Result<GraphqlBudget, RemoteFailure> {
+    let stdout = remote_stdout(
+        Command::new("gh")
+            .current_dir(repo)
+            .args(["api", "rate_limit"]),
+        REMOTE_LIMIT,
+    )?;
+    parse_graphql_budget(&stdout).ok_or_else(|| RemoteFailure::classify(Some(0), &stdout, ""))
+}
+
+fn parse_graphql_budget(response: &str) -> Option<GraphqlBudget> {
+    let value = serde_json::from_str::<serde_json::Value>(response).ok()?;
+    let graphql = value.pointer("/resources/graphql")?;
+    Some(GraphqlBudget {
+        remaining: graphql.get("remaining")?.as_u64()?,
+        limit: graphql.get("limit")?.as_u64()?,
+        reset: graphql.get("reset")?.as_i64()?,
+    })
 }
 
 /// Every request's answer as one, or the failure that leaves all of it unknown.
@@ -810,16 +936,14 @@ fn github_request(
     repo: &Path,
     owner: &str,
     name: &str,
-    branch_heads: &[(String, String)],
+    branches: &[String],
 ) -> Result<GithubBranches, RemoteFailure> {
-    // Build aliased GraphQL query: two fields per branch. Branch names are
-    // reusable, so current-head identity decides whether historical PR state
-    // applies to this worktree.
+    // Build aliased GraphQL query: two fields per branch.
     let mut fields = String::new();
-    for (i, (branch, _)) in branch_heads.iter().enumerate() {
+    for (i, branch) in branches.iter().enumerate() {
         let escaped = branch.replace('\\', "\\\\").replace('"', "\\\"");
         fields.push_str(&format!(
-            "b{i}: pullRequests(first: 100, headRefName: \"{escaped}\", orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ headRefOid state }} }}\n\
+            "b{i}: pullRequests(first: 100, headRefName: \"{escaped}\", orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ number headRefOid state }} }}\n\
              r{i}: ref(qualifiedName: \"refs/heads/{escaped}\") {{ id }}\n"
         ));
     }
@@ -836,26 +960,23 @@ fn github_request(
         REMOTE_LIMIT,
     )?;
 
-    parse_pull_request_states(&stdout, branch_heads)
-        .zip(parse_existing_branches(&stdout, branch_heads))
+    parse_pull_request_nodes(&stdout, branches)
+        .zip(parse_existing_branches(&stdout, branches))
         .map(|(pull_requests, existing)| GithubBranches {
             pull_requests,
             existing,
         })
-        .ok_or(RemoteFailure::Unavailable)
+        .ok_or_else(|| RemoteFailure::classify(Some(0), &stdout, ""))
 }
 
-fn parse_existing_branches(
-    response: &str,
-    branch_heads: &[(String, String)],
-) -> Option<HashSet<String>> {
+fn parse_existing_branches(response: &str, branches: &[String]) -> Option<HashSet<String>> {
     let value = serde_json::from_str::<serde_json::Value>(response).ok()?;
     let repository = value.pointer("/data/repository")?;
-    branch_heads
+    branches
         .iter()
         .enumerate()
         .filter_map(
-            |(index, (branch, _))| match repository.get(format!("r{index}")) {
+            |(index, branch)| match repository.get(format!("r{index}")) {
                 // An absent answer is unknown, never a deleted branch.
                 None => Some(None),
                 Some(serde_json::Value::Null) => None,
@@ -865,62 +986,76 @@ fn parse_existing_branches(
         .collect()
 }
 
-fn parse_pull_request_states(
+/// Every branch's PRs. A branch without an answer leaves the whole answer
+/// unknown: no answer is not evidence of no open PR.
+fn parse_pull_request_nodes(
     response: &str,
-    branch_heads: &[(String, String)],
-) -> Option<HashMap<String, PullRequestState>> {
+    branches: &[String],
+) -> Option<HashMap<String, Vec<PullRequestNode>>> {
     let value = serde_json::from_str::<serde_json::Value>(response).ok()?;
     let repository = value.pointer("/data/repository")?;
-
-    Some(
-        branch_heads
-            .iter()
-            .enumerate()
-            .filter_map(|(index, (branch, head))| {
-                let nodes = repository
-                    .pointer(&format!("/b{index}/nodes"))?
-                    .as_array()?;
-                let mut states = nodes
-                    .iter()
-                    .filter(|node| {
-                        node.get("headRefOid").and_then(serde_json::Value::as_str)
-                            == Some(head.as_str())
+    branches
+        .iter()
+        .enumerate()
+        .map(|(index, branch)| {
+            let nodes = repository
+                .pointer(&format!("/b{index}/nodes"))?
+                .as_array()?
+                .iter()
+                .map(|node| {
+                    Some(PullRequestNode {
+                        number: node.get("number")?.as_u64()?,
+                        head: node.get("headRefOid")?.as_str()?.to_string(),
+                        state: match node.get("state")?.as_str()? {
+                            "OPEN" => PullRequestState::Open,
+                            "MERGED" => PullRequestState::Merged,
+                            "CLOSED" => PullRequestState::Closed,
+                            _ => return None,
+                        },
                     })
-                    .filter_map(|node| node.get("state").and_then(serde_json::Value::as_str));
-                let state = if states.clone().any(|state| state == "OPEN") {
-                    PullRequestState::Open
-                } else if states.clone().any(|state| state == "MERGED") {
-                    PullRequestState::Merged
-                } else if states.any(|state| state == "CLOSED") {
-                    PullRequestState::Closed
-                } else {
-                    return None;
-                };
-                Some((branch.clone(), state))
-            })
-            .collect(),
-    )
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some((branch.clone(), nodes))
+        })
+        .collect()
 }
 
-/// List all remote branch names via a single `git ls-remote --heads origin` call.
-fn list_remote_branches(repo: &Path) -> Result<HashSet<String>, RemoteFailure> {
+/// Every origin ref of one kind (`heads` or `tags`) and its object, in one
+/// `git ls-remote`.
+fn remote_refs(repo: &Path, kind: &str) -> Result<HashMap<String, String>, RemoteFailure> {
     let stdout = remote_stdout(
         Command::new("git")
             .arg("-C")
             .arg(repo)
             .env("GIT_TERMINAL_PROMPT", "0")
-            .args(["ls-remote", "--heads", "origin"]),
+            .args(["ls-remote", &format!("--{kind}"), "origin"]),
         REMOTE_LIMIT,
     )?;
+    let prefix = format!("refs/{kind}/");
     Ok(stdout
         .lines()
         .filter_map(|line| {
-            line.split('\t')
-                .nth(1)?
-                .strip_prefix("refs/heads/")
-                .map(|b| b.to_string())
+            let (object, name) = line.split_once('\t')?;
+            Some((name.strip_prefix(&prefix)?.to_string(), object.to_string()))
         })
         .collect())
+}
+
+/// Every origin branch and its head.
+pub(crate) fn remote_heads(repo: &Path) -> Result<HashMap<String, String>, RemoteFailure> {
+    remote_refs(repo, "heads")
+}
+
+/// Every origin tag name.
+pub(crate) fn remote_tags(repo: &Path) -> Result<HashSet<String>, RemoteFailure> {
+    Ok(remote_refs(repo, "tags")?
+        .into_keys()
+        .map(|name| name.trim_end_matches("^{}").to_string())
+        .collect())
+}
+
+fn list_remote_branches(repo: &Path) -> Result<HashSet<String>, RemoteFailure> {
+    remote_heads(repo).map(|heads| heads.into_keys().collect())
 }
 
 /// Worktree states from local Git alone. No network calls.
@@ -1035,17 +1170,28 @@ fn remote_facts(
             pull_requests: Some(HashMap::new()),
             outcome: listed
                 .as_ref()
-                .map_or_else(|failure| (*failure).into(), |_| RemoteOutcome::Answered),
+                .map_or_else(RemoteOutcome::from, |_| RemoteOutcome::Answered),
             branches: listed.unwrap_or_default(),
         };
     };
-    match github_branches(repo, nwo, &branch_heads) {
+    let names: Vec<String> = branch_heads
+        .iter()
+        .map(|(branch, _)| branch.clone())
+        .collect();
+    match github_branches(repo, nwo, &names) {
         Ok(mut github) => {
             // The listing compares against the default branch's remote head,
             // so a set naming no worktree branch still means "all gone".
             github.existing.insert(default_branch.to_string());
+            let pull_requests = branch_heads
+                .iter()
+                .filter_map(|(branch, head)| {
+                    let node = head_pull_request(github.pull_requests.get(branch)?, head)?;
+                    Some((branch.clone(), node.state))
+                })
+                .collect();
             RemoteFacts {
-                pull_requests: Some(github.pull_requests),
+                pull_requests: Some(pull_requests),
                 branches: github.existing,
                 outcome: RemoteOutcome::Answered,
             }
@@ -1055,10 +1201,10 @@ fn remote_facts(
         Err(failure) => RemoteFacts {
             pull_requests: None,
             branches: match failure {
-                RemoteFailure::Unavailable => list_remote_branches(repo).unwrap_or_default(),
                 RemoteFailure::TimedOut => HashSet::new(),
+                _ => list_remote_branches(repo).unwrap_or_default(),
             },
-            outcome: failure.into(),
+            outcome: (&failure).into(),
         },
     }
 }
@@ -1815,10 +1961,11 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 mod tests {
     use super::{
         abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
-        git_common_dir, list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
-        parse_pull_request_states, plan_placement, remote_stdout, wave_agent_segment,
-        whole_github_answer, worktree_path, worktree_prune_reason, GithubBranches, PlacementError,
-        PlacementStrategy, PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment,
+        git_common_dir, head_pull_request, list_worktrees, move_default_agent_to_worktree,
+        parse_existing_branches, parse_graphql_budget, parse_pull_request_nodes, plan_placement,
+        remote_stdout, wave_agent_segment, whole_github_answer, worktree_path,
+        worktree_prune_reason, GithubBranches, GraphqlBudget, PlacementError, PlacementStrategy,
+        PullRequestNode, PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment,
         WorktreeState,
     };
     use std::collections::{HashMap, HashSet};
@@ -1984,36 +2131,44 @@ mod tests {
                 "repository": {
                     "b0": {
                         "nodes": [
-                            {"headRefOid": "current", "state": "OPEN"},
-                            {"headRefOid": "previous", "state": "MERGED"}
+                            {"number": 3, "headRefOid": "current", "state": "OPEN"},
+                            {"number": 2, "headRefOid": "previous", "state": "MERGED"}
                         ]
                     },
-                    "b1": {
-                        "nodes": [
-                            {"headRefOid": "landed", "state": "MERGED"}
-                        ]
-                    },
-                    "b2": {
-                        "nodes": [
-                            {"headRefOid": "closed", "state": "CLOSED"}
-                        ]
-                    }
+                    "b1": {"nodes": [{"number": 1, "headRefOid": "closed", "state": "CLOSED"}]}
                 }
             }
         });
         let branches = vec![
-            ("jack-heart/product".to_string(), "current".to_string()),
-            ("jack-heart/landed".to_string(), "landed".to_string()),
-            ("jack-heart/closed".to_string(), "closed".to_string()),
+            "jack-heart/product".to_string(),
+            "jack-heart/closed".to_string(),
         ];
+        let nodes = parse_pull_request_nodes(&response.to_string(), &branches).unwrap();
+        let product = &nodes["jack-heart/product"];
 
         assert_eq!(
-            parse_pull_request_states(&response.to_string(), &branches),
-            Some(HashMap::from([
-                ("jack-heart/product".to_string(), PullRequestState::Open),
-                ("jack-heart/landed".to_string(), PullRequestState::Merged),
-                ("jack-heart/closed".to_string(), PullRequestState::Closed),
-            ]))
+            head_pull_request(product, "current").map(|node| node.state),
+            Some(PullRequestState::Open)
+        );
+        assert_eq!(
+            head_pull_request(product, "previous").map(|node| node.state),
+            Some(PullRequestState::Merged)
+        );
+        assert_eq!(head_pull_request(product, "elsewhere"), None);
+        assert_eq!(
+            head_pull_request(&nodes["jack-heart/closed"], "closed").map(|node| node.state),
+            Some(PullRequestState::Closed)
+        );
+        assert_eq!(
+            parse_pull_request_nodes(
+                &response.to_string(),
+                &[
+                    branches[0].clone(),
+                    branches[1].clone(),
+                    "unanswered".to_string()
+                ]
+            ),
+            None
         );
     }
 
@@ -2023,49 +2178,53 @@ mod tests {
             "data": {"repository": {"r0": {"id": "ref"}, "r1": null}}
         })
         .to_string();
-        let heads = |names: &[&str]| -> Vec<(String, String)> {
-            names
-                .iter()
-                .map(|name| (name.to_string(), "head".to_string()))
-                .collect()
-        };
+        let names =
+            |names: &[&str]| -> Vec<String> { names.iter().map(|name| name.to_string()).collect() };
 
         assert_eq!(
-            parse_existing_branches(&response, &heads(&["kept", "deleted"])),
+            parse_existing_branches(&response, &names(&["kept", "deleted"])),
             Some(HashSet::from(["kept".to_string()]))
         );
         assert_eq!(
-            parse_existing_branches(&response, &heads(&["kept", "deleted", "unanswered"])),
+            parse_existing_branches(&response, &names(&["kept", "deleted", "unanswered"])),
             None
         );
     }
 
     #[test]
     fn a_github_request_without_an_answer_leaves_every_branch_unknown() {
+        let node = PullRequestNode {
+            number: 1,
+            head: "head".to_string(),
+            state: PullRequestState::Open,
+        };
         let answered = |branch: &str| {
             Ok(GithubBranches {
-                pull_requests: HashMap::from([(branch.to_string(), PullRequestState::Open)]),
+                pull_requests: HashMap::from([(branch.to_string(), vec![node.clone()])]),
                 existing: HashSet::from([branch.to_string()]),
             })
+        };
+        let unavailable = || RemoteFailure::Unavailable {
+            detail: "down".to_string(),
         };
 
         assert_eq!(
             whole_github_answer(vec![answered("first"), answered("second")]),
             Ok(GithubBranches {
                 pull_requests: HashMap::from([
-                    ("first".to_string(), PullRequestState::Open),
-                    ("second".to_string(), PullRequestState::Open),
+                    ("first".to_string(), vec![node.clone()]),
+                    ("second".to_string(), vec![node.clone()]),
                 ]),
                 existing: HashSet::from(["first".to_string(), "second".to_string()]),
             })
         );
         assert_eq!(
-            whole_github_answer(vec![answered("first"), Err(RemoteFailure::Unavailable)]),
-            Err(RemoteFailure::Unavailable)
+            whole_github_answer(vec![answered("first"), Err(unavailable())]),
+            Err(unavailable())
         );
         assert_eq!(
             whole_github_answer(vec![
-                Err(RemoteFailure::Unavailable),
+                Err(unavailable()),
                 answered("second"),
                 Err(RemoteFailure::TimedOut),
             ]),
@@ -2088,7 +2247,45 @@ mod tests {
         );
         assert_eq!(
             remote_stdout(&mut Command::new("false"), Duration::from_secs(10)),
-            Err(RemoteFailure::Unavailable)
+            Err(RemoteFailure::Unavailable {
+                detail: "no error output".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn remote_failures_name_their_cause() {
+        let run = |script: &str| {
+            remote_stdout(
+                Command::new("sh").args(["-c", script]),
+                Duration::from_secs(10),
+            )
+            .unwrap_err()
+            .to_string()
+        };
+
+        assert!(run("echo 'To get started, run: gh auth login' >&2; exit 4")
+            .starts_with("authentication failed (gh exit 4): To get started"));
+        assert!(run(r#"echo '{"errors":[{"type":"RATE_LIMITED"}]}'; echo 'gh: API rate limit exceeded' >&2; exit 1"#)
+            .starts_with("rate limited"));
+        assert_eq!(
+            run("echo 'fatal: unable to access' >&2; exit 128"),
+            "unavailable: fatal: unable to access"
+        );
+    }
+
+    #[test]
+    fn graphql_budget_reads_the_rate_limit_resource() {
+        let response = serde_json::json!({
+            "resources": {"graphql": {"limit": 5000, "remaining": 4921, "reset": 1792530300}}
+        });
+        assert_eq!(
+            parse_graphql_budget(&response.to_string()),
+            Some(GraphqlBudget {
+                remaining: 4921,
+                limit: 5000,
+                reset: 1792530300
+            })
         );
     }
 

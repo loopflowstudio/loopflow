@@ -75,9 +75,18 @@ admission and Started claims and records LOO-523 in the LOO-412 section.
   the person's Wave Machine default on this Machine and copies it to their other
   registered Machines over `lf --machine`. Setting it also moves that person's Wave
   Session to the Machine, restarting it there if it does not already live there.
-- **Repo Session Machine (open):** Wave Sessions follow a personal Wave Machine;
-  the repo Session stays on whichever Machine runs it. A personal repo Machine
-  (`lf repo machine`) would mirror the Wave setting; deferred until wanted.
+- **Decided by Jack Heart (2026-10-20): `lf repo machine <machine>`** mirrors
+  `lf wave machine`: a personal default for the repo Session and for Tasks with no
+  Wave, stored on this Machine and copied to the person's other Machines over
+  `lf --machine`. Setting it moves the person's repo Session there (complete the old
+  primary, admit on the target). `lf connect --repo` and repo `--fresh`/resetSession
+  route to it. Resolution: Wave → parent Waves → repo Machine → this Machine.
+- **Decided by Jack Heart (2026-10-20): the Machine registry is personal, not
+  repo-scoped.** `lf machine add/list/remove`, labels and routes belong to the
+  person across all repositories: no repository column or repo-keyed lookup on
+  `machines`, and no repository content. Wave and repo Machine defaults stay keyed
+  by Wave or repository in the personal store. Remove existing repo scoping
+  (`machines.repo`, `remove_machine` clearing it) in this change.
 - **Moving a Session leaves its native history behind** on the old Machine; the
   successor starts with fresh Wave context, like `--fresh`.
 

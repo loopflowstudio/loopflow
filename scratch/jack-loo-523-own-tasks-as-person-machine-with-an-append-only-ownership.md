@@ -1,7 +1,8 @@
 # LOO-523: Own Tasks as (person, Machine) with an append-only ownership log
 
-Status: implemented (2026-10-19), awaiting Jack Heart's review. Jack's brief
-(Task description) holds the accepted decisions. This plan holds the mechanisms;
+Status: ownership log and personal Wave Machine implemented (2026-10-19/20);
+Jack Heart's 2026-10-20 direction (repo Machine, personal Machine registry) is
+remaining work. Jack's brief (Task description) holds the accepted decisions. This plan holds the mechanisms;
 choices that need Jack's judgment are in `scratch/questions.md` (items 7-12 record
 where implementation departed from this plan).
 
@@ -109,10 +110,38 @@ lf wave machine infrastructure mini   # your default for this Wave's Tasks
   laptop knows to launch there and mini knows to receive the runs.
 - Setting it moves the person's Wave Session to that Machine, restarting it
   there if it does not already live there.
-- Resolution for a new Task: its Wave's default → parent Waves → this Machine.
-  No setting means this Machine.
+- Resolution for a new Task: its Wave's default → parent Waves → the person's
+  repo Machine → this Machine (Jack Heart, 2026-10-20). No setting means this
+  Machine. (Built: Wave → parent Waves → this Machine; the repo step is remaining.)
 - Captured, not inherited: a Task's Machine is the one in its claim. Changing
   the Wave default later moves no existing Task; handoff is how a Task moves.
+
+### Repo Machine (Jack Heart, 2026-10-20; remaining)
+
+```
+lf repo machine mini     # your default for the repo Session and Tasks with no Wave
+```
+
+- Mirrors `lf wave machine`: keyed by repository, stored in this Machine's
+  personal store, copied to the person's other registered Machines over
+  `lf --machine`.
+- Setting it moves the person's repo Session there: complete the old primary,
+  admit on the target.
+- `lf connect --repo` and repo `--fresh`/Desktop `resetSession` route to it.
+
+### Machine registry is personal (Jack Heart, 2026-10-20; remaining)
+
+The set of available Machines (`lf machine add/list/remove`, labels, routes)
+belongs to the person across all their repositories: no repository column or
+repo-keyed lookup on `machines`, and no repository content. Wave and repo
+Machine defaults stay keyed by Wave or repository in the personal store.
+
+- Today `machines.repo` is the remote checkout path: `lf machine add` stores it,
+  `remove_machine` clears it with the label (`store/sqlite/durable.rs:131`), and
+  `ssh.rs:184-190` uses it as the remote repo when no repository is named.
+- Sketch: drop the column in the draft; `lf --machine` names the repository by
+  identity (`--repository`, as Wave Machine copies already do) and the remote
+  resolves its own checkout.
 
 ### Writer rule (forwarding stays within one person's Machines)
 
@@ -147,7 +176,7 @@ are per-Machine, so each Machine can hold its own "one" primary. Decisions:
 - **Wave Sessions route to your Wave Machine.** `lf connect --wave`, context
   connects resolving to a Wave, and `--fresh`/Desktop `resetSession --wave` route
   through `lf --machine` to the personal Wave Machine (this Machine when unset).
-  `--repo` stays on this Machine (no personal repo Machine yet; see questions).
+  `--repo` routes to the personal repo Machine once it exists (remaining).
 - **Moving a Wave Session.** `lf wave machine <wave> <m>` completes the source
   primary on the old Machine and admits a successor on `<m>` through the existing
   `ensure_primary_session_in` replace path. Native provider history stays on the
@@ -293,9 +322,8 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   and that is the upward-copy follow-up.
 - **No local Machine name:** the hostname is used at read time. No column is
   added.
-- **Config freshness:** owning Machines come from the main checkout's
-  `.lf/config.yaml`. A Machine with an unpulled config resolves the old owner.
-  Accepted: the same holds for crons today.
+- **Copy freshness:** a Wave/repo Machine copy that fails to reach an
+  unreachable Machine leaves it resolving its own default until set again there.
 
 ## Alternatives rejected
 
@@ -342,8 +370,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   - `Placement`, `PlacementProvenance`, `placement_in`, `find_placement`,
     `place_work`
   - delegation routing in `planning_write.rs`
-  - `lf wave place` and `lf/commands/placement.rs`; owning Machines are edited
-    in `.lf/config.yaml`
+  - `lf wave place` and `lf/commands/placement.rs`; replaced by `lf wave machine`
   - `tests/fixtures/dto/placements.json` (unused)
   - the placement tests in `durable.rs:920-1190`, `store/durable.rs:198-238` and
     `ops/task.rs:5188-5392`
@@ -383,7 +410,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
 
 1. **This slice:** the draft migration plus the store layer, which deletes
    admission, placement and `started_at`. It adds `task_ownership` with
-   append/read/ordered-owner logic, the writer rule, the config resolver, and
+   append/read/ordered-owner logic, the writer rule, the Wave Machine resolver, and
    `place_task` claiming. Focused test:
    `cargo test -p loopflow ownership` (store unit tests for claim → handoff →
    unclaim, wrong-writer refusal, a later delivered claim winning, and
@@ -413,7 +440,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   owner's fresh claim.
 - Two of your Machines that share Git planning and the same Wave Machine
   cannot both claim: the non-owning one forwards to the owner. With no
-  configured owner, both claims are delivered and, after exchange, each
+  Wave Machine set, both claims are delivered and, after exchange, each
   other Machine shows the second claim as owner. The first claimant still shows
   itself as owner, with `superseded_by` naming the second. Its running Flow is
   untouched, and its context block reports the later claim. The integration test covers this
@@ -437,18 +464,15 @@ The live Linear demo above is a demo/review step, not gate.
 
 ## Remaining work
 
-- Built 2026-10-20: `wave_machines` (draft), `lf wave machine` with copy to your
-  registered Machines and Wave Session move, writer rule within your Machines,
-  `session connect --wave` routing, handoff completing the Task primary;
-  `machines:` config and `MachinesConfig` deleted.
+- `lf repo machine` and the repo step in Wave resolution (above).
+- Personal Machine registry: drop `machines.repo` and repo-keyed routing (above).
 - Context-resolved connects, owner-Machine `observe_task_location`, and remote
   primaries in `lf open` (`scratch/questions.md` item 18).
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
-Compress (2026-10-20): lib `ownership task_location` 29/29, integration `ownership wave_machine handoff` 18/18, clippy clean; `docs/architecture.html` re-rendered.
-Check results (2026-10-20): ownership + wave machine integration 5/5, cli_discovery/documented/dto/global 78/78, clippy clean, `check_migrations.py` pass. Earlier (2026-10-19): ownership integration 3/3, `dto_fixtures` 42/42,
-release/CLI integration 61/61, focused Swift 76/76, `check_migrations.py` pass;
-full integration otherwise green except `auth_tests::banked_resets…` (passes alone);
-the two `native_runner_*_foreground` lib tests hang without a terminal (deferred to CI).
+Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at`
+(every reading fell to Unavailable); it now reads ownership. The main merge left
+`world/mod.rs` calling the old three-argument `record_flow_process`; fixed.
+Check results (2026-10-20): `cargo build -p loopflow --lib --bins` pass after realign; earlier compress run lib `ownership task_location` 29/29, integration `ownership wave_machine handoff` 18/18, clippy clean, `check_migrations.py` pass; `native_runner_*_foreground` hang without a terminal (CI).

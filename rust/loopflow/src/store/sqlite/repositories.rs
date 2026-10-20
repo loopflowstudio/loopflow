@@ -224,13 +224,12 @@ impl SqliteStore {
             )?;
             let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
                 .ok_or(StoreError::NotFound)?;
-            let (checkout, owner, started): (Option<String>, Option<String>, Option<i64>) = tx
-                .query_row(
-                    "SELECT worktree,checkout_machine_id,started_at FROM tasks WHERE id=?1",
-                    [id.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )?;
-            if checkout.is_none() && started.is_none() {
+            let (checkout, owner): (Option<String>, Option<String>) = tx.query_row(
+                "SELECT worktree,checkout_machine_id FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if checkout.is_none() && !super::task_ownership::owned_in(&tx, &id)? {
                 return Ok(TaskLocation::Unrecorded);
             }
             if owner.as_deref() != Some(machine.as_str()) {

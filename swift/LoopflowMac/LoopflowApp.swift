@@ -60,15 +60,20 @@ struct LoopflowApp: App {
 
         WindowGroup(id: "workspace", for: RepositoryWorkspace.self) { $workspace in
             Group {
+                // A capture opens its target window from a window that stays:
+                // the launch view hands off to a repository window, and opening
+                // another window during that hand-off aborts in AttributeGraph.
                 if let workspace {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
                                             openRepository: requestRepository)
+                        .task { openCaptureViewIfNeeded() }
                 } else if AppTestMode.shouldBypassRegistry {
                     RepoView(portfolioService: portfolioService,
                              sessionWorkspaces: workspaces.registry(for: "fixture"), initialRepoPath: launchRepoURL?.path,
                              query: registryQuery)
+                        .task { openCaptureViewIfNeeded() }
                 } else {
                     WorkspaceLaunchView {
                         if let path = launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath {
@@ -83,7 +88,6 @@ struct LoopflowApp: App {
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
-            .task { openCaptureViewIfNeeded() }
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
@@ -332,6 +336,9 @@ private extension View {
                     if captureWindow != nil { break }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
+                // A launch view that hands off to a repository window is
+                // replaced before it settles; the replacement captures.
+                if Task.isCancelled { return }
 
                 if let window = captureWindow {
                     if let width = AppTestMode.windowWidth {
@@ -341,6 +348,7 @@ private extension View {
                         window.setContentSize(NSSize(width: width, height: height))
                     }
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if Task.isCancelled { return }
                     if window.isVisible {
                         do {
                             _ = try SnapshotService().snapshotWindow(window, to: path)

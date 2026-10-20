@@ -86,6 +86,11 @@ impl World {
         }
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
+        // Manual membership: folder mode would scan the person's own ~/src.
+        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Manual)?;
+        crate::portfolio::change(&crate::portfolio::PortfolioCommand::Add {
+            paths: vec![repo.clone()],
+        })?;
         Ok(Self {
             dir,
             env,

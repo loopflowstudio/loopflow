@@ -242,7 +242,7 @@ async fn list(
         let mut entries = crate::ops::human_session::list(store, &selection).await?;
         let next = if entries.len() > filter.limit {
             entries.pop();
-            entries.last().map(|session| session.id.clone())
+            entries.last().map(|session| session.id.to_string())
         } else {
             None
         };

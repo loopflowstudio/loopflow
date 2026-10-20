@@ -1,6 +1,5 @@
 //! Wave-owned live metric contracts, observations, and derived readings.
 
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,10 +12,47 @@ const CONTRACT_SCHEMA: &str = "loopflow.metric/v1";
 const FUTURE_SOURCE_ALLOWANCE: Duration = Duration::minutes(5);
 const MAX_METRIC_DURATION_SECONDS: i64 = 10 * 365 * 24 * 60 * 60;
 
+/// Canonical Work association; metric names remain case sensitive.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(from = "MetricObservationIdentity")]
 pub struct MetricIdentity {
+    wave_id: String,
+    pub metric_id: String,
+}
+
+impl MetricIdentity {
+    pub fn new(wave_id: &str, metric_id: impl Into<String>) -> Self {
+        Self {
+            wave_id: crate::id::canonical_uuid(wave_id),
+            metric_id: metric_id.into(),
+        }
+    }
+
+    pub fn wave_id(&self) -> &str {
+        &self.wave_id
+    }
+}
+
+/// Original hash input. Its Wave spelling is evidence, never a lookup key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetricObservationIdentity {
     pub wave_id: String,
     pub metric_id: String,
+}
+
+impl From<MetricObservationIdentity> for MetricIdentity {
+    fn from(identity: MetricObservationIdentity) -> Self {
+        Self::new(&identity.wave_id, identity.metric_id)
+    }
+}
+
+impl From<MetricIdentity> for MetricObservationIdentity {
+    fn from(identity: MetricIdentity) -> Self {
+        Self {
+            wave_id: identity.wave_id,
+            metric_id: identity.metric_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,10 +365,7 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
     let (name, body) = parse_metric_markdown(markdown)?;
 
     MetricContract::new(MetricContractDefinition {
-        identity: MetricIdentity {
-            wave_id: wave_id.to_string(),
-            metric_id: frontmatter.id,
-        },
+        identity: MetricIdentity::new(wave_id, frontmatter.id),
         name,
         stage: frontmatter.stage,
         instrument: frontmatter.instrument,
@@ -445,7 +478,7 @@ fn normalize_body(body: &str) -> String {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricObservation {
     Observed {
-        identity: MetricIdentity,
+        identity: MetricObservationIdentity,
         contract_revision: String,
         instrument: String,
         observation_id: String,
@@ -457,7 +490,7 @@ pub enum MetricObservation {
         complete: bool,
     },
     Unavailable {
-        identity: MetricIdentity,
+        identity: MetricObservationIdentity,
         contract_revision: String,
         instrument: String,
         observation_id: String,
@@ -468,9 +501,11 @@ pub enum MetricObservation {
 }
 
 impl MetricObservation {
-    pub(crate) fn identity(&self) -> &MetricIdentity {
+    pub(crate) fn metric_identity(&self) -> MetricIdentity {
         match self {
-            Self::Observed { identity, .. } | Self::Unavailable { identity, .. } => identity,
+            Self::Observed { identity, .. } | Self::Unavailable { identity, .. } => {
+                MetricIdentity::new(&identity.wave_id, &identity.metric_id)
+            }
         }
     }
 
@@ -512,14 +547,13 @@ impl MetricObservation {
         matches!(
             self,
             Self::Observed {
-                identity,
                 contract_revision,
                 instrument,
                 source_window_start,
                 source_window_end,
                 complete: true,
                 ..
-            } if identity == &contract.identity
+            } if self.metric_identity() == contract.identity
                 && contract_revision == &contract.contract_revision
                 && instrument == &contract.instrument
                 && *source_window_end - *source_window_start == contract.window.elapsed()
@@ -576,10 +610,11 @@ impl MetricObservation {
         contract: &MetricContract,
         received_at: OffsetDateTime,
     ) -> Result<(), MetricError> {
-        if self.identity() != &contract.identity {
+        let identity = self.metric_identity();
+        if identity != contract.identity {
             return Err(MetricError::ObservationIdentityMismatch {
                 expected: contract.identity.clone(),
-                observed: self.identity().clone(),
+                observed: identity,
             });
         }
         let expected_observation_id = self.expected_observation_id()?;
@@ -634,7 +669,7 @@ impl MetricObservation {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum MetricObservationPayload<'a> {
     Observed {
-        identity: &'a MetricIdentity,
+        identity: &'a MetricObservationIdentity,
         contract_revision: &'a str,
         instrument: &'a str,
         value: f64,
@@ -645,7 +680,7 @@ enum MetricObservationPayload<'a> {
         complete: bool,
     },
     Unavailable {
-        identity: &'a MetricIdentity,
+        identity: &'a MetricObservationIdentity,
         contract_revision: &'a str,
         instrument: &'a str,
         #[serde(with = "time::serde::rfc3339")]
@@ -673,16 +708,23 @@ impl MetricObservationEvidence {
         contract: &MetricContract,
         observations: &[MetricObservation],
     ) -> Result<Self, MetricError> {
-        Ok(Self {
-            current: select_current(contract, observations)?.cloned(),
-            instrumented: observations.iter().any(|observation| {
-                observation.identity() == &contract.identity
-                    && observation.contract_revision() == contract.contract_revision
-            }),
-            graduation_qualified: observations
-                .iter()
-                .any(|observation| observation.qualifies_graduation(contract)),
-        })
+        let mut evidence = Self::default();
+        let mut current = None;
+        for observation in observations {
+            if observation.metric_identity() != contract.identity {
+                continue;
+            }
+            // Match through canonical Work, but order by the original evidence digest.
+            let order = (observation.source_time(), observation.digest()?);
+            if current.is_none_or(|(selected, _)| order > selected) {
+                current = Some((order, observation));
+            }
+            evidence.instrumented |= observation.contract_revision() == contract.contract_revision;
+            evidence.graduation_qualified =
+                evidence.graduation_qualified || observation.qualifies_graduation(contract);
+        }
+        evidence.current = current.map(|(_, observation)| observation.clone());
+        Ok(evidence)
     }
 }
 
@@ -981,31 +1023,6 @@ pub fn compose_metric_portfolio(
     })
 }
 
-fn select_current<'a>(
-    contract: &MetricContract,
-    observations: &'a [MetricObservation],
-) -> Result<Option<&'a MetricObservation>, MetricError> {
-    let mut current: Option<(&MetricObservation, [u8; 32])> = None;
-    for observation in observations {
-        if observation.identity() != &contract.identity {
-            continue;
-        }
-        let digest = observation.digest()?;
-        let replace =
-            current.as_ref().is_none_or(|(selected, selected_digest)| {
-                match observation.source_time().cmp(&selected.source_time()) {
-                    Ordering::Greater => true,
-                    Ordering::Equal => digest > *selected_digest,
-                    Ordering::Less => false,
-                }
-            });
-        if replace {
-            current = Some((observation, digest));
-        }
-    }
-    Ok(current.map(|(observation, _)| observation))
-}
-
 fn derive_evidence(
     contract: &MetricContract,
     observation: &MetricObservation,
@@ -1208,16 +1225,49 @@ pub enum MetricError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn canonical_ids_metric_keys_preserve_punctuation_and_metric_names() {
+        let uuid = "ABCDEF12-ABCD-4ABC-8ABC-ABCDEF123456";
+        for spelling in [
+            uuid.to_string(),
+            uuid.replace('-', ""),
+            format!("{{{uuid}}}"),
+            format!("URN:UUID:{uuid}"),
+        ] {
+            let identity = MetricIdentity::new(&spelling, "Case-Sensitive");
+            let decoded: MetricIdentity = serde_json::from_value(
+                serde_json::json!({"wave_id": spelling, "metric_id": "Case-Sensitive"}),
+            )
+            .unwrap();
+            assert_eq!(identity, decoded);
+            let map = std::collections::HashMap::from([(identity, 1)]);
+            assert_eq!(
+                map.get(&MetricIdentity::new(
+                    &spelling.to_ascii_lowercase(),
+                    "Case-Sensitive"
+                )),
+                Some(&1)
+            );
+            assert!(!map.contains_key(&MetricIdentity::new(&spelling, "case-sensitive")));
+            assert_eq!(decoded.wave_id(), spelling.to_ascii_lowercase());
+        }
+        assert_ne!(
+            MetricIdentity::new(uuid, "metric"),
+            MetricIdentity::new(&uuid.replace('-', ""), "metric")
+        );
+        assert_eq!(
+            MetricIdentity::new("Historical-Wave", "metric").wave_id(),
+            "Historical-Wave"
+        );
+    }
+
     fn at(hour: i64) -> OffsetDateTime {
         OffsetDateTime::UNIX_EPOCH + Duration::hours(hour)
     }
 
     fn definition() -> MetricContractDefinition {
         MetricContractDefinition {
-            identity: MetricIdentity {
-                wave_id: "product".to_string(),
-                metric_id: "task-loop-trust".to_string(),
-            },
+            identity: MetricIdentity::new("product", "task-loop-trust"),
             name: "Task loops earn trust".to_string(),
             stage: MetricStage::Installed,
             instrument: "lifecycle-scorecard".to_string(),
@@ -1241,7 +1291,7 @@ mod tests {
 
     fn observed(contract: &MetricContract, value: f64, end: OffsetDateTime) -> MetricObservation {
         let mut observation = MetricObservation::Observed {
-            identity: contract.identity.clone(),
+            identity: contract.identity.clone().into(),
             contract_revision: contract.contract_revision.clone(),
             instrument: "lifecycle-scorecard".to_string(),
             observation_id: String::new(),
@@ -1256,7 +1306,7 @@ mod tests {
 
     fn unavailable(contract: &MetricContract, as_of: OffsetDateTime) -> MetricObservation {
         let mut observation = MetricObservation::Unavailable {
-            identity: contract.identity.clone(),
+            identity: contract.identity.clone().into(),
             contract_revision: contract.contract_revision.clone(),
             instrument: contract.instrument.clone(),
             observation_id: String::new(),

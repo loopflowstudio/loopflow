@@ -117,7 +117,7 @@ impl ClaudeHarness {
             *attachment = capture.prepare_agent_process(session, attachment)?;
             config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone()))?,
+                serde_json::to_string(&attachment.caller(session.clone().into()))?,
             );
         }
         let resume_id = self

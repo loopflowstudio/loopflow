@@ -15,6 +15,18 @@ public struct TaskLocationObservation: Codable, Equatable, Sendable {
     }
 }
 
+extension TaskLocationObservation {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        request = try values.decode(String.self, forKey: .request)
+        repositoryID = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .repositoryID), "repo_")
+        taskID = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .taskID), "task_")
+        machineID = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .machineID), "home_")
+        observedAt = try values.decode(Int64.self, forKey: .observedAt)
+        location = try values.decode(TaskLocation.self, forKey: .location)
+    }
+}
+
 public enum TaskLocation: Codable, Equatable, Sendable {
     case recorded(taskID: String, checkout: String?)
     case unrecorded
@@ -30,7 +42,7 @@ public enum TaskLocation: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         switch try values.decode(State.self, forKey: .state) {
         case .recorded:
-            self = .recorded(taskID: try values.decode(String.self, forKey: .taskID),
+            self = .recorded(taskID: StructuredIdentity.prefixed(try values.decode(String.self, forKey: .taskID), "task_"),
                              checkout: try values.decodeIfPresent(String.self, forKey: .checkout))
         case .unrecorded: self = .unrecorded
         case .unavailable: self = .unavailable(reason: try values.decode(String.self, forKey: .reason))

@@ -163,7 +163,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("fixture CLI failure"));
-    assert!(String::from_utf8_lossy(&output.stdout).contains(&session.id));
+    assert!(String::from_utf8_lossy(&output.stdout).contains(session.id.as_str()));
 
     // A direct old CLI or a gate launch must ignore a stale main-Machine pin.
     for entry in [Path::new(binary), &gate] {
@@ -183,7 +183,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(String::from_utf8_lossy(&output.stdout).contains(&session.id));
+        assert!(String::from_utf8_lossy(&output.stdout).contains(session.id.as_str()));
     }
     assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
     assert_eq!(store.session_history(&session.id, 0, 100).unwrap(), history);

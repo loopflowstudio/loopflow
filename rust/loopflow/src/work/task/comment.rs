@@ -2,6 +2,7 @@
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskComment {
+    #[serde(deserialize_with = "crate::id::deserialize_uuid")]
     pub id: String,
     pub body: String,
     pub author: TaskCommentAuthor,

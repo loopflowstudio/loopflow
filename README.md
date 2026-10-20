@@ -171,6 +171,10 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
+IDs accept any casing: `lf task status loo-506`, `TASK_…`, an uppercased Linear
+UUID and `SESSION_…` select the same records and print canonical IDs. Provider
+conversation IDs, names, slugs and paths stay exactly as written.
+
 Subtree delegation travels with shared planning. Started Tasks retain their recorded
 Machine; new Tasks reserve an exclusive execution owner before checkout.
 Connection settings and execution records remain Machine-local.

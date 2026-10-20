@@ -177,6 +177,28 @@ struct WorkCLISubscriptionTests {
         await keeping.value
     }
 
+    @Test func canonical_ids_desktop_cli_transport_accepts_any_casing() async throws {
+        let fixture = try WorkCLIFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try await fixture.prepare()
+        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Mixed case", "--json"])
+        let id = try #require(created["id"] as? String)
+        let current = try await fixture.run(["task", "location", id, "--json"])
+        let reading = try #require(try JSONDecoder().decode([TaskLocationObservation].self, from: Data(current.utf8)).first)
+        let query = RegistryQuery { args, _ in try await fixture.run(args) }
+
+        // Desktop's CLI transport sends every identity uppercased; Rust owns ingress.
+        let observed = try await query.taskLocation(task: id.uppercased(),
+                                                    repository: reading.repositoryID.uppercased(),
+                                                    machine: reading.machineID.uppercased())
+        #expect(observed.taskID == id)
+        #expect(observed.repositoryID == reading.repositoryID)
+        #expect(observed.machineID == reading.machineID)
+        #expect(observed.request == observed.request.uppercased(), "opaque request token returns byte-exact")
+        let status = try await fixture.json(["task", "status", id.uppercased(), "--json"])
+        #expect((status["task"] as? [String: Any])?["id"] as? String == id)
+    }
+
     private func selectedPlanMembers(_ model: WorkModel) -> [ViewMember] {
         model.selectionPlans.value?.first { $0.owner.reference == model.selection }?.members ?? []
     }

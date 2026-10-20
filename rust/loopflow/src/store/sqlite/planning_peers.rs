@@ -178,13 +178,14 @@ impl SqliteStore {
         revision: &str,
         incoming: &PlanningSnapshot,
     ) -> StoreResult<()> {
+        let incoming = incoming.canonicalized().map_err(invalid)?;
         incoming.validate().map_err(invalid)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_destination(&tx, repo, destination)?;
         route_repository(&tx, repo, destination)?;
         let merged = export_in(&tx, repo, destination, true)?
-            .merge(incoming)
+            .merge(&incoming)
             .map_err(invalid)?;
         for (id, change) in &incoming.changes {
             planning_write::retain(&tx, id, change)?;

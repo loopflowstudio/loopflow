@@ -129,7 +129,7 @@ impl TerminalTitle {
             provider_name: name.provider,
             name: name.terminal,
             store,
-            session: session.id,
+            session: session.id.to_string(),
             cmux: std::env::var("CMUX_WORKSPACE_ID")
                 .ok()
                 .zip(std::env::var("CMUX_SURFACE_ID").ok())
@@ -267,7 +267,7 @@ mod tests {
             .unwrap();
         let title = TerminalTitle {
             store,
-            session: session.id,
+            session: session.id.to_string(),
             attachment: Some(attachment.clone()),
             name: session.title.clone(),
             provider_name: session.title,

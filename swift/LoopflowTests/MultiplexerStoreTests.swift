@@ -506,3 +506,32 @@ struct MultiplexerStoreTests {
         #expect(store.focusedPaneId == left.id)
     }
 }
+
+@Test @MainActor
+func canonical_ids_reopening_session_preserves_pane_and_focus() throws {
+    let upper = "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    let store = MultiplexerStore()
+    store.load(sessionId: upper)
+    let pane = store.focusedPane
+    store.reveal(sessionId: upper.lowercased())
+    #expect(store.layout.allPanes.count == 1)
+    #expect(store.focusedPane.id == pane.id)
+    #expect(store.focusedPane.incarnation == pane.incarnation)
+    #expect(store.focusedPane.sessionId == upper.lowercased())
+    let encoded = try JSONEncoder().encode(store.layout)
+    let restored = try JSONDecoder().decode(LayoutNode.self, from: encoded)
+    #expect(restored == store.layout)
+}
+
+@Test
+func canonical_ids_workspace_keys_decode_canonically_without_changing_paths() throws {
+    let raw = Data(#"{"machine_id":"HOME_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","worktree":"/Case/Repo"}"#.utf8)
+    let workspace = try JSONDecoder().decode(WorkspaceIdentity.self, from: raw)
+    #expect(workspace.machineId == "home_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    #expect(workspace.worktree == "/Case/Repo")
+    let upper = WorkWorkspaceKey(repository: "REPO_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", kind: .task, id: "TASK_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+    let lower = WorkWorkspaceKey(repository: "repo_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", kind: .task, id: "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+    #expect(upper == lower)
+    #expect([upper: "retained"][lower] == "retained")
+    #expect(AgentSessionId(rawValue: "Case-Sensitive") != AgentSessionId(rawValue: "case-sensitive"))
+}

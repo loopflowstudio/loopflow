@@ -139,7 +139,7 @@ async fn inspect_agent_threads(endpoint: &str, thread: Option<&AgentSessionId>) 
 #[derive(Debug, Clone)]
 pub struct CodexConnection {
     pub store: SqliteStore,
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub thread_id: Option<AgentSessionId>,
     pub attachment: Option<SessionAttachment>,
     pub account_id: Option<crate::store::ProviderAccountId>,

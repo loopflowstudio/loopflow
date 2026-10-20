@@ -1306,7 +1306,7 @@ Poll a configured channel and post each Session's final answer
 
 ## lf wave
 
-Manage Wave identity, placement and planning
+Manage Wave identity and planning
 
 | Argument | What it does |
 |---|---|
@@ -1475,7 +1475,7 @@ List installed loopflow cron jobs
 
 ## lf wave cron preflight
 
-Validate configured commands and Machine placement without installing jobs
+Validate configured commands and your Wave Machine without installing jobs
 
 | Argument | What it does |
 |---|---|
@@ -1549,6 +1549,17 @@ Show one Wave's current plan, Task details, and execution evidence
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
 | `--sync` | Refresh planning from Linear before reading Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave machine
+
+Choose your Machine for a Wave's new Tasks and its Wave Session
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id; omit to show the current choice |
+| `--unset` | Start the Wave's Tasks on whichever Machine runs them Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename

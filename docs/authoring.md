@@ -366,16 +366,16 @@ Every Wave uses the repository Team and binds only its Initiative. Select the
 synchronization transport with `planning.provider`; a Team binding selects Linear
 when that choice is omitted.
 
-The owning Machine is committed configuration:
+Which Machine runs your work for a Wave is your choice, never repository content:
 
-```yaml
-machines:
-  default: home_…        # standalone Tasks and unlisted Waves
-  waves:
-    product: home_…      # child Waves inherit their parent's entry
+```bash
+lf wave machine product mini      # your Machine for this Wave's new Tasks
+lf wave machine product           # show it
+lf wave machine product --unset   # back to whichever Machine runs the command
 ```
 
-It does not edit the goal, launch work or stop existing conversations.
+It does not edit the goal or launch work. It moves your Wave Session to the new
+Machine and leaves existing Tasks where they are.
 
 ### Writing KRs
 

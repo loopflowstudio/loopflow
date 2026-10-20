@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, TaskCommand};
+use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -130,7 +130,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(selector) = launch_task(cli) else {
-        return Ok(false);
+        return dispatch_wave_session(cli, args);
     };
     let Some(store) = read_registry()? else {
         return Ok(false);
@@ -183,6 +183,51 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         forwarded.splice(0..0, ["--task".into(), route.task_id.to_string()]);
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
+    Ok(true)
+}
+
+/// A Wave's Session lives on your Machine for that Wave. The destination runs
+/// it wherever it arrives, even if its own copy of the choice differs.
+fn dispatch_wave_session(cli: &Cli, args: &[String]) -> Result<bool> {
+    let (
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    all: false,
+                    ..
+                },
+        }),
+        Some(wave),
+        None,
+    ) = (&cli.command, cli.wave.as_deref(), cli.task.as_deref())
+    else {
+        return Ok(false);
+    };
+    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+        return Ok(false);
+    }
+    let Some(store) = read_registry()? else {
+        return Ok(false);
+    };
+    let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
+    let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
+        return Ok(false);
+    };
+    let (machine, _) = store.wave_owning_machine(&wave_id)?;
+    if machine == store.local_machine()?.id {
+        return Ok(false);
+    }
+    let mut forwarded = args[1..].to_vec();
+    if cli.repository.is_none() {
+        let repository = match repo.as_deref() {
+            Some(repo) => store.repository_id(repo)?,
+            None => None,
+        }
+        .ok_or_else(|| anyhow!("Wave {wave} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
+        forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
+    }
+    super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;
     Ok(true)
 }
 

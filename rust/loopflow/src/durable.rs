@@ -143,15 +143,13 @@ pub enum TaskExecutionSource {
     OwningMachine(OwningMachineSource),
 }
 
-/// Which repository configuration entry supplied the owning Machine.
+/// Where the person's Machine for an unowned Task came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
 pub enum OwningMachineSource {
-    /// `machines.waves.<name>`, on the Task's Wave or a parent Wave.
+    /// `lf wave machine`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// `machines.default`.
-    Default,
-    /// No configured entry: single-Machine use needs no configuration.
+    /// No Wave Machine is set: the Machine running the command.
     ThisMachine,
 }
 

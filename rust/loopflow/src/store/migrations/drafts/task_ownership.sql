@@ -29,6 +29,20 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_task_ownership_update AFTER UPDATE ON task_ownership
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
+-- This person's Machine for each Wave's unowned Tasks. Personal, never planning
+-- content: each of the person's Machines holds its own copy.
+CREATE TABLE wave_machines (
+    wave_id TEXT PRIMARY KEY,
+    machine_id TEXT NOT NULL CHECK (machine_id GLOB 'home_*'),
+    set_at INTEGER NOT NULL
+);
+CREATE TRIGGER store_revision_wave_machines_insert AFTER INSERT ON wave_machines
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_wave_machines_update AFTER UPDATE ON wave_machines
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_wave_machines_delete AFTER DELETE ON wave_machines
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 -- One entry records what each Machine knew. It invents no person, and a Machine
 -- it cannot name stays unknown. These entries are local evidence, never delivered.
 INSERT INTO task_ownership(id, task_id, kind, person, machine_id, at, ordered_at, written_here)

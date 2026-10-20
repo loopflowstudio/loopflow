@@ -133,9 +133,6 @@ pub fn explain(
         TaskExecutionSource::OwningMachine(OwningMachineSource::Wave(wave)) => {
             format!("owning_machine:wave:{wave}")
         }
-        TaskExecutionSource::OwningMachine(OwningMachineSource::Default) => {
-            "owning_machine:default".into()
-        }
         TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine) => {
             "owning_machine:this_machine".into()
         }

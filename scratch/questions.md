@@ -1,9 +1,7 @@
 # LOO-523 open questions (decided provisionally; Jack reviews before landing)
 
-1. **Owning Machines live in `.lf/config.yaml`** (`machines.default`, `machines.waves.<name>`).
-   This replaces the journal-held Wave placement, so the setting travels in Linear
-   mode too. `lf wave place` is deleted rather than taught to edit YAML. The
-   alternative is to keep a CLI that rewrites config.
+1. **Superseded by Jack Heart (2026-10-20):** the committed `machines:` block is
+   deleted; each person's Wave Machine is Machine-local (`lf wave machine`).
 2. **Decided by Jack Heart (2026-10-19): an unconfigured repository resolves to
    "this Machine".** Both claims push to the provider, and the second claim wins.
    Machines that never connect through a provider do not share the Task. The
@@ -51,10 +49,8 @@
   name the Machine keep it".
 - Add: "LOO-523 (2026-10-19): Tasks are owned by (person, Machine) through an
   append-only `task_ownership` log; Started, Work placement and first-start
-  admission are deleted. Owning Machines live in `.lf/config.yaml` `machines:`."
-13. **Renaming a Wave does not rewrite `machines.waves.<name>` in `.lf/config.yaml`.**
-    The entry is keyed by name, so a rename leaves it pointing at the old name until
-    someone edits config. Alternative: key by Wave id (less readable).
+  admission are deleted. Each person's Wave Machine is Machine-local
+  (`lf wave machine`), copied to their other Machines."
 14. **The ownership verbs are `claim`, `handoff` and `unclaim`** (Jack Heart, 2026-10-20).
     `lf task release` made `lf release` ambiguous; `unclaim` pairs with `claim` and
     keeps the shorthand.
@@ -88,3 +84,19 @@
   (`lf repo machine`) would mirror the Wave setting; deferred until wanted.
 - **Moving a Session leaves its native history behind** on the old Machine; the
   successor starts with fresh Wave context, like `--fresh`.
+
+## Implementation choices (2026-10-20, needs Jack's review)
+
+15. **`wave_machines` is keyed by Wave id alone.** A Machine's store belongs to one
+    person, so "the person's" Wave Machine needs no person column. Copies travel by
+    Wave name with `--repository`, since Wave ids are per Machine.
+16. **Setting the Wave Machine admits, not launches, the Wave Session there.** The
+    target admits a primary (`ensure`, as `--prepare` does); the provider starts on
+    the next connect. Other Machines complete their Wave primary. `--unset` moves no
+    Session: every Machine then runs its own.
+17. **Recorded entries (no person) count as yours**, and so does every entry when
+    this Machine has no participant name; single-person use needs no name.
+18. **Deferred from "primary Sessions follow the Machine":** context-resolved
+    connects (no `--wave`) routing to the Wave Machine, `observe_task_location`
+    reading the owner Machine, and `lf open` reading remote primaries. Explicit
+    `--wave`/`--task` connects already route.

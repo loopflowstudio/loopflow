@@ -137,25 +137,46 @@ lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by a person on a Machine, or unowned. `task checkout` and `task run`
-claim an unowned Task when they allocate its checkout. Claim, handoff, unclaim, run
-and checkout run on the Task's writer over `lf --machine`: the owner's Machine, or
-the owning Machine while the Task is unowned or its owner's Machine is unknown.
-Handoff needs only the target's identity, not a connection. Completion, abandonment
-and reopening leave ownership alone; a Done Task shows its last owner.
+claim an unowned Task when they allocate its checkout. Handoff needs only the
+target's identity, not a connection. Completion, abandonment and reopening leave
+ownership alone; a Done Task shows its last owner.
 
-```yaml
-# .lf/config.yaml
-machines:
-  default: home_…           # standalone Tasks and unlisted Waves
-  waves:
-    infrastructure: home_…  # child Waves inherit their parent's entry
+```bash
+lf wave machine infrastructure mini     # your Machine for this Wave's new Tasks
+lf wave machine infrastructure          # show it ("mini", or "this Machine")
+lf wave machine infrastructure --unset  # back to whichever Machine runs the command
 ```
 
-The owning Machine comes from the Task's Wave, its parent Waves, `default`, then
-this Machine, so one Machine needs no configuration. Cron install reads the same entry.
+Your Wave Machine is a personal choice, never committed. It is stored in this
+Machine's local store and copied to your other Machines (`lf machine add`) over
+`lf --machine`, so the laptop knows to launch there and mini knows to receive the
+runs. An unreachable Machine gets a warning; rerun later. An unowned Task resolves
+through its Wave, then parent Waves, then this Machine, so one Machine needs no
+setup. `lf cron` installs a Wave's crons for the same Machine.
+
+Setting it moves your Wave Session: the old Machine completes its Wave primary
+Session and the new Machine admits a fresh one, with fresh Wave context as with
+`--fresh`; native provider history stays on the old Machine.
+`lf session connect --wave <wave>` routes to your Wave Machine.
+
+A Task's Machine is the one in its claim. Changing the Wave Machine moves no
+existing Task; `lf task handoff <task> <machine>` moves one, completing its primary
+Session on the old Machine. The new Machine admits one on first connect.
+
+Claim, handoff, unclaim, run and checkout pick their writer within your own Machines:
+
+| Task is | The command |
+|---|---|
+| Yours, on another of your Machines | Reruns there over `lf --machine` |
+| Unowned | Writes your claim on your Wave Machine |
+| Someone else's | Writes your claim on your own Wave Machine; the later claim wins |
+
+Nothing routes to another person's Machine. You cannot hand off or unclaim
+someone else's claim.
 
 Each change is posted as a Task comment ("Jack Heart claimed this on mini") that
-rides ordinary comment delivery to Linear or Git planning. With Linear, a claim
+rides ordinary comment delivery to Linear or Git planning. The Machine follows the
+person for information only; nothing another person does depends on it. With Linear, a claim
 assigns the Task to that Machine's Linear viewer and moves backlog to started;
 unclaim clears the assignee. When another Machine claims later, nothing is
 cancelled: the earlier claimant keeps its claim locally, `lf task status` reports
@@ -648,7 +669,7 @@ crons:
 ```
 
 ```bash
-lf cron preflight                  # validate configuration and owning Machines
+lf cron preflight                  # validate configuration and Wave Machines
 lf cron sync                       # explicitly install the configured list
 lf cron list --wave product         # filter by the command's Work selector
 lf cron list --task EXP-12
@@ -670,7 +691,7 @@ lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
-Checks continue with Desktop closed while the owning Machine's user is logged in.
+Checks continue with Desktop closed while this Machine's user is logged in.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 
@@ -776,8 +797,8 @@ other command shapes fail before effects. Combine both flags for identity plus i
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
 and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the
-owner's Machine; unowned Tasks show the owning Machine as a **proposed destination**,
-with its source (`owning_machine:wave:<name>`, `default` or `this_machine`). Remote execution state is unavailable
+owner's Machine; unowned Tasks show your Wave Machine as a **proposed destination**,
+with its source (`owning_machine:wave:<name>` or `this_machine`). Remote execution state is unavailable
 without reading that Machine. Completion, future checkout and provider checks are
 not fabricated; a real run checks them again.
 
@@ -905,7 +926,7 @@ lf desktop list --json                       # read an already-running Mac app
 Explanation reads local records without allocating a checkout, creating a plan,
 starting a provider or contacting peers. Each identity is bound (with its source),
 unbound or unavailable. Machine identifies the reader; Execution Machine comes
-from recorded checkout evidence, never the owning Machine substituted for a missing
+from recorded checkout evidence, never the Wave Machine substituted for a missing
 execution observation. The timestamp dates this read, not planning freshness or
 permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
@@ -1164,8 +1185,8 @@ running older providers can retain old hook paths; this does not rewrite their
 environment or interrupt them. An installed Desktop update still requires the
 supported installation handoff; source tests do not prove that live handoff.
 
-Task launches route to the owner's Machine, or the owning Machine for an unowned
-Task. The cross-machine path requires the same repository plan to be explicitly
+Task launches route to the Machine in your claim, or your Wave Machine for an
+unowned Task. The cross-machine path requires the same repository plan to be explicitly
 bound at the destination. Complete remote execution observation is still under
 development; missing local execution is not proof of globally unstarted work.
 

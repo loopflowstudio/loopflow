@@ -41,9 +41,9 @@ Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
 Workflow definitions remain separately stored: provisioning and the draft migration
 import `.lf/workflows/`, and Wave workflow selection updates the stored definition.
-Wave list, status and roadmap emit each Wave's `machine` from the committed
-`machines:` entry in `.lf/config.yaml` (the Wave, then its parents, then
-`default`), or `machine: null` when unconfigured, never a fabricated local Machine.
+Wave list, status and roadmap emit each Wave's `machine` from the reader's
+Machine-local Wave → Machine default (the Wave, then its parents), or
+`machine: null` when unset, never a fabricated local Machine.
 Desktop consumes the same optional value.
 
 Task deletion atomically records local removal and a stable pending field receipt.

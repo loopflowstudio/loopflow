@@ -258,17 +258,6 @@ pub struct CronDef {
     pub schedule: String,
 }
 
-/// Which Machine owns unowned Work: the Task's Wave or a parent Wave's entry,
-/// then `default`. Absent configuration resolves to the reading Machine.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct MachinesConfig {
-    #[serde(default)]
-    pub default: Option<crate::durable::MachineId>,
-    #[serde(default)]
-    pub waves: BTreeMap<String, crate::durable::MachineId>,
-}
-
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -278,8 +267,6 @@ pub struct Config {
     pub crons: Option<Vec<CronDef>>,
     #[serde(default)]
     pub planning: Option<PlanningConfig>,
-    #[serde(default)]
-    pub machines: Option<MachinesConfig>,
     #[serde(default)]
     pub automation: AutomationConfig,
     #[serde(default)]
@@ -391,7 +378,6 @@ impl Default for Config {
         Self {
             workflow: None,
             planning: None,
-            machines: None,
             crons: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),

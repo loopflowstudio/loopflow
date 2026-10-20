@@ -209,7 +209,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
-| Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; committed `machines:` names the owning Machine for unowned Work |
+| Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; each person's Machine-local Wave → Machine default places their unowned Work |
 
 An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,

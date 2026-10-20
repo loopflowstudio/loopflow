@@ -411,7 +411,7 @@ Jack's laptop store holds 533 placements (all `legacy`, all on this Machine),
   open, and the next refresh on the owner restores the assignee. In Git, a
   stale Machine's unclaim of that claim is followed, after exchange, by the
   owner's fresh claim.
-- Two Machines that share Git planning and the same `machines.waves` entry
+- Two of your Machines that share Git planning and the same Wave Machine
   cannot both claim: the non-owning one forwards to the owner. With no
   configured owner, both claims are delivered and, after exchange, each
   other Machine shows the second claim as owner. The first claimant still shows
@@ -437,14 +437,17 @@ The live Linear demo above is a demo/review step, not gate.
 
 ## Remaining work
 
-- Personal Wave Machine (above): `lf wave machine`, copy to own Machines, Wave Session move; delete committed `machines:` config and update docs, `scratch/questions.md` item 1, and the integration tests that use `machines.waves`.
-- Writer rule: forward only within the person's own Machines.
-- Primary Sessions follow the Machine (section above).
+- Built 2026-10-20: `wave_machines` (draft), `lf wave machine` with copy to your
+  registered Machines and Wave Session move, writer rule within your Machines,
+  `session connect --wave` routing, handoff completing the Task primary;
+  `machines:` config and `MachinesConfig` deleted.
+- Context-resolved connects, owner-Machine `observe_task_location`, and remote
+  primaries in `lf open` (`scratch/questions.md` item 18).
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
-Check results (2026-10-19): ownership integration 3/3, `dto_fixtures` 42/42,
+Check results (2026-10-20): ownership + wave machine integration 5/5, cli_discovery/documented/dto/global 78/78, clippy clean, `check_migrations.py` pass. Earlier (2026-10-19): ownership integration 3/3, `dto_fixtures` 42/42,
 release/CLI integration 61/61, focused Swift 76/76, `check_migrations.py` pass;
 full integration otherwise green except `auth_tests::banked_resets…` (passes alone);
 the two `native_runner_*_foreground` lib tests hang without a terminal (deferred to CI).

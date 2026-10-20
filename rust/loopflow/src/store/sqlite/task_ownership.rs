@@ -1,8 +1,8 @@
 //! A Task's append-only ownership log and this Machine's reading of it.
 //!
-//! The later entry wins, in provider order. Exactly one Machine may append the
-//! next entry: the owner's Machine, or the configured owning Machine while the
-//! Task is unowned or its owner's Machine is unknown. An inbound entry never
+//! The later entry wins, in provider order. Writes stay within one person's
+//! Machines: your Task's next entry is written on its Machine when that is one
+//! of yours, otherwise on your Machine for its Wave. An inbound entry never
 //! ends this Machine's own open claim; only its own unclaim or handoff does.
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -129,7 +129,7 @@ fn reading_in(conn: &Connection, task: &TaskId) -> StoreResult<(Vec<Row>, Readin
 }
 
 /// The local Machine has no registered label; its short hostname names it.
-fn local_label() -> String {
+pub(crate) fn local_label() -> String {
     let host = gethostname::gethostname().to_string_lossy().into_owned();
     host.split('.').next().unwrap_or(&host).to_string()
 }
@@ -182,56 +182,78 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(reading_in(conn, task)?.1.owner.is_some())
 }
 
-/// The configured owning Machine: the Task's Wave or a parent Wave's entry,
-/// then `machines.default`, then this Machine.
+/// Your Machine for an unowned Task: its Wave's or a parent Wave's setting,
+/// then this Machine.
 pub(super) fn owning_machine_in(
     conn: &Connection,
     task: &TaskId,
 ) -> StoreResult<(MachineId, OwningMachineSource)> {
-    let (repo, wave): (String, Option<String>) = conn.query_row(
-        "SELECT w.repo,p.wave_id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-         LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+    let wave: Option<String> = conn.query_row(
+        "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    resolve_owning_machine(conn, &repo, wave)
+    resolve_owning_machine(conn, wave)
 }
 
 fn resolve_owning_machine(
     conn: &Connection,
-    repo: &str,
     mut wave: Option<String>,
 ) -> StoreResult<(MachineId, OwningMachineSource)> {
-    let machines = crate::config::load_repo_config(std::path::Path::new(repo))
-        .map_err(|error| StoreError::InvalidData(error.to_string()))?
-        .and_then(|config| config.machines)
-        .unwrap_or_default();
     let mut visited = std::collections::HashSet::new();
     while let Some(id) = wave.filter(|id| visited.insert(id.clone())) {
-        let (name, parent): (String, Option<String>) = conn.query_row(
-            "SELECT name,parent_wave_id FROM waves WHERE id=?1",
+        let (name, parent, machine): (String, Option<String>, Option<String>) = conn.query_row(
+            "SELECT w.name,w.parent_wave_id,m.machine_id FROM waves w
+             LEFT JOIN wave_machines m ON m.wave_id=w.id WHERE w.id=?1",
             [&id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        if let Some(machine) = machines.waves.get(&name) {
-            return Ok((machine.clone(), OwningMachineSource::Wave(name)));
+        if let Some(machine) = machine {
+            return Ok((
+                MachineId::from_raw(machine),
+                OwningMachineSource::Wave(name),
+            ));
         }
         wave = parent;
     }
-    match machines.default {
-        Some(machine) => Ok((machine, OwningMachineSource::Default)),
-        None => Ok((local_machine_in(conn)?, OwningMachineSource::ThisMachine)),
+    Ok((local_machine_in(conn)?, OwningMachineSource::ThisMachine))
+}
+
+/// This Machine, or one registered with `lf machine add`.
+fn is_my_machine_in(conn: &Connection, machine: &MachineId) -> StoreResult<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM machines WHERE id=?1 AND (route='local' OR label IS NOT NULL)",
+            [machine.as_str()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+/// Whether a holder is the person on this Machine. Entries recorded before
+/// ownership existed name no person and are this Machine's own evidence.
+fn is_mine(holder: &Holder, me: Option<&str>) -> bool {
+    match (&holder.0, me) {
+        (Some(person), Some(me)) => person == me,
+        _ => true,
     }
 }
 
-/// The one Machine that may append the Task's next entry.
+/// The one Machine of yours that writes the Task's next entry: the owner's,
+/// when you own it on one of your Machines, else your Machine for its Wave.
+/// Someone else's Machine is never a writer for you.
 pub(super) fn writer_in(
     conn: &Connection,
     task: &TaskId,
 ) -> StoreResult<(MachineId, TaskExecutionSource)> {
     let (_, reading) = reading_in(conn, task)?;
-    if let Some((_, Some(machine))) = reading.owner {
-        return Ok((machine, TaskExecutionSource::Owner));
+    if let Some(holder) = &reading.owner {
+        if let (true, Some(machine)) = (is_mine(holder, person()?.as_deref()), &holder.1) {
+            if is_my_machine_in(conn, machine)? {
+                return Ok((machine.clone(), TaskExecutionSource::Owner));
+            }
+        }
     }
     let (machine, source) = owning_machine_in(conn, task)?;
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
@@ -246,6 +268,24 @@ fn require_writer_in(conn: &Connection, task: &TaskId) -> StoreResult<MachineId>
         )));
     }
     Ok(local)
+}
+
+/// Handoff and unclaim end your own claim; someone else's stays theirs.
+fn require_my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<(MachineId, Holder)> {
+    let local = require_writer_in(conn, task)?;
+    let (_, reading) = reading_in(conn, task)?;
+    match reading.owner {
+        None => Err(StoreError::InvalidAuthority(format!(
+            "Task {task} is unowned"
+        ))),
+        Some(holder) if !is_mine(&holder, person()?.as_deref()) => {
+            Err(StoreError::InvalidAuthority(format!(
+                "Task {task} is claimed by {}; claim it to take it over",
+                holder.0.as_deref().unwrap_or("someone else")
+            )))
+        }
+        Some(holder) => Ok((local, holder)),
+    }
 }
 
 fn person() -> StoreResult<Option<String>> {
@@ -488,19 +528,32 @@ pub(super) fn reassert_in(
 }
 
 impl SqliteStore {
-    /// The Machine that owns a Wave's unowned Tasks, from repository configuration.
+    /// Your Machine for a Wave's unowned Tasks.
     pub fn wave_owning_machine(
         &self,
         wave: &crate::id::WaveId,
     ) -> StoreResult<(MachineId, OwningMachineSource)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        let repo: String = snapshot.query_row(
-            "SELECT repo FROM waves WHERE id=?1",
-            [wave.as_str()],
-            |row| row.get(0),
-        )?;
-        resolve_owning_machine(&snapshot, &repo, Some(wave.to_string()))
+        resolve_owning_machine(&snapshot, Some(wave.to_string()))
+    }
+
+    /// Set or clear your Machine for a Wave. Existing Tasks keep their claims.
+    pub fn set_wave_machine(
+        &self,
+        wave: &crate::id::WaveId,
+        machine: Option<&MachineId>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        match machine {
+            Some(machine) => conn.execute(
+                "INSERT INTO wave_machines(wave_id,machine_id,set_at) VALUES(?1,?2,?3)
+                 ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id,set_at=excluded.set_at",
+                params![wave.as_str(), machine.as_str(), crate::store::rows::now_unix()],
+            )?,
+            None => conn.execute("DELETE FROM wave_machines WHERE wave_id=?1", [wave.as_str()])?,
+        };
+        Ok(())
     }
 
     pub fn task_ownership(&self, task: &TaskId) -> StoreResult<TaskOwnership> {
@@ -534,6 +587,8 @@ impl SqliteStore {
         Ok(entry)
     }
 
+    /// Move your claim to another Machine. The Task's primary Session here is
+    /// completed; the target admits its own on first connect.
     pub fn handoff_task(
         &self,
         task: &TaskId,
@@ -541,19 +596,18 @@ impl SqliteStore {
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = require_writer_in(&tx, task)?;
-        let (_, reading) = reading_in(&tx, task)?;
-        let Some((person, _)) = reading.owner else {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Task {task} is unowned; claim it before handing it off"
-            )));
-        };
+        let (local, (person, _)) = require_my_claim_in(&tx, task)?;
         if *target == local {
             return Err(StoreError::InvalidData(format!(
                 "Task {task} is already owned on this Machine"
             )));
         }
         let entry = append_in(&tx, task, OwnershipKind::Handoff, person, target)?;
+        tx.execute(
+            "UPDATE agent_sessions SET completed_at=?2 WHERE completed_at IS NULL
+             AND id=(SELECT primary_session_id FROM tasks WHERE id=?1)",
+            params![task.as_str(), crate::store::rows::now_unix()],
+        )?;
         tx.commit()?;
         Ok(entry)
     }
@@ -561,12 +615,7 @@ impl SqliteStore {
     pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let local = require_writer_in(&tx, task)?;
-        if reading_in(&tx, task)?.1.owner.is_none() {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Task {task} is already unowned"
-            )));
-        }
+        let (local, _) = require_my_claim_in(&tx, task)?;
         let entry = append_in(&tx, task, OwnershipKind::Unclaim, person()?, &local)?;
         tx.commit()?;
         Ok(entry)

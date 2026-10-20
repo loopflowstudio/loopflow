@@ -876,6 +876,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             unreachable!("read commands dispatch separately")
         }
         WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
+        WaveCommand::Machine { .. } => loopflow::lf::commands::wave_machine::run(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -2500,7 +2501,7 @@ fn execute_command(
         }
 
         Some(Commands::Wave {
-            cmd: cmd @ WaveCommand::Rename { .. },
+            cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Machine { .. }),
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
             cmd: cmd @ WaveCommand::Workflow { .. },

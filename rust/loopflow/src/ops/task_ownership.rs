@@ -18,7 +18,8 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId> {
+/// A registered Machine label, this Machine's hostname, or a Machine id.
+pub(crate) fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId> {
     if let Some(machine) = store
         .machines()
         .map_err(message)?
@@ -26,6 +27,9 @@ fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId> {
         .find(|machine| machine.label.as_deref() == Some(target))
     {
         return Ok(machine.id);
+    }
+    if target == crate::store::sqlite::task_ownership::local_label() {
+        return Ok(store.local_machine().map_err(message)?.id);
     }
     // A handoff needs only the target's identity, not a connection to it.
     MachineId::parse(target).map_err(|_| {

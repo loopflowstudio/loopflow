@@ -265,13 +265,15 @@ lf --machine mini --wave shipper wave-operate
 lf task handoff LOO-123 mini            # move one Task's ownership to mini
 ```
 
-Name the Machine that owns a Wave's unowned work in `.lf/config.yaml`:
+Pick the Machine that runs your new Tasks for a Wave:
 
-```yaml
-machines:
-  waves:
-    shipper: home_…    # the id from lf machine list
+```bash
+lf wave machine shipper mini            # stored here and on your other Machines
+lf session connect --wave shipper       # your Wave Session, now on mini
 ```
+
+The choice is yours alone and never committed. Existing Tasks stay put; move one
+with `lf task handoff`.
 
 The target Machine proves its identity before running the command and keeps the
 resulting execution locally.

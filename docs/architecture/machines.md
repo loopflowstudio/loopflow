@@ -94,25 +94,46 @@ needs only the target's identity, not a connection. `lf task run` and
 Completion, abandonment and reopening write no entries; a Done Task shows its
 last owner as history.
 
-Committed `.lf/config.yaml` names the owning Machine for unowned Work:
+Which Machine runs a person's Wave work is that person's choice, never
+repository content:
 
-```yaml
-machines:
-  default: home_…           # standalone Tasks and unlisted Waves
-  waves:
-    infrastructure: home_…  # child Waves inherit their parent's entry
+```bash
+lf wave machine infrastructure mini     # your Machine for this Wave's new Tasks
+lf wave machine infrastructure          # show it ("mini", or "this Machine")
+lf wave machine infrastructure --unset  # back to whichever Machine runs the command
 ```
 
-Resolution walks the Task's Wave, its parent Waves, `default`, then this Machine,
-so single-Machine use needs no configuration. Cron install and `lf wave show`'s
-`machine` field read the same resolver.
+The setting lives in Machine-local SQLite `wave_machines` and is copied to the
+person's other added Machines over `lf --machine`, so the laptop launches there and
+mini receives the runs. An unreachable Machine gets a warning; rerun later.
+Resolution for an unowned Task walks its Wave, its parent Waves, then this Machine,
+so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
+field read the same resolver.
 
-Exactly one Machine may append the next entry: the owner's Machine, or the owning
-Machine while the Task is unowned or its owner's Machine is unknown. Claim,
-handoff, unclaim, `task run`, `task checkout` and global `--task` route to that
-writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
-Routing reports its source: `owner`, `owning_machine:wave:<name>`,
-`owning_machine:default` or `owning_machine:this_machine`. Ownership does not move
+Setting it moves the Wave Session: the old Machine completes its Wave primary
+Session and the new Machine admits a fresh one (fresh Wave context, as with
+`--fresh`; native provider history stays behind). `lf session connect --wave <w>`
+and Desktop's Wave Session route to the Wave Machine over `lf --machine`.
+
+A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
+moves no existing Task; `lf task handoff <task> <machine>` moves one and completes
+its primary Session on the old Machine. The new Machine admits a primary on first
+connect.
+
+Forwarding stays within one person's Machines. Claim, handoff, unclaim,
+`task run`, `task checkout` and global `--task` pick their writer and re-check
+inside one IMMEDIATE transaction:
+
+| Task is | Writer |
+|---|---|
+| Yours, on another of your Machines | That Machine, over `lf --machine` |
+| Unowned | Your Wave Machine |
+| Someone else's | Your own Wave Machine; your later claim wins |
+
+Nothing routes to another person's Machine, and nobody hands off or unclaims
+another person's claim; cross-person handoff is deferred. The Machine in a claim
+comment is informational. Routing reports its source: `owner`,
+`owning_machine:wave:<name>` or `owning_machine:this_machine`. Ownership does not move
 a checkout or launch a process. `lf wave status` reads planning, Task conditions,
 metrics and Session history; no process needs to be running.
 
@@ -177,7 +198,7 @@ owner claims again.
 With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
 backlog, triage or `unstarted` to `started`; unclaim clears the assignee; handoff
 leaves it. The assignee is not a second ownership store: assignee changes write no
-entries, and the owning Machine re-asserts its assignee while its claim is
+entries, and the claim's Machine re-asserts its assignee while its claim is
 unsuperseded.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and

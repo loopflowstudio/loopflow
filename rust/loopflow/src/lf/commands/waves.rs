@@ -1078,7 +1078,7 @@ fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
     )
 }
 
-/// Read planning and the configured owning Machine without allocating execution.
+/// Read planning and your Machine for the Wave without allocating execution.
 async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
@@ -1090,11 +1090,11 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Res
         let state = store.task_state(&task.id).await?;
         active_tasks += u32::from(!state.is_terminal());
     }
-    // Configured owning Machines only; an unconfigured Wave belongs to the reader.
+    // Only a chosen Wave Machine is named; an unset Wave runs on the reader.
     let (machine_id, source) = store
         .wave_owning_machine(wave.id())
         .await
-        .map_err(|error| anyhow!("failed to read Wave owning Machine: {error}"))?;
+        .map_err(|error| anyhow!("failed to read your Wave Machine: {error}"))?;
     let machine = match source {
         crate::durable::OwningMachineSource::ThisMachine => None,
         _ => store

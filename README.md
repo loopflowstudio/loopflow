@@ -182,9 +182,9 @@ lf task unclaim LOO-506        # unowned again
 ```
 
 A Task is owned by a person on a Machine, or unowned; `lf task run` claims an
-unowned Task. Ownership travels with shared planning as Task comments. Committed
-`machines:` in `.lf/config.yaml` names the owning Machine for unowned Work.
-Connection settings and execution records remain Machine-local.
+unowned Task. Ownership travels with shared planning as Task comments.
+`lf wave machine <wave> mini` picks your Machine for a Wave's new Tasks; it is
+yours, never committed. Connection settings and execution records remain Machine-local.
 
 Task comments in Linear reach the Task's next useful boundary: before a Flow step,
 after an agent turn, when showing planning, and before a Linear write. Team checks
@@ -300,9 +300,9 @@ across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
 ones, and `--available` keeps those available for you to work with. `--all` means all repositories.
 
-Task creation also saves its primary conversation. Wave admission saves the Wave
-and repository conversations. These Sessions survive the creating command without
-starting a provider or marking a Task Started; the first input connecting reserves does.
+A Task's primary conversation is admitted lazily on its owner's Machine, on first
+connect. Wave admission saves the Wave and repository conversations. Admission
+starts no provider and marks no Task Started; the first input connecting reserves does.
 
 `lf connect` opens this scope's ongoing conversation, creating one when absent.
 From the canonical checkout or the repository's persistent checkout it opens the

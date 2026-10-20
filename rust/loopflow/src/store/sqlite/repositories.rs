@@ -459,25 +459,19 @@ mod tests {
     }
 
     #[test]
-    fn configured_owning_machine_routes_unowned_tasks_until_one_is_claimed() {
+    fn wave_machine_routes_unowned_tasks_until_one_is_claimed() {
         use crate::durable::{OwningMachineSource, TaskExecutionSource};
         let home = tempfile::tempdir().unwrap();
-        let repo = home.path().join("repo");
-        std::fs::create_dir_all(repo.join(".lf")).unwrap();
-        let repo = repo.canonicalize().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().canonicalize().unwrap();
+        let repo = repo.to_str().unwrap();
         let mini = MachineId::new();
-        std::fs::write(
-            repo.join(".lf/config.yaml"),
-            format!("machines:\n  waves:\n    work: {mini}\n"),
-        )
-        .unwrap();
-        let project = store
-            .ensure_wave_project(repo.to_str().unwrap(), "work")
-            .unwrap();
+        let project = store.ensure_wave_project(repo, "work").unwrap();
+        let wave = project.wave_id.clone();
+        store.set_wave_machine(&wave, Some(&mini)).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
-                repository_id: store.ensure_repository(repo.to_str().unwrap()).unwrap(),
+                repository_id: store.ensure_repository(repo).unwrap(),
                 id: TaskId::new(),
                 project_id: Some(project.id),
                 title: "Owned elsewhere".into(),
@@ -491,23 +485,19 @@ mod tests {
             route.source,
             TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
         );
-        // Only the owning Machine may claim; this one refuses without writing.
+        // Only your Machine for the Wave claims; this one refuses without writing.
         assert!(store.claim_task(&task.id).is_err());
         assert!(store.task_ownership(&task.id).unwrap().log.is_empty());
 
-        std::fs::write(repo.join(".lf/config.yaml"), "machines: {}\n").unwrap();
+        store.set_wave_machine(&wave, None).unwrap();
         let local = store.local_machine().unwrap().id;
         assert_eq!(
             store.task_execution_route(&task.id).unwrap().machine_id,
             local
         );
         store.claim_task(&task.id).unwrap().unwrap();
-        // Once owned, the owner's Machine routes regardless of configuration.
-        std::fs::write(
-            repo.join(".lf/config.yaml"),
-            format!("machines:\n  default: {mini}\n"),
-        )
-        .unwrap();
+        // Captured, not inherited: a later Wave Machine moves no claimed Task.
+        store.set_wave_machine(&wave, Some(&mini)).unwrap();
         let route = store.task_execution_route(&task.id).unwrap();
         assert_eq!(
             (route.machine_id, route.source),

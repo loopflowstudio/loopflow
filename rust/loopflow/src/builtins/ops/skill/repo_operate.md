@@ -290,12 +290,12 @@ Use shared readers: `lf wave list --json` for the repository, `lf wave status <w
 for one Wave, and `lf wave show --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
-A Task is owned by a person on a Machine, or unowned. Committed `.lf/config.yaml`
-`machines:` names the owning Machine for unowned Work (the Wave, its parents, then
-`default`, then the reading Machine). Change one Task with `lf task claim`,
+A Task is owned by a person on a Machine, or unowned. Each person picks their own
+Machine for a Wave's new Tasks with `lf wave machine <wave> <machine>`, never
+committed; unset means the Machine running the command. Change one Task with `lf task claim`,
 `lf task handoff <issue> <machine>` or `lf task unclaim`; they run on the Task's
 writer automatically. Use `lf id`, then `lf --wave <wave> wave-operate` locally or
-`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's owning Machine. `lf --machine` runs the target's `lf`;
+`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's Machine. `lf --machine` runs the target's `lf`;
 its SSH route may change without moving Work. Connect missing logins in the
 foreground with `lf machine connect`; work uses credentials resident on its Machine.
 

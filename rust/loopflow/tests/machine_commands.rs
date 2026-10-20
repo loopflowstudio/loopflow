@@ -1255,6 +1255,27 @@ struct SharedPlan {
     remote_path: std::path::PathBuf,
     destination: loopflow::planning_git::PlanningDestination,
     _repos: [loopflow_test_support::TestRepo; 2],
+    _person: Person,
+}
+
+/// In-process writes name the same person as the fixture's `lf` commands,
+/// whose Git identity is the test repository's.
+struct Person(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+impl Person {
+    fn jack() -> Self {
+        let guard = loopflow_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::env::set_var("LF_USER_NAME", "Jack");
+        Self(guard)
+    }
+}
+
+impl Drop for Person {
+    fn drop(&mut self) {
+        std::env::remove_var("LF_USER_NAME");
+    }
 }
 
 impl SharedPlan {
@@ -1294,6 +1315,7 @@ impl SharedPlan {
             remote_path,
             destination,
             _repos: repos,
+            _person: Person::jack(),
         }
     }
 
@@ -1503,6 +1525,117 @@ fn task_ownership_owner_reclaims_after_a_stale_unclaim_elsewhere() {
         ownership.log.last().unwrap().kind,
         loopflow::durable::OwnershipKind::Claim
     );
+}
+
+#[test]
+fn task_ownership_never_routes_to_another_persons_machine() {
+    use loopflow::durable::{OwningMachineSource, TaskExecutionSource};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    let mini = plan.remote.local_machine().unwrap().id;
+    // Kim claims on mini, a Machine this laptop also has registered.
+    let entry = serde_json::json!({
+        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
+        "task_id": task.as_str(), "kind": "claim", "person": "Kim",
+        "machine_id": mini.as_str(),
+        "at": time::OffsetDateTime::now_utc().unix_timestamp(),
+    });
+    plan.remote
+        .append_task_comment(
+            &task,
+            &loopflow::work::task::comment::TaskComment {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: format!("Kim claimed this\n\n<!-- loopflow-ownership:{entry} -->"),
+                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: Some(
+                    time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap(),
+                ),
+            },
+        )
+        .unwrap();
+    plan.to_local();
+    assert_eq!(
+        plan.local
+            .task_ownership(&task)
+            .unwrap()
+            .owner
+            .unwrap()
+            .person
+            .as_deref(),
+        Some("Kim")
+    );
+    // Someone else's claim stays theirs: no route to mini, no handoff or unclaim.
+    let route = plan.local.task_execution_route(&task).unwrap();
+    assert_eq!(
+        (route.machine_id, route.source),
+        (
+            plan.local.local_machine().unwrap().id,
+            TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
+        )
+    );
+    assert!(plan.local.unclaim_task(&task).is_err());
+    assert!(plan.local.handoff_task(&task, &mini).is_err());
+    // Claiming writes here; the later claim wins.
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    // Kim's claim stays Kim's on mini, which now sees the later claim.
+    let later = plan
+        .remote
+        .task_ownership(&task)
+        .unwrap()
+        .superseded_by
+        .unwrap();
+    assert_eq!(
+        later.machine.id,
+        Some(plan.local.local_machine().unwrap().id)
+    );
+}
+
+#[test]
+fn wave_machine_is_copied_to_your_other_machines_and_routes_new_tasks() {
+    use loopflow::durable::OwningMachineSource;
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let output = fixture.run(&[
+        "--repository",
+        plan.repository.as_str(),
+        "wave",
+        "machine",
+        "owners",
+        "mini",
+    ]);
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
+    for store in [&plan.local, &plan.remote] {
+        let wave = store
+            .ensure_wave_project(
+                if std::ptr::eq(store, &plan.local) {
+                    plan.local_path.to_str().unwrap()
+                } else {
+                    plan.remote_path.to_str().unwrap()
+                },
+                "owners",
+            )
+            .unwrap()
+            .wave_id;
+        assert_eq!(
+            store.wave_owning_machine(&wave).unwrap(),
+            (mini.clone(), OwningMachineSource::Wave("owners".into()))
+        );
+    }
+    // The laptop routes the unowned Task to mini; mini claims it for itself.
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    assert!(plan.local.claim_task(&task).is_err());
+    plan.remote.claim_task(&task).unwrap().unwrap();
 }
 
 #[test]

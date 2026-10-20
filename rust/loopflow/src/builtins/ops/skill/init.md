@@ -14,7 +14,7 @@ The launch prompt identifies the reviewer.
   user explicitly chooses them.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
   reversible changes through the review protocol with the Task. Never guess a
-  user preference. OAuth, personal config, owning Machines, and external object
+  user preference. OAuth, personal config, Wave Machines, and external object
   creation require the present User. When absent, report the exact blocker and
   next commands; do not manufacture a session.
 
@@ -273,27 +273,29 @@ lf wave status <wave> --json
 lf --machine <machine-id> --wave <wave> wave-operate
 ```
 
-Name the owning Machine for unowned Work in committed `.lf/config.yaml`:
+Pick the user's Machine for a Wave's new Tasks. It is their personal choice, never
+committed repository content:
 
-```yaml
-machines:
-  default: <machine-id>        # standalone Tasks and unlisted Waves
-  waves:
-    <wave>: <machine-id>       # child Waves inherit their parent's entry
+```bash
+lf wave machine <wave> <machine-label>   # stored here, copied to their other Machines
+lf wave machine <wave>                   # show it
+lf wave machine <wave> --unset           # back to whichever Machine runs the command
 ```
 
-Without an entry, the reading Machine owns its own unowned Work, so one Machine
-needs no configuration. Cron install reads the same entry. Move one Task with
-`lf task handoff <issue> <machine-label>`.
+Without a setting, the Machine running the command takes the Wave's unowned Tasks,
+so one Machine needs no setup. An unreachable Machine gets a warning; rerun later.
+Setting it moves the user's Wave Session to that Machine with fresh context;
+`lf cron` installs the Wave's crons for that Machine. Existing Tasks stay on
+the Machine in their claim; move one with `lf task handoff <issue> <machine-label>`.
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. Connect required logins with `lf machine connect` in a foreground
 terminal. Remote processes use credentials installed on their Machine. Before
-naming an owning Machine, use remote reads to verify that the remote has `lf`, the repository,
+setting a Wave Machine, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf machine add` discovers the identity
 and records its label, repository and SSH route. `lf --wave <wave> wave-operate` makes a finite pass locally; prefix it with
 `lf --machine <machine-id>` to run on the remote Machine. Adding a machine,
-changing `machines:`, handing off a Task and starting a Wave each change durable
+setting a Wave Machine, handing off a Task and starting a Wave each change durable
 execution state.
 
 ## 6. Prove the result
@@ -309,7 +311,7 @@ lf wave list --json
 ```
 
 For a selected Wave, also run `lf wave status <wave> --json` and
-`lf wave show <wave> --json`. After naming an owning Machine, use
+`lf wave show <wave> --json`. After setting a Wave Machine, use
 `lf wave status <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated

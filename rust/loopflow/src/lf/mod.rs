@@ -1111,6 +1111,20 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
+    /// Choose your Machine for a Wave's new Tasks and its Wave Session
+    Machine {
+        wave: String,
+        /// A registered Machine label, this Machine's hostname, or a Machine id;
+        /// omit to show the current choice
+        #[arg(conflicts_with = "unset")]
+        machine: Option<String>,
+        /// Start the Wave's Tasks on whichever Machine runs them
+        #[arg(long)]
+        unset: bool,
+        /// Apply on this Machine only; set by the copy to your other Machines
+        #[arg(long, hide = true)]
+        here: bool,
+    },
     /// Rename or relocate an authored Wave and its provider mapping
     Rename {
         wave: String,
@@ -1754,7 +1768,7 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate configured commands and the owning Machine without installing jobs
+    /// Validate configured commands and your Wave Machine without installing jobs
     Preflight {
         /// Only commands with this --wave selector
         #[arg(short = 'w', long)]

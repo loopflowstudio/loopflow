@@ -330,7 +330,7 @@ interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
 Task or planning provider. `lf connect` finds or admits it, prepares its
 workspace, reserves the first input and owns the foreground launch; `--prepare`
-stops before launch. Task creation atomically admits its primary conversation;
+stops before launch. Task primaries are admitted lazily on the owner Machine, on first connect;
 explicit Wave admission also admits the repository conversation. A Session may
 have no current capture: metadata admission does not mark a Task Started, prepare
 a prompt or start a provider. The first captured input, or binding a previously
@@ -640,7 +640,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Steer** — message guiding work | Immutable source/revision UUID; existing associations select Sessions | [`Steer`](../rust/loopflow/src/steer.rs), [`SessionSteerStatus`](../rust/loopflow/src/steer.rs) | `steers`, `session_steers`, `steer_batches`, `steer_deliveries`; `steer_adapters` binds provider callbacks. `task_comments` and `task_comment_deliveries` retain the separate planning thread and Linear sync | Foreground Task connections acquire comments independently of pending writes | `lf comment`, Linear issue comments | SQLite |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **LfSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds attachment stream readings and terminal-reported status | Native turn observation retains start/usage/completion; Codex protocol replies record native identity; Claude retains its supplied ID and OpenCode confirms its native ID through the private server API; `lf __pi-event` retains Pi native identity, activity and cumulative usage; `lf __tool-lifeline` admits the existing watchdog into Pi-owned detached tool groups; `lf __session-title` supplies new plain-native names; Session operations own state | `lf session`, interactive `lf` | `process:cmux` projects the attached Session name without owning it |
-| **Machine / Promotion** — stable machine identity and artifact selection | `MachineId` is identity; SSH route is mutable. Committed `machines:` configuration names each Wave's owning Machine; it is never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`MachinesConfig`](../rust/loopflow/src/config.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`; `.lf/config.yaml` `machines:`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh` |
+| **Machine / Promotion** — stable machine identity and artifact selection | `MachineId` is identity; SSH route is mutable. Each person's Machine-local Wave → Machine default, copied to their other Machines, places their unowned Work and Wave Session; it is never process ownership or repository content. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`wave_machines`](../rust/loopflow/src/store/sqlite/task_ownership.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`; Machine-local SQLite `wave_machines`; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf wave machine`, `lf self`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh` |
 | **Session history projections** — captured events and exact provider evidence | LfSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects LfSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf history show`, `lf history replay`, `lf usage`, `lf history`; Work/status history | `process:lf`, provider harnesses |
 | **LfProcess** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. A detached transport Process owns execution and terminal state; viewers hold separate revocable input tokens. | [`LfProcessId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs), [`transport`](../rust/loopflow/src/transport.rs) | `processes` (`kind='lf'`); Session rows reference their transport Process | Foreground commands and detached execution owners; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf history list`, `lf transport`; ordinary parsed CLI commands | — |
 | **AgentProcess** — the provider's OS process | Its original parent and served Session survive attachment transfer. PID/birth and terminal evidence belong to the record; a fresh token fences each attachment. | `AgentProcess`, `SessionAttachment`, common `LfProcess` projection | LfProcess's table, rows of `kind='agent'`; Session retains its current record reference | Provider launch and observed settlement; typed admission remains open | `lf top`, Task execution inventory; LfProcess's process readers | Provider OS process; `process:pi` owns its RPC or native conversation, tools and credentials |
@@ -651,7 +651,7 @@ effects. The unconditional-update race remains a protocol limit.
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
 | **Store change revision** — which displayed domain a commit changed | Derived inside the writer's transaction by schema triggers, never authored and never bumped at a call site. Transcript lines move nothing; usage moves only its own revision, which Wave detail follows at most every 10 s. The Work reader pins revisions and database-derived joins in one read transaction; nested readers use savepoints. Events only say when to compare revisions. Post-command checkpoints confirm delivery after affected subscriptions catch up, without forcing unchanged queries; explicit Retry still forces reads. OS/Git/file observations are not transactional facts. | [`StoreRevisions`](../rust/loopflow/src/store/sqlite/revisions.rs), [`WorkFrame`](../rust/loopflow/src/lf/commands/work_watch.rs) | `store_revisions` | Store transaction | `lf monitor work` | — |
 | **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `process:sh` (release hooks) |
-| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends: the owner's Machine, or the owning Machine while unowned or the owner's Machine is unknown. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf task handoff`, `lf task unclaim`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
+| **Task ownership** — (person, Machine) or unowned | An append-only log; the later entry wins in provider order. Exactly one writer appends, always one of the caller's own Machines: their Machine holding the claim, else their Wave Machine; nothing routes to another person's Machine. Entries travel as marked Task comments. An inbound entry never ends this Machine's own open claim. | [`TaskOwnership`](../rust/loopflow/src/durable.rs), [`TaskOwnershipEntry`](../rust/loopflow/src/durable.rs) | `task_ownership` (append-only by trigger) | The writer's IMMEDIATE transaction, reached over `lf --machine` | `lf task claim`, `lf task handoff`, `lf task unclaim`, `lf task run`, `lf task checkout` | Linear assignee; SSH |
 | **Portfolio** — repository selection on one Machine | Rust owns folder discovery and manual membership; Desktop reads and changes the same selection. Removing membership preserves files and retained Work. | [`Portfolio`](../rust/loopflow/src/portfolio.rs), `PortfolioMode`, `PortfolioRepo` | Machine-local config.yaml; locked atomic writes | Foreground CLI; Portfolio controls call its API | `lf portfolio` | — |
 | **Desktop workspace** — retained presentation of repository, Wave or Task | Work identity selects one repository window and retained workspaces through the sidebar. Pane contents own Machine locations; exact window/content/surface lifetimes fence mutations. Reads acquire no client and receipts promise no readiness. | `WorkWorkspaceKey`, `DesktopInspection`, `DesktopPaneTarget`, `DesktopPaneReceipt` | Window-owned registry, multiplexer and native surfaces; no second Work database | Loopflow.app on macOS | `lf desktop` | Apple events |
 <!-- architecture-map:end -->
@@ -1140,18 +1140,25 @@ whose target proves its Machine identity.
 
 ### Multi-Machine ownership and execution
 
-`MachineId` is stable identity; its SSH route is replaceable. Committed
-repository configuration names the owning Machine for unowned Work:
+`MachineId` is stable identity; its SSH route is replaceable. Which Machine runs a
+person's Wave work is that person's choice, never repository content:
 
-```yaml
-machines:
-  default: home_…           # standalone Tasks and unlisted Waves
-  waves:
-    infrastructure: home_…  # child Waves inherit their parent's entry
+```bash
+lf wave machine infrastructure mini     # your Machine for this Wave's new Tasks
+lf wave machine infrastructure          # show it ("mini", or "this Machine")
+lf wave machine infrastructure --unset  # back to whichever Machine runs the command
 ```
 
-Resolution walks the Task's Wave, its parent Waves, `default`, then this Machine,
-so single-Machine use needs no configuration. Cron install reads the same resolver.
+The setting lives in Machine-local SQLite `wave_machines` and is copied to the
+person's other added Machines over `lf --machine`; an unreachable Machine gets a
+warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
+Waves, then this Machine, so single-Machine use needs no setup. Cron install reads
+the same resolver. Setting it completes the old Machine's Wave primary Session and
+admits a fresh one on the new Machine; native provider history stays behind.
+`lf session connect --wave <w>` and Desktop's Wave Session route to the Wave
+Machine. A Task's Machine is captured in its claim: changing the Wave Machine moves
+no existing Task, and `lf task handoff` moves one, completing its primary Session
+on the old Machine.
 
 ```bash
 lf machine add jack@mini.local --label mini
@@ -1167,13 +1174,16 @@ journal order, where each local append sorts after every entry its Machine has s
 A handoff moves the claim to its target Machine and keeps the person; it needs
 only the target's identity, not a connection.
 
-Exactly one Machine may append the next entry: the owner's Machine, or the
-owning Machine while the Task is unowned or its owner's Machine is unknown.
+Forwarding stays within one person's Machines. A Task the caller owns on another
+of their Machines reruns there; an unowned Task gets the caller's claim on their
+Wave Machine; a Task someone else owns gets the caller's claim on their own Wave
+Machine, and the later claim wins. Nothing routes to another person's Machine, and
+nobody hands off or unclaims another person's claim; cross-person handoff is
+deferred. The Machine in a claim comment is informational only.
 `lf task claim|handoff|unclaim`, `lf task run` and `lf task checkout` route to
 that writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
-`task_execution_route` returns the owner's Machine (source `owner`) or the
-owning Machine (`owning_machine:wave:<name>`, `owning_machine:default`,
-`owning_machine:this_machine`). `lf task location --peers` observes other
+`task_execution_route` returns the claim's Machine (source `owner`) or the Wave
+Machine (`owning_machine:wave:<name>`, `owning_machine:this_machine`). `lf task location --peers` observes other
 Machines' checkouts and routes nothing.
 
 Each local entry is delivered as a marked Task comment ("Jack Heart claimed this

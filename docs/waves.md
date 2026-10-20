@@ -190,7 +190,8 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Committed `machines:` in `.lf/config.yaml` names the owning Machine. Use `lf cron`
+`lf wave machine <wave> <machine>` picks your Machine for the Wave; it is personal,
+never committed. Use `lf cron`
 for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
@@ -311,18 +312,20 @@ lf --machine <machine-id> --wave shipper wave-operate
 lf --machine <machine-id> wave status shipper --json
 ```
 
-```yaml
-# .lf/config.yaml
-machines:
-  default: home_…      # standalone Tasks and unlisted Waves
-  waves:
-    shipper: home_…    # child Waves inherit their parent's entry
+```bash
+lf wave machine shipper mini            # your Machine for this Wave's new Tasks
+lf wave machine shipper                 # show it ("mini", or "this Machine")
+lf wave machine shipper --unset         # back to whichever Machine runs the command
 ```
 
-A Machine is a stable machine identity with a replaceable route. The owning
-Machine resolves through the Task's Wave, its parent Waves, `default`, then the
-reading Machine; it runs Wave crons and receives unowned Tasks. It does not start
-a process or confer signal authority. Readers operate on the selected Machine;
+A Machine is a stable machine identity with a replaceable route. Your Wave Machine
+is your own choice, stored locally and copied to your other added Machines; an
+unreachable one gets a warning, so rerun later. An unowned Task resolves through its
+Wave, its parent Waves, then the Machine running the command. Your Wave Machine runs
+the Wave's crons, receives your unowned Tasks and hosts your Wave Session: setting it
+completes the old Machine's Wave primary and admits a fresh one there, leaving native
+history behind. Existing Tasks keep the Machine in their claim; `lf task handoff`
+moves one. It does not start a process or confer signal authority. Readers operate on the selected Machine;
 they never silently aggregate other Machines.
 
 ```bash

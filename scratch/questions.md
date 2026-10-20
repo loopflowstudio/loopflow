@@ -22,7 +22,6 @@ occurrences; first visible wins independently of focus. Newer edits survive rest
 Console. Existing 489 navigation and 416 lifetime owners are reused, never cloned.
 Source handoff is available locally; do not repeat that historical blocker.
 Cold Process reattachment and native mounted retention still need real evidence.
-Publish for demo review only. No merge or automatic completion authorization.
 
 October 17 implementation assumption: unsaved ad hoc query destinations remain
 read-only compositions until saved as an independently named Dashboard. Their

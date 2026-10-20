@@ -60,7 +60,9 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
 }
 
 #[cfg(test)]
-pub(crate) use tests::{apply_before_current_draft, current_draft_sql, upgrade_from_draft};
+pub(crate) use tests::{
+    apply_before_current_draft, apply_build_drafts, current_draft_sql, upgrade_from_draft,
+};
 
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
@@ -3017,13 +3019,23 @@ mod tests {
                 )?;
                 apply_set(conn, MIGRATIONS, guards)?;
             }
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql)?;
-                super::seed_peer_planning(conn, draft.sql)?;
-            }
+            _apply_build_drafts_in(conn)?;
             super::validate_foreign_keys(conn)
         })
         .unwrap();
+    }
+
+    /// Bring a released fixture to this build's experiment schema.
+    pub(crate) fn apply_build_drafts(conn: &rusqlite::Connection) {
+        super::_migration_transaction(conn, |conn, _| _apply_build_drafts_in(conn)).unwrap();
+    }
+
+    fn _apply_build_drafts_in(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql)?;
+            super::seed_peer_planning(conn, draft.sql)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn current_draft_sql(name: &str) -> String {

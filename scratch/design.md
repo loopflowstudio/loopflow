@@ -16,14 +16,10 @@ Ensure live query entry points use Dashboard presentation, including an ad hoc q
 this decision does not require saving or pinning every query.
 
 Publication is for demo review; merge and Task completion remain separate.
-Complete pre-compression notes are preserved at
-`refs/loopflow/evidence/loo-497-before-intent-compress:scratch/design.md`
-(tree `bbb68ebbc97d0b304806aa564333651d77629a2d`).
+Pre-compression notes: `refs/loopflow/evidence/loo-497-before-intent-compress:scratch/design.md`.
 
-Pre-cut code, design and evidence: `refs/loopflow/evidence/loo-497-before-dashboard-cut` (tree
-`d68851b7807858609266546ea8d459a4ebf7fc17`). Earlier foundations design remains at
-`refs/loopflow/evidence/loo-497-foundations-design` (blob
-`e737550f687c0d5f17c363e1ebe2c00a31f8fcde`). Historical proposals there do not
+Pre-cut code, design and evidence: `refs/loopflow/evidence/loo-497-before-dashboard-cut`;
+foundations design: `refs/loopflow/evidence/loo-497-foundations-design`. Historical proposals there do not
 supersede the October 17 correction.
 
 ## Contract
@@ -186,12 +182,16 @@ The CLI result schema includes passive plans and live opening receipts.
 
 ## Reconciliation — October 19
 
-Baseline `a572d1788c` (Codex transport; no Dashboard overlap).
-Saved panes follow the Task's repository (LOO-505). Anonymous-query
+Baseline `0f08742fc4` (v0.14.8 release batch: structured IDs, `LfSessionId`).
+Its new Task-Project/repository trigger required `repository_id` in the
+`saved_selections` upgrade fixture; main's canonical-ID upgrade tests now apply
+build drafts before opening (`apply_build_drafts`), since a draft-bearing build
+refuses a release-only schema. Saved panes follow the Task's repository (LOO-505). Anonymous-query
 save-before-arrange (`questions.md`) remains an assumption, not accepted removal
 of arrangement parity.
 
-Linear LOO-497 is retitled for Dashboards, but its acceptance body still lists
+Linear LOO-497 is retitled for Dashboards, but its acceptance body (still so on
+its October 19 05:41 revision) lists
 scripting parity and `open` beside, which Jack Heart's October 18 decisions moved
 to LOO-519 and removed; the body needs rewriting before review.
 
@@ -222,10 +222,9 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 19, Machine control): `scripts/test_desktop.sh --filter 'WorkNavigationTests|DTOFixtureTests|WorkDestinationTests|DashboardWorkspaceTests'` — 144 passed; Rust delegation/placement lib tests, wave-place CLI, `machine_commands`, `cli_discovery`, `dto_fixtures` pass; clippy clean. Broader suites stay gate-owned.
+Check (October 19, after v0.14.8 merge): `cargo test -p loopflow --lib -- store::migration store::sqlite::selections` — 136 passed after the fixture/draft repair; clippy clean. Native and broader suites stay gate-owned.
 
-## Handoff status
+## History
 
-Earlier: `8d4f2d8ea1:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
-October 17: Jack Heart rejected the prototype's invisible aliases; this sets no
-production query-reference syntax.
+Earlier design: `8d4f2d8ea1:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
+Jack Heart rejected the prototype's invisible aliases (October 17); no production query-reference syntax is set.

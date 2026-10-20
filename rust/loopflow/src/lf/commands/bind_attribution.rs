@@ -27,7 +27,7 @@ pub struct BindReport {
 
 #[derive(Debug, Serialize)]
 pub struct BoundSession {
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub task: String,
     pub wave: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
@@ -77,7 +77,7 @@ impl Usage {
 /// One captured input reduced to what the comparison measures.
 #[derive(Debug)]
 struct Step {
-    session_id: String,
+    session_id: crate::id::LfSessionId,
     task: Option<String>,
     wave: Option<String>,
     ended_at: Option<i64>,
@@ -300,7 +300,7 @@ mod tests {
 
     fn step(session: &str, task: Option<&str>, ended_at: Option<i64>, input: i64) -> Step {
         Step {
-            session_id: session.to_string(),
+            session_id: session.into(),
             task: task.map(str::to_string),
             wave: task.map(|_| "intelligence".to_string()),
             ended_at,
@@ -311,7 +311,7 @@ mod tests {
 
     fn bind(session: &str, at: i64, task: &str) -> SessionBind {
         SessionBind {
-            session_id: session.to_string(),
+            session_id: session.into(),
             at,
             task: task.to_string(),
             wave: Some("intelligence".to_string()),

@@ -97,6 +97,8 @@ fn title_source(source: TitleSource) -> &'static str {
 }
 
 pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSession>> {
+    let canonical = crate::id::canonical_session(id);
+    let id = canonical.as_str();
     conn.query_row(
         &format!("{SESSION_SELECT} WHERE s.id=?1"),
         [id],
@@ -425,6 +427,8 @@ impl SqliteStore {
         attachment: &crate::process::SessionAttachment,
         owner: &crate::id::LfProcessId,
     ) -> StoreResult<()> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         self.with_session_attachment(session, attachment, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
@@ -439,6 +443,8 @@ impl SqliteStore {
         &self,
         session: &str,
     ) -> StoreResult<Option<crate::id::LfProcessId>> {
+        let canonical = crate::id::canonical_session(session);
+        let session = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let id: Option<String> = conn
             .query_row(
@@ -609,6 +615,8 @@ impl SqliteStore {
         id: &str,
         now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut labels = std::collections::HashMap::new();
@@ -623,13 +631,14 @@ impl SqliteStore {
 
     /// Resolve a conversation or captured-input selector from its SQLite owner.
     pub(crate) fn resolve_history_input(&self, selector: &str) -> StoreResult<String> {
+        let canonical = crate::id::canonical_session(selector);
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1)",
-            [selector],
+            [&canonical],
             |row| row.get::<_, bool>(0),
         )? {
-            return Ok(selector.to_string());
+            return Ok(canonical);
         }
         let mut query = conn.prepare("SELECT id FROM (
             SELECT receipt_key AS id FROM session_events WHERE kind='captured' UNION SELECT json_extract(payload,'$.caller_key') FROM session_events WHERE kind='captured')
@@ -785,21 +794,21 @@ impl SqliteStore {
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
-                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)
+                WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
-                        AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?1 OR slug=?1)))
+                        AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                    WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2)
+                    WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id
-                            WHERE p.id=?2 OR p.project_slug=?2 OR p.external_project_id=?2)))
+                            WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
                 AND (?3 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)
                     OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
                         AND origin.task_id IN (SELECT id FROM tasks WHERE id=?3 OR issue_identifier=?3 OR external_issue_id=?3)))
-                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?4))
+                AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
@@ -810,6 +819,7 @@ impl SqliteStore {
                 FROM eligible JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
+            // Names, slugs and capture locators keep their bytes; identities are canonical.
             let mut rows = query.query(params![
                 wave,
                 project,
@@ -818,7 +828,11 @@ impl SqliteStore {
                 window.0,
                 window.1,
                 input,
-                window.2.map(|n| n as i64)
+                window.2.map(|n| n as i64),
+                wave.map(crate::id::canonical_uuid),
+                project.map(|project| crate::id::canonical_prefixed(project, "proj_")),
+                project.map(crate::id::canonical_uuid),
+                caller.map(crate::id::canonical_session),
             ])?;
             let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();
@@ -892,7 +906,7 @@ impl SqliteStore {
                         .map_err(invalid)?;
                     let session = crate::session::HistoryCapture {
                         captured,
-                        id: session_id.clone(),
+                        id: session_id.clone().into(),
                         current_capture: current_input,
                         caller_artifact_key: caller
                             .as_deref()
@@ -1274,6 +1288,8 @@ impl SqliteStore {
     }
 
     pub fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?1 ORDER BY seq",
@@ -1284,6 +1300,8 @@ impl SqliteStore {
     }
 
     pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
+        let canonical = crate::id::canonical_session(id);
+        let id = canonical.as_str();
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
@@ -1378,7 +1396,7 @@ pub(super) fn retain_history_in(
             "SELECT seq,session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
             [&observation.artifact_key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
         let (captured, owner) = captured.ok_or(StoreError::NotFound)?;
-        if owner != session.id {
+        if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
         }
         let key = format!("{}:{}", observation.artifact_key, observation.source);
@@ -1513,7 +1531,7 @@ fn capture_in(
         )
         .optional()?;
     if let Some((seq, owner, caller)) = saved {
-        if owner != session.id || caller != session.caller_artifact_key {
+        if owner != session.id.as_str() || caller != session.caller_artifact_key {
             return Err(invalid(
                 "captured artifact has conflicting Session or caller evidence",
             ));
@@ -2055,7 +2073,7 @@ mod metadata_tests {
                 [],
             )
             .unwrap();
-        filter.after = Some(first[0].id.clone());
+        filter.after = Some(first[0].id.to_string());
         let second = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");

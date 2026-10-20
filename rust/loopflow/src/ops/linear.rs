@@ -2482,6 +2482,14 @@ mod tests {
                 crate::work::wave::ensure_wave_row(&store, repo.path(), "survival/infrastructure")
                     .await
                     .unwrap();
+                // Queued responses expect survival first; discovery is newest-first.
+                rusqlite::Connection::open(&database)
+                    .unwrap()
+                    .execute(
+                        "UPDATE waves SET created_at = CASE name WHEN 'survival' THEN 2 ELSE 1 END",
+                        [],
+                    )
+                    .unwrap();
 
                 let old_survival = migration_project_node(
                     "project-survival",

@@ -133,7 +133,7 @@ pub(super) async fn task_conversation(
         .max_by_key(|(session, opened)| {
             (
                 human
-                    .get(&session.id)
+                    .get(session.id.as_str())
                     .copied()
                     .or(*opened)
                     .unwrap_or(session.created_at.saturating_mul(1000)),

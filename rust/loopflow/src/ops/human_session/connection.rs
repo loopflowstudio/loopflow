@@ -118,7 +118,7 @@ pub(crate) async fn explain_connect(
                 _ => store.sqlite.primary_session(&scope)?,
             }
         };
-        Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id)))
+        Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id.to_string())))
     }
     .await;
     let (scope, selector) = match selected {

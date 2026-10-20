@@ -57,3 +57,28 @@ public struct LfProcessPage: Codable, Sendable, Equatable {
     public let entries: [LfProcess]
     public let next: LfProcessCursor?
 }
+
+extension LfProcess {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = StructuredIdentity.uuid(try values.decode(String.self, forKey: .id))
+        pid = try values.decodeIfPresent(UInt32.self, forKey: .pid)
+        kind = try values.decode(ProcessKind.self, forKey: .kind)
+        agentSessionID = (try values.decodeIfPresent(String.self, forKey: .agentSessionID)).map { StructuredIdentity.session($0) }
+        osStartedAt = try values.decodeIfPresent(Int64.self, forKey: .osStartedAt)
+        traceID = StructuredIdentity.uuid(try values.decode(String.self, forKey: .traceID))
+        parentLfProcessId = (try values.decodeIfPresent(String.self, forKey: .parentLfProcessId)).map { StructuredIdentity.uuid($0) }
+        viaAgent = try values.decodeIfPresent(Bool.self, forKey: .viaAgent)
+        callerSessionID = (try values.decodeIfPresent(String.self, forKey: .callerSessionID)).map { StructuredIdentity.session($0) }
+        callerAgentProcessId = (try values.decodeIfPresent(String.self, forKey: .callerAgentProcessId)).map { StructuredIdentity.uuid($0) }
+        command = try values.decodeIfPresent(String.self, forKey: .command)
+        repo = try values.decodeIfPresent(String.self, forKey: .repo)
+        cwd = try values.decodeIfPresent(String.self, forKey: .cwd)
+        startedAt = try values.decode(Int64.self, forKey: .startedAt)
+        completedAt = try values.decodeIfPresent(Int64.self, forKey: .completedAt)
+        outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
+        exitCode = try values.decodeIfPresent(Int32.self, forKey: .exitCode)
+        signal = try values.decodeIfPresent(String.self, forKey: .signal)
+        error = try values.decodeIfPresent(String.self, forKey: .error)
+    }
+}

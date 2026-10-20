@@ -228,7 +228,7 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
                     ),
                     None => None,
                 },
-                caller_session_id: caller.clone(),
+                caller_session_id: caller.clone().map(Into::into),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
                     "succeeded" => LfProcessOutcomeFilter::Succeeded,

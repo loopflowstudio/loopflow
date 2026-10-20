@@ -3,13 +3,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::{AgentSessionId, WaveId};
+use crate::id::{AgentSessionId, LfSessionId, WaveId};
 
 /// Attribution captured before a native request, never from its delayed reply.
 /// This is observation context, not a capability to write to the provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionTurnOrigin {
-    pub session_id: String,
+    pub session_id: LfSessionId,
     pub lf_process_id: crate::id::LfProcessId,
     pub agent_process_id: crate::id::LfProcessId,
     pub captured_event: Option<i64>,
@@ -21,7 +21,7 @@ pub(crate) struct SessionTurnOrigin {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvent {
     pub seq: i64,
-    pub session_id: String,
+    pub session_id: LfSessionId,
     // Retain the published DTO key and historical event encoding.
     #[serde(rename = "provider_thread")]
     pub agent_session: Option<AgentSessionId>,
@@ -75,7 +75,7 @@ impl SessionEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LfSession {
     pub captured: Option<i64>,
-    pub id: String,
+    pub id: LfSessionId,
     /// Immutable captured input; absent until the first explicit input reservation.
     pub artifact_key: Option<String>,
     /// Causal input reference; grants neither attachment nor Flow authority.
@@ -117,7 +117,7 @@ impl LfSession {
 /// A Session assigned to a Task after it began.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionBind {
-    pub session_id: String,
+    pub session_id: LfSessionId,
     pub at: i64,
     /// The Task's issue identifier.
     pub task: String,
@@ -240,7 +240,7 @@ pub(crate) struct SessionSummary {
     pub task_primary: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
-    pub id: String,
+    pub id: LfSessionId,
     pub artifact_key: Option<String>,
     pub title: String,
     pub title_source: TitleSource,
@@ -303,7 +303,7 @@ impl FlowProcessSummaryState {
 #[derive(Debug)]
 pub(crate) struct HistoryCapture {
     pub captured: Option<i64>,
-    pub id: String,
+    pub id: LfSessionId,
     pub current_capture: Option<i64>,
     pub caller_artifact_key: Option<String>,
     pub task_id: Option<TaskId>,
@@ -328,7 +328,7 @@ pub(crate) fn conversation(
     let (provider, model) = crate::config::parse_agent(&agent);
     LfSession {
         captured: None,
-        id: uuid::Uuid::new_v4().simple().to_string(),
+        id: uuid::Uuid::new_v4().simple().to_string().into(),
         artifact_key: None,
         caller_artifact_key: None,
         input_published: false,

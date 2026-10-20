@@ -190,7 +190,7 @@ fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec
                 (_, Some(_)) => WorkflowActor::Conversation,
                 (_, None) => WorkflowActor::Person,
             },
-            session_id,
+            session_id: session_id.map(Into::into),
             note: row.get(7)?,
             at: row.get(8)?,
         })
@@ -1058,7 +1058,7 @@ mod tests {
             assert_eq!(page[0].id, expected);
             assert_eq!(page[0].task_ids, vec![task.clone()]);
             assert_eq!(page[0].workspace.as_ref().unwrap().machine_id, home);
-            filter.after = Some(page[0].id.clone());
+            filter.after = Some(page[0].id.to_string());
         }
         filter.task = None;
         filter.orphan = true;
@@ -1070,7 +1070,7 @@ mod tests {
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
             assert!(page[0].task_ids.is_empty());
-            filter.after = Some(page[0].id.clone());
+            filter.after = Some(page[0].id.to_string());
         }
     }
 
@@ -1132,7 +1132,7 @@ mod tests {
             let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
-            filter.after = Some(page[0].id.clone());
+            filter.after = Some(page[0].id.to_string());
         }
         assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
     }

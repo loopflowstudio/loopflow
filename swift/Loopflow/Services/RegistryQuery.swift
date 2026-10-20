@@ -108,12 +108,15 @@ public struct RegistryQuery: Sendable {
 
     /// A request-bound observation, not admission or checkout preparation.
     public func taskLocation(task: String, repository: String, machine: String) async throws -> TaskLocationObservation {
+        // The request token is opaque and returns byte-exact; identities compare canonically.
         let request = UUID().uuidString
         let readings = try Self.decode([TaskLocationObservation].self, from: await run(
             ["task", "location", task, "--request", request, "--json"], nil))
         guard readings.count == 1, let reading = readings.first,
-              reading.request == request, reading.repositoryID == repository,
-              reading.taskID == task, reading.machineID == machine else {
+              reading.request == request,
+              reading.repositoryID == StructuredIdentity.prefixed(repository, "repo_"),
+              reading.taskID == StructuredIdentity.prefixed(task, "task_"),
+              reading.machineID == StructuredIdentity.prefixed(machine, "home_") else {
             throw RegistryQueryError("Stale or mismatched execution-location observation; nothing was opened.")
         }
         return reading

@@ -1535,12 +1535,18 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
         "--json",
     ]);
     let inferred = read(&["--json", "session", "resume", "--explain"]);
-    assert_eq!(explicit["resolution"]["session"]["value"], session.id);
+    assert_eq!(
+        explicit["resolution"]["session"]["value"],
+        session.id.as_str()
+    );
     assert_eq!(
         explicit["resolution"]["session"],
         native["resolution"]["session"]
     );
-    assert_eq!(inferred["resolution"]["session"]["value"], session.id);
+    assert_eq!(
+        inferred["resolution"]["session"]["value"],
+        session.id.as_str()
+    );
     assert_eq!(
         inferred["resolution"]["session"]["source"],
         "contextual_session"

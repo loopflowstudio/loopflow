@@ -324,7 +324,7 @@ pub struct SessionUsage {
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionHistory {
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,
     pub caller_artifact_key: Option<String>,
@@ -1310,7 +1310,7 @@ pub(crate) fn resolve_manifest(
         })?;
     let session = store.session(&artifact).map_err(std::io::Error::other)?;
     let artifact = session
-        .filter(|session| session.id == artifact)
+        .filter(|session| session.id.as_str() == crate::id::canonical_session(&artifact))
         .and_then(|session| session.artifact_key)
         .unwrap_or(artifact);
     let dir = record_dir(lf_home, &artifact).ok_or_else(|| {
@@ -2137,7 +2137,7 @@ impl CaptureHandle {
         if let Some(owner) = crate::transport::current() {
             store.bind_session_transport(&session.id, &attachment, owner)?;
         }
-        capture.attachment = Some((session.id, attachment));
+        capture.attachment = Some((session.id.to_string(), attachment));
         drop(capture);
         self.register_interrupt();
         Ok(())
@@ -2182,7 +2182,7 @@ impl CaptureHandle {
         let attachment = store.prepare_session_agent_process(&session, expected)?;
         command.env(
             crate::process::AGENT_CALLER_ENV,
-            serde_json::to_string(&attachment.caller(session.clone()))?,
+            serde_json::to_string(&attachment.caller(session.clone().into()))?,
         );
         capture.attachment = Some((session.clone(), attachment.clone()));
         // Keep the capture's settlement snapshot fixed through admission. The
@@ -2267,7 +2267,7 @@ impl CaptureHandle {
         if let Some((session, attachment)) = &capture.attachment {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone()))
+                serde_json::to_string(&attachment.caller(session.clone().into()))
                     .expect("caller provenance serializes"),
             );
         }
@@ -2462,7 +2462,7 @@ impl SessionCapture {
             crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: manifest.caller_artifact_key.clone(),
-                id: format!("session_{}", Uuid::new_v4().simple()),
+                id: format!("session_{}", Uuid::new_v4().simple()).into(),
                 artifact_key: Some(manifest.artifact_key.clone()),
                 input_published: false,
                 cwd: manifest.cwd.clone(),
@@ -2767,7 +2767,7 @@ pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
         .map_err(|_| record_error(std::io::Error::other("capture key is not valid UTF-8")))?;
     let (_, owner) = resolve_capture(&key)?;
     if let Some(caller) = crate::journal::agent_caller() {
-        if owner.id != caller.session_id {
+        if owner.id.as_str() != crate::id::canonical_session(&caller.session_id) {
             return Err(record_error(std::io::Error::other(
                 "capture belongs to another Session",
             )));
@@ -3969,7 +3969,7 @@ mod tests {
                 request.clone(),
             )?;
             let (id, next_attachment) = next.session_attachment().unwrap();
-            assert_eq!(id, session.id);
+            assert_eq!(id, session.id.as_str());
             assert_eq!(
                 next.conversation_resume_token()?,
                 Some("native-thread".into())

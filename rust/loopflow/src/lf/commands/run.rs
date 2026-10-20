@@ -120,7 +120,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     } else {
         message.to_owned()
     };
-    turn.resume = Some(session.id.clone());
+    turn.resume = Some(session.id.to_string());
     turn.skill_input = None;
     turn.resolved_invocation = None;
     turn.task = session.task_id.as_ref().map(ToString::to_string);

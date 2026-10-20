@@ -826,7 +826,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             flow_lf_process_id: None,
             work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
-            id: id.clone(),
+            id: id.clone().into(),
             artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
             input_published: true,
             cwd: if foreign_row {
@@ -1660,7 +1660,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
                 .claim_session_attachment(&session, None, &origin, true)
                 .unwrap()
         });
-    let caller = serde_json::to_string(&attachment.caller(session.clone())).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     fixture.json(&["session", "bind", &session, "--task", "INF-123", "--json"]);
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.

@@ -6,52 +6,7 @@ use time::OffsetDateTime;
 use crate::id::WaveId;
 use crate::steer::Steer;
 
-macro_rules! durable_id {
-    ($name:ident, $prefix:literal) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new() -> Self {
-                Self(format!("{}{}", $prefix, uuid::Uuid::new_v4().simple()))
-            }
-
-            pub fn parse(value: &str) -> Result<Self, DurableDataError> {
-                let suffix = value.strip_prefix($prefix).ok_or_else(|| {
-                    DurableDataError::InvalidId(format!("expected {} id", $prefix))
-                })?;
-                uuid::Uuid::parse_str(suffix)
-                    .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
-                Ok(Self(value.to_string()))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = DurableDataError;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Self::parse(value)
-            }
-        }
-    };
-}
+use crate::id::prefixed_uuid_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DurableDataError {
@@ -60,7 +15,12 @@ pub enum DurableDataError {
 }
 
 // Identity of one selected repository plan, never derived from a code remote.
-durable_id!(RepositoryId, "repo_");
+prefixed_uuid_id!(
+    RepositoryId,
+    "repo_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
 
 /// One selected plan and its retained Machine-local locators, read together.
 /// Locators prove explicit association, not portable Work or execution authority.
@@ -69,18 +29,37 @@ pub struct RepositoryIdentity {
     pub id: RepositoryId,
     pub locators: Vec<RepositoryId>,
 }
-durable_id!(ProjectId, "proj_");
-durable_id!(TaskId, "task_");
-// Opaque IDs retain their released spelling, including references in scheduled jobs.
-durable_id!(MachineId, "home_");
-durable_id!(ToolResponseId, "response_");
-durable_id!(CronReceiptId, "cron_");
-
-impl ProjectId {
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
+prefixed_uuid_id!(
+    ProjectId,
+    "proj_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    TaskId,
+    "task_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+// Machine identity retains its released home_ prefix; job labels are separate locators.
+prefixed_uuid_id!(
+    MachineId,
+    "home_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    ToolResponseId,
+    "response_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+prefixed_uuid_id!(
+    CronReceiptId,
+    "cron_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
@@ -92,9 +71,6 @@ impl TaskId {
             )
         });
         Self(format!("task_{}", uuid.simple()))
-    }
-    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
-        Self(value.into())
     }
 }
 

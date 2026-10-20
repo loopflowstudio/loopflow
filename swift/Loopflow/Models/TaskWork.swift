@@ -165,3 +165,14 @@ public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiab
 public enum FlowProcessSummaryState: String, Codable, Sendable, Equatable {
     case current, completed, stopped
 }
+
+extension TaskSession {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
+        title = try values.decode(String.self, forKey: .title)
+        interactive = try values.decode(Bool.self, forKey: .interactive)
+        flowLfProcessId = (try values.decodeIfPresent(String.self, forKey: .flowLfProcessId)).map { StructuredIdentity.uuid($0) }
+        completedAt = try values.decodeIfPresent(Int64.self, forKey: .completedAt)
+    }
+}

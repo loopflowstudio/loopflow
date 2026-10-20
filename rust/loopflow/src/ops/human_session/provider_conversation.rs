@@ -44,14 +44,14 @@ pub(super) async fn human_input_times<'a>(
             codex
                 .entry(home)
                 .or_default()
-                .push((session.id.clone(), id));
+                .push((session.id.to_string(), id));
         } else {
             let at = claude.entry((home.clone(), id.clone())).or_insert_with(|| {
                 transcript(provider, &home, id.as_str())
                     .and_then(|path| claude_input_time(&path, id.as_str()))
             });
             if let Some(at) = at {
-                times.insert(session.id.clone(), *at);
+                times.insert(session.id.to_string(), *at);
             }
         }
     }
@@ -240,7 +240,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
     let session = store
         .create_session(LfSession {
             captured: None,
-            id: format!("session_{}", uuid::Uuid::new_v4().simple()),
+            id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
             artifact_key: Some(crate::session_record::new_artifact_key()),
             caller_artifact_key: None,
             input_published: false,
@@ -420,7 +420,7 @@ mod tests {
             }}),
         }).unwrap();
         let times = super::human_input_times(&store, [&session]).await.unwrap();
-        assert_eq!(times.get(&session.id), Some(&42_000));
+        assert_eq!(times.get(session.id.as_str()), Some(&42_000));
         let retained = store
             .get_provider_account("codex", &account.account_id)
             .await

@@ -480,11 +480,16 @@ fn describe(
             // A Task's primary follows its claim; a Wave's or repository's
             // follows your Session Machine for it.
             let setting = crate::durable::MachineSetting::Session;
-            let session_machine = match (&scope, &repository_id) {
+            let local = store.sqlite.local_machine()?.id;
+            let remote = |machine: crate::durable::MachineId| {
+                (machine != local).then(|| machine.to_string())
+            };
+            let machine = match (&scope, &repository_id) {
+                (PrimaryScope::Task(_), _) => execution_machine.clone(),
                 (PrimaryScope::Wave(wave), _) => {
-                    Some(store.sqlite.wave_owning_machine(wave, setting)?.0)
+                    remote(store.sqlite.wave_owning_machine(wave, setting)?.0)
                 }
-                (PrimaryScope::Repository(_), Some(repository)) => Some(
+                (PrimaryScope::Repository(_), Some(repository)) => remote(
                     store
                         .sqlite
                         .repository_owning_machine(
@@ -493,14 +498,7 @@ fn describe(
                         )?
                         .0,
                 ),
-                _ => None,
-            };
-            let local = store.sqlite.local_machine()?.id;
-            let machine = match scope {
-                PrimaryScope::Task(_) => execution_machine.clone(),
-                _ => session_machine
-                    .filter(|machine| *machine != local)
-                    .map(|machine| machine.to_string()),
+                (PrimaryScope::Repository(_), None) => None,
             };
             match machine {
                 Some(machine) => (None, Some(machine)),

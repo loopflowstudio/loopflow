@@ -262,6 +262,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(registry) = crate::store::read_existing_registry()? else {
         return Ok(false);
     };
+    let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
     let store = &registry.sqlite;
     let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
@@ -272,15 +273,12 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let wave = match cli.wave.clone() {
         Some(wave) => Some(wave),
         None if cli.repo.is_some() || cli.repository.is_some() => None,
-        None => match context_scope(registry, repo.as_deref())? {
+        None => match context_scope(&registry, repo.as_deref())? {
             Some(ContextScope::Wave(name)) => Some(name),
             Some(ContextScope::Repository) => None,
             // A Task's Session follows its claim; unresolved context stays local.
             _ => return Ok(false),
         },
-    };
-    let Some(store) = read_registry()? else {
-        return Ok(false);
     };
     let (machine, scope) = match wave.as_deref() {
         Some(wave) => {
@@ -343,19 +341,18 @@ enum ContextScope {
 /// Resolve as the local connect does. Task worktrees and unassociated ones are
 /// `None`: a Task routes by its claim, and an error belongs to the local connect.
 fn context_scope(
-    registry: crate::store::Store,
+    store: &crate::store::SharedStore,
     repo: Option<&str>,
 ) -> Result<Option<ContextScope>> {
     let Some(repo) = repo else {
         return Ok(None);
     };
-    let store: crate::store::SharedStore = std::sync::Arc::new(registry);
     let cwd = std::env::current_dir()?;
     tokio::runtime::Runtime::new()?.block_on(async {
         use crate::ops::human_session::{connection_scope, SessionTarget};
         use crate::session::PrimaryScope;
         Ok(
-            match connection_scope(&store, &cwd, SessionTarget::Context).await {
+            match connection_scope(store, &cwd, SessionTarget::Context).await {
                 Ok(PrimaryScope::Wave(id)) => store
                     .list_waves(Some(repo))
                     .await?

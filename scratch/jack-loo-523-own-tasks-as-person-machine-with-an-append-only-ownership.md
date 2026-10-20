@@ -478,3 +478,4 @@ Realign (2026-10-20, second): steers 352e4d61, b5619b52, b36e4435, 8bb9b532, 26f
 9ae7038b are all implemented as described above (`machine_use.rs`, `scope_defaults`, no
 `machines.repo`, no `lf wave machine`/`lf task handoff`); PR #1610 head matches the branch.
 Check results (2026-10-20, implement 2): integration `machine_commands ownership dto_fixtures documented_commands` 80/80; lib `machine_defaults ownership task_location commands::open` 30/30; fmt + clippy clean.
+Compress (2026-10-20): `lf connect` routing opens the store once; `lf open` resolves a remote Session Machine in one match; deleted `unavailable_execution_owner_opens_nothing_locally` (it asserted the checkout-Machine refusal ownership removed). `machine_commands` 29/29, `work_open` 11/11, clippy clean.

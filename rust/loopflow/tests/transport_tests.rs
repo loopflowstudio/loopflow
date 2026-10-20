@@ -757,6 +757,15 @@ read -r answer < /dev/tty
         }
     }
     std::thread::sleep(Duration::from_millis(200));
+    // The first was mid-turn when the machine went down; the second was waiting.
+    sql.execute(
+        r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+           SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1
+           ON CONFLICT(session_id) DO UPDATE SET program_status=excluded.program_status,
+               agent_process_id=excluded.agent_process_id"#,
+        [&sessions[0]],
+    )
+    .unwrap();
     let resume_all = || -> Value {
         let output = fixture
             .command(&["resume", "--all", "--json"])
@@ -795,6 +804,13 @@ read -r answer < /dev/tty
             .all(|entry| entry["outcome"]["kind"] == "resumed"),
         "{resumed}"
     );
+    for entry in resumed.as_array().unwrap() {
+        assert_eq!(
+            entry["turn_cut_off"],
+            entry["id"] == sessions[0].as_str(),
+            "{resumed}"
+        );
+    }
     let reopened = launches(5);
     assert_eq!(reopened.len(), 5, "{reopened:?}");
     for line in &reopened[3..] {

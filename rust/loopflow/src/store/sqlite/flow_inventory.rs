@@ -274,13 +274,14 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
+                // Agent Processes record a bare executable name, not an argv array.
                 "WITH RECURSIVE delegated(id,serves) AS (
-                     SELECT id,json_extract(command,'$[1]')='transport' AND json_extract(command,'$[2]')='serve'
+                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='transport' AND json_extract(command,'$[2]')='serve' END
                      FROM processes WHERE id=?1
                      UNION
-                     SELECT p.id,json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve'
+                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END
                      FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                     WHERE d.serves OR (json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve'))
+                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END))
                  SELECT session_id,receipt_key,seq FROM session_events
                  WHERE kind='captured' AND lf_process_id IN (SELECT id FROM delegated)
                  ORDER BY seq DESC LIMIT 1",
@@ -440,6 +441,13 @@ mod tests {
             process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
             // A command the agent ran is not the step's own capture.
             process(&nested, Some(&served), &["lf", "-b", "skill", "other"]);
+            // Agent Processes record a bare executable name instead of argv.
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,started_at)
+                 VALUES(?1,'fixture',?2,'codex',1)",
+                rusqlite::params![crate::id::LfProcessId::new(), &step],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
                  VALUES('step-session','Step','human',1,0,'/repo'),('nested-session','Nested','human',1,0,'/repo')",

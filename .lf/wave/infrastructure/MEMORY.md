@@ -118,7 +118,7 @@ Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
 choices; omission preserves defaults. October 10 approval authorizes landing and
 completion after verified merge. No logins, credential reads or real-provider tests.
 Six fixture Sessions prove Claude across child overrides; replay/native history
-retain their provider. Conflicting resume explains starting anew.
+keep their provider; conflicting resume explains starting anew.
 
 October 11 gate repaired isolation, replay pinning and pruning's NULL-worktree
 read. Override checks passed. Release-lock failure's cause remains unknown;
@@ -510,8 +510,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
-“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
+Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
+storage and autonomous cleanup”; current direction: Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -530,7 +530,7 @@ and proof limits; prior parent account: `86d0e5e6a2:wave/infrastructure/MEMORY.m
 
 Infrastructure selected one opaque `~/.lf/runs` root under Jack Heart's source-only
 delegation (comment `3829b49e-2ade-4bee-8850-2ae2297399a8`); PR #1450 (`1af81fe03`)
-is integrated. This supersedes relocation, parallel layouts and offline migration.
+is integrated; LOO-370 completed October 6. This supersedes relocation, parallel layouts and offline migration.
 Capture keys select history; Session IDs select mutations, and Session/Exec
 provenance supplies authority.
 Preserve paths, payloads, feedback, native identity and usage; missing payload
@@ -545,15 +545,12 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`, hosted CI passing.
-LOO-370 recovered and completed October 6 under the opaque-root decision.
-Installed acceptance is unproved; LOO-373 owns landing-placement reconciliation.
-
-Save service, attached lf and provider identities before stop removes receipts.
-Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
-Retain native history without inventing review success; protect unknown owners
-and independent reviews. Evidence:
-`c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart authorized LOO-377; #1429 merged (`c5dc238b0afb`); installed acceptance
+unproved; LOO-373 owns landing-placement reconciliation. Save service, attached lf
+and provider identities before stop removes receipts. Lock launch before attachment
+fencing; settle spawn, then reobserve the Flow. Retain native history without
+inventing review success; protect unknown owners and independent reviews.
+Evidence: `c28b7d0197:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Transient recovery (LOO-326, curated 2026-10-09)
 
@@ -638,10 +635,8 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery
-
-LOO-295/292 closed; LOO-373 retains placement repair. Evidence and unapproved
-batching: `10ca6bd39:wave/infrastructure/MEMORY.md`, this heading.
+Installed worker recovery: LOO-295/292 closed; LOO-373 retains placement repair
+(`10ca6bd39:wave/infrastructure/MEMORY.md`, Installed worker recovery).
 
 ## Optional chapters and Task workflows (curated 2026-10-12)
 
@@ -923,20 +918,17 @@ acceptance or authorize deleting execution history.
   LOO-278's integration did not transfer its registered checkout/PR ownership.
   Historical archives remain outside live architecture discovery.
 
-LOO-296's restoration and unsuperseded LOO-286/287 configured continuity remain
-unproved. Exact obligations, deleted-stack counterexamples and unknown liveness
-removal cause: `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51:.lf/wave/infrastructure/MEMORY.md`,
+LOO-296's restoration and LOO-286/287 configured continuity remain unproved;
+obligations and counterexamples: `71bbdb80d2:.lf/wave/infrastructure/MEMORY.md`,
 this heading. Current model/acceptance above supersedes old controllers without
 retroactive proof. Repair operation entry; UI observation is no scheduler.
 Historical trigger/default-wait proposals need current selection. Current
 [delivery mechanics](../../../docs/architecture/delivery.md) and TESTING.md own
 their guidance; Wave learning stays with its identified owner.
 
-## Prompt reduction boundary (2026-09-24)
-
-LOO-287's open proof and Intelligence ownership of assembly remain at
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
-and consumed launch evidence stay separate.
+Prompt reduction boundary (2026-09-24): LOO-287's open proof and Intelligence's
+assembly ownership: `7b28ab1ca:wave/infrastructure/MEMORY.md`, that heading.
+Identity, eligibility and consumed launch evidence stay separate.
 
 ## Installation and command scope (curated 2026-10-11)
 
@@ -992,7 +984,9 @@ liveness or continuity.
 
 ## Shipped history
 
-Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
+Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading. Unselected
+follow-ups and Jack Heart's unresolved July 6 “up/down 5ths” referent:
+`7b28ab1ca:wave/infrastructure/MEMORY.md`, Earlier follow-ups; archives authorize no work.
 Cron continuity judges the latest due against exact scheduled receipts; manual
 runs prove no firing, and old gaps do not keep later telemetry red.
 
@@ -1005,8 +999,8 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   scratch exclusion belongs only to persistent workspaces. Separate-index proofs
   preserve staged and working bytes. Disposable CLI and 90 commit/Git/worktree
   tests pass; full CI and installed acceptance remain unproved.
-- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
-- **Wait for `cargo test` to finish:** lib failures skip later targets.
+- **Desktop gates are headless.** `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas. Compile-only and skipped checks prove no interaction behavior.
+- **Wait for `cargo test`:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
@@ -1037,10 +1031,9 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   Membership changes preserve historical execution and require current ownership
   evidence before external effects. Earlier blanket refusal of provider reopening
   is superseded, not evidence that configured continuity passed.
-- **Historical continuity blocked daily telemetry** on August 23. LOO-241's
-  original eight-gap failure remains at `ec126964d:wave/infrastructure/MEMORY.md`
-  under Gotchas; current continuity judges the latest due interval, as recorded
-  under Shipped history. Fresh failures belong to existing work, not duplicate Tasks.
+- **Historical continuity blocked daily telemetry** (August 23, LOO-241:
+  `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas). Fresh failures belong to
+  existing work, not duplicate Tasks.
 - **Release orchestration and publication are separate evidence.** August 23's
   unpublished v0.12.14 despite cron/workflow success remains at
   `24db5d4d6:wave/infrastructure/MEMORY.md`, under Gotchas. Judge product state;
@@ -1074,11 +1067,6 @@ Plan ownership above records LOO-406's current direction. KRs are explicit
 judgments; preserve unrelated provider associations and diagnose ambiguous moves.
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
-
-## Earlier follow-ups
-
-Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 

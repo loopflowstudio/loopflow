@@ -40,7 +40,7 @@ extension WorkSectionHeading where Trailing == EmptyView {
 
 /// Tone shared by plan chips, Session state, status dots, and Flow nodes.
 enum WorkTone {
-    case running, done, waiting, failure, stopped, neutral
+    case running, done, available, warning, failure, stopped, neutral
 
     func ink(in palette: LoopflowPalette) -> Color {
         switch self {
@@ -54,7 +54,8 @@ enum WorkTone {
         switch self {
         case .running: palette.workingTone
         case .done: palette.successTone
-        case .waiting: palette.waitingTone
+        case .available: palette.availableTone
+        case .warning: palette.warningTone
         case .failure: palette.failureTone
         case .stopped, .neutral: palette.stoppedTone
         }
@@ -69,8 +70,8 @@ extension TaskExecutionState {
     var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
-        case .blocked: ("Blocked", .waiting)
-        case .stalled: ("Stalled", .waiting)
+        case .blocked: ("Blocked", .warning)
+        case .stalled: ("Stalled", .warning)
         case .idle, .unknown: (nil, .stopped)
         }
     }
@@ -192,10 +193,10 @@ struct WorkDisclosureHeading: View {
             } else if let hasLastGood = failure {
                 Text(hasLastGood ? "May be out of date" : "Unavailable")
                     .font(Typography.strong(10.5))
-                    .foregroundStyle(WorkTone.waiting.text(in: palette))
+                    .foregroundStyle(WorkTone.warning.text(in: palette))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 1)
-                    .background(WorkTone.waiting.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
+                    .background(WorkTone.warning.fill(in: palette), in: RoundedRectangle(cornerRadius: 4))
                     .accessibilityIdentifier("\(identifier)-stale")
                 Button("Retry", action: retry)
                     .buttonStyle(WorkOutlineButtonStyle())
@@ -262,7 +263,7 @@ extension ProgramStatusState {
     var workTone: WorkTone {
         switch self {
         case .working: .running
-        case .blocked: .waiting
+        case .blocked: .warning
         case .error: .failure
         case .done: .done
         case .idle, .clear: .neutral

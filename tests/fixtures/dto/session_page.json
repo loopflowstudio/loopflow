@@ -53,7 +53,7 @@
       "interactive": true,
       "workspace": null,
       "primary_scope": null,
-      "attention": "available",
+      "availability": "available",
       "task_primary": false,
       "program_status": {
         "seen": true,

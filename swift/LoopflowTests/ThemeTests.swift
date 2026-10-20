@@ -257,6 +257,27 @@ struct ThemeTests {
         #expect(store.selectedSource == .yours)
     }
 
+    /// `waiting` once served warnings and availability alike. Your files keep
+    /// those colors as the warning role; availability is never reinterpreted.
+    @Test func yourRetiredWaitingRoleMigratesToWarning() throws {
+        let paths = ThemePaths.temporary()
+        try paths.write("background=FFF4DF\nforeground=34291F\nloopflow-waiting-ink = #7A4A00\nloopflow-waiting-fill=#FFF0D0",
+                        theme: "Paper")
+        try paths.write("background=101010\nforeground=EEEEEE\nloopflow-waiting-ink = #E0B050", theme: "Midnight", ghostty: true)
+        let library = ThemeLibrary.load(paths)
+        let paper = try #require(library.yours["Paper"]).palette.definition
+        #expect(paper.warningTone.inkRGB == ThemeRGB(0x7A4A00))
+        #expect(paper.warningTone.fillRGB == ThemeRGB(0xFFF0D0))
+        #expect(paper.availableTone.inkRGB != ThemeRGB(0x7A4A00))
+        let migrated = try String(contentsOf: paths.themes.appendingPathComponent("Paper"), encoding: .utf8)
+        #expect(migrated.contains("loopflow-warning-ink = #7A4A00\nloopflow-warning-fill=#FFF0D0"))
+        #expect(!migrated.contains("waiting"))
+        // Ghostty's folder is not Loopflow's to rewrite; its retired key is reported, not applied.
+        let ghostty = paths.ghostty!.appendingPathComponent("Midnight")
+        #expect(try String(contentsOf: ghostty, encoding: .utf8).contains("loopflow-waiting-ink"))
+        #expect(try ThemeFile.read(ghostty).diagnostics.contains("Line 3: loopflow-waiting-ink is now loopflow-warning-ink; not applied."))
+    }
+
     @Test func invalidFilesAreReportedAndDoNotHideOtherThemes() throws {
         let paths = ThemePaths.temporary()
         try paths.write("background=red\nforeground=000000", theme: "Broken")

@@ -192,6 +192,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    /// Resolve a public Work address through Rust's repository and Work owners.
+    /// Reads only: no checkout, Session or window is prepared.
+    public func workLink(_ url: URL) async throws -> WorkLink {
+        let links = try Self.decode([WorkLink].self, from: await run(["open", url.absoluteString, "--link", "--json"], nil))
+        guard let link = links.first, links.count == 1 else {
+            throw RegistryQueryError("The Work link did not resolve to one destination.")
+        }
+        return link
+    }
+
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
         var args = ["wave", "show", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
@@ -314,6 +324,16 @@ public struct RegistryQuery: Sendable {
             try await start(args, cwd)
         } else {
             _ = try await run(args, cwd)
+        }
+    }
+
+    /// Reopen every conversation on this Machine that a restart or crash cut off,
+    /// each in its own owner with no viewer; panes attach when they show it.
+    public func resumeInterrupted() async throws {
+        if let start {
+            try await start(["resume", "--all"], nil)
+        } else {
+            _ = try await run(["resume", "--all"], nil)
         }
     }
 
@@ -447,6 +467,13 @@ public struct RegistryQuery: Sendable {
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
         let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
+    /// Reattach only; neither preparation nor the returned command can resume execution.
+    /// Nil when nothing is running to attach to.
+    public func prepareSessionAttachment(id: String, cwd: String? = nil) async throws -> SessionRecord? {
+        try Self.decode(SessionRecord?.self, from: await run(
+            ["session", "attach", id, "--if-free", "--prepare", "--json"], cwd))
     }
 
     /// Prepare one Session’s terminal command without starting its provider.

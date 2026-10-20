@@ -101,11 +101,54 @@ public struct TaskRunExplanation: Codable, Equatable, Sendable {
     public let unavailable: [String]
 }
 
-public struct DesktopOpenExplanation: Codable, Equatable, Sendable {
-    public let resolution: ContextExplanation
-    public let url: String?
-    public let impediments: [String]
-    public let unavailable: [String]
+/// `lf open --link --json`: a readable Work link resolved by Rust's shared owners.
+public struct WorkLink: Codable, Equatable, Sendable {
+    public enum Relation: String, Codable, Equatable, Sendable {
+        case currentConversation = "current_conversation"
+        case otherConversation = "other_conversation"
+        case unknown
+    }
+
+    public enum Host: String, Codable, Equatable, Sendable {
+        case auto, desktop, cmux, herdr, rex, terminal
+    }
+
+    public struct Target: Codable, Equatable, Sendable {
+        public let kind: WorkWorkspaceKey.Kind
+        public let repositoryPath: String
+        public let repositoryId: String?
+        public let task: String?
+        public let taskId: String?
+        public let wave: String?
+        public let session: String?
+        public let diff: Bool
+        public let executionMachine: String?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, task, wave, session, diff
+            case repositoryPath = "repository_path", repositoryId = "repository_id"
+            case taskId = "task_id", executionMachine = "execution_machine"
+        }
+    }
+
+    public struct Route: Codable, Equatable, Sendable {
+        public let hosts: [Host]
+        public let reason: String
+    }
+
+    public let label: String
+    public let url: String
+    public let markdown: String
+    public let fallbackArgv: [String]
+    public let target: Target
+    public let conversation: Relation
+    public let conversationReason: String?
+    public let route: Route
+
+    enum CodingKeys: String, CodingKey {
+        case label, url, markdown, target, conversation, route
+        case fallbackArgv = "fallback_argv", conversationReason = "conversation_reason"
+    }
 }
 
 public enum SessionConnectIntent: String, Codable, Equatable, Sendable {

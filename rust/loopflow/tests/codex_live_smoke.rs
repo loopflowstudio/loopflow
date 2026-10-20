@@ -43,7 +43,7 @@ async fn codex_live_one_turn_smoke() {
                 work_source: None,
                 bound_at: None,
                 id: "smoke".into(),
-                artifact_key: uuid::Uuid::new_v4().simple().to_string(),
+                artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
                 caller_artifact_key: None,
                 input_published: false,
                 cwd: dir.path().into(),

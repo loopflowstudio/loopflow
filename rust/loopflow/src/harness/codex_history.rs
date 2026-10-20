@@ -20,7 +20,7 @@ pub(super) struct History {
     active_turn: Option<String>,
     turns: HashMap<String, Turn>,
     requests: HashMap<String, (u64, Option<SessionTurnOrigin>)>,
-    attention: super::attention::Attention,
+    activity: super::activity_tracker::SessionActivityTracker,
 }
 
 /// All connection-local evidence for one native turn. Seeing a turn before
@@ -58,16 +58,17 @@ impl History {
         rpc: &Value,
         owner: Option<(&SqliteStore, &str, &SessionAttachment)>,
     ) -> StoreResult<()> {
-        self.attention.apply(super::attention::codex(rpc, true));
+        self.activity
+            .apply(super::activity_tracker::codex(rpc, true));
         if rpc["method"] == "turn/start" && !rpc["id"].is_null() {
             self.active_turn = None;
-            self.attention.preview = None;
+            self.activity.preview = None;
             if let Some((store, session, attachment)) = owner {
-                self.attention.record(
+                self.activity.record(
                     store,
                     session,
                     attachment,
-                    vec![super::attention::Signal::Working],
+                    vec![super::activity_tracker::Signal::Working],
                 );
             }
             let origin = owner
@@ -134,12 +135,12 @@ impl History {
                     .filter(|turn| !self.turns.get(*turn).is_some_and(|seen| seen.started))
                 {
                     self.active_turn = Some(turn.clone());
-                    self.attention.preview = None;
+                    self.activity.preview = None;
                 }
             }
             // Late turn events still enter history, but cannot replace current activity.
             if turn.is_none() || turn == self.active_turn {
-                let mut signals = super::attention::codex(rpc, false);
+                let mut signals = super::activity_tracker::codex(rpc, false);
                 if let Some(turn) = turn.as_ref().filter(|_| {
                     method == "item/completed" && params["item"]["type"] == "agentMessage"
                 }) {
@@ -147,7 +148,7 @@ impl History {
                         .as_str()
                         .filter(|text| !text.trim().is_empty())
                     {
-                        self.attention.preview = Some(crate::session::SessionPreview {
+                        self.activity.preview = Some(crate::session::SessionPreview {
                             provider_thread: thread.clone(),
                             provider_turn: turn.clone(),
                             observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -155,9 +156,9 @@ impl History {
                             text: text.chars().take(2048).collect(),
                         });
                     }
-                    signals = vec![super::attention::Signal::Working];
+                    signals = vec![super::activity_tracker::Signal::Working];
                 }
-                self.attention.record(store, session, attachment, signals);
+                self.activity.record(store, session, attachment, signals);
             }
         }
         if let Some(turn) = turn {
@@ -411,7 +412,7 @@ mod tests {
                 .claim_session_attachment(&original.id, Some(&first), &b, false)
                 .unwrap();
             let mut next = original.clone();
-            next.artifact_key = crate::session_record::new_artifact_key();
+            next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
                 .replace_session_input(original.captured, next)
                 .unwrap();
@@ -476,7 +477,7 @@ mod tests {
                 .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
             assert_eq!(
                 store
-                    .input_history(&original.artifact_key)
+                    .input_history(original.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,
@@ -484,7 +485,7 @@ mod tests {
             );
             assert_eq!(
                 store
-                    .input_history(&next.artifact_key)
+                    .input_history(next.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,

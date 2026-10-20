@@ -952,7 +952,7 @@ struct WorkModelStreamTests {
                 "state": "working", "id": NSNull(), "kind": NSNull(), "progress": NSNull(),
                 "app": NSNull(), "title": NSNull(), "msg": NSNull()
             ]]] as Any
-            entry["attention"] = available ? "available" : NSNull()
+            entry["availability"] = available ? "available" : NSNull()
             entry["agent_process_id"] = "retained-agent"
             entry["preview"] = turn.map {
                 ["provider_thread": "thread", "provider_turn": $0, "source": "codex",

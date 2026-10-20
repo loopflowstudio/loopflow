@@ -2313,7 +2313,7 @@ mod local_planning_tests {
         ] {
             let mut session = template.clone();
             session.id = id.into();
-            session.artifact_key = crate::session_record::new_artifact_key();
+            session.artifact_key = Some(crate::session_record::new_artifact_key());
             session.captured = None;
             session.task_id = Some(task.id.clone());
             session.wave_id = Some(task.wave_id.clone().unwrap());

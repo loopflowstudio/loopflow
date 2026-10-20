@@ -133,6 +133,19 @@ pub struct SelectionResolution {
     pub unavailable: Vec<String>,
 }
 
+impl SelectionResolution {
+    /// Member Task IDs in member order, each once.
+    pub fn task_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = Vec::new();
+        for member in &self.members {
+            if member.work.kind == WorkWorkspaceKind::Task && !ids.contains(&member.work.id) {
+                ids.push(member.work.id.clone());
+            }
+        }
+        ids
+    }
+}
+
 /// Facts from the shared Work reader. Unknown Task state remains unknown.
 #[derive(Debug, Clone)]
 pub struct SelectionWork {

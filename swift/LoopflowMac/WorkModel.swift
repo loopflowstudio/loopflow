@@ -2466,12 +2466,7 @@ extension WorkModel {
         dashboardError = nil
         do {
             _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
-            let plan = try await query.viewPlan(expression: nil, repoPath: repoPath)
-            guard self.repoPath == repoPath else { return }
-            var plans = selectionPlans.value ?? []
-            plans.removeAll { $0.dashboardID == nil && $0.selection.expression == .repository }
-            plans.insert(plan, at: 0)
-            applySelectionPlans(plans, reason: "")
+            try await refreshPlan(nil, repoPath: repoPath)
         } catch { dashboardError = error.localizedDescription }
     }
 
@@ -2481,10 +2476,23 @@ extension WorkModel {
     }
 
     private func refreshDashboard(_ id: String, repoPath: String) async throws {
-        let plan = try await query.viewPlan(expression: "query:" + id, repoPath: repoPath)
+        try await refreshPlan("query:" + id, repoPath: repoPath)
+    }
+
+    /// Re-read one plan after a write; nil reads the repository's built-in plan.
+    private func refreshPlan(_ expression: String?, repoPath: String) async throws {
+        let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
         guard self.repoPath == repoPath else { return }
+        replacePlan(plan)
+    }
+
+    /// A Dashboard plan replaces its Dashboard's; a built-in plan replaces its expression's.
+    private func replacePlan(_ plan: WorkViewPlan) {
         var plans = selectionPlans.value ?? []
-        plans.removeAll { $0.dashboardID == id }
+        plans.removeAll { other in
+            other.dashboardID == plan.dashboardID
+                && (plan.dashboardID != nil || other.selection.expression == plan.selection.expression)
+        }
         plans.append(plan)
         applySelectionPlans(plans, reason: "")
     }
@@ -2523,11 +2531,7 @@ extension WorkModel {
         do {
             let plan = try await query.viewPlan(expression: expression, repoPath: repoPath)
             guard viewOpening == request, self.repoPath == repoPath else { return }
-            if let id = plan.dashboardID {
-                var plans = selectionPlans.value ?? []
-                plans.removeAll { $0.dashboardID == id }; plans.append(plan)
-                applySelectionPlans(plans, reason: "")
-            }
+            if plan.dashboardID != nil { replacePlan(plan) }
             selectDestination(plan.dashboardID.map { .dashboard($0) } ?? .view(plan), recordingHistory: true)
             selectionOpening = DesktopOpening(url: link, status: .usable, reason: nil)
         } catch {

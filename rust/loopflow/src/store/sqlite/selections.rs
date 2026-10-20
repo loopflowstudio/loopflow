@@ -644,12 +644,7 @@ impl SqliteStore {
         let resolution = repository_default()
             .resolve(repository.as_str(), &work, &BTreeMap::new())
             .map_err(StoreError::from)?;
-        let mut order: Vec<String> = Vec::new();
-        for member in resolution.members {
-            if member.work.kind == WorkWorkspaceKind::Task && !order.contains(&member.work.id) {
-                order.push(member.work.id);
-            }
-        }
+        let mut order = resolution.task_ids();
         let from = order
             .iter()
             .position(|id| id == task)
@@ -822,16 +817,6 @@ mod tests {
         );
     }
 
-    fn task_order(plan: &crate::work::selection::ViewPlan) -> Vec<String> {
-        let mut order: Vec<String> = Vec::new();
-        for member in &plan.resolution.members {
-            if member.work.kind == WorkWorkspaceKind::Task && !order.contains(&member.work.id) {
-                order.push(member.work.id.clone());
-            }
-        }
-        order
-    }
-
     #[test]
     fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         let (_dir, store, repo) = fixture();
@@ -841,12 +826,12 @@ mod tests {
             "task_33333333333333333333333333333333",
         );
         assert_eq!(
-            task_order(&store.view_plan(&repo, None).unwrap()),
+            store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [one, two]
         );
         assert_eq!(store.reorder_task(&repo, two, one).unwrap(), [two, one]);
         assert_eq!(
-            task_order(&store.view_plan(&repo, None).unwrap()),
+            store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [two, one]
         );
         let plans = store.selection_plans(&repo).unwrap();
@@ -857,7 +842,7 @@ mod tests {
                     && plan.resolution.members.len() > 1
             })
             .unwrap();
-        assert_eq!(task_order(wave), [two, one, three]);
+        assert_eq!(wave.resolution.task_ids(), [two, one, three]);
 
         store
             .conn
@@ -868,7 +853,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(
-            task_order(&store.view_plan(&repo, None).unwrap()),
+            store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [two, one, three]
         );
         assert_eq!(
@@ -883,7 +868,7 @@ mod tests {
             .is_err());
         assert_eq!(store.revisions().unwrap(), revisions);
         assert_eq!(
-            task_order(&store.view_plan(&repo, None).unwrap()),
+            store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [three, two, one]
         );
     }

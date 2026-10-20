@@ -148,8 +148,7 @@ struct DashboardSlotGrid<Tile: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: members.count) { _, _ in page = min(page, layout.pages(members).count - 1) }
-        .onChange(of: layout.count) { _, _ in page = min(page, layout.pages(members).count - 1) }
+        .onChange(of: layout.pages(members).count) { _, count in page = min(page, count - 1) }
     }
 
     private func turn(to target: Int) {

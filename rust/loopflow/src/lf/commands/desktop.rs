@@ -612,15 +612,11 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 slots.as_ref(),
             )?)?
         }
-        DesktopCommand::Order { task, to, .. } => {
-            let task_id = |selector: &str| {
-                selector
-                    .strip_prefix("task:")
-                    .unwrap_or(selector)
-                    .to_string()
-            };
-            serde_json::to_value(store.reorder_task(&repository, &task_id(task), &task_id(to))?)?
-        }
+        DesktopCommand::Order { task, to, .. } => serde_json::to_value(store.reorder_task(
+            &repository,
+            &work_key(&repository, task)?.id,
+            &work_key(&repository, to)?.id,
+        )?)?,
         DesktopCommand::Layout {
             work, save: true, ..
         } => {

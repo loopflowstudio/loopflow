@@ -2,23 +2,19 @@
 
 Full note: `08253c4dda:scratch/desktop-dashboard-demo.md`.
 
-A populated-clone demo at `e08cbb102d` failed before app launch: clone creation hit
-SQLite `SQLITE_IOERR_GETTEMPPATH` (6410); a retry with clone-local `TMPDIR`/
-`SQLITE_TMPDIR` progressed but fell below TESTING.md's 32 GiB disk reserve
-(8.4 GB database + 6.9 GB WAL, not ready). The clone was disposed; no app was
-replaced. The later synthetic-fixture review in
+A populated-clone demo at `e08cbb102d` failed before app launch (SQLite temp path,
+then disk reserve); the synthetic-fixture review in
 [dashboard-continuity-review.md](dashboard-continuity-review.md) superseded it.
 
-Open engineering recommendations (not agreed UX, not launched work): clone creation
-should choose a writable temp dir inside its sandbox and budget its peak footprint;
+Main's #1612 (October 20) replaces clone creation with an APFS snapshot and runs
+draft builds on `~/.lf/copies/<digest>/` automatically. Still open (not agreed UX):
 live `desktop state`/control target `com.loopflow.mac`, so a separately identified
 preview cannot show candidate CLI↔native round-trip parity.
 
 ## Native demo on a copy of Jack's lfdb — October 19, 2026
 
 Build: Loopflow Dev at `3dd981e645` + `79bf0d415b`, private `LF_HOME` holding a
-VACUUM copy of `~/.lf/loopflow.db` with 0.14.8 and the `saved_selections` draft
-applied by SQL (canonical preflight only takes fences). Launched with `open -n --env`.
+VACUUM copy of `~/.lf/loopflow.db` with the draft applied by SQL (#1612 now automates this).
 
 Observed (Jack Heart's screenshots):
 1. “Couldn't update planning: sqlite error: malformed JSON”, Working Tasks 0, warnings

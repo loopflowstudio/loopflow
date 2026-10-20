@@ -202,8 +202,10 @@ to LOO-519 and removed; the body needs rewriting before review.
 
 ## Remaining implementation, verification and transport
 
-- Demo preparation: see [desktop-dashboard-demo.md](desktop-dashboard-demo.md) for
-  the clone temp-path/disk-budget repair and candidate CLI↔native targeting gap.
+- Demo preparation: main's #1612 (not yet merged here) runs draft builds on an
+  APFS copy of the real store and adds `lf-world` fixtures, superseding the clone
+  repair and hand-applied draft; the CLI↔native targeting gap remains
+  ([desktop-dashboard-demo.md](desktop-dashboard-demo.md)).
 - Scripting parity: readback oracle, exit statuses and scoped context with LOO-519;
   readiness/events and wait/run-wait with LOO-453; LOO-498 owns external hosts. Opening receipts report launch acceptance, not provider readiness or exit.
 - LOO-416 cold Shell attachment: native launches record no `lf_process_id` on the

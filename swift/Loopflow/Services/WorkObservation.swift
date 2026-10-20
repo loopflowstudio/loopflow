@@ -207,6 +207,8 @@ public struct WorkFrame: Decodable, Sendable {
     public let sequence: Int
     public let answers: Int?
     public let home: String
+    /// The preview copy directory a draft-carrying build runs on; nil on the shared store.
+    public let copy: String?
     public let revisions: StoreRevisions?
     public let unavailable: String?
     public let content: Content
@@ -221,14 +223,15 @@ public struct WorkFrame: Decodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case sequence, answers, home, revisions, unavailable, part, body
+        case sequence, answers, home, copy, revisions, unavailable, part, body
     }
 
-    public init(sequence: Int, answers: Int?, home: String, revisions: StoreRevisions?,
+    public init(sequence: Int, answers: Int?, home: String, copy: String?, revisions: StoreRevisions?,
                 unavailable: String?, content: Content, wire: Wire?) {
         self.sequence = sequence
         self.answers = answers
         self.home = home
+        self.copy = copy
         self.revisions = revisions
         self.unavailable = unavailable
         self.content = content
@@ -240,6 +243,7 @@ public struct WorkFrame: Decodable, Sendable {
         sequence = try container.decode(Int.self, forKey: .sequence)
         answers = try container.decode(Int?.self, forKey: .answers)
         home = try container.decode(String.self, forKey: .home)
+        copy = try container.decode(String?.self, forKey: .copy)
         revisions = try container.decode(StoreRevisions?.self, forKey: .revisions)
         unavailable = try container.decode(String?.self, forKey: .unavailable)
         wire = nil
@@ -281,7 +285,7 @@ public struct WorkFrame: Decodable, Sendable {
             wire = nil
         }
         return WorkFrame(sequence: frame.sequence, answers: frame.answers, home: frame.home,
-                              revisions: frame.revisions, unavailable: frame.unavailable,
+                              copy: frame.copy, revisions: frame.revisions, unavailable: frame.unavailable,
                               content: frame.content, wire: wire)
     }
 }

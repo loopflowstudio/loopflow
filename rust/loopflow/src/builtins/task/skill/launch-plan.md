@@ -106,8 +106,9 @@ Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → refresh
-→ loop-or-next. Refresh runs sync → realign. Iterate returns to implementation;
-Advance publishes and ends the pursuit. The `code` workflow starts with that
+→ loop-or-next → concept-review → loop-or-next. Refresh runs sync → realign.
+Either decider's Iterate returns to implementation; the second's Advance
+publishes and ends the pursuit. The `code` workflow starts with that
 pursuit; `feature` drafts the design first; both land an accepted PR through
 `ship`. Design review and the demo are workflow nodes in the Task
 conversation, never Flow steps. A Task on a workflow takes only an edge

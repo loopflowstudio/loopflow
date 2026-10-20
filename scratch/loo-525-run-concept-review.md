@@ -109,3 +109,7 @@ reference `pursue` by name and inherit the change; LOO-521 (PR #1608).
 
 - A plain skill step in a Flow cannot return Blocked; it records the open
   choice in the working design and the following `loop-or-next` blocks on it.
+- gate (2026-10-20): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+  clean; `cargo test -p loopflow --lib -- flow:: builtins` 109 passed (LF_* unset).
+  Docs consistent; release notes left as shipped. Headless iterate/advance/Blocked
+  behavior remains demo-owned.

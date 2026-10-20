@@ -257,7 +257,7 @@ fn plan_in(
                 conn,
                 &crate::session::PrimaryScope::Task(task_id.clone()),
             )?;
-            content.primary_session = primary.as_ref().map(|session| session.id.clone());
+            content.primary_session = primary.as_ref().map(|session| session.id.to_string());
             if primary.is_none() {
                 content
                     .unavailable
@@ -278,7 +278,7 @@ fn plan_in(
             }
             if content.face.is_none() {
                 content.face = primary.map(|primary| PaneIntent::Session {
-                    session_id: primary.id,
+                    session_id: primary.id.into(),
                     location: content.location.clone(),
                 });
             }

@@ -1,6 +1,7 @@
 # LOO-533: Prove sidebar density on a built world
 
-Status: draft plan (kickoff, 2026-10-20). Jack Heart filed this on 2026-10-20 as an
+Status: implemented on this branch (e4b85fc3fd, 35a4417e05); gate and the build-cost
+decision remain (realigned 2026-10-20). Jack Heart filed this on 2026-10-20 as an
 autonomous follow-up to lf-world (#1612). Keep inline JSON for pure view logic,
 failure and transitional states, terminal/focus proofs, and DTO contract fixtures.
 
@@ -86,13 +87,14 @@ Sessions stay out of the main navigation. It then binds the orphans with
    - `WorkModel(query:repoPath: <world>/repo)`, then `refresh()`. Select the product
      Task "Keep Task observation read-only 7" (found by name from `model.visibleWork`; IDs are
      generated). Inspect `WorkNavigator(model:onOpenSession:)` directly.
-   - It makes the same assertions as today, with real ids: 8 `work-task-*` buttons;
-     one `work-wave-<id>` per visible Wave; no `WaveLensView`; no `work-session-count-*`;
-     no `work-orphans-open`, `session-row-<orphan id>` or `debug-orphan-session-<orphan id>`.
-     Also assert `unmatchedSessions.count == 4` before binding.
-   - Phase two runs `lf session bind <orphan> --task <that Task>` for each orphan through
-     the same runner, then calls `refreshSessions()`. `unmatchedSessions` is empty, and
-     `work-orphans-open` is still absent.
+   - Assertions use real ids and only identifiers `WorkNavigator` still renders
+     (`work-orphans-open`, `work-session-count-*` and `debug-orphan-session-*` no longer
+     exist; questions.md #2): three Waves of 50 Tasks; 8 started product Tasks; 8
+     `work-task-*` buttons once they are opened; one `work-wave-<id>` per Wave; no
+     `WaveLensView`; no `session-row-<orphan id>`; `unmatchedSessions.count == 4`.
+   - Phase two binds each orphan to the selected Task through `RegistryQuery.bindSession`
+     (`lf session bind`), then calls `refreshSessions()`. `unmatchedSessions` is empty
+     and that Task holds 5 Sessions.
 4. **Build `lf-world` wherever the swift suite builds `lf`.** Add `--bin lf-world` to
    `scripts/test.py` `swift-cli` and to ci.yml's "Build CLI for Swift transport tests".
 5. **Window captures move to the screenshot manifest.** The two-size captures were
@@ -130,8 +132,10 @@ Sessions stay out of the main navigation. It then binds the orphans with
 
 ## Operational boundary
 
-- The `density` world must build in under 60 s on a debug build here, down from
-  661 s. Record the measured figure below. The swift CI step's 20-minute cap includes it.
+- Target: the `density` world builds in under 60 s on a debug build, down from 661 s.
+  Measured 448 s (228 s CPU) under load ~50 after grouping heads; the remaining cost
+  is ~44 git subprocesses per Task save (questions.md #1). The swift CI step's
+  20-minute cap includes it; the local headless proof took 613 s end to end.
 - `World` sets process env, so each build runs `lf-world` as a subprocess, never
   in the test process.
 
@@ -179,6 +183,9 @@ Expected: all pass. The density build time is printed in the remaining-work line
 - [x] `density` recipe.
 - [x] Headless world-driven proof (`WorkDensityWorldTests.swift`); hand-built population deleted.
 - [x] `lf-world` in swift-cli and CI build steps; density screenshot shots.
-- [ ] Gate: `world_recipes` with density; decide whether the build cost is acceptable in CI.
+- [ ] Gate: `world_recipes` with density and the headless proof, on an unloaded host.
+- [ ] Decision needed (Jack Heart): accept ~450 s density builds in CI and `world_recipes`,
+  or open a Task to remove a redundant planning acquisition per save. Either choice
+  leaves the 60 s target unmet on this branch; the code does not change until decided.
 
 Check: `cargo test -p loopflow --lib heads_by_key|planning_peers` pass; clippy clean; `scripts/test_desktop.sh --filter sidebarDensity` passed in 613 s (world build dominates, load ~50). Gate owns `world_recipes`.

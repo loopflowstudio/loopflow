@@ -75,13 +75,11 @@ lf task complete <id>                           # Asana task shows completed
 lf task comment <id> "From lf"                  # appears as an Asana comment
 ```
 
-## Delete — do not maintain
+## Deleted
 
-- `linear_observe::connected` as the remote-provider switch for shared paths
-  (replaced by `planning_client::connected`).
-- `planning_client::PlanningProvider` and `configured()`: duplicated `PlanningConfig`;
-  callers read `remote_name(repo)` and `asana_project(repo)` (removed in compress).
-- No prior Asana code remains (removed in 43a1f85ce3); nothing to delete.
+`linear_observe::connected` is gone; shared paths now call `planning_client::connected`.
+A duplicate `PlanningProvider` enum was removed too. No earlier Asana code remained
+after 43a1f85ce3.
 
 ## Checks
 

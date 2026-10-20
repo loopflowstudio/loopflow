@@ -616,14 +616,15 @@ fn failed_placement_is_observed_without_starting_a_task() {
     assert_eq!(Path::new(&cwd), task.repo.path().canonicalize().unwrap());
     assert_eq!(outcome, "failed");
     assert!(support::recorded_flows(task.home.path()).is_empty());
-    let started: Option<i64> = db
+    // A failed launch for another selector writes no ownership entry anywhere.
+    let entries: i64 = db
         .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
+            "SELECT count(*) FROM task_ownership WHERE task_id!=?1",
             [task.registered.task.id.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(started, None);
+    assert_eq!(entries, 0);
 }
 
 // Release the fixture even when an assertion fails, so no held child escapes.
@@ -684,15 +685,17 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
 "#,
         );
         let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-        let started = || {
+        // The checkout already claimed the Task; inspection and Flows add no entry.
+        let entries = || {
             db.query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
+                "SELECT count(*) FROM task_ownership WHERE task_id=?1",
                 [task.registered.task.id.as_str()],
-                |row| row.get::<_, Option<i64>>(0),
+                |row| row.get::<_, i64>(0),
             )
             .unwrap()
         };
-        // Explicit placement and passive inspection must not start the Task.
+        let claimed = entries();
+        // Explicit placement and passive inspection must not claim the Task again.
         let read = command(
             &caller,
             task.home.path(),
@@ -705,7 +708,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             "{}",
             String::from_utf8_lossy(&read.stderr)
         );
-        assert!(started().is_none());
+        assert_eq!(entries(), claimed);
         assert!(support::recorded_flows(task.home.path()).is_empty());
 
         let parent = loopflow::id::LfProcessId::new();
@@ -744,7 +747,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             );
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(started().is_some(), "{launch}");
+        assert_eq!(entries(), claimed, "{launch}");
         let status = task.status();
         let flows = status["work"]["flow_processes"].as_array().unwrap();
         assert_eq!(flows.len(), 1, "{launch}: {status}");

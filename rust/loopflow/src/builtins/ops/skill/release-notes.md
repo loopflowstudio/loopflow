@@ -16,8 +16,13 @@ Write release notes that fuse release intent with shipped behavior.
    discussion. Do not expand the source with git or GitHub queries; the bounded
    JSON is the complete notes input.
 4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
-5. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
-6. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
+5. Each `breaking` line is a compatibility break the release cut proved, such as
+   `lf < 0.15.0 can no longer open the store (raised by: drop_waves)`. Quote it
+   verbatim in the opening story and explain the upgrade in operational notes.
+   Loopflow adds any line the notes omit. An empty list means older versions
+   keep working; never invent a break.
+6. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
+7. Write to `LF_RELEASE_NOTES_OUTPUT` when set, otherwise `RELEASE_NOTES.md`.
    A preview supplies a temporary output path; do not edit the repository's
    release files or publish anything.
 

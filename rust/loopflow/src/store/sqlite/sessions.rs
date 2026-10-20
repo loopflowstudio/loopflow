@@ -28,9 +28,9 @@ macro_rules! session_step {
 pub(super) const SESSION_FLOW: &str = session_flow!();
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.request,s.interactive,s.repo,
-    s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
+    s.task_id,s.wave_id,", session_flow!(), " AS flow_lf_process_id,s.work_source,s.bound_at,
+    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
@@ -205,8 +205,8 @@ fn inventory_query(
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Flow/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.interactive,s.task_id,s.wave_id,
-    ", session_flow!(), ",s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",s.current_capture
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
+    ", session_flow!(), " AS flow_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
@@ -216,7 +216,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Flow is the Flow process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.*,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
+        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.flow_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
         (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_lf_process_id=fs.flow_lf_process_id)),
         w.slug,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
@@ -510,7 +510,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.*, (
+            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.flow_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture, (
                 SELECT MAX(json_extract(payload,'$.opened_at_ms'))
                 FROM session_events WHERE session_id=candidates.id AND kind='observed'
                 AND json_extract(payload,'$.type')='interactive_opened'
@@ -790,7 +790,7 @@ impl SqliteStore {
                     AND origin.captured_event IS NULL
                 GROUP BY e.session_id,e.provider_thread,e.provider_turn)
                 , eligible AS MATERIALIZED (
-                SELECT *, SUM(ended IS NULL) OVER () AS unfinished,
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs

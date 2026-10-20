@@ -28,36 +28,11 @@ this before it lands.
   - since #1605 `SessionsStore.select` only attaches; the reopen tests `resume`.
 - Files tests use `README.md` (the world checkout's file) instead of notes.txt.
 
-## 2. Large recipe — measured, stopped for Jack's decision (2026-10-20)
+## 2. Large recipe — deferred
 
-Targets: 256 and 2048 started Tasks with checkouts, a Session on every other
-(DesktopPerformanceTests) or every Task (WorkspacePerformanceTests).
-Debug `lf-world`, M-series Mac, another agent and Swift builds sharing the CPU
-(noisy, but the shape is clear):
-
-| Path | Result |
-| --- | --- |
-| `World::task` (= `lf task create`), 64 Tasks | create 136 s, checkout 44 s (0.7 s each), 32 Sessions 2.8 s, 64 Flows 1.5 s: 3 min 7 s |
-| same, 256 Tasks | 122 created after 6.5 min, per-Task cost rising ~2 s → ~4.5 s; stopped |
-| store `create_task`, one planning sync at the end, no checkouts, 256 | 70 s create + 9.8 s for 128 Sessions |
-| same, 2048 | 933 created after 9.5 min, ~2.7 s per Task at ~900; stopped |
-
-Where it goes (sampled): `lf task create` runs the Git planning exchange
-(`planning_git` subprocesses) per Task; below that, `planning_write::capture`
-per Task write grows with the size of the plan (~16 `planning_peer_changes`
-rows per Task). The lookup query in `capture` is indexed; the growing cost is
-elsewhere in capture/retain and is not yet pinned down. Projected 2048 builds
-are hours either way, and 2048 checkouts alone would be ~25 min.
-
-Proposal (needs Jack's choice before building further):
-1. Find and fix the per-write growth in `planning_write` (a product cost: every
-   Task write in a large repository pays it), then re-measure.
-2. Large recipe at a Rows rung: Tasks through store writers with one planning
-   exchange, Sessions bound without checkouts; "started" needs a checkout or
-   Flow, so either the perf tests stop requiring every Task started, or a few
-   checkouts carry Flows and the rest stay planned.
-3. Build the large world once per lf-world build and clone it per run (APFS
-   clone, as `store::copy` does), so the suite pays the build rarely.
+Jack Heart cancelled the large recipe for now (2026-10-20) after measurement:
+per-Task planning writes grow with the plan, so 2048 Tasks takes hours.
+Follow-up LOO-541 owns the optimization and the numbers.
 
 ## Delete — do not maintain
 

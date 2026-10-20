@@ -364,3 +364,68 @@ def test_a_write_failure_leaves_the_tree_byte_identical(repo: Path) -> None:
     assert (repo / MIGRATIONS_RS).read_text() == before_registry
     assert canonical_files(repo) == before_canonical
     assert {p.name: p.read_text() for p in (repo / DRAFTS).glob("*.sql")} == before_drafts
+
+
+# -- Reader floor -------------------------------------------------------------
+
+BREAKING_NOTE = Path("release/unreleased/BREAKING.md")
+
+
+def released_floor(repo: Path) -> str:
+    return (repo / MIGRATIONS_RS).read_text().rsplit("reader_floor: ", 1)[1].split(",", 1)[0]
+
+
+def test_additive_drafts_keep_the_previous_reader_floor(repo: Path) -> None:
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+    draft(repo, "wave_tags", body="CREATE TABLE wave_tags (wave_id TEXT, tag TEXT);\n"
+          "CREATE INDEX wave_tags_by_wave ON wave_tags(wave_id);\n")
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 0, result.stderr
+    assert "reader floor stays 0.11.0" in result.stdout
+    assert released_floor(repo) == 'Some("0.11.0")'
+    assert not (repo / BREAKING_NOTE).exists()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "ALTER TABLE waves RENAME COLUMN id TO wave_id;\n",
+        "DROP TABLE waves;\n",
+        "ALTER TABLE waves ADD COLUMN state TEXT NOT NULL DEFAULT 'ready';\nUPDATE waves SET state='done';\n",
+        "CREATE UNIQUE INDEX waves_by_id ON waves(id);\n",
+        "CREATE TRIGGER waves_stamp AFTER INSERT ON waves BEGIN SELECT 1; END;\n",
+        "-- breaks: older readers reject the new status value\nSELECT 1;\n",
+    ],
+)
+def test_unproven_drafts_raise_the_floor_and_name_themselves(repo: Path, body: str) -> None:
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+    draft(repo, "wave_reshape", body=body)
+
+    result = run(repo, "0.11.30")
+
+    line = "lf < 0.11.30 can no longer open the store (raised by: wave_reshape)"
+    assert result.returncode == 0, result.stderr
+    assert line in result.stdout
+    assert released_floor(repo) == 'Some("0.11.30")'
+    assert (repo / BREAKING_NOTE).read_text() == line + "\n"
+
+
+def test_preview_and_test_materialization_write_no_breaking_note(repo: Path) -> None:
+    draft(repo, "drop_waves", body="DROP TABLE waves;\n")
+
+    assert "lf < 0.11.30" in run(repo, "0.11.30", "--check").stdout
+    assert run(repo, "0.11.30", "--materialize-for-tests").returncode == 0
+    assert not (repo / BREAKING_NOTE).exists()
+
+
+def test_an_unreplayable_released_history_proves_nothing_additive(repo: Path) -> None:
+    (repo / MIGRATIONS / "0.11.002_future.sql").write_text("CREATE TABLE future (id TEXT) STRICTER;\n")
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+
+    result = run(repo, "0.11.30", "--check")
+
+    assert result.returncode == 0, result.stderr
+    assert "cannot replay 0.11.002_future.sql" in result.stderr
+    assert "lf < 0.11.30 can no longer open the store (raised by: wave_note)" in result.stdout

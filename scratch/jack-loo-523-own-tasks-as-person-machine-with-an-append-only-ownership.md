@@ -460,5 +460,8 @@ The live Linear demo above is a demo/review step, not gate.
 Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at`
 (every reading fell to Unavailable); it now reads ownership. The main merge left
 `world/mod.rs` calling the old three-argument `record_flow_process`; fixed.
+Realign (2026-10-20, second): steers 352e4d61, b5619b52, b36e4435, 8bb9b532, 26f247a2, ba3528a6 and
+9ae7038b are all implemented as described above (`machine_use.rs`, `scope_defaults`, no
+`machines.repo`, no `lf wave machine`/`lf task handoff`); PR #1610 head matches the branch.
 Check results (2026-10-20, compress): `--test integration machine_commands` 28/28; fmt + clippy clean.
 Check results (2026-10-20, implement): lib `machine_defaults ownership task_location` + CLI/skill/ssh/migrations pass; integration `machine_commands ownership dto_fixtures` 74/74; fmt + clippy clean; `native_runner_*_foreground` hang without a terminal (CI).

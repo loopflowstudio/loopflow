@@ -1608,12 +1608,13 @@ fn task_ownership_never_routes_to_another_persons_machine() {
 
 #[test]
 fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
-    use loopflow::durable::OwningMachineSource;
+    use loopflow::durable::{MachineSetting, OwningMachineSource};
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
     let task = plan.task();
     plan.to_local();
     let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
     let repository = ["--repository", plan.repository.as_str()];
     let mut wave = repository.to_vec();
     wave.extend(["machine", "use", "mini", "owners"]);
@@ -1627,6 +1628,12 @@ fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
     let output = fixture.run(&bare);
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("This repository:"));
+    // The Wave Session comes back to the laptop; its Tasks stay on mini.
+    let mut session = repository.to_vec();
+    session.extend(["machine", "use", laptop.as_str(), "owners", "--session"]);
+    let output = fixture.run(&session);
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners: its Session runs"));
     for (store, path) in [
         (&plan.local, &plan.local_path),
         (&plan.remote, &plan.remote_path),
@@ -1636,23 +1643,56 @@ fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
             .unwrap()
             .wave_id;
         assert_eq!(
-            store.wave_owning_machine(&wave).unwrap(),
+            store
+                .wave_owning_machine(&wave, MachineSetting::Tasks)
+                .unwrap(),
             (mini.clone(), OwningMachineSource::Wave("owners".into()))
         );
         assert_eq!(
-            store.repository_owning_machine(&plan.repository).unwrap(),
-            (mini.clone(), OwningMachineSource::Repository)
+            store
+                .wave_owning_machine(&wave, MachineSetting::Session)
+                .unwrap(),
+            (laptop.clone(), OwningMachineSource::Wave("owners".into()))
         );
+        for setting in [MachineSetting::Tasks, MachineSetting::Session] {
+            assert_eq!(
+                store
+                    .repository_owning_machine(&plan.repository, setting)
+                    .unwrap(),
+                (mini.clone(), OwningMachineSource::Repository)
+            );
+        }
     }
     let listed = fixture.json(&["machine", "list", "--json"]);
-    let scopes = listed[0]["defaults"]
+    let listing = |id: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|listing| listing["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let scopes = listing(mini.as_str())["defaults"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|d| d["scope"]["kind"].as_str().unwrap())
+        .map(|d| {
+            format!(
+                "{} {}",
+                d["scope"]["kind"].as_str().unwrap(),
+                d["setting"].as_str().unwrap()
+            )
+        })
         .collect::<Vec<_>>();
-    assert_eq!(listed[0]["id"], mini.as_str());
-    assert_eq!(scopes, ["wave", "repository"]);
+    assert_eq!(
+        listing(laptop.as_str())["defaults"][0]["setting"],
+        "session"
+    );
+    assert_eq!(
+        scopes,
+        ["wave tasks", "repository tasks", "repository session"]
+    );
     // The laptop routes the unowned Task to mini; mini claims it for itself.
     assert_eq!(
         plan.local.task_execution_route(&task).unwrap().machine_id,

@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::durable::{DefaultScope, Machine, MachineDefault, MachineId};
+use crate::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
 use crate::lf::MachineCommand;
 use crate::store::Store;
 
@@ -114,12 +114,15 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
                     for default in &listing.defaults {
-                        match &default.scope {
-                            DefaultScope::Wave(_) => println!("  Wave {}", default.name),
-                            DefaultScope::Repository(_) => {
-                                println!("  repository {}", default.name)
-                            }
-                        }
+                        let scope = match &default.scope {
+                            DefaultScope::Wave(_) => "Wave",
+                            DefaultScope::Repository(_) => "repository",
+                        };
+                        let part = match default.setting {
+                            MachineSetting::Tasks => "Tasks",
+                            MachineSetting::Session => "Session",
+                        };
+                        println!("  {scope} {} {part}", default.name);
                     }
                 }
             }

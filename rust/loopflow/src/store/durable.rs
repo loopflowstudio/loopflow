@@ -62,9 +62,13 @@ impl Store {
     pub async fn wave_owning_machine(
         &self,
         wave: &crate::id::WaveId,
+        setting: crate::durable::MachineSetting,
     ) -> StoreResult<(MachineId, crate::durable::OwningMachineSource)> {
         let wave = wave.clone();
-        run_sqlite(&self.sqlite, move |store| store.wave_owning_machine(&wave)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.wave_owning_machine(&wave, setting)
+        })
+        .await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {

@@ -143,7 +143,7 @@ pub enum TaskExecutionSource {
     OwningMachine(OwningMachineSource),
 }
 
-/// Where the person's Machine for an unowned Task came from.
+/// Where your Machine for an unowned Task or a scope's Session came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
 pub enum OwningMachineSource {
@@ -165,12 +165,23 @@ pub enum DefaultScope {
     Repository(RepositoryId),
 }
 
+/// Which part of a Wave or repository a Machine default places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineSetting {
+    /// Where the scope's new Tasks run.
+    Tasks,
+    /// Where the scope's primary Session runs.
+    Session,
+}
+
 /// One of your Machine defaults, with the scope's name on this Machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MachineDefault {
     pub scope: DefaultScope,
     /// The Wave's name, or the repository's path on this Machine.
     pub name: String,
+    pub setting: MachineSetting,
     pub machine_id: MachineId,
 }
 

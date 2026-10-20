@@ -2053,11 +2053,17 @@ pub enum MachineCommand {
         #[arg(conflicts_with_all = ["task", "repo"])]
         wave: Option<String>,
         /// Hand this Task to the Machine; you stay its person
-        #[arg(long, conflicts_with = "repo")]
+        #[arg(long, conflicts_with_all = ["repo", "session", "tasks"])]
         task: Option<String>,
         /// Set this repository's default for its Session and Tasks with no Wave default
         #[arg(long)]
         repo: bool,
+        /// Set only where the scope's primary Session runs, and move it there
+        #[arg(long, conflicts_with = "tasks")]
+        session: bool,
+        /// Set only where the scope's new Tasks run
+        #[arg(long)]
+        tasks: bool,
         /// Apply on this Machine only; set by the copy to your other Machines
         #[arg(long, hide = true)]
         here: bool,

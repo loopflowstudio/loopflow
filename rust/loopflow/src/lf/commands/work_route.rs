@@ -223,7 +223,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     Ok(true)
 }
 
-/// A Wave's or repository's Session lives on your Machine for it. The
+/// A Wave's or repository's Session lives on your Session Machine for it. The
 /// destination runs it wherever it arrives, even if its own copy differs.
 fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let (
@@ -261,7 +261,9 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
                 return Ok(false);
             };
             (
-                store.wave_owning_machine(&wave_id)?.0,
+                store
+                    .wave_owning_machine(&wave_id, crate::durable::MachineSetting::Session)?
+                    .0,
                 format!("Wave {wave}"),
             )
         }
@@ -270,7 +272,9 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
                 return Ok(false);
             };
             (
-                store.repository_owning_machine(repository)?.0,
+                store
+                    .repository_owning_machine(repository, crate::durable::MachineSetting::Session)?
+                    .0,
                 "this repository".to_string(),
             )
         }

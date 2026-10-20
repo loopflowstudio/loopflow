@@ -459,7 +459,9 @@ mod tests {
 
     #[test]
     fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
-        use crate::durable::{DefaultScope, OwningMachineSource, TaskExecutionSource};
+        use crate::durable::{
+            DefaultScope, MachineSetting, OwningMachineSource, TaskExecutionSource,
+        };
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let repo = home.path().canonicalize().unwrap();
@@ -486,7 +488,11 @@ mod tests {
         store.claim_task(&claimed.id).unwrap().unwrap();
 
         store
-            .set_machine_default(&DefaultScope::Repository(repository.clone()), &worker)
+            .set_machine_default(
+                &DefaultScope::Repository(repository.clone()),
+                MachineSetting::Tasks,
+                &worker,
+            )
             .unwrap();
         let task = new_task("Routed");
         let route = store.task_execution_route(&task.id).unwrap();
@@ -497,9 +503,31 @@ mod tests {
                 TaskExecutionSource::OwningMachine(OwningMachineSource::Repository)
             )
         );
+        // The Wave's Session Machine places no Task.
+        store
+            .set_machine_default(
+                &DefaultScope::Wave(wave.clone()),
+                MachineSetting::Session,
+                &local,
+            )
+            .unwrap();
+        assert_eq!(
+            store.task_execution_route(&task.id).unwrap().machine_id,
+            worker
+        );
+        assert_eq!(
+            store
+                .wave_owning_machine(&wave, MachineSetting::Session)
+                .unwrap(),
+            (local.clone(), OwningMachineSource::Wave("work".into()))
+        );
         // The Wave's default outranks the repository's.
         store
-            .set_machine_default(&DefaultScope::Wave(wave.clone()), &mini)
+            .set_machine_default(
+                &DefaultScope::Wave(wave.clone()),
+                MachineSetting::Tasks,
+                &mini,
+            )
             .unwrap();
         let route = store.task_execution_route(&task.id).unwrap();
         assert_eq!(
@@ -518,7 +546,7 @@ mod tests {
             (route.machine_id, route.source),
             (local, TaskExecutionSource::Owner)
         );
-        assert_eq!(store.machine_defaults().unwrap().len(), 2);
+        assert_eq!(store.machine_defaults().unwrap().len(), 3);
     }
 
     #[test]

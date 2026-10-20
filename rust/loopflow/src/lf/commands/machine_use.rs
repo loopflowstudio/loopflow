@@ -1,7 +1,8 @@
 //! `lf machine use`: run work on one of your Machines. A Task moves by
 //! handoff; a Wave or repository default is personal, stored on this Machine
-//! and copied to your other Machines.
-use crate::durable::{DefaultScope, MachineId, RepositoryId};
+//! and copied to your other Machines. A scope's Tasks and its Session each
+//! have their own Machine; `--tasks` or `--session` sets one, neither sets both.
+use crate::durable::{DefaultScope, MachineId, MachineSetting, RepositoryId};
 use crate::id::WaveId;
 use crate::lf::MachineCommand;
 use crate::ops::task_ownership::{change, render, resolve_machine, OwnershipChange};
@@ -27,6 +28,8 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
         wave,
         task,
         repo: repository_scope,
+        session,
+        tasks,
         here,
         json,
     } = command
@@ -47,6 +50,7 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
             wave.as_deref(),
             task.as_deref(),
             *repository_scope,
+            *session || *tasks,
         )
         .await?;
         anyhow::Ok((store, scope))
@@ -76,31 +80,44 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
         ),
         Scope::Task(_) => unreachable!("Task scope hands off above"),
     };
-    store.sqlite.set_machine_default(&default_scope, &target)?;
-    runtime.block_on(move_primary_session(
-        &store,
-        repo,
-        wave_name.as_deref(),
-        &primary,
-        &target,
-    ))?;
+    let settings = match (*session, *tasks) {
+        (true, _) => vec![MachineSetting::Session],
+        (_, true) => vec![MachineSetting::Tasks],
+        _ => vec![MachineSetting::Tasks, MachineSetting::Session],
+    };
+    for setting in &settings {
+        store
+            .sqlite
+            .set_machine_default(&default_scope, *setting, &target)?;
+    }
+    if settings.contains(&MachineSetting::Session) {
+        runtime.block_on(move_primary_session(
+            &store,
+            repo,
+            wave_name.as_deref(),
+            &primary,
+            &target,
+        ))?;
+    }
     if *json {
         println!(
             "{}",
-            serde_json::json!({ "scope": default_scope, "machine_id": target })
+            serde_json::json!({ "scope": default_scope, "settings": settings, "machine_id": target })
         );
     } else {
         let label = match &wave_name {
             Some(name) => format!("Wave {name}"),
             None => "This repository".to_string(),
         };
-        println!(
-            "{label}: your new Tasks and its Session run on {}",
-            describe(&store.sqlite, &target)?
-        );
+        let parts = match settings.as_slice() {
+            [MachineSetting::Session] => "its Session runs",
+            [MachineSetting::Tasks] => "your new Tasks run",
+            _ => "your new Tasks and its Session run",
+        };
+        println!("{label}: {parts} on {}", describe(&store.sqlite, &target)?);
     }
     if !here {
-        let args = [
+        let mut args = vec![
             "--repository".to_string(),
             repository.to_string(),
             "machine".into(),
@@ -109,19 +126,27 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
             wave_name.unwrap_or_else(|| "--repo".into()),
             "--here".into(),
         ];
+        if *session {
+            args.push("--session".into());
+        }
+        if *tasks {
+            args.push("--tasks".into());
+        }
         runtime.block_on(copy_to_my_machines(&store.sqlite, &args))?;
     }
     Ok(())
 }
 
 /// `--task`, `--repo` and a Wave argument are explicit; bare, the worktree's
-/// Task, then its Wave, then this repository.
+/// Task, then its Wave, then this repository. `--session` or `--tasks` names a
+/// part of a Wave or repository, so a bare one skips the worktree's Task.
 async fn select_scope(
     store: &SharedStore,
     repo: &Path,
     wave: Option<&str>,
     task: Option<&str>,
     repository: bool,
+    scope_part: bool,
 ) -> anyhow::Result<Scope> {
     if let Some(task) = task {
         return Ok(Scope::Task(task.to_string()));
@@ -144,7 +169,11 @@ async fn select_scope(
     }
     let cwd = std::env::current_dir()?;
     let selected = crate::ops::select_execution_work(store, &cwd).await?;
-    if let Some(task) = selected.as_ref().and_then(|work| work.task.as_ref()) {
+    if let Some(task) = selected
+        .as_ref()
+        .and_then(|work| work.task.as_ref())
+        .filter(|_| !scope_part)
+    {
         return Ok(Scope::Task(task.id.to_string()));
     }
     Ok(match selected.and_then(|work| work.wave) {

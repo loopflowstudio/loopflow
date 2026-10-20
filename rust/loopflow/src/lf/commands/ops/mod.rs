@@ -1517,7 +1517,9 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
                 None,
             )
             .await?;
-            let (owning_machine, _) = store.wave_owning_machine(wave.id()).await?;
+            let (owning_machine, _) = store
+                .wave_owning_machine(wave.id(), crate::durable::MachineSetting::Tasks)
+                .await?;
             (main_repo_root(Path::new(wave.repo()))?, owning_machine)
         };
         let path_env = std::env::var("PATH").map_err(|_| {

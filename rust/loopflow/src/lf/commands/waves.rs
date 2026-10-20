@@ -1090,9 +1090,9 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Res
         let state = store.task_state(&task.id).await?;
         active_tasks += u32::from(!state.is_terminal());
     }
-    // Only a chosen Wave Machine is named; an unset Wave runs on the reader.
+    // Only a chosen Machine for the Wave's Tasks is named; unset runs on the reader.
     let (machine_id, source) = store
-        .wave_owning_machine(wave.id())
+        .wave_owning_machine(wave.id(), crate::durable::MachineSetting::Tasks)
         .await
         .map_err(|error| anyhow!("failed to read your Wave Machine: {error}"))?;
     let machine = match source {

@@ -223,7 +223,12 @@ pub(super) fn writer_in(
         [task.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    let (machine, source) = super::scope_defaults::owning_machine_in(conn, wave, repository)?;
+    let (machine, source) = super::scope_defaults::owning_machine_in(
+        conn,
+        wave,
+        repository,
+        crate::durable::MachineSetting::Tasks,
+    )?;
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 

@@ -2887,6 +2887,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
             &loopflow::durable::DefaultScope::Wave(
                 loopflow::id::WaveId::parse(&destination_wave).unwrap(),
             ),
+            loopflow::durable::MachineSetting::Tasks,
             &remote,
         )
         .unwrap();

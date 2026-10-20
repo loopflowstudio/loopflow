@@ -31,11 +31,13 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 
 -- This person's defaults, by Wave or repository; a Task's own Machine is its
 -- ownership claim. Personal, never planning content: each of the person's
--- Machines holds its own copy. Machine is the first setting; each is optional.
+-- Machines holds its own copy. Machine is the first setting, in two parts: where
+-- the scope's new Tasks run and where its primary Session runs. Each is optional.
 CREATE TABLE scope_defaults (
     scope_kind TEXT NOT NULL CHECK (scope_kind IN ('wave', 'repository')),
     scope_id TEXT NOT NULL,
-    machine_id TEXT CHECK (machine_id GLOB 'home_*'),
+    tasks_machine_id TEXT CHECK (tasks_machine_id GLOB 'home_*'),
+    session_machine_id TEXT CHECK (session_machine_id GLOB 'home_*'),
     set_at INTEGER NOT NULL,
     PRIMARY KEY (scope_kind, scope_id),
     CHECK (scope_kind != 'repository' OR scope_id GLOB 'repo_*')

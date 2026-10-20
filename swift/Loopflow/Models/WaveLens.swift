@@ -20,7 +20,7 @@ public enum WaveLensColor: String, Sendable, Hashable {
         case .red: palette.failure
         case .blue: palette.working
         case .black: palette.surfaceElement
-        case .unknown: palette.waiting
+        case .unknown: palette.warning
         }
     }
 

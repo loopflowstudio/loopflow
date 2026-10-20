@@ -1101,7 +1101,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
-                artifact_key: run_id,
+                artifact_key: Some(run_id),
                 caller_artifact_key: None,
                 input_published: false,
                 cwd: repo.into(),

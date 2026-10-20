@@ -767,7 +767,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     let first = watch.session(|record| !record.is_null());
     assert_eq!(first["title"], "Conversation");
     assert_eq!(first["flow_membership"]["kind"], "unknown");
-    assert_eq!(first["attention"], serde_json::Value::Null);
+    assert_eq!(first["availability"], serde_json::Value::Null);
 
     let conn = home.raw();
     let write = |sql: &str| {
@@ -805,9 +805,9 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
          SELECT s.id,p.attachment_token,p.id,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id='conversation'",
     );
-    watch.session(|record| record["attention"] == "available");
+    watch.session(|record| record["availability"] == "available");
     write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
-    watch.session(|record| record["attention"].is_null());
+    watch.session(|record| record["availability"].is_null());
 
     event(
         "observed",
@@ -831,7 +831,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     // No database write announces this death: the OS clock must find it.
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
-    watch.session(|record| record["state"] == "closed" && record["attention"].is_null());
+    watch.session(|record| record["state"] == "closed" && record["availability"].is_null());
 
     write("UPDATE agent_sessions SET completed_at=4 WHERE id='conversation'");
     watch.session(|record| record.is_null() || record["state"] == "closed");

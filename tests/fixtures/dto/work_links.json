@@ -1,0 +1,62 @@
+[
+  {
+    "label": "LOO-507 · Pi integration",
+    "url": "loopflow://loopflow/task/LOO-507",
+    "markdown": "[LOO-507 · Pi integration](loopflow://loopflow/task/LOO-507)",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "loopflow://loopflow/task/LOO-507"
+    ],
+    "target": {
+      "kind": "task",
+      "repository_path": "/src/loopflow",
+      "repository_id": "repo_22222222222222222222222222222222",
+      "task": "LOO-507",
+      "task_id": "task_44444444444444444444444444444444",
+      "wave": null,
+      "session": null,
+      "diff": false,
+      "execution_machine": "home_55555555555555555555555555555555"
+    },
+    "conversation": "other_conversation",
+    "conversation_reason": null,
+    "route": {
+      "hosts": [
+        "desktop",
+        "cmux",
+        "terminal"
+      ],
+      "reason": "Automatic order: Desktop when Launch Services finds it, then this cmux workspace, then a plain terminal"
+    }
+  },
+  {
+    "label": "loopflow · product Wave",
+    "url": "loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222",
+    "markdown": "[loopflow · product Wave](loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222)",
+    "fallback_argv": [
+      "lf",
+      "open",
+      "loopflow://loopflow/wave/product?repository=repo_22222222222222222222222222222222"
+    ],
+    "target": {
+      "kind": "wave",
+      "repository_path": "/src/loopflow",
+      "repository_id": "repo_22222222222222222222222222222222",
+      "task": null,
+      "task_id": null,
+      "wave": "product",
+      "session": null,
+      "diff": false,
+      "execution_machine": null
+    },
+    "conversation": "unknown",
+    "conversation_reason": "No calling conversation identity was supplied",
+    "route": {
+      "hosts": [
+        "terminal"
+      ],
+      "reason": "a terminal was requested"
+    }
+  }
+]

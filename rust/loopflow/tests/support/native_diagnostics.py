@@ -117,7 +117,8 @@ def _exercise(lf: str, provider: str, home: Path, repo: str) -> None:
         os.write(master, b"\x7f ready")
         _read_until(lambda: "DRAFT: café 雪 🦀 ready".encode() in output)
         os.write(master, b"\r")
-        _read_until(lambda: b"EDITOR_EXIT" in output)
+        # lf replaces the provider's exit text with its own way back.
+        _read_until(lambda: b"Continue with: lf resume" in output)
         while child.poll() is None:
             if select.select([master], [], [], 0.05)[0]:
                 try:
@@ -130,7 +131,10 @@ def _exercise(lf: str, provider: str, home: Path, repo: str) -> None:
         assert b"cmux title update failed" not in output
         assert b"Loopflow recorded diagnostics:" in output
         if provider != "opencode":
-            assert b"PROVIDER_STDERR" in output
+            assert b"EDITOR_EXIT" not in output, output
+            # Replaced exit text survives in the execution owner's log.
+            owner_log = home / "machine/logs/transport.log"
+            assert b"PROVIDER_STDERR" in output + owner_log.read_bytes(), output
         else:
             assert b"PROVIDER_STDERR" not in output
             assert any(

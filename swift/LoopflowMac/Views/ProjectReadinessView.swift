@@ -32,7 +32,7 @@ struct ProjectReadinessView: View {
             if isPending {
                 ProgressView("Preparing Project…")
             } else if let message {
-                Text(message).foregroundStyle(palette.waiting).textSelection(.enabled)
+                Text(message).foregroundStyle(palette.warning).textSelection(.enabled)
                 if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
             }
             if let successor = readiness?.pendingSuccessor {

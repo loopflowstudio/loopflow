@@ -251,37 +251,61 @@ prove source behavior; installed concurrent-Flow acceptance remains unproved.
 The slow status/ensure observations and unattributed records-read report have
 no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
 
-Jack Heart's October 11 Kata report (`d4991d61-da39-4b7a-af0f-15880c234d82`)
-records identical timeouts on consecutive prompts with one background shell.
-This rules out a Loopflow-repository-only incident or a requirement for this
-Wave's Flows. Shared-store admission can explain cross-repository recurrence;
-the Kata lock holder and exact cause remain unconfirmed. The background shell
-alone is no causal evidence. Separate-directory, consecutive-callback fixtures
-retain held contention across prompts; installed Kata acceptance remains open.
+Jack Heart's October 11 Kata report (`d4991d61`) reproduced consecutive
+prompt timeouts outside Loopflow with one background shell. Shared-store contention
+can explain cross-repository recurrence; the Kata lock holder/cause remain unknown.
+Callback fixtures prove no installed concurrent-Flow/Kata acceptance. Materialized/Linux CI remains open. Report, gate and Task-preservation
+evidence: `4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
 
-After main sync, the Task-facts fixture now separates edit-time advancement
-from Task/PR preservation. Affected checks pass; hosted materialized/Linux CI
-and installed concurrent-Flow acceptance remain unproved. Exact gate evidence:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Session titles.
+## Program Status direction (LOO-398/415, reconciled 2026-10-16)
 
-## Program Status direction (LOO-398, 2026-10-07)
+Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
+lf writing only for pipe-driven work/Flow position. Reports override inference
+in Rust's single Waiting judgment; they grant no execution authority.
+Jack Heart assigned emission to LOO-415 on October 7, conditional on lf and
+Flows reporting equally well to external hosts; LOO-398 owns reading. LOO-415's
+brief requires one terminal writer for Flow steps as well as conversations.
+A PTY accepted only 62 of 74 OSC bytes: a parent mutex cannot serialize independent
+step writers. Provider reports pass unchanged, with no reports in JSON/log output.
+LOO-384 retains non-reporters; LOO-402 owns broader presentation. Source proofs
+do not establish installed/native adoption; viewer absence is not provider death.
+Earlier patch evidence and constraints:
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, Program Status direction.
 
-Jack Heart selected every-pane Desktop reading and unchanged provider passthrough;
-reports override inference without granting control. LOO-384 owns non-reporters,
-LOO-402 broader presentation. Publication, not landing, was authorized. Embedded
-patch approval and source checks establish no provider adoption, installed or
-composed native-pane acceptance. Task-header judgment remains open. Observation
-fences survive; viewer absence is not death. Dated patch/check details:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
+## Session continuity (LOO-416, reconciled 2026-10-17)
 
-Jack Heart's October 7 deferral assigns emission to LOO-415, conditional on lf
-and Flows reporting to herdr equally well. A PTY accepted 62 of 74 OSC bytes;
-one owner must serialize complete reports with child output. A parent mutex
-cannot serialize independent terminal writers. Provider reports pass once;
-lf-only IDs, explicit blocked state, step clearing and terminal-only emission
-remain required. Implementation is still absent at `72dbe0344f`.
-Original design: `c62c19f5c:scratch/read-and-write-program-status.md`.
+Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
+shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
+creation and lifecycle, including nested CLI callers without Desktop. No shared
+daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
+transport; PR #1581 supplies the independent owner and attach-only path, with
+terminal restoration limits still explicit. LOO-497 owns the shared layout API;
+LOO-489 integrates it.
+
+Application retention now keeps repository registries across window closure;
+headless tests cover twelve Work layouts/drafts, not twelve live providers.
+Known scenes render before lookup; fresh resolution still owns new link delivery.
+App death destroys Desktop runtime state: durable identity, native history and
+repaint alone cannot restore live input or exact scrollback. Exact renderer recovery
+and layout replication across Desktop installations remain unresolved. The owner
+retains bounded vt100 text state, not a complete native terminal snapshot.
+
+Admission is not execution: Task filing and explicit Wave admission now commit
+uncaptured primary Sessions; ensure prepares placement, while explicit execution
+reserves input and Started. Nested CLI stand-ins preserve a pending request,
+provider/Session identity and caller provenance after calling-provider/viewer death;
+this proves neither native readiness nor a warming policy.
+Finite Desktop requests must propagate cancellation through the actual worker,
+drain input/output together and bound inherited pipes after child exit. Kill only
+the exact query child; a timed-out mutation remains unknown, never retried blindly.
+
+LOO-497 owns durable intent; Jack Heart's October 17 LOO-489 slice narrows to built-in
+query views. That handoff supplies no durable restoration commitment. Full LOO-416
+acceptance still requires saved-state integration and measured native continuity.
+
+Release's operation-entry lesson applies: prove reopening through its public
+router, then native remount and provider survival separately. Neither retained
+models nor successful surface construction proves editable provider readiness.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
@@ -365,12 +389,12 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## AgentProcess (LOO-443/447, 2026-10-10)
+## AgentProcess (LOO-443/447, reconciled 2026-10-16)
 
-Jack Heart accepted #1519. Headless launch requires attachment; retired generation
-counters stay unread. Stand-ins prove A → B → A rejection, not configured relay.
-Client/provider death differs; leader death or unknown descendants grants no signaling.
-LOO-447 excluded historical orphans, removal timing and configured-provider runs.
+Jack Heart accepted #1519 (`71741bd4`) and #1524 landing (`55bc3fcd`).
+AgentProcess owns fenced attachment and exact stop; client death differs from
+provider death, and unknown descendants grant no signaling. Stand-ins prove
+A → B → A rejection, not configured relay or installed acceptance.
 
 LOO-415 supersedes the stop/resume design. Jack Heart's October 10 decisions,
 #1524 approval and source proofs: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`,
@@ -463,6 +487,8 @@ Candidate, 0.14.5 and 0.14.6 PTY faults preserve exact drafts/history, proving n
 original-reset repair. Incident records lack its initiating error; installed
 recovery remains unproved.
 Live/unknown providers grant no duplicate launch or signaling.
+LOO-416 supersedes eager primary-input preparation: admission prepares placement
+without a capture; connect reserves the first input and launches.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
@@ -727,9 +753,10 @@ Receipts preserve attempts, later edits, nulls, ages, foreign/partial facts and 
 Journal routes replace inventories, retaining causal losers and uncertainty.
 Released SQL stays immutable; no old-version Git decoder. Key pairing and automatic export of Git-imported,
 unmapped Work into Linear remain open; Linear's unconditional updates retain a
-remote-edit race. LOO-414 owns exclusive first-start authority: missing local
-placement proves no peer absence. Jack's `19116a1b` stacks 427 on 412 for later
-landing; this approval does not settle that separate authority.
+remote-edit race. Jack moved minimum first-start admission to LOO-427 on October
+11; LOO-414 retains coordinator recovery and detached launch retries. Missing
+local placement proves no peer absence. Earlier stacking approval `19116a1b`
+did not settle first-start authority.
 
 Ordinary Tasks/comments replace FollowThrough and its ritual/CLI/DTO/UI/Flow.
 Private recovery retains filing IDs/uncertainty, committing Tasks before comments. One config
@@ -1083,41 +1110,26 @@ Preserve caller checkpoints/common invocation loading. LOO-422 owns OSC 7501
 simplification after adoption. Codex rejected-turn recovery and installed homepage
 capture remain open; CI owns the full materialized matrix.
 
-Jack Heart narrowed LOO-420 to ordinary installed-skill invocation, matching
-help/list, native same-harness execution, translated ports, exact arguments,
-assets and declarations; builtin inline skills and `--agent/-a` remain.
-Busy-terminal injection, queues, competing writers and generic recovery are
-outside scope. Jack requested compression, then gate/landing and completion
-after verified merge October 8. Exact comments:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+LOO-420 history:
+`4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+Jack Heart selected native installed-skill invocation with matching discovery,
+exact arguments/assets and translated ports, then delivery after verified merge.
+Busy-terminal injection, competing writers and generic recovery stay excluded.
+One catalog owns source/declarations/arguments; export preserves third-party files.
+Native subagent names never select lf's harness. Preserve Session placement,
+captures after refused continuation and reservations after failed publication.
 
-One skill catalog replaces external/npx/rams and Flow resolvers. Retain source,
-declarations and arguments together; export preserves third-party files. Claude
-subagent names do not select lf's harness. Independent fixes preserve saved Session
-placement, active captures on refused continuation and unpublished reservations on
-publication failure. Launcher success proves no provider exit.
+Codex 0.160.1 requires discovery for typed skill input; explicit Markdown references
+select original paths without another catalog. Custom prompts retain positions and
+assignments, not bundle semantics. Preserve unfamiliar declarations, native/sibling
+history, stale-client rejection and lossless JSON; snapshot/escape native syntax.
+Unbound third-party launches omit operating guidance; attributed Work/Flows retain
+it. PATH discovery replaces availability probes, not actual spawn error handling.
 
-Preserve native/sibling history, stale-client rejection, exact arguments, lossless
-JSON and snapshotted declarations. Escape argument/preprocessing syntax. Rejected
-hook/preprocessing approaches and source audits remain at
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
-Direct invocation and large inputs.
-
-Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
-explicit Markdown skill reference selects the original path on both surfaces.
-No catalog mount or second resolver is required. Single-file custom prompts keep
-one-based positions and named assignments; valid metadata does not make them skill
-bundles. Unfamiliar native declarations are reported, not silently discarded.
-
-Ordinary unbound third-party launches omit operating/conversation guidance;
-attributed Work and captured Flows retain it. Budget checks remain; notices accompany
-managed context or excerpts. Captured input identifies a Flow; ordinary selection
-also retains an in-memory invocation. PATH discovery replaces availability's
-`--version` subprocess/cache without changing actual launch failure handling.
-
-Earlier fixture/gate results and benchmark limits:
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
-No production-speedup claim; hosted CI, merge and completion remain unproved.
+[Benchmarks](../../../scripts/benchmarks/skill-invocation/README.md) retain fixture
+proofs and baseline Git failure, not live compliance or speedup. Hosted CI, merge,
+installation and completion remain unproved in this evidence; launcher success
+never proves provider exit.
 
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 

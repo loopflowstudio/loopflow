@@ -108,7 +108,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
 
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
-        Some(Commands::Desktop { .. })
+        Some(Commands::Desktop { .. } | Commands::Open(_))
         | Some(Commands::Task {
             cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. },
         }) => None,
@@ -372,10 +372,9 @@ mod tests {
     }
 
     #[test]
-    fn desktop_commands_do_not_route_to_the_execution_machine() {
-        for operation in ["open", "list"] {
-            let cli =
-                Cli::try_parse_from(["lf", "--task", "LOO-427", "desktop", operation]).unwrap();
+    fn presentation_commands_do_not_route_to_the_execution_machine() {
+        for argv in [["desktop", "list"].as_slice(), ["open"].as_slice()] {
+            let cli = Cli::try_parse_from(["lf", "--task", "LOO-427"].iter().chain(argv)).unwrap();
             assert_eq!(launch_task(&cli), None);
         }
     }

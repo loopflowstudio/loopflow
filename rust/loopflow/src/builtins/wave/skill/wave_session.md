@@ -20,7 +20,7 @@ is the whole method; this section only says when to apply it.
 - End a turn only when every started Task has its disposition, including merged
   Tasks awaiting completion. Surface due follow-ups, even when unstarted,
   under the included procedure's authorization rule. Report in the procedure's
-  order: waiting on the user, moving, stuck, then due follow-ups and backlog.
+  order: available to work on, moving, stuck, then due follow-ups and backlog.
 
 ## What happens between turns
 

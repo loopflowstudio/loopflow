@@ -20,7 +20,7 @@ first, then the engineering words it borrows.
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
 | **Run** | What the product calls a headless Session; an interactive one is a Session. |
-| **Waiting** | A conversation that asked a question, handed its turn back, or went quiet with no tool call outstanding. |
+| **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
 | **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
 | **AgentProcess** | The provider's OS process Loopflow started for a Session; it keeps running when another lf process attaches. |
 | **Machine** | One OS user’s Loopflow authority in one data directory; two users on one host have separate identities. |

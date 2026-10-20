@@ -162,3 +162,37 @@ fn wrapped_inline_commands_are_checked_for_ambiguity() {
         assert!(normalize_args(args).is_err(), "{example}");
     }
 }
+
+/// Maintained product copy and builtin prompts describe conversations as
+/// available, never as people owing agents attention. Shipped release notes
+/// and quotations keep their original words; they are not scanned.
+#[test]
+fn maintained_copy_uses_availability_not_obligation() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = vec![
+        repo.join("README.md"),
+        repo.join("AGENTS.md"),
+        repo.join("swift/README.md"),
+        repo.join("website/home.html"),
+        repo.join("website/main.py"),
+    ];
+    for directory in ["docs", "rust/loopflow/src/builtins", "skills"] {
+        markdown_files(&repo.join(directory), &mut files);
+    }
+    let retired =
+        Regex::new(r"(?i)waiting on you|needs you\b|--waiting\b|needs-me|attention required")
+            .unwrap();
+    let failures: Vec<String> = files
+        .iter()
+        .flat_map(|path| {
+            let text = fs::read_to_string(path).unwrap();
+            let shown = path.strip_prefix(&repo).unwrap().display().to_string();
+            text.lines()
+                .enumerate()
+                .filter(|(_, line)| retired.is_match(line))
+                .map(|(index, line)| format!("{shown}:{}: {}", index + 1, line.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

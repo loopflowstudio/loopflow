@@ -343,7 +343,7 @@ struct SessionPaneView: View {
             if bellRinging {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.palette.waiting)
+                    .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
             if isFocused && hovering {
@@ -627,13 +627,13 @@ struct SessionPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Session terminal ended").foregroundStyle(theme.palette.text)
+                Text("No longer open here").foregroundStyle(theme.palette.text)
                 ScrollView {
                     Text(output).font(.system(.body, design: .monospaced))
                         .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                openButton(item, retrying: true)
+                openButton(item)
             }.padding()
         case .failed(let message):
             ContentUnavailableView {
@@ -643,7 +643,7 @@ struct SessionPaneView: View {
                 Text(message)
                     .foregroundStyle(theme.palette.textSecondary)
             } actions: {
-                openButton(item, retrying: true)
+                openButton(item)
             }
         case .pending where workspace.openingConversation:
             ProgressView("Opening conversation…")
@@ -657,27 +657,29 @@ struct SessionPaneView: View {
                 Text("This Session has no live terminal in this pane yet.")
                     .foregroundStyle(theme.palette.textSecondary)
             } actions: {
-                openButton(item, retrying: false)
+                openButton(item)
             }
         }
     }
 
+    /// The one way back, as `lf resume`: Resume attaches to a running
+    /// conversation or reopens its saved history; Move here takes it over.
     @ViewBuilder
-    private func openButton(_ item: SessionItem, retrying: Bool) -> some View {
+    private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            Button(action.kind == .open && retrying ? "Try again" : action.label) {
+            Button(action.kind == .open ? "Resume" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
                     if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.select(item.id) }
+                    else { await sessions.resume(item.id) }
                 }
             }
             .buttonStyle(.bordered)
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
-            .disabled(action.unavailableReason != nil)
-            .help(action.unavailableReason ?? action.help)
-            .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
+            .disabled(action.kind == .moveHere && action.unavailableReason != nil)
+            .help(action.kind == .open ? "Attach to the running conversation, or reopen its saved history" : action.unavailableReason ?? action.help)
+            .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }
 

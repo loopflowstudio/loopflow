@@ -9,9 +9,8 @@ struct RepoView: View {
 
     @Environment(\.palette) private var palette
     @State private var model: WorkModel
-    /// The repository window retains its panes and native surfaces through
-    /// navigation. Other repository windows never mount these surfaces.
-    @State private var sessionWorkspaces: SessionsWorkspaceRegistry
+    /// The application retains these panes when this window closes.
+    private let sessionWorkspaces: SessionsWorkspaceRegistry
     private let taskLinks: WorkLinkRouter?
     private let repository: String?
     private let openingRequests: Set<UUID>
@@ -19,14 +18,16 @@ struct RepoView: View {
 
     init(
         portfolioService: PortfolioService,
+        sessionWorkspaces: SessionsWorkspaceRegistry,
         initialRepoPath: String? = nil,
         query: RegistryQuery = RegistryQueryLocal.shared,
         taskLinks: WorkLinkRouter? = nil,
         repository: String? = nil,
         openingRequests: Set<UUID> = [],
-        openRepository: ((String, URL?) -> Void)? = nil
+        openRepository: ((String, LinkedWork?) -> Void)? = nil
     ) {
         self.portfolioService = portfolioService
+        self.sessionWorkspaces = sessionWorkspaces
         self.initialRepoPath = initialRepoPath
         self.query = query
         self.taskLinks = taskLinks
@@ -37,7 +38,6 @@ struct RepoView: View {
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         model.openRepository = openRepository
         _model = State(initialValue: model)
-        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localMachineId: model.savedMachineId))
     }
 
     @ToolbarContentBuilder
@@ -90,13 +90,13 @@ struct RepoView: View {
                 WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
-                   readText: { try sessionWorkspaces.readText($0) }) { url in
+                   readText: { try sessionWorkspaces.readText($0) }) { link in
                     if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
                     if let machine = sessionWorkspaces.localMachineId {
                         model.confirmMachine(machine)
                         model.bindWorkspaces(sessionWorkspaces, repository: repository)
                     }
-                    await model.receiveWorkLink(url)
+                    await model.receiveWorkLink(link)
                 }.frame(width: 0, height: 0)
             }
         }

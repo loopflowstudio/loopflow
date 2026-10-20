@@ -41,7 +41,7 @@ able to drive the same system. One planning provider per repository (already tru
 | Created there → appears in `lf task list` | yes | no (acquisition missing) | no (acquisition missing) |
 | Title/description edit → Task updated + steer | yes | yes | yes |
 | Comment → steer | yes | yes | needs comment capability |
-| Status change there → local state | yes | yes | yes (stand-in) |
+| Status change there → local state | yes | same path, untested | yes (stand-in test) |
 
 ## Open
 

@@ -314,8 +314,13 @@ completion nor Flow authority.
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
-Task or planning provider. `lf connect` finds or admits it, prepares
-its first input and owns the foreground launch; `--prepare` stops before launch.
+Task or planning provider. `lf connect` finds or admits it, prepares its
+workspace, reserves the first input and owns the foreground launch; `--prepare`
+stops before launch. Task creation atomically admits its primary conversation;
+explicit Wave admission also admits the repository conversation. A Session may
+have no current capture: metadata admission does not mark a Task Started, prepare
+a prompt or start a provider. The first captured input, or binding a previously
+captured conversation, starts work.
 `resume` is an alias. `connect --fresh` retires the predecessor as primary and
 admits the successor in one transaction, keeping the previous client and history.
 Scope locks serialize admission and fresh requests. Each explicit fresh request

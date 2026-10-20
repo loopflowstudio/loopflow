@@ -1399,7 +1399,7 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
                 work_source: None,
                 bound_at: None,
                 id: "connection-proof".into(),
-                artifact_key: uuid::Uuid::new_v4().simple().to_string(),
+                artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
                 input_published: true,
                 cwd: cwd.to_path_buf(),
                 skill: None,
@@ -1423,7 +1423,7 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::LfSession {
 
 fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::LfSession) {
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'observed',?2,1,?3)",
-        rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key),
+        rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key.as_ref().unwrap()),
         serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();
 }
 
@@ -1584,8 +1584,8 @@ fn session_connect_explain_preserves_missing_and_stale_evidence() {
     let clients = home
         .path()
         .join(".lf/runs")
-        .join(&session.artifact_key[..2])
-        .join(&session.artifact_key)
+        .join(&session.artifact_key.as_deref().unwrap()[..2])
+        .join(session.artifact_key.as_ref().unwrap())
         .join("provider-clients");
     fs::create_dir_all(&clients).unwrap();
     let receipt = clients.join("stale.json");
@@ -1620,8 +1620,8 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         let clients = home
             .path()
             .join(".lf/runs")
-            .join(&session.artifact_key[..2])
-            .join(&session.artifact_key)
+            .join(&session.artifact_key.as_deref().unwrap()[..2])
+            .join(session.artifact_key.as_ref().unwrap())
             .join("provider-clients");
         fs::create_dir_all(&clients).unwrap();
         let receipt = clients.join("client.json");

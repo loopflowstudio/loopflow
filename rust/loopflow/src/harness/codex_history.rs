@@ -412,7 +412,7 @@ mod tests {
                 .claim_session_attachment(&original.id, Some(&first), &b, false)
                 .unwrap();
             let mut next = original.clone();
-            next.artifact_key = crate::session_record::new_artifact_key();
+            next.artifact_key = Some(crate::session_record::new_artifact_key());
             let next = store
                 .replace_session_input(original.captured, next)
                 .unwrap();
@@ -477,7 +477,7 @@ mod tests {
                 .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
             assert_eq!(
                 store
-                    .input_history(&original.artifact_key)
+                    .input_history(original.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,
@@ -485,7 +485,7 @@ mod tests {
             );
             assert_eq!(
                 store
-                    .input_history(&next.artifact_key)
+                    .input_history(next.input_key().unwrap())
                     .unwrap()
                     .usage
                     .total_input_tokens,

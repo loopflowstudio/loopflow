@@ -94,7 +94,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["wave", "show"]) { return data }
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(active)],"next":null}"# }
-            if args.starts(with: ["session", "connect"]) { return try await owner.prepare(args) }
+            if ["connect", "attach"].contains(args.dropFirst().first), args.first == "session" { return try await owner.prepare(args) }
             throw RegistryQueryError("Unexpected Task conversation operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -116,9 +116,6 @@ struct WorkDestinationTests {
         let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
             sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
             ._sessionPlaceholder(try #require(store.sessions.first))
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-retry-\(record.id)")
-        }
         let move = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(record.id)").button()
         #expect(!move.isDisabled())
         #expect(throws: Never.self) {
@@ -381,7 +378,7 @@ struct WorkDestinationTests {
                 ]]), as: UTF8.self)
             }
             if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if command.starts(with: ["session", "connect"]) { return encoded }
+            if ["connect", "attach"].contains(command.dropFirst().first), command.first == "session" { return encoded }
             throw RegistryQueryError("No checkout, provider launch or transfer permitted")
         }
         let (model, workspaceRegistry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -726,7 +723,7 @@ struct WorkDestinationTests {
         let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if args.starts(with: ["session", "connect"]) {
+            if ["connect", "attach"].contains(args.dropFirst().first), args.first == "session" {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
@@ -1904,7 +1901,9 @@ private actor ExternalConversationOwner {
             takeoverPrepared = true
             return prepared
         }
-        guard args.contains("--try") else {
+        // A client outside any lf owner leaves nothing to attach to.
+        if args.contains("--if-free") { return "null" }
+        guard args.contains("--try") || args.contains("ensure") else {
             throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
         }
         return active

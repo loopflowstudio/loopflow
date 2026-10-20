@@ -1115,7 +1115,7 @@ impl CodexHarness {
         })
         .await
         .map_err(|_| anyhow!("Codex app-server did not open its socket within 15s"))??;
-        let socket = crate::harness::codex_connection::connect_provider(socket).await?;
+        let socket = super::codex_connection::connect_upstream(socket).await?;
         let (mut writer, mut reader) = socket.split();
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
 

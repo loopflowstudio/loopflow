@@ -299,7 +299,7 @@ mod tests {
             .replace_session_input(
                 bound.captured,
                 crate::session::LfSession {
-                    artifact_key: new_artifact_key(),
+                    artifact_key: Some(new_artifact_key()),
                     ..bound
                 },
             )
@@ -323,7 +323,7 @@ mod tests {
             .replace_session_input(
                 captured.captured,
                 crate::session::LfSession {
-                    artifact_key: new_artifact_key(),
+                    artifact_key: Some(new_artifact_key()),
                     ..captured
                 },
             )
@@ -341,7 +341,7 @@ mod tests {
             .replace_session_input(
                 next.captured,
                 crate::session::LfSession {
-                    artifact_key: new_artifact_key(),
+                    artifact_key: Some(new_artifact_key()),
                     ..next
                 },
             )

@@ -135,13 +135,11 @@ final class PullRequestStore {
         refreshing = true
         defer { if self.generation == generation { refreshing = false } }
         do {
-            let next = try await Task.detached(priority: .userInitiated) {
-                let text = try LocalWaveAgentLauncher.queryGitHub([
-                    "pr", "view", url.absoluteString, "--json",
-                    "number,url,title,body,state,isDraft,additions,deletions,changedFiles,headRefOid,baseRefOid,headRefName,baseRefName,reviewDecision,reviewRequests,statusCheckRollup"
-                ])
-                return try JSONDecoder().decode(GitHubPullRequest.self, from: Data(text.utf8))
-            }.value
+            let text = try await LocalWaveAgentLauncher.queryGitHub([
+                "pr", "view", url.absoluteString, "--json",
+                "number,url,title,body,state,isDraft,additions,deletions,changedFiles,headRefOid,baseRefOid,headRefName,baseRefName,reviewDecision,reviewRequests,statusCheckRollup"
+            ])
+            let next = try JSONDecoder().decode(GitHubPullRequest.self, from: Data(text.utf8))
             guard !Task.isCancelled, generation == self.generation else { return }
             files = nil
             filesError = nil
@@ -161,25 +159,23 @@ final class PullRequestStore {
         loadingFiles = true
         defer { if fileGeneration == generation { loadingFiles = false } }
         do {
-            let next = try await Task.detached(priority: .userInitiated) {
-                let parts = pr.url.pathComponents.filter { $0 != "/" }
-                guard parts.count >= 4, parts[2] == "pull", let host = pr.url.host else {
-                    throw LocalLfError(errorDescription: "GitHub PR URL is unavailable.")
-                }
-                let text = try LocalWaveAgentLauncher.queryGitHub([
-                    "api", "--hostname", host, "--paginate", "--slurp",
-                    "repos/\(parts[0])/\(parts[1])/pulls/\(pr.number)/files?per_page=100"
-                ])
-                let pages = try JSONDecoder().decode([[GitHubPullRequestFile]].self, from: Data(text.utf8))
-                // Files are read from the PR's moving head; do not label another head's patch with this one.
-                let head = try LocalWaveAgentLauncher.queryGitHub([
-                    "pr", "view", pr.url.absoluteString, "--json", "headRefOid,baseRefOid", "--jq", "[.headRefOid, .baseRefOid] | join(\" \")"
-                ]).trimmingCharacters(in: .whitespacesAndNewlines)
-                guard head == "\(pr.headRefOid) \(pr.baseRefOid)" else {
-                    throw LocalLfError(errorDescription: "The PR changed while loading diffs. Refresh to read the new head.")
-                }
-                return pages.flatMap { $0 }
-            }.value
+            let parts = pr.url.pathComponents.filter { $0 != "/" }
+            guard parts.count >= 4, parts[2] == "pull", let host = pr.url.host else {
+                throw LocalLfError(errorDescription: "GitHub PR URL is unavailable.")
+            }
+            let text = try await LocalWaveAgentLauncher.queryGitHub([
+                "api", "--hostname", host, "--paginate", "--slurp",
+                "repos/\(parts[0])/\(parts[1])/pulls/\(pr.number)/files?per_page=100"
+            ])
+            let pages = try JSONDecoder().decode([[GitHubPullRequestFile]].self, from: Data(text.utf8))
+            // Files are read from the PR's moving head; do not label another head's patch with this one.
+            let head = try await LocalWaveAgentLauncher.queryGitHub([
+                "pr", "view", pr.url.absoluteString, "--json", "headRefOid,baseRefOid", "--jq", "[.headRefOid, .baseRefOid] | join(\" \")"
+            ]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard head == "\(pr.headRefOid) \(pr.baseRefOid)" else {
+                throw LocalLfError(errorDescription: "The PR changed while loading diffs. Refresh to read the new head.")
+            }
+            let next = pages.flatMap { $0 }
             guard !Task.isCancelled, generation == fileGeneration, pullRequest?.url == pr.url, pullRequest?.headRefOid == pr.headRefOid, pullRequest?.baseRefOid == pr.baseRefOid else { return }
             files = next
             filesError = nil

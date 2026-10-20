@@ -514,6 +514,7 @@ fn run_native_session(
         }
         return Err(error);
     }
+    let _native = native_return(&attachment);
     // The process record now owns the launch identity.
     drop(launch_lock);
     let status = if let Some(title) = &mut title {
@@ -711,6 +712,7 @@ fn run_opencode_native(
                 }
                 drop(launch_lock);
                 let mut child = process.spawn()?;
+                let _native = native_return(&owner);
                 let status = (|| -> Result<_> {
                     record_interactive_opened(environment)?;
                     Ok(if let Some(title) = &mut title {
@@ -916,6 +918,29 @@ async fn serve_codex_native(
         );
     }
     Ok(())
+}
+
+/// lf's line for leaving a native client. The client's own exit text names
+/// commands outside lf, or a relay that exits with the client. Leaving ends the
+/// invocation and its AgentProcess on every harness; only detaching keeps it.
+fn native_return(
+    (store, session, _): &crate::harness::agent_process::AttachmentOwner,
+) -> Option<crate::transport::NativeClient> {
+    let name = store
+        .session(session)
+        .ok()
+        .flatten()
+        .map(|session| session.title)
+        .filter(|title| !title.is_empty())
+        .map_or_else(
+            || "the conversation".to_string(),
+            |title| format!("“{title}”"),
+        );
+    let command = format!("lf resume {session}");
+    crate::transport::native_client(
+        format!("Left {name}. Continue with: {command}  (Ctrl+] steps away without stopping)"),
+        format!("Detached from {name}; it keeps running. Return with: {command}"),
+    )
 }
 
 pub(crate) fn short_id(id: &str) -> String {

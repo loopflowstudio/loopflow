@@ -64,10 +64,11 @@ its receipt; a printed link opens nothing.
 If the repository is inaccessible, ownership unresolved, or its Project unavailable,
 leave an explicit unfiled brief in the conversation. Report provider failures
 honestly. After an uncertain write, reconcile with `lf wave status <wave> --json`
-in that destination before retrying. Retain the identical repository, Wave, title
-and report: creation deduplicates exact input, and rewording can create a duplicate.
-Retry only the uncertain filing with unchanged input there; refine afterward with
-`lf task edit`. Report each Task separately. Preserve successful filings when
+in that destination. Every explicit create makes a distinct Task, even with
+identical input; only internal synchronization retries reuse the saved identity.
+Recover the created Task's identity and refine it with `lf task edit`. If the
+write remains uncertain, report it rather than issuing another create.
+Report each Task separately. Preserve successful filings when
 another fails; never recreate the batch or substitute the launch repository.
 
 ## Keep the conversation available

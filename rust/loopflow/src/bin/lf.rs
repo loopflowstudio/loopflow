@@ -2054,6 +2054,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 connection,
                 takeover,
                 try_open,
+                all: false,
             },
     }) = &cli.command
     {

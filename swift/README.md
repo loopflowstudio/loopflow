@@ -65,6 +65,23 @@ drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
 relaunch; ordinary launch still opens the repository, without acquiring a Session.
 
+Closing a repository window keeps its panes, selected Work and file drafts until
+Desktop quits. Reopening a known repository shows retained content immediately,
+even while repository resolution waits or fails. Errors remain visible; new Task
+links wait for resolution before delivery. Unknown repositories need an initial lookup.
+
+Selecting a retained Session reuses its surface. When a surface needs reconnecting,
+Desktop attaches to the recorded execution without starting a provider, replaying
+input or taking control from another viewer. A failed connection stays visible.
+**Resume** does what `lf resume` does: it attaches to a running conversation, or
+otherwise reopens its saved provider history. At launch Desktop runs
+`lf resume --all`, so conversations a reboot or crash interrupted come back
+unasked. Repository, Wave and Task conversation entry share metadata-only
+preparation; only a newly admitted conversation offers its first launch.
+Finite CLI requests time out after 30 seconds. Canceling preparation ends only
+that request; running Sessions continue. If a change times out, refresh to learn
+its result before retrying.
+
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 

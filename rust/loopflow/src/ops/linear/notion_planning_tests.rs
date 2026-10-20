@@ -727,3 +727,68 @@ fn notion_pages_move_to_in_progress_when_work_starts() {
         );
     });
 }
+
+#[test]
+fn notion_pages_show_the_pr() {
+    use crate::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
+    with_notion(|runtime, fixture, repo, state| {
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("Ship it".into()), None).unwrap();
+        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let task = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        let at = time::OffsetDateTime::now_utc();
+        let mut pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: "ship".into(),
+            branch: "jack/ship".into(),
+            base_commit: "0".repeat(40),
+            parent_pr_id: None,
+            publication: Some(PrPublication {
+                requested_at: at,
+                presentation: None,
+                github: Some(GithubPr {
+                    number: 42,
+                    url: "https://github.com/loopflowstudio/fixture/pull/42".into(),
+                    head_sha: None,
+                }),
+                merge: None,
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: at,
+            updated_at: at,
+        };
+        // Publishing twice in one state comments once.
+        for _ in 0..2 {
+            runtime.block_on(crate::ops::task::link_pr_to_planning(
+                &fixture.store,
+                &task,
+                &mut pr,
+            ));
+        }
+        assert_eq!(pr.linear_link_error, None);
+        let page = mirrored(runtime, &state, &id)["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let thread = runtime.block_on(state.lock()).comments[&page].clone();
+        assert_eq!(thread.len(), 1);
+        let spans = &thread[0]["rich_text"];
+        assert_eq!(spans[0]["plain_text"], "GitHub PR #42");
+        assert_eq!(
+            spans[0]["href"],
+            "https://github.com/loopflowstudio/fixture/pull/42"
+        );
+        assert_eq!(spans[1]["plain_text"], " — Open");
+    });
+}

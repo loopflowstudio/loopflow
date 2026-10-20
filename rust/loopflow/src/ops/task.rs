@@ -2644,7 +2644,7 @@ pub(crate) fn attach_task_github_pr(
         }
         // Linear linkage is idempotent. A failed or interrupted writeback cannot
         // erase the GitHub identity already committed above.
-        link_pr_to_linear(&store, &task, &mut pr).await;
+        link_pr_to_planning(&store, &task, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)
@@ -3398,11 +3398,12 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     }
 }
 
-/// Idempotently refresh the PR's Linear linkage (attachment + managed comment) and
-/// record the outcome on the PR. Best-effort: a degraded writeback lands in
+/// Idempotently show the PR on the Task's planning item and record the outcome
+/// on the PR: a Linear attachment and managed comment, or for Asana and Notion one
+/// comment per PR state. Best-effort: a degraded writeback lands in
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
-async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
+pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     let Some(issue_id) = task.linear_id.as_ref() else {
         return;
     };
@@ -3419,6 +3420,25 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
             return;
         }
     };
+    if !super::planning_client::is_linear(&repo.to_string_lossy()) {
+        let posted = async {
+            super::planning_client::PlanningClient::for_items(&repo)
+                .await?
+                .sync_comment("", issue_id.as_str(), &body)
+                .await
+                .map_err(|error| task_error(error.to_string()))
+        }
+        .await;
+        if let Err(error) = &posted {
+            tracing::warn!(
+                issue = task.identifier,
+                pr = github.number,
+                "planning link degraded; the GitHub PR is published and the next publish retries: {error}"
+            );
+        }
+        pr.linear_link_error = posted.err().map(|error| error.to_string());
+        return;
+    }
     let prior = crate::ops::linear::PrLinkageIds {
         attachment_id: pr.linear_attachment_id.clone(),
         comment_id: pr.linear_comment_id.clone(),

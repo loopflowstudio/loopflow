@@ -42,6 +42,7 @@ for a term. The Mac app and CLI read the same owners.
 | Install it and try one piece of work | [Get Started](getting-started.md) |
 | See what got done and what needs you | [Conducting](conducting.md) |
 | Give it a goal to keep working on | [Waves](waves.md) |
+| Share Tasks with coworkers or capture them in a meeting | [Plan and share Tasks](planning.md) |
 | Change how it works | [Authoring](authoring.md) |
 | Drive it from another AI agent | [The Agent API](agent-api.md) |
 | Look up a word | [Glossary](glossary.md) |

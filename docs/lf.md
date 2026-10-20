@@ -349,15 +349,8 @@ planning:
   database: "<database-url-or-id>"   # the repository's Notion database
 ```
 
-Asana mirrors each Task as a task in the repository project; Notion mirrors it as
-a page in the repository database, with the description as the page body. Title,
-description, status and comments write back as rich text, and people's comments
-and edits arrive as Task steers. Notion adds a `Loopflow ID` property to the
-database, uses its Status groups (or a Done checkbox) for state, and mirrors
-`Due` and `Assignee` when the database has them. Its integration needs the
-comment capabilities. Connect with `doppler run -- lf account connect asana` or
-`notion`. Neither mirrors Projects yet; a Task in a Wave Project stays local
-until it does.
+[Plan and share Tasks](planning.md) explains what each choice does for coworkers
+and meetings, and what flows between Loopflow and the tracker.
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use

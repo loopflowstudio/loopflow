@@ -37,9 +37,10 @@ docs/planning.md states the target UX. Done on this branch:
 
 Remaining before the docs are true:
 
-- Latest-sent-wins conflicts (Jack, 2026-10-19): `observe_attempts` sets
-  `conflict_json` and acceptance adopts the provider; flipping it changes Linear's
-  tested policy. docs/planning.md states today's tracker-wins until then.
+- Latest-sent-wins (Jack, 2026-10-19) implemented 2026-10-20 for field receipts:
+  `reconcile_edits` rebases an unsent save onto the observed provider value and keeps
+  it pending; acquisition tolerates a pending membership's team until delivery.
+  Task state deliveries still adopt the tracker (separate machinery).
 - Asana identifier footer: belongs with Task codes (`scratch/task-codes.md`).
 - Unverified: assignment between coworkers.
 
@@ -131,10 +132,6 @@ follow-up relations, project content documents, chapter sweeps.
 - Notion live comments: the Loopflow integration lacks Read/Insert comments
   capabilities (live 403); Jack enables them in Notion's integration settings.
 
-- Live check of the 2026-10-20 scope: Asana `POST /teams/{team}/projects` and
-  project `html_notes` footer; Notion `POST /databases` with an empty `status`
-  config (Notion may refuse creating status properties via API; fall back to a
-  `Done` checkbox if so) and a `dual_property` relation.
 - Project edits after creation (name, summary, status, order) stay local for
   Asana/Notion: field delivery reaches `PlanningClient::linear()` and records
   its error. Coworker-created Asana projects / Notion Projects pages are not
@@ -206,6 +203,14 @@ after 43a1f85ce3.
 
 - 2026-10-20 after merging main: clippy clean; `cargo test --lib -- work_watch status_tests asana_planning notion_planning` 58 passed; touched integration suites 116 passed after the DTO label fix.
 - Landing: manabot and fantasia commit `linear: team:`; the new lf names the move and refuses those configs until they say `planning: {provider: linear, team}`. Deploy lf right after landing.
+
+- 2026-10-20 live (temporary ignored tests, reverted): Notion on a fresh page created
+  Tasks + Projects, mirrored a Project, related a Task, moved it started → completed,
+  and a rerun reused both databases; Asana in the Loopflow team created the repository
+  project and a Wave project, put a task in both, completed and deleted it. Probe data
+  removed.
+
+- 2026-10-20 after latest-sent-wins: `cargo test --lib -- planning asana notion` 217 passed; 3 failed only under load (load avg 64; each passes alone). clippy clean.
 
 ## Wave Projects in Asana and Notion (implemented 2026-10-20)
 

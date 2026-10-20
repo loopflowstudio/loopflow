@@ -618,18 +618,21 @@ mod tests {
                 owner
                     .reconcile_edits(&conn, Some(revision), &mut edits)
                     .unwrap();
-                assert_eq!(
-                    edits,
-                    vec![title(if changed_readback { remote } else { later })]
-                );
-                let conflict: Option<String> = conn
+                // The unsent later save is sent last, so it wins and rebases
+                // onto any provider change it will replace.
+                assert_eq!(edits, vec![title(later)]);
+                let (conflict, base): (Option<String>, String) = conn
                     .query_row(
-                        &format!("SELECT conflict_json FROM {kind}_changes WHERE id=?1"),
+                        &format!("SELECT conflict_json,base_json FROM {kind}_changes WHERE id=?1"),
                         [format!("later-{kind}")],
-                        |row| row.get(0),
+                        |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .unwrap();
-                assert_eq!(conflict.is_some(), changed_readback);
+                assert!(conflict.is_none());
+                assert_eq!(
+                    serde_json::from_str::<Value>(&base).unwrap(),
+                    json!({"revision":revision,"value":title(if changed_readback { remote } else { original })})
+                );
                 let attempted: bool = conn
                     .query_row(
                         &format!("SELECT export_attempted FROM {table} WHERE {key}=?1"),

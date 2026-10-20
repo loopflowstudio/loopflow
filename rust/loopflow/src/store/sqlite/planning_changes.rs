@@ -415,8 +415,9 @@ impl<'a> PlanningChanges<'a> {
         changes.collect()
     }
 
-    /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
-    /// Both values remain in the receipt. Only attempted writes can be acknowledged.
+    /// The change sent last wins. An unsent save still goes out after a provider
+    /// edit, so it rebases onto that edit and stays pending, naming the value it
+    /// will replace. Only attempted writes can be acknowledged.
     pub(crate) fn reconcile_edits(
         self,
         conn: &Connection,
@@ -435,14 +436,16 @@ impl<'a> PlanningChanges<'a> {
             if edit != &change.value
                 && change.base.as_ref().and_then(|b| b.value.as_ref()) != Some(edit)
             {
-                let conflict = PlanningBaseline {
+                let replaced = PlanningBaseline {
                     revision: revision.map(str::to_owned),
                     value: Some(edit.clone()),
                 };
-                conn.execute(&format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"), params![change.id,serde_json::to_string(&conflict)?])?;
-            } else {
-                *edit = change.value;
+                conn.execute(
+                    &format!("UPDATE {owner}_changes SET base_json=?2 WHERE id=?1"),
+                    params![change.id, serde_json::to_string(&replaced)?],
+                )?;
             }
+            *edit = change.value;
         }
         Ok(())
     }

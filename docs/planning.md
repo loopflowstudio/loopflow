@@ -110,9 +110,11 @@ Asana rich text or Notion blocks.
 `lf task create` appear in the tracker; items people add to the tracker during the
 meeting appear in `lf task list`.
 
-**Conflicts:** when the same field changes in both places before they sync, the
-tracker's value wins. Your edit stays in `lf task status` and Desktop beside the
-value that replaced it, ready to apply again.
+**Conflicts:** when a title, description, assignee or due date changes in both
+places before they sync, the change sent last wins. An edit you saved offline goes
+out after a coworker's and replaces it; the tracker's history keeps theirs. Status
+follows the tracker: if a coworker reopens a Task you completed offline, it stays
+open, and your completion stays in `lf task status` and Desktop.
 
 **Offline:** commands save locally and sync on the next command or connected
 Session. `lf task sync <task>` retries one Task; a creation whose reply was lost

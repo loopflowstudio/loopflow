@@ -602,7 +602,9 @@ their receipts and local execution. Project ingestion stores
 editable content so KRs and targets survive the shared reader. Task creation/edits
 and Project creation/edits, rotation and membership moves use common transactions and field
 receipts. Task deletion commits local removal and its pending receipt without changing execution.
-Observed conflicts adopt Linear; unchanged baselines preserve pending saves.
+Field conflicts go to the change sent last: an unsent save rebases onto the observed
+provider value and still delivers, and a provider edit observed after an attempted
+write is adopted.
 Independent foreground loops deliver creation, fields, ordering, state, deletion
 and comments; receipt-backed CLI/Desktop projections expose pending and uncertain
 effects. The unconditional-update race remains a protocol limit.

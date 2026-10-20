@@ -688,8 +688,8 @@ fn notion_renames_and_completion_reach_the_task() {
             })
         };
 
-        // A concurrent rename in Notion is adopted, as with Linear; the unsent
-        // local rename stays visible as the saved value beside it.
+        // The change sent last wins: a rename saved offline goes out after a
+        // concurrent rename in Notion, so it replaces it.
         runtime.block_on(state.lock()).offline = true;
         crate::ops::task::task_edit(
             repo,
@@ -703,24 +703,18 @@ fn notion_renames_and_completion_reach_the_task() {
         .unwrap();
         runtime.block_on(state.lock()).offline = false;
         edit_in_notion("Renamed in Notion", "Not started");
-        assert_eq!(refresh().title, "Renamed in Notion");
-        let sync = fixture.store.sqlite.task_planning_sync(&saved.id).unwrap();
-        let title = sync
-            .changes
-            .iter()
-            .find(|change| change.field == "task_title")
-            .expect("the local rename is retained");
-        assert_eq!(
-            title.state,
-            crate::store::planning_sync::PlanningSyncState::AdoptedLinear
-        );
-        assert_eq!(title.local_value, json!("Renamed locally"));
-
-        // Once settled, Notion's next rename and completion reach the Task.
+        assert_eq!(refresh().title, "Renamed locally");
         runtime.block_on(crate::ops::linear_observe::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
+        assert_eq!(
+            runtime.block_on(state.lock()).pages[&page]["properties"]["Name"]["title"][0]["text"]
+                ["content"],
+            "Renamed locally"
+        );
+
+        // Notion's next rename and completion, sent after it, reach the Task.
         edit_in_notion("Renamed in Notion again", "Done");
         let task = refresh();
         assert_eq!(task.title, "Renamed in Notion again");

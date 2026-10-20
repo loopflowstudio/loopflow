@@ -1176,7 +1176,7 @@ pub enum TaskCommand {
     Pause { issue: String },
     /// Clear a Task pause without starting execution
     Resume { issue: String },
-    /// Synchronize a Task; observed planning conflicts adopt Linear
+    /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
         /// Retry an uncertain issue creation with its saved ID; may recreate a deleted issue

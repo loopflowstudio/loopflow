@@ -1213,14 +1213,17 @@ fn task_acquisition_in(
          OR COALESCE(observed.archived,0)
          OR COALESCE(parent.membership_unresolved,0) OR COALESCE(parent.archived,0)
          OR CASE WHEN i.id IS NULL THEN 0 ELSE
-             (i.project_id IS NOT p.external_project_id AND NOT (?2 AND EXISTS(
+             -- A pending membership move is sent last, so it wins over the
+             -- observed Project and its team until delivery.
+             (NOT (?2 AND EXISTS(
                  SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field='task_project'
                  AND c.acknowledged=0 AND c.conflict_json IS NULL
-                 AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field))))
+                 AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
+              AND (i.project_id IS NOT p.external_project_id
+                   OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
+                          NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
+                      ELSE 0 END))
              OR NOT i.project_id_observed OR i.claimed_project_id IS NOT i.project_id
-             OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
-                    NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
-                ELSE 0 END
              OR CASE WHEN observed.id IS NULL THEN 0
                 WHEN NOT json_valid(observed.team_ids) THEN 1
                 WHEN json_type(observed.team_ids) IS NOT 'array' THEN 1

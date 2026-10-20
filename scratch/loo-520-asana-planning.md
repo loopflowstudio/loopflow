@@ -73,6 +73,14 @@ stays the default remote provider; Git stays the default transport.
   HTTP Basic + JSON token requests; Notion uses its registered port 19223
   (`NOTION_CLIENT_ID`/`NOTION_CLIENT_SECRET` in Doppler).
 
+## Provider edits
+
+Asana and Notion have no team feed, so each Task observation also runs the exact
+read through `planning_delivery::ingest_task`, Linear's acceptance path: renames,
+description edits and completion made in the provider update the Task. A
+concurrent unsent local edit follows the existing policy: the provider's value is
+adopted and the local one stays as an "Adopted planning provider change" receipt.
+
 ## Linear-only (unchanged)
 
 Team claims, Initiatives/Waves, team delta acquisition, reteam, attachments,

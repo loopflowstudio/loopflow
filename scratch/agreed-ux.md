@@ -104,7 +104,7 @@ weighing an 8-slot 4×2 alternative; not chosen, not built; geometry stays data.
 
 Implemented: sidebar Dashboards › Working Tasks (`WorkNavigation.Destination.workingTasks`)
 shows the repository built-in plan's Tasks, in sidebar order, through
-`DashboardSlotLayout.golden` (`DashboardSlotGrid.swift`); 7 per page, ⌥⌘←/→ or the
+the plan's `slots` (Rust `SlotLayout::golden`, `DashboardSlotGrid.swift`); 7 per page, ⌥⌘←/→ or the
 chevrons turn pages with a push transition; empty slots stay as dashed outlines.
 `FocusSizing` grows the focused tile at every split of any slot layout, never writing
 weights. Order: lfdb `task_orders` per repository, written by `lf desktop order task:A

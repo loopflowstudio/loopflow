@@ -66,8 +66,7 @@ supersede the October 17 correction.
 ## Prototype
 
 `scratch/query-view` snapshots LOO-489's Console study plus Dashboard composition
-(source hashes in `source-manifest.json`; contract in `navigation-console-contract.md`).
-History: `a21f32ff7c:scratch/design.md`.
+(hashes: `source-manifest.json`; contract: `navigation-console-contract.md`).
 
 ## Owners and implemented boundary
 
@@ -165,9 +164,9 @@ Validation covers only the edited selection and its references.
 
 Separate Dashboard destinations, pinned discovery, Cmd K entries and name/query/
 pin editing consume Rust plans. Tiles reuse retained Task workspaces, show their
-primary Session or explicit zoom; unstarted Tasks offer Start (agreed-ux.md). Hide/restore, drag
-swap and split resize edit the full saved occurrence tree; resize commits once
-per gesture. Ordinary repository/Wave views retain the Console contract.
+primary Session or explicit zoom; unstarted Tasks offer Start (agreed-ux.md). Hide/restore
+and drag swap edit the full saved occurrence tree; slot edits write `slots_json` (October 20).
+Ordinary repository/Wave views retain the Console contract.
 
 Live `lf view EXPRESSION` opens the existing repository URL route; `--plan` stays
 headless. Native inspection reports the selected full plan, including suppressed
@@ -216,7 +215,7 @@ Review repairs are recorded at `08253c4dda:scratch/design.md`.
 
 Gate owns affected suites and combined headless native/Linux acceptance
 (`desktop-api-coordination.md`). Demo judges rendered continuity: Wave → Dashboard
-→ hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
+→ hide A → add a slot, focus B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
 Check (October 20, order + slots): `cargo test --lib -- store::sqlite::selections work::selection lf::commands::desktop store::migrations` 162 passed, `--test integration dto_fixtures` 44 passed, clippy clean; `swift test --filter 'DashboardWorkspaceTests|WorkSelectionTests|WorkNavigationTests|WorkModelTests|TaskRowMetadataTests|ThemeWorkflowTests'` 98 passed. Native and broader suites stay gate-owned.

@@ -16,6 +16,9 @@ enum WorkDestination: Hashable {
     case flowLog(String)
 }
 
+/// A Task destination already resolved to this Machine's repository locator.
+/// Public addresses are parsed and resolved only by Rust (`lf open --link`);
+/// this value travels between the app's router and repository windows.
 struct TaskLink: Equatable, Sendable {
     let issue: String
     let repo: String?
@@ -23,56 +26,79 @@ struct TaskLink: Equatable, Sendable {
     let diff: Bool
     let machine: String?
     let repository: String?
+    /// Opening its conversation, rather than the Task's details.
+    let conversation: Bool
+    /// The public address Rust resolved, when this link arrived as one.
+    private let workAddress: String?
 
-    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false, machine: String? = nil, repository: String? = nil) {
+    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false, machine: String? = nil,
+         repository: String? = nil, conversation: Bool = false, address: String? = nil) {
         self.issue = issue
         self.repo = repo
         self.session = session
         self.diff = diff
         self.machine = machine
         self.repository = repository
+        self.conversation = conversation
+        workAddress = address
     }
 
-    var url: URL? {
-        var components = URLComponents()
-        components.scheme = "loopflow"
-        components.host = "task"
-        components.path = "/" + issue
-        components.queryItems = [("repo", repo), ("session", session), ("diff", diff ? "true" : nil), ("machine", machine), ("repository", repository)].compactMap { name, value in
-            value.map { URLQueryItem(name: name, value: $0) }
-        }
-        return components.url
+    /// The Work address for opening receipts.
+    var address: String {
+        workAddress ?? Self.address(repository: repo.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "repository", task: issue)
     }
 
-    init(url: URL) throws {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme == "loopflow", components.host == "task",
-              components.user == nil, components.password == nil, components.port == nil,
-              components.fragment == nil else {
-            throw RegistryQueryError("Invalid Task link")
+    /// An external Work link always opens its conversation.
+    init?(_ link: WorkLink) {
+        guard link.target.kind == .task, let issue = link.target.task else { return nil }
+        self.init(issue: issue, repo: link.target.repositoryPath, session: link.target.session, diff: link.target.diff,
+                  machine: link.target.executionMachine,
+                  repository: link.target.executionMachine == nil ? nil : link.target.repositoryId,
+                  conversation: true, address: link.url)
+    }
+
+    func with(repo: String) -> TaskLink {
+        TaskLink(issue: issue, repo: repo, session: session, diff: diff, machine: machine,
+                 repository: repository, conversation: conversation, address: workAddress)
+    }
+
+    private static func address(repository: String, task: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        func encode(_ value: String) -> String {
+            value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
         }
-        let path = components.percentEncodedPath
-        guard path.hasPrefix("/"),
-              let issue = String(path.dropFirst()).removingPercentEncoding,
-              !issue.isEmpty, !issue.contains("/"), !issue.contains("\\"),
-              !issue.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }) else {
-            throw RegistryQueryError("Task links require one issue identifier")
+        return "loopflow://\(encode(repository))/task/\(encode(task))"
+    }
+}
+
+/// A Work destination delivered to its repository window: a Task, or a Wave
+/// whose primary conversation the window selects.
+enum LinkedWork: Equatable, Sendable {
+    case task(TaskLink)
+    /// `address` is the public Work address when the Wave arrived as one.
+    case wave(id: String, address: String?)
+
+    /// An external Work link resolved by Rust; a repository root delivers nothing.
+    init?(_ link: WorkLink) {
+        switch link.target.kind {
+        case .task: guard let task = TaskLink(link) else { return nil }; self = .task(task)
+        case .wave: guard let wave = link.target.wave else { return nil }; self = .wave(id: wave, address: link.url)
+        case .repository: return nil
         }
-        let items = components.queryItems ?? []
-        guard items.allSatisfy({ ["repo", "session", "diff", "machine", "repository"].contains($0.name) && $0.value?.isEmpty == false }),
-              Set(items.map(\.name)).count == items.count,
-              items.first(where: { $0.name == "diff" }).map({ $0.value == "true" }) ?? true else {
-            throw RegistryQueryError("Task links accept one optional repo, session and diff=true query")
+    }
+
+    var address: String? {
+        switch self {
+        case .task(let link): link.address
+        case .wave(_, let address): address
         }
-        guard items.contains(where: { $0.name == "machine" }) == items.contains(where: { $0.name == "repository" }) else {
-            throw RegistryQueryError("Remote Task links require both Machine and repository identity")
+    }
+
+    func with(repo: String) -> LinkedWork {
+        switch self {
+        case .task(let link): .task(link.with(repo: repo))
+        case .wave: self
         }
-        machine = items.first(where: { $0.name == "machine" })?.value
-        repository = items.first(where: { $0.name == "repository" })?.value
-        self.issue = issue
-        repo = items.first(where: { $0.name == "repo" })?.value
-        session = items.first(where: { $0.name == "session" })?.value
-        diff = items.contains { $0.name == "diff" }
     }
 }
 
@@ -83,7 +109,7 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let inspect: (String, UUID) -> DesktopWindowInspection
     let controlPane: (DesktopPaneCommand) throws -> String
     let readText: (DesktopTextRequest) throws -> DesktopTextReading
-    let receive: (URL) async -> Void
+    let receive: (LinkedWork) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
         Receiver(router: router, repository: repository, openingRequests: openingRequests, inspect: inspect, controlPane: controlPane, readText: readText, receive: receive)
@@ -106,12 +132,12 @@ struct WorkLinkReceiver: NSViewRepresentable {
         var inspect: (String, UUID) -> DesktopWindowInspection
         var controlPane: (DesktopPaneCommand) throws -> String
         var readText: (DesktopTextRequest) throws -> DesktopTextReading
-        var receive: (URL) async -> Void
+        var receive: (LinkedWork) async -> Void
 
         init(router: WorkLinkRouter, repository: String, openingRequests: Set<UUID>, inspect: @escaping (String, UUID) -> DesktopWindowInspection,
              controlPane: @escaping (DesktopPaneCommand) throws -> String,
              readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
-             receive: @escaping (URL) async -> Void) {
+             receive: @escaping (LinkedWork) async -> Void) {
             self.router = router
             self.repository = repository
             self.openingRequests = openingRequests

@@ -161,12 +161,22 @@ final class WorkModel {
     func bindWorkspaces(_ registry: SessionsWorkspaceRegistry, repository: String) {
         guard workspaceRegistry !== registry else { return }
         workspaceRegistry = registry
-        workspaceRepository = repository
+        let retainedRepository = registry.keys.first?.repository
+        workspaceRepository = retainedRepository ?? repository
         reconcileSelectionRepository()
         for key in registry.openWork where key.kind == .task {
             retainWorkingTask(key.reference)
         }
-        openSelectedWorkspace()
+        guard retainedRepository != nil, taskOpening?.status != .opening else {
+            openSelectedWorkspace()
+            return
+        }
+        // Retained Work may all be hidden; nil selection must not reopen it.
+        setSelection(registry.selectedWork?.reference)
+        if let key = registry.selectedWork, let workspace = registry.retained(key) {
+            navigation.workspacePresentation = workspace.presentation
+            navigation.selectedSessionId = workspace.presentation.selectedSessionId
+        }
     }
 
     func openSelectedWorkspace(besideFocused: Bool = false) {
@@ -198,9 +208,9 @@ final class WorkModel {
         workspace.presentation.content = .terminals
     }
 
-    @ObservationIgnored var openRepository: ((String, URL?) -> Void)?
+    @ObservationIgnored var openRepository: ((String, LinkedWork?) -> Void)?
 
-    private(set) var taskLinkURL: URL?
+    private(set) var taskLink: TaskLink?
     private(set) var taskLinkReading: WorkReading<RoadmapSnapshot> = .loading
     var showsTaskLink = false
     private(set) var linkedTaskPage: LinkedTaskPage?
@@ -210,22 +220,21 @@ final class WorkModel {
     @ObservationIgnored private var taskLinkExpectedID: String?
     @ObservationIgnored private var taskLinkConversation = false
 
-    func openTaskLink(_ url: URL, expectedTaskID: String? = nil, conversation: Bool = false) async {
+    func openTaskLink(_ link: TaskLink, expectedTaskID: String? = nil) async {
         guard !Task.isCancelled else { return }
         dismissTaskLink()
         let generation = destinationGeneration
-        taskOpening = DesktopOpening(url: url.absoluteString, status: .opening, reason: nil)
+        taskOpening = DesktopOpening(url: link.address, status: .opening, reason: nil)
         defer {
             if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
         }
         // Observation invalidates on every write, changed or not. Reopening
         // what is already open must not redraw the window.
-        if taskLinkURL != url { taskLinkURL = url }
+        if taskLink != link { taskLink = link }
         taskLinkExpectedID = expectedTaskID
-        taskLinkConversation = conversation
+        taskLinkConversation = link.conversation
         if showsTaskLink { showsTaskLink = false }
         do {
-            let link = try TaskLink(url: url)
             // Already observed planning opens directly, like the outline and palette.
             // Unscoped links and identity mismatches still resolve through a read.
             if let loaded = loadedTask(link), expectedTaskID == nil || loaded.task.id == expectedTaskID {
@@ -249,12 +258,12 @@ final class WorkModel {
             if matches.count == 1, link.repo != nil || !unavailable, let match = matches.first {
                 try await openLinkedTask(wave: match.0, task: match.1, link: link, generation: generation)
             } else {
-                taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
+                taskOpening = DesktopOpening(url: link.address, status: .failed, reason: "Task lookup is missing, ambiguous or unavailable; choose a repository-qualified Task.")
                 showsTaskLink = true
             }
         } catch {
             Perf.agentInput("opening_failed", task: expectedTaskID ?? "")
-            failTaskLink(error, url: url, generation: generation)
+            failTaskLink(error, link: link, generation: generation)
         }
     }
 
@@ -268,23 +277,23 @@ final class WorkModel {
     }
 
     func chooseLinkedTask(wave: WaveRoadmap?, task: RoadmapTask) async {
-        guard let taskLinkURL else { return }
+        guard let taskLink else { return }
         dismissTaskLink()
         let generation = destinationGeneration
-        taskOpening = DesktopOpening(url: taskLinkURL.absoluteString, status: .opening, reason: nil)
+        taskOpening = DesktopOpening(url: taskLink.address, status: .opening, reason: nil)
         defer {
             if Task.isCancelled, destinationGeneration == generation { dismissTaskLink() }
         }
         do {
-            try await openLinkedTask(wave: wave, task: task, link: TaskLink(url: taskLinkURL), generation: generation)
+            try await openLinkedTask(wave: wave, task: task, link: taskLink, generation: generation)
         } catch {
-            failTaskLink(error, url: taskLinkURL, generation: generation)
+            failTaskLink(error, link: taskLink, generation: generation)
         }
     }
 
-    private func failTaskLink(_ error: Error, url: URL, generation: Int) {
+    private func failTaskLink(_ error: Error, link: TaskLink, generation: Int) {
         guard !Task.isCancelled, destinationGeneration == generation else { return }
-        taskOpening = DesktopOpening(url: url.absoluteString, status: .failed, reason: error.localizedDescription)
+        taskOpening = DesktopOpening(url: link.address, status: .failed, reason: error.localizedDescription)
         taskLinkReading = .unavailable(lastGood: nil, reason: error.localizedDescription)
         // A sidebar opening already has its retained Task error and retry.
         // Only unresolved external links need the lookup sheet.
@@ -329,7 +338,7 @@ final class WorkModel {
         guard destinationGeneration == generation else { return }
         var task = task
         if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
-            openRepository(task.task.repo, taskLinkURL)
+            openRepository(task.task.repo, taskLink.map(LinkedWork.task))
             return
         }
         var location: TaskLocationObservation?
@@ -600,7 +609,7 @@ final class WorkModel {
 
     private func openTaskDestination(wave: WaveRoadmap?, task: RoadmapTask, preservingOpening: Bool) {
         if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
-            openRepository(task.task.repo, TaskLink(issue: task.task.identifier, repo: task.task.repo).url)
+            openRepository(task.task.repo, .task(TaskLink(issue: task.task.identifier, repo: task.task.repo)))
             return
         }
         setRepoPath(task.task.repo, preservingOpening: preservingOpening)
@@ -623,11 +632,11 @@ final class WorkModel {
 
     func openTaskConversation(_ id: String) async {
         guard let found = task(id: id) else {
-            guard let repoPath, let url = TaskLink(issue: id, repo: repoPath).url else { return }
-            await openTaskLink(url, conversation: true)
+            guard let repoPath else { return }
+            await openTaskLink(TaskLink(issue: id, repo: repoPath, conversation: true))
             return
         }
-        guard let url = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo).url else { return }
+        let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
         let key = workspaceKey(for: .task(id: id), repository: workspaceRepository ?? "")
         let retainedConversation = workspaceRegistry?.retained(key)?.multiplexer.layout.allPanes.contains {
             $0.sessionId != nil
@@ -638,29 +647,24 @@ final class WorkModel {
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
         if !retainedConversation {
-            await openTaskLink(url, expectedTaskID: found.task.id, conversation: true)
+            await openTaskLink(link, expectedTaskID: found.task.id)
         }
     }
 
     func openPaletteWave(_ id: String) {
         guard let wave = wave(id: id)?.wave else { return }
         if let openRepository, repoPath?.normalizedFilePath != wave.repo.normalizedFilePath {
-            var link = URLComponents()
-            link.scheme = "loopflow"; link.host = "open"
-            link.queryItems = [URLQueryItem(name: "repo", value: wave.repo), URLQueryItem(name: "wave", value: id)]
-            openRepository(wave.repo, link.url)
+            openRepository(wave.repo, .wave(id: id, address: nil))
         } else { select(.wave(id: id)) }
     }
 
-    func receiveWorkLink(_ url: URL) async {
-        if url.host == "open" {
-            let wave = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "wave" }?.value
-            if let wave {
-                if self.wave(id: wave) == nil { await refresh() }
-                select(.wave(id: wave))
-            }
-            else { select(nil) }
-        } else { await openTaskLink(url) }
+    func receiveWorkLink(_ link: LinkedWork) async {
+        switch link {
+        case .task(let link): await openTaskLink(link)
+        case .wave(let id, _):
+            if wave(id: id) == nil { await refresh() }
+            select(.wave(id: id))
+        }
     }
 
     func openPaletteTask(_ id: String) async {
@@ -676,13 +680,12 @@ final class WorkModel {
         }
         guard let recent = navigation.recentDestinations.first(where: { $0.id == .task(id) }),
               let repoPath else { return }
-        guard let url = TaskLink(issue: recent.key, repo: repoPath).url else { return }
-        await openTaskLink(url, expectedTaskID: id)
+        await openTaskLink(TaskLink(issue: recent.key, repo: repoPath), expectedTaskID: id)
     }
 
     func retryTaskLink() async {
-        guard let taskLinkURL else { return }
-        await openTaskLink(taskLinkURL, expectedTaskID: taskLinkExpectedID, conversation: taskLinkConversation)
+        guard let taskLink else { return }
+        await openTaskLink(taskLink, expectedTaskID: taskLinkExpectedID)
     }
 
     func inspectDesktop(repository: String, window: UUID, workspaces: SessionsWorkspaceRegistry) -> DesktopWindowInspection {
@@ -1069,10 +1072,7 @@ final class WorkModel {
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
-        if usesFixedFixture {
-            if AppTestMode.current() == .sessionFixtures { await refreshSessions() }
-            return
-        }
+        if usesFixedFixture { return }
         guard query.streamsWork else {
             // This transport has no reader: one reading, shown until asked again.
             await refresh()
@@ -1586,7 +1586,7 @@ final class WorkModel {
             case .working: return true
             case .available:
                 guard sessions.errorMessage == nil else { return false }
-                return taskSessions(id).contains { $0.attention == .available && $0.state != .closed }
+                return taskSessions(id).contains { $0.availability == .available && $0.state != .closed }
             case .running:
                 if case .reported(_, let report) = SessionProgramStatus(sessions: taskSessions(id), unavailable: sessions.errorMessage) { return report.state == .working }
                 return false
@@ -1737,7 +1737,7 @@ final class WorkModel {
     }
 
     func refreshSessions() async {
-        guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
+        guard !usesFixedFixture else { return }
         if workObservation != nil {
             syncWorkScope()
             return
@@ -2144,7 +2144,7 @@ final class WorkModel {
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
-        if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
+        if fixed { self.sessions = .available([]) }
         self.waves = waves
         self.workActivity = workActivity
         self.repos = repos

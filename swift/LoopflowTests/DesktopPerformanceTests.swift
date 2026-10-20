@@ -210,9 +210,10 @@ struct DesktopPerformanceTests {
         let fixture = try DesktopNativeSessionFixture.load()
         let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
         let reads = SnapshotReads()
+        let copiedRepo = try #require(env["LF_DESKTOP_TASK_REPO"])
         let query = RegistryQuery { args, cwd in
             let result = await reads.read(binary: fixture.cli, home: try #require(env["LF_DESKTOP_TASK_SNAPSHOT"]),
-                                          args: args, cwd: cwd ?? fixture.repo, fixture: fixture)
+                                          args: args, cwd: cwd ?? copiedRepo, fixture: fixture)
             try await MainActor.run {
                 var receipt: [String: Any] = ["event": "read", "args": args,
                     "outcome": result.isSuccess ? "passed" : "unavailable"]
@@ -228,11 +229,10 @@ struct DesktopPerformanceTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
         let router = WorkLinkRouter()
-        var link = URLComponents()
-        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
-        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo)]
-        router.deliver(try #require(link.url), repository: "fixture-plan")
-        let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
+        let link = TaskLink(issue: fixture.issue, repo: fixture.repo)
+        router.deliver(.task(link), repository: "fixture-plan")
+        let view = RepoView(portfolioService: PortfolioService(), sessionWorkspaces: SessionsWorkspaceRegistry(),
+                            initialRepoPath: fixture.repo, query: query, taskLinks: router, repository: "fixture-plan")
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                        styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -695,16 +695,14 @@ struct DesktopPerformanceTests {
         }
         let files = workspace.files(issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
-        files.selection = "notes.txt"
+        files.selection = "README.md"
         await files.loadFile()
         let document = try #require(files.selectedDocument)
         try #require(document.snapshot != nil)
         document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
         document.editor.setSelectedRange(NSRange(location: 2, length: 3))
-        var link = URLComponents()
-        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
-        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo), URLQueryItem(name: "session", value: fixture.sessionId)]
-        let url = try #require(link.url)
+        let link = TaskLink(issue: fixture.issue, repo: fixture.repo, session: fixture.sessionId)
+        let url = link
         // RepoView owns keepWorkCurrent. A full soak requires its observation stream; starting another reader
         // here would invalidate the very idle measurement this test collects.
         try journal.write(["event": "memory_phase", "phase": "owned_setup_end"])
@@ -729,7 +727,7 @@ struct DesktopPerformanceTests {
             }, ready: {
                 let terminal = registry.surfaces.view(for: identity)
                 let hasHistory = terminal.surface.map {
-                    terminalText($0).contains("native:\(fixture.nativeId):retained-history")
+                    terminalText($0).contains("resumed \(fixture.nativeId)")
                 } ?? false
                 let focused = window.firstResponder === terminal
                 let selected = model.selection?.id == fixture.taskId
@@ -745,12 +743,12 @@ struct DesktopPerformanceTests {
                 return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
-                 "provider": "owned Codex stub", "history_preserved": (try? fixture.historyIsPreserved()) == true]
+                 "provider": "lf-world stub claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
             }, input: {
                 let surface = try #require(registry.surfaces.view(for: identity).surface)
                 let message = "reopened-\(round)"
                 try send(window, message + "\n")
-                try await wait(window) { terminalText(surface).contains("reply:\(fixture.nativeId):\(message)") }
+                try await wait(window) { terminalText(surface).contains("reply \(fixture.nativeId): \(message)") }
             })
             try journal.write(["event": "memory_phase", "phase": "native_input_complete", "round": round])
             // Navigate away and back while the client is still live, retaining
@@ -1334,12 +1332,7 @@ extension DesktopPerformanceTests {
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
 #endif
-        var components = URLComponents()
-        components.scheme = "loopflow"
-        components.host = "task"
-        components.path = "/" + issue
-        components.queryItems = [URLQueryItem(name: "repo", value: repo)]
-        let url = try #require(components.url)
+        let url = TaskLink(issue: issue, repo: repo)
         for attempt in 0..<samples {
             let reads = SnapshotReads()
             let query = RegistryQuery { args, cwd in
@@ -1355,7 +1348,8 @@ extension DesktopPerformanceTests {
                 return try result.get()
             }
             let router = WorkLinkRouter()
-            let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: repo,
+            let view = RepoView(portfolioService: PortfolioService(), sessionWorkspaces: SessionsWorkspaceRegistry(),
+                                  initialRepoPath: repo,
                                   query: query, taskLinks: router, repository: "fixture-plan")
             let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -1375,12 +1369,12 @@ extension DesktopPerformanceTests {
                 var lastState = ""
                 do {
                     if scenario == "cold_workspace" {
-                        router.deliver(url, repository: "fixture-plan")
+                        router.deliver(.task(url), repository: "fixture-plan")
                         window.contentView = NSHostingView(rootView: view)
                         window.makeKeyAndOrderFront(nil)
                     } else {
                         if scenario == "warm_task" { model?.select(nil) }
-                        router.deliver(url, repository: "fixture-plan")
+                        router.deliver(.task(url), repository: "fixture-plan")
                     }
                     // The receiver schedules its async resolution on the main actor.
                     // Do not accept the previous destination before that request starts.
@@ -1471,7 +1465,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session connect" || verb == "machine id"
+            if let fixture, verb == "session connect" || verb == "session attach" || verb == "machine id"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }

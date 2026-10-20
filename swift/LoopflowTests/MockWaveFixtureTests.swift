@@ -4,10 +4,9 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The `mock-waves` UI-test fixture must render the same populated surface the
-/// registry would — the stable list's lens states and the selected Wave's full
-/// detail hierarchy — so the offline screenshot and AttributeGraph cycle capture
-/// exercise real data, not an empty shell.
+/// The `mock-waves` UI-test fixture renders the states no data can produce —
+/// loading and error — over the stable list. Populated states render from an
+/// `lf-world` world in `live` mode.
 @Suite("Mock wave fixture")
 struct MockWaveFixtureTests {
     @Test("live UI-test mode keeps production registry reads")
@@ -32,54 +31,9 @@ struct MockWaveFixtureTests {
         #expect(byName["cadenza"]?.parentWaveId == "wave-1")  // future-ancestry indentation
     }
 
-    @Test("the selected Wave decodes into the populated detail hierarchy with verbatim lenses")
-    func selectedDetailHierarchy() throws {
-        let detail = try JSONDecoder().decode(
-            WaveDetailSnapshot.self, from: Data(MockWaveFixture.detailJSON.utf8)
-        )
-        let workMap = detail.workMap
-
-        #expect(workMap.objective == "Make releases boring.")
-        let chapter = try #require(workMap.currentProject)
-        let tasks = workMap.tasks.items
-        #expect(chapter.krs.count == 1)
-        #expect(tasks.filter { !$0.task.completed }.count == 2)
-        let metric = try #require(detail.metricPortfolio.metrics.first)
-        #expect(metric.name == "Task loops earn trust")
-        #expect(metric.evidence == .met(
-            value: 1,
-            sourceWindowStart: "2026-08-13T18:00:00Z",
-            sourceWindowEnd: "2026-08-20T18:00:00Z"
-        ))
-        #expect(detail.metricPortfolio.metrics.count == 3)
-        #expect(detail.metricPortfolio.metrics.count { $0.stage == .graduated } == 2)
-        #expect(detail.metricPortfolio.metrics.count { $0.stage == .installed } == 1)
-        #expect(detail.metricPortfolio.contractIssues.count == 1)
-
-        // Project row lens folds Task conditions: waiting outranks clear.
-        #expect(WaveLens.forTasks(tasks: tasks).color == .blue)
-
-        // Task rows: the shared condition verbatim.
-        let byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.task.identifier, $0) })
-        #expect(WaveLens.forTask(try #require(byId["INF-123"]).condition).color == .blue)
-        #expect(WaveLens.forTask(try #require(byId["INF-124"]).condition).color == .black)
-    }
-
-    // The Proof requires the screenshot fixture to cover empty, loading, error,
-    // selected, and future-child indentation. Empty is the `empty-workspaces`
-    // mode; selected and indentation are proven above. These cover the detail
-    // states the mock surface drives with `LOOPFLOW_UI_TEST_DETAIL_STATE`.
-
-    @Test("the selected detail state renders the populated hierarchy, no longer awaiting")
-    func selectedDetailState() {
-        let outcome = MockWaveFixture.detailReading(
-            waveName: MockWaveFixture.detailWaveName,
-            state: .selected
-        )
-        #expect(outcome.reading.snapshot != nil)
-        #expect(outcome.reading.errorMessage == nil)
-        #expect(outcome.awaitingFirstRead == false)
-    }
+    // Empty is the `empty-workspaces` mode and indentation is proven above.
+    // These cover the detail states the mock surface drives with
+    // `LOOPFLOW_UI_TEST_DETAIL_STATE`.
 
     @Test("the loading detail state withholds the snapshot and keeps the loading affordance")
     func loadingDetailState() {
@@ -105,11 +59,11 @@ struct MockWaveFixtureTests {
         #expect(outcome.awaitingFirstRead == false)
     }
 
-    @Test("detailState reads LOOPFLOW_UI_TEST_DETAIL_STATE, defaulting to selected")
+    @Test("detailState reads LOOPFLOW_UI_TEST_DETAIL_STATE")
     func detailStateParsing() {
         #expect(MockWaveFixture.DetailState(rawValue: "loading") == .loading)
         #expect(MockWaveFixture.DetailState(rawValue: "error") == .error)
-        #expect(MockWaveFixture.DetailState(rawValue: "selected") == .selected)
+        #expect(MockWaveFixture.DetailState(rawValue: "selected") == nil)
         #expect(MockWaveFixture.DetailState(rawValue: "nonsense") == nil)
     }
 }

@@ -27,7 +27,7 @@ pub(super) enum Signal {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct Attention {
+pub(super) struct SessionActivityTracker {
     open_tools: BTreeSet<String>,
     pending_input: BTreeSet<String>,
     yielded: bool,
@@ -36,7 +36,7 @@ pub(super) struct Attention {
     pub(super) preview: Option<crate::session::SessionPreview>,
 }
 
-impl Attention {
+impl SessionActivityTracker {
     /// Apply one stream message's signals; false when it carried none.
     pub(super) fn apply(&mut self, signals: Vec<Signal>) -> bool {
         let any = !signals.is_empty();
@@ -93,7 +93,7 @@ impl Attention {
         Some(reading)
     }
 
-    /// Attention is display evidence: a failed save never fails the turn.
+    /// Activity is display evidence: a failed save never fails the turn.
     pub(super) fn record(
         &mut self,
         store: &SqliteStore,
@@ -265,7 +265,7 @@ pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
 mod tests {
     use serde_json::{json, Value};
 
-    use super::{claude, codex, opencode, Attention, Signal};
+    use super::{claude, codex, opencode, SessionActivityTracker, Signal};
     use crate::id::LfProcessId;
     use crate::process::SessionAttachment;
     use crate::store::sqlite::SqliteStore;
@@ -276,7 +276,7 @@ mod tests {
         _home: tempfile::TempDir,
         store: SqliteStore,
         attachment: SessionAttachment,
-        attention: Attention,
+        activity: SessionActivityTracker,
         now: i64,
     }
 
@@ -300,7 +300,7 @@ mod tests {
     impl Driven {
         fn new(interactive: bool) -> Self {
             let home = tempfile::tempdir().unwrap();
-            let path = home.path().join("attention.db");
+            let path = home.path().join("activity.db");
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             store.test_session("conversation", "run_00000000000000000000000000000001");
             let conn = rusqlite::Connection::open(&path).unwrap();
@@ -329,14 +329,14 @@ mod tests {
                 _home: home,
                 store,
                 attachment,
-                attention: Attention::default(),
+                activity: SessionActivityTracker::default(),
                 now: START,
             }
         }
 
         fn hear(&mut self, signals: Vec<Signal>) {
             self.now += 1;
-            self.attention.record_at(
+            self.activity.record_at(
                 &self.store,
                 "conversation",
                 &self.attachment,
@@ -442,7 +442,7 @@ mod tests {
         ));
         assert!(session.available_after(0), "an approval is a question");
         session
-            .attention
+            .activity
             .apply(codex(&json!({"id":7,"result":{"decision":"accept"}}), true));
         session.hear(codex(
             &json!({"method":"item/commandExecution/outputDelta","params":{}}),
@@ -540,14 +540,14 @@ mod tests {
 
     #[test]
     fn an_unchanged_reading_is_saved_only_as_it_ages() {
-        let mut attention = Attention::default();
-        assert!(attention.apply(vec![Signal::Working]));
-        assert!(attention.reading(10).is_some());
-        attention.apply(vec![Signal::Working]);
-        assert!(attention.reading(12).is_none());
-        attention.apply(vec![Signal::ToolStarted("call".into())]);
-        assert_eq!(attention.reading(12).unwrap().open_tools, 1);
-        attention.apply(vec![Signal::Working]);
-        assert_eq!(attention.reading(17).unwrap().observed_at, 17);
+        let mut activity = SessionActivityTracker::default();
+        assert!(activity.apply(vec![Signal::Working]));
+        assert!(activity.reading(10).is_some());
+        activity.apply(vec![Signal::Working]);
+        assert!(activity.reading(12).is_none());
+        activity.apply(vec![Signal::ToolStarted("call".into())]);
+        assert_eq!(activity.reading(12).unwrap().open_tools, 1);
+        activity.apply(vec![Signal::Working]);
+        assert_eq!(activity.reading(17).unwrap().observed_at, 17);
     }
 }

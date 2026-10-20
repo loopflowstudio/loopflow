@@ -477,7 +477,7 @@ fn prepare_conversation(
             loopflow::session::LfSession {
                 captured: None,
                 id: format!("session_{input}").into(),
-                artifact_key: input.clone(),
+                artifact_key: Some(input.clone()),
                 caller_artifact_key: Some(CALLER.into()),
                 input_published: false,
                 cwd: cwd.into(),
@@ -591,7 +591,10 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
         assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
         assert!(dir.join("prepared").exists());
-        assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+        assert_eq!(
+            store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
+            Some(&input)
+        );
     }
 }
 
@@ -715,7 +718,7 @@ for line in sys.stdin:
     assert_eq!(after.skill, before.skill);
     assert_eq!(after.task_id, before.task_id);
     assert_eq!(after.wave_id, before.wave_id);
-    assert_ne!(after.artifact_key, input);
+    assert_ne!(after.artifact_key.as_ref(), Some(&input));
     assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
     assert!(store
         .session_history(&id, 0, 0)
@@ -725,8 +728,8 @@ for line in sys.stdin:
         &std::fs::read(
             home.path()
                 .join("runs")
-                .join(&after.artifact_key[..2])
-                .join(&after.artifact_key)
+                .join(&after.artifact_key.as_deref().unwrap()[..2])
+                .join(after.artifact_key.as_ref().unwrap())
                 .join("manifest.json"),
         )
         .unwrap(),
@@ -795,8 +798,8 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["attention"], "available");
-    assert!(listed(home.path(), &working)["attention"].is_null());
+    assert_eq!(available[0]["availability"], "available");
+    assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }
 
@@ -1088,7 +1091,7 @@ exit 2
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();
-                let input = store.session(&id).unwrap().unwrap().artifact_key;
+                let input = store.session(&id).unwrap().unwrap().artifact_key.unwrap();
                 record_native(home.path(), &id, &input, &native);
             }
             fs::write(home.path().join("release"), "done").unwrap();
@@ -1422,7 +1425,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
             "{error}"
         );
         let retained = store.session(&id).unwrap().unwrap();
-        assert_eq!(retained.artifact_key, input);
+        assert_eq!(retained.artifact_key.as_ref(), Some(&input));
         assert_eq!(retained.provider, before.provider);
         assert_eq!(retained.title, before.title);
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -1449,7 +1452,10 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
         "{}",
         String::from_utf8_lossy(&prepared.stderr)
     );
-    assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    assert_eq!(
+        store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
+        Some(&input)
+    );
     install_codex_fixture(home.path(), None);
     let recovered = connect(false);
     assert!(
@@ -1772,7 +1778,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     input.write_all(&blocked.as_bytes()[..17]).unwrap();
     input.write_all(&blocked.as_bytes()[17..]).unwrap();
     let item = wait_for("blocked");
-    assert_eq!(item["attention"], "available");
+    assert_eq!(item["availability"], "available");
     assert_eq!(
         item["program_status"]["records"][0]["msg"],
         "Use **literal** text?"
@@ -1794,7 +1800,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert_eq!(page["entries"][0]["id"], id);
     for state in ["working", "done"] {
         writeln!(input, "{}", records(state)).unwrap();
-        assert!(wait_for(state)["attention"].is_null());
+        assert!(wait_for(state)["availability"].is_null());
     }
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
     assert!(store
@@ -1824,7 +1830,7 @@ fn program_status_cli_observes_available_without_completing_work() {
         .unwrap();
     assert_eq!(ended["state"], "closed");
     assert!(ended["program_status"].is_null());
-    assert!(ended["attention"].is_null());
+    assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
     store
         .claim_session_attachment(&id, attachment.as_ref(), &lf_process_id, true)
@@ -1850,7 +1856,7 @@ fn program_status_cli_observes_available_without_completing_work() {
         .find(|item| item["id"] == id)
         .unwrap();
     assert!(item["program_status"].is_null());
-    assert!(item["attention"].is_null());
+    assert!(item["availability"].is_null());
 }
 
 #[test]

@@ -204,7 +204,7 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
 uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
 lf telemetry-daily                                     # maintainer report
 ```
 
@@ -1243,9 +1243,12 @@ Add `--startup-failure before-thread`, `after-thread`, or `first-turn` to drop
 only the disposable renderer's connection at native startup protocol boundaries.
 Each case checks the retained Session diagnostic's operation, direction and
 AgentProcess, reads it through `lf history show SESSION --events`, and rejects
-raw diagnostic output in the PTY. These probes use real Codex with a local model;
-they stop after diagnostic readback and clean up the disposable providers. They
-do not prove native startup recovery or establish the original reset's cause.
+raw diagnostic output in the PTY. These probes use real Codex with a local model.
+`after-thread` withholds the frame carrying the new thread's ID: Codex then shows
+"Reconnect failed" and ignores `/exit`, so the probe leaves with Ctrl+C and checks
+that the printed `lf resume` continues the same thread without repeating its input.
+The other phases stop after diagnostic readback. Leaving stops Codex, so a first
+turn already accepted in that window ends interrupted and may lose its input.
 
 ### Released capture-history preservation
 

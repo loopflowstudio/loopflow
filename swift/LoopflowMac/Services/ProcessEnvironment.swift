@@ -58,6 +58,8 @@ enum GUIProcessEnvironment {
                 || launcherTerminalPrefixes.contains(where: key.hasPrefix)) {
             copy.removeValue(forKey: key)
         }
+        // `lf open` from any child opens beside it here, not in the launcher's host.
+        copy["LF_DESKTOP"] = "1"
         return copy
     }
 
@@ -69,5 +71,5 @@ enum GUIProcessEnvironment {
     private static let providerAccountKeys: Set<String> = [
         "CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
     ]
-    private static let launcherTerminalPrefixes = ["WARP_", "CMUX_", "CLAUDE_CODE_", "CODEX_"]
+    private static let launcherTerminalPrefixes = ["WARP_", "CMUX_", "HERDR_", "CLAUDE_CODE_", "CODEX_"]
 }

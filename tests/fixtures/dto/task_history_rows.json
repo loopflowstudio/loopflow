@@ -501,7 +501,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
@@ -565,7 +565,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
@@ -629,7 +629,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
@@ -693,7 +693,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
@@ -949,7 +949,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,

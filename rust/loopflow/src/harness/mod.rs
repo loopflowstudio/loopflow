@@ -1,5 +1,5 @@
+mod activity_tracker;
 pub mod agent_process;
-mod attention;
 pub mod claude;
 mod claude_history;
 mod claude_mapping;

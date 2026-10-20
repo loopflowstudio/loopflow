@@ -76,8 +76,8 @@ impl SessionEventKind {
 pub struct LfSession {
     pub captured: Option<i64>,
     pub id: LfSessionId,
-    /// Immutable captured input, not a resumable execution identity.
-    pub artifact_key: String,
+    /// Immutable captured input; absent until the first explicit input reservation.
+    pub artifact_key: Option<String>,
     /// Causal input reference; grants neither attachment nor Flow authority.
     pub caller_artifact_key: Option<String>,
     pub input_published: bool,
@@ -104,6 +104,14 @@ pub struct LfSession {
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
+}
+
+impl LfSession {
+    pub(crate) fn input_key(&self) -> anyhow::Result<&String> {
+        self.artifact_key
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Session {} has no captured input", self.id))
+    }
 }
 
 /// A Session assigned to a Task after it began.
@@ -233,7 +241,7 @@ pub(crate) struct SessionSummary {
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,
-    pub artifact_key: String,
+    pub artifact_key: Option<String>,
     pub title: String,
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,
@@ -308,4 +316,41 @@ pub(crate) struct HistoryCapture {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub interactive: bool,
+}
+
+pub(crate) fn conversation(
+    cwd: &std::path::Path,
+    agent: Option<&str>,
+    skill: &str,
+    title: String,
+) -> anyhow::Result<LfSession> {
+    let skill = crate::flow::load_skill(skill, cwd)?.name;
+    let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
+    let (provider, model) = crate::config::parse_agent(&agent);
+    Ok(LfSession {
+        captured: None,
+        id: uuid::Uuid::new_v4().simple().to_string().into(),
+        artifact_key: None,
+        caller_artifact_key: None,
+        input_published: false,
+        cwd: cwd.to_path_buf(),
+        skill: Some(skill),
+        provider: Some(provider),
+        model,
+        node: None,
+        iterations: None,
+        task_id: None,
+        wave_id: None,
+        flow_lf_process_id: None,
+        work_source: None,
+        bound_at: None,
+        interactive: true,
+        repo: None,
+        title,
+        title_source: TitleSource::Generated,
+        request: None,
+        ready_summary: None,
+        completed_at: None,
+        created_at: crate::store::rows::now_unix(),
+    })
 }

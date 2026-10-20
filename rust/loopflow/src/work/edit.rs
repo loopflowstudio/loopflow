@@ -5,7 +5,6 @@ use serde_json::Value;
 
 /// An edit carries its target; its value determines the scope and conflict field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct WorkEdit {
     pub target: String,
     pub change: WorkValue,
@@ -42,14 +41,12 @@ impl WorkEdit {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Disposition {
     pub planning_state: Option<String>,
     pub planning_completed: i64,
     pub planning_completed_at: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct CommentContent {
     pub body: String,
     pub author: crate::work::task::comment::TaskCommentAuthor,
@@ -57,7 +54,6 @@ pub struct CommentContent {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Delegation {
     pub machine_id: crate::durable::MachineId,
     pub placed_at: i64,
@@ -67,7 +63,7 @@ pub struct Delegation {
 macro_rules! work_values {
     ($(($variant:ident, $field:literal, $value:ty)),* $(,)?) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-        #[serde(tag = "field", content = "value", deny_unknown_fields)]
+        #[serde(tag = "field", content = "value")]
         pub enum WorkValue {
             $(#[serde(rename = $field)] $variant($value),)*
         }

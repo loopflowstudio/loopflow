@@ -56,7 +56,8 @@ public enum GhosttyThemeMapping {
             workSelectedFill: selectedFill, workSelectedText: selectedText,
             workSelectedSecondaryText: selectedText.mixed(with: selectedFill, amount: 0.16).readable(on: [selectedFill], dark: selectedDark),
             shadow: terminal.indexed[0], selectionFill: ThemePaint(rgb: surfaces[1], opacity: 0.72),
-            workingTone: tone(terminal.indexed[4]), waitingTone: tone(terminal.indexed[3]),
+            workingTone: tone(terminal.indexed[4]), warningTone: tone(terminal.indexed[3]),
+            availableTone: tone(terminal.indexed[5]),
             failureTone: tone(terminal.indexed[1]), successTone: tone(terminal.indexed[2]), stoppedTone: tone(secondary)
         )
     }

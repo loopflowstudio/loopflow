@@ -13,7 +13,7 @@ pub(super) struct History {
     pub owner: super::agent_process::AttachmentOwner,
     pub requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
     pub pending: VecDeque<(AgentSessionId, String)>,
-    pub attention: super::attention::Attention,
+    pub activity: super::activity_tracker::SessionActivityTracker,
 }
 
 impl History {
@@ -22,8 +22,12 @@ impl History {
             return Ok(());
         };
         let (store, session, attachment) = &self.owner;
-        self.attention
-            .record(store, session, attachment, super::attention::claude(&value));
+        self.activity.record(
+            store,
+            session,
+            attachment,
+            super::activity_tracker::claude(&value),
+        );
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
@@ -126,7 +130,7 @@ mod tests {
                 [("request".to_string(), origin)].into(),
             )),
             pending: Default::default(),
-            attention: Default::default(),
+            activity: Default::default(),
         };
         history
             .record(&json!({"type":"user","uuid":"old","session_id":"thread"}).to_string())
@@ -142,7 +146,7 @@ mod tests {
             )));
         let original = store.session("conversation").unwrap().unwrap();
         let mut next = original.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         let next = store
             .replace_session_input(original.captured, next)
             .unwrap();
@@ -169,7 +173,7 @@ mod tests {
         assert_eq!(events[1].kind, SessionEventKind::Output);
         assert_eq!(events[1].payload["value"], value);
         assert!(store
-            .input_final_answer(&next.artifact_key)
+            .input_final_answer(next.input_key().unwrap())
             .unwrap()
             .is_none());
         let answer = store

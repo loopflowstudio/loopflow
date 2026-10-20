@@ -61,6 +61,7 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
+lf-world                   builds fake worlds for demos and tests through production writers
 lf __context-block         provider turn-boundary hook: context at start/compaction, steers at tool and prompt boundaries, Linear acquisition at turn end
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```

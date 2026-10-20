@@ -76,7 +76,7 @@ impl SqliteStore {
         }
         let session = match super::sessions::session_in(&tx, &session.id)? {
             Some(mut existing) if retry => {
-                existing.artifact_key = crate::session_record::new_artifact_key();
+                existing.artifact_key = Some(crate::session_record::new_artifact_key());
                 existing.input_published = false;
                 super::sessions::replace_input_in(&tx, &mut existing, Some(process))?;
                 existing

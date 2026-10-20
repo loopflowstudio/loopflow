@@ -184,17 +184,30 @@ struct WorkSelectionTests {
         let remoteTask = try #require(remoteWave.tasks.items.first)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Routing must not launch here") }, repoPath: repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
-        var destinations: [(String, URL?)] = []
+        var destinations: [(String, LinkedWork?)] = []
         model.openRepository = { destinations.append(($0, $1)) }
         #expect(model.searchDestinations(remoteTask.task.identifier).contains { $0.id == .task(remoteTask.id) })
         await model.openPaletteTask(remoteTask.id)
         model.openPaletteWave(remoteWave.wave.id)
         #expect(destinations.count == 2)
         #expect(destinations.allSatisfy { $0.0 == remoteWave.wave.repo })
-        #expect(destinations.first?.1?.host == "task")
-        #expect(destinations.last?.1?.host == "open")
+        #expect(destinations.first?.1 == .task(TaskLink(issue: remoteTask.task.identifier, repo: remoteWave.wave.repo)))
+        #expect(destinations.last?.1 == .wave(id: remoteWave.wave.id, address: nil))
         #expect(model.repoPath == repo)
         #expect(model.selection == nil)
+    }
+
+    @Test("A delivered Wave link selects that Wave in its repository window")
+    func deliveredWaveLinkSelectsWave() async throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
+        let wave = try #require(roadmap.waves.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Selection must not read") }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+        await model.receiveWorkLink(.wave(id: wave.wave.id, address: "loopflow://loopflow/wave/\(wave.wave.id)"))
+        #expect(model.selection == .wave(id: wave.wave.id))
     }
 
     @Test("Navigator selection previews planned Tasks without preparing a conversation")

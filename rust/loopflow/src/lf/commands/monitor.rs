@@ -113,13 +113,16 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         };
         let sessions_next = if sessions.len() > 100 {
             sessions.truncate(100);
-            sessions.last().map(|session| session.id.clone())
+            sessions.last().map(|session| session.id.to_string())
         } else {
             None
         };
         for session in sessions {
             use crate::ops::human_session::SessionState;
-            let live = active.sessions.iter().any(|live| live.id == session.id);
+            let live = active
+                .sessions
+                .iter()
+                .any(|live| live.id == session.id.as_str());
             let (state, reason, next) = match session.state {
                 SessionState::Closed => (
                     "finished",
@@ -144,7 +147,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             };
             items.push(MonitorItem {
                 kind: "session",
-                id: session.id,
+                id: session.id.into(),
                 title: session.title,
                 state,
                 reason,

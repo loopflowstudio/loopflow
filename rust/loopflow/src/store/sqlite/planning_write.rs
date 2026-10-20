@@ -562,8 +562,12 @@ pub(crate) fn write(
     edits: &[WorkEdit],
     origin: WriteOrigin,
 ) -> StoreResult<bool> {
+    let edits = edits
+        .iter()
+        .map(WorkEdit::canonicalized)
+        .collect::<StoreResult<Vec<_>>>()?;
     let mut changed = false;
-    for ((table, id), values) in grouped(edits) {
+    for ((table, id), values) in grouped(&edits) {
         changed |= write_record(conn, table, id, &values, origin)?;
     }
     Ok(changed)
@@ -576,7 +580,11 @@ pub(crate) fn local(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<bool> 
 
 /// Create shared records before attaching any machine-local execution data.
 pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {
-    let records = grouped(edits);
+    let edits = edits
+        .iter()
+        .map(WorkEdit::canonicalized)
+        .collect::<StoreResult<Vec<_>>>()?;
+    let records = grouped(&edits);
     // Foreign-key parents exist before children even when the caller's edits
     // arrive in a different order. Capturing fields still uses the common writer.
     for table in WORK_TABLES {
@@ -586,7 +594,7 @@ pub(crate) fn create(conn: &Connection, repo: &str, edits: &[WorkEdit]) -> Store
             }
         }
     }
-    write(conn, edits, WriteOrigin::Local)?;
+    write(conn, &edits, WriteOrigin::Local)?;
     Ok(())
 }
 

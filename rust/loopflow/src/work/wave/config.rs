@@ -23,6 +23,7 @@ pub(crate) enum WaveConfigError {
 /// The Linear Initiative linked to this Wave.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WaveLinearConfig {
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option", default)]
     pub initiative: Option<String>,
 }
 

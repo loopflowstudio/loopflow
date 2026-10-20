@@ -4314,7 +4314,7 @@ pub(crate) fn append_task_comment(
     let id = uuid::Uuid::new_v4().to_string();
     let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
     let provenance =
-        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id));
+        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id.into()));
     let (body, author) = if let Some(provenance) = provenance.filter(|_| !steer) {
         (
             format!(

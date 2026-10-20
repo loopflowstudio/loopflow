@@ -2104,7 +2104,7 @@ fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> S
     if portfolio.contract_issues.iter().any(|issue| {
         matches!(issue,
             MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
-            if wave_id == &metric.identity.wave_id
+            if wave_id == metric.identity.wave_id()
         )
     }) {
         return "unavailable for this chapter".into();
@@ -3124,7 +3124,7 @@ mod tests {
             let portfolio = MetricPortfolioDto {
                 contract_issues: vec![
                     crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
-                        wave_id: metric.identity.wave_id.clone(),
+                        wave_id: metric.identity.wave_id().to_string(),
                         reason: "current Project is ambiguous".into(),
                     },
                 ],
@@ -3158,10 +3158,7 @@ mod tests {
     fn text_metrics_group_official_signals_and_separate_candidates() {
         let metric =
             |name: &str, stage: MetricStage, evidence: MetricEvidenceDto| MetricReadingDto {
-                identity: MetricIdentity {
-                    wave_id: "product".to_string(),
-                    metric_id: name.to_lowercase().replace(' ', "-"),
-                },
+                identity: MetricIdentity::new("product", name.to_lowercase().replace(' ', "-")),
                 contract_revision: "0".repeat(64),
                 name: name.to_string(),
                 description: "Reviewed metric meaning.".to_string(),

@@ -177,7 +177,7 @@ pub(crate) async fn select_connection(
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str()), fresh).await?,
         PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), fresh).await?,
     };
-    Ok(session.id)
+    Ok(session.id.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,7 +263,7 @@ pub struct SessionRecord {
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
-    pub id: String,
+    pub id: crate::id::LfSessionId,
     pub workspace: Option<SessionWorkspace>,
     pub interactive: bool,
     pub work: Option<WorkRef>,
@@ -310,6 +310,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
+        #[serde(deserialize_with = "crate::id::deserialize_uuid")]
         flow_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
@@ -554,7 +555,7 @@ impl<'a> NativeSession<'a> {
 
 fn session_token(session: &LfSession) -> HumanSessionToken {
     HumanSessionToken::Primary {
-        id: session.id.clone(),
+        id: session.id.to_string(),
     }
 }
 
@@ -1066,7 +1067,7 @@ pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<Se
 /// Resolved identity for confirmation, not a reservation or permission to bind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionBindingPreview {
-    pub session_id: String,
+    pub session_id: crate::id::LfSessionId,
     pub task_id: String,
     pub identifier: String,
     pub title: String,
@@ -1079,7 +1080,7 @@ pub(crate) async fn preview_binding(
 ) -> Result<SessionBindingPreview> {
     let (session, task) = binding_target(store, id, task).await?;
     Ok(SessionBindingPreview {
-        session_id: session.id,
+        session_id: session.id.clone(),
         task_id: task.id.to_string(),
         identifier: task.identifier,
         title: task.title,
@@ -1506,7 +1507,7 @@ mod tests {
                 let mut provider = crate::harness::agent_process::spawn(
                     command,
                     None,
-                    &(store.sqlite.clone(), session.id.clone(), first.clone()),
+                    &(store.sqlite.clone(), session.id.to_string(), first.clone()),
                 )?;
                 std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
                 // Without native identity, connect must leave the running provider alone.
@@ -1906,6 +1907,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn canonical_ids_session_wire_decodes_structured_ids_and_keeps_native_bytes() {
+        let fixture = include_str!("../../../../tests/fixtures/dto/canonical_ids_session.json");
+        let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
+        let wire = serde_json::to_value(&session).unwrap();
+        assert_eq!(
+            wire["open_argv"][3], "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "argv is opaque"
+        );
+        let mut fields = wire.clone();
+        fields.as_object_mut().unwrap().remove("open_argv");
+        let wire = fields.to_string();
+        for structured in [
+            "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "TASK_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC",
+            "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD",
+            "HOME_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+            "FFFFFFFF-FFFF-4FFF-8FFF-FFFFFFFFFFFF",
+        ] {
+            assert!(!wire.contains(structured), "{structured}: {wire}");
+            assert!(wire.contains(&structured.to_ascii_lowercase()), "{wire}");
+        }
+        for opaque in [
+            "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+            "Turn-A",
+            "/Case/Worktree",
+        ] {
+            assert!(wire.contains(opaque), "{opaque}: {wire}");
+        }
+        let again: super::SessionRecord =
+            serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+        assert_eq!(again, session);
+    }
+
     #[tokio::test]
     async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         let directory = tempfile::tempdir().unwrap();
@@ -2008,24 +2044,26 @@ mod tests {
         let mut command = tokio::process::Command::new("/bin/sleep");
         command.arg("60").stdin(std::process::Stdio::null());
         let input = crate::session_record::new_artifact_key();
-        // Virtual time passes the old startup deadline while the owned child
-        // waits. Canceling the future then reaps it through kill_on_drop.
-        let result = tokio::runtime::Builder::new_current_thread()
+        // Advance explicitly: a real child's I/O can prevent the paused clock
+        // from auto-advancing. Dropping the future reaps it through kill_on_drop.
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .start_paused(true)
             .build()
             .unwrap()
             .block_on(async {
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(31),
-                    super::spawn_session_process(&mut command, &input),
-                )
-                .await
+                let launch = super::spawn_session_process(&mut command, &input);
+                tokio::pin!(launch);
+                assert!(futures_util::poll!(&mut launch).is_pending());
+                tokio::time::advance(std::time::Duration::from_secs(31)).await;
+                tokio::time::resume();
+                let result =
+                    tokio::time::timeout(std::time::Duration::from_secs(1), &mut launch).await;
+                assert!(
+                    result.is_err(),
+                    "foreground launch ended before first-use input: {result:?}"
+                );
             });
-        assert!(
-            result.is_err(),
-            "foreground launch ended before first-use input: {result:?}"
-        );
     }
 
     #[test]

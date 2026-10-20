@@ -668,7 +668,7 @@ Count dispatched Task loops that settle without rescue.
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
     let mut observation = MetricObservation::Observed {
-        identity: contract.identity.clone(),
+        identity: contract.identity.clone().into(),
         contract_revision: contract.contract_revision.clone(),
         instrument: contract.instrument.clone(),
         observation_id: String::new(),

@@ -69,7 +69,11 @@ public struct WorkReference: Codable, Sendable, Hashable {
 
     public init(kind: Kind, id: String) {
         self.kind = kind
-        self.id = id
+        self.id = switch kind {
+        case .wave: StructuredIdentity.uuid(id)
+        case .project: StructuredIdentity.prefixed(id, "proj_")
+        case .task: StructuredIdentity.prefixed(id, "task_")
+        }
     }
 
     public static func wave(id: String) -> WorkReference {
@@ -129,5 +133,12 @@ public enum WorkAuthor: Codable, Sendable, Hashable {
             try container.encode(Kind.imported, forKey: .kind)
             try container.encode(id, forKey: .id)
         }
+    }
+}
+
+extension WorkReference {
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(kind: try values.decode(Kind.self, forKey: .kind), id: try values.decode(String.self, forKey: .id))
     }
 }

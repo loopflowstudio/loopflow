@@ -169,6 +169,30 @@ exact local races use OS locks; remote execution uses lf --machine
 An identifier in one area is not authority in another. The detailed boundaries
 below are the architecture's central constraint.
 
+### Identifier spelling
+
+Structured IDs have one stored and emitted spelling; input may use any casing.
+Domain constructors, parsing and serde normalize (`id.rs`), and SQLite triggers
+reject a noncanonical write with `canonical identity required: <table>`.
+
+| Domain | Canonical form |
+| --- | --- |
+| Wave, Trace, LfProcess/Flow, steer, attachment and owned UUIDs; Linear Issue, Project, Initiative, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
+| Task, Project, repository, Machine, PR, landing, tool response, cron receipt | Lowercase prefix and UUID (`task_`, `proj_`, `repo_`, `home_`, `pr_`, `landing_`, `response_`, `cron_`) |
+| LfSession (`LfSessionId`) | Lowercase `session_<hex>` or bare 32 hex; other historical names keep their bytes |
+| Task label | Lowercase local `lf-<hex>`; uppercase Linear `<TEAM>-<n>` |
+
+Opaque values keep their bytes: provider conversation and turn IDs
+(`AgentSessionId`), account IDs, request and cursor tokens, credentials, hashes,
+capture locators, names, slugs, paths and arbitrary payload content. A Task
+selector resolves each domain separately (`TaskSelector`), so an opaque
+external ID is never treated as a ticket; a Session selector tries the
+canonical LfSession first and gives native lookup the original text.
+Metric evidence keeps its originally hashed Wave spelling while its Work
+association is canonical. Files named from an identity keep their retained
+locators (below). The `canonical_structured_ids` migration converts released
+rows and declared JSON paths in one transaction and aborts on any collision.
+
 ## Planning and execution vocabulary
 
 These are the accepted product owners; see [cutover status](#cutover-status)
@@ -338,7 +362,19 @@ lock beside the canonical database path. Attachment validation releases the SQLi
 mutex before provider I/O; history and other Sessions keep using the database.
 Lock acquisition has an OS-clock deadline independent of the provider reactor.
 Lock files retain their inode across process exit; deleting a live lock file
-would let two processes own different locks for the same Session.
+would let two processes own different locks for the same Session. The Session's
+immutable `fence_locator` retains that address independently of its ID spelling.
+Process rows likewise retain receipt basenames and trace journal directory names
+in `receipt_locator` and `journal_trace_locator`; an identity conversion never
+renames those files. New Processes in a retained trace reuse its directory name.
+
+Identity migration tries affected Session fences without blocking and holds them
+through SQLite commit or rollback. Busy dispatch, live affected owners and unknown
+receipt evidence defer the upgrade without changing the ledger. An unreadable,
+malformed, unsupported or mismatched affected receipt remains unknown until it is
+repaired; elapsed time does not grant permission. Old waiting callers re-read
+attachment authority under the same inode, and canonical Session storage guards
+reject recreating an owner with its prior mixed-case spelling.
 
 Connect transfers the attachment while retaining the live conversation. Client
 replacement claims the attachment before stopping the exact old clients; it leaves
@@ -642,6 +678,13 @@ Released migration files remain immutable. Three direct draft groups establish
 the final Process, Project-status and Session schema. Current Work, links, accounts,
 routes and resumable conversations survive the cutover. Migration rehearsal uses
 a disposable copy and leaves the installed Machine unchanged.
+
+Metric observations retain their original payload and content hash, including the
+Wave spelling used by the producer. `MetricObservationIdentity` is that hash input;
+`MetricIdentity` is the canonical Work association used by contracts, validation,
+qualification and readings. The relational Wave key can change case without
+rewriting evidence or changing equal-time selection. Reimporting the original
+payload remains idempotent. Metric names and UUID punctuation retain their bytes.
 
 ### Filesystem state
 

@@ -26,10 +26,11 @@ pub struct TaskOverview {
 /// Conversation identity and completion, without loading its input or transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSession {
-    pub id: String,
+    pub id: crate::id::LfSessionId,
     pub title: String,
     pub interactive: bool,
     /// The Flow whose step opened its current input.
+    #[serde(deserialize_with = "crate::id::deserialize_uuid_option")]
     pub flow_lf_process_id: Option<String>,
     pub completed_at: Option<i64>,
 }

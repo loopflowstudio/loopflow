@@ -818,6 +818,28 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
+    @Test("canonical_ids: structured Session IDs decode canonically; native bytes stay exact")
+    func canonicalIdsSessionWire() throws {
+        let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("canonical_ids_session.json"))
+        #expect(session.id == "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        #expect(session.taskIds == ["task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"])
+        #expect(session.waveId == "dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+        #expect(session.agentProcessId == "ffffffff-ffff-4fff-8fff-ffffffffffff")
+        #expect(session.work?.id == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        #expect(session.workspace?.machineId == "home_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+        #expect(session.workspace?.taskId == "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        #expect(session.workspace?.worktree == "/Case/Worktree")
+        guard case .step(_, let flow, _, _, _, _) = session.flowMembership else {
+            Issue.record("expected a Flow step")
+            return
+        }
+        #expect(flow == "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+        #expect(session.preview?.providerThread == "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA")
+        #expect(session.preview?.providerTurn == "Turn-A")
+        #expect(session.openArgv.last == "SESSION_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        #expect(try JSONDecoder().decode(SessionRecord.self, from: JSONEncoder().encode(session)) == session)
+    }
+
     @Test("Every Session kind retains its identity without a Run field")
     func sessionIdentityHasNoRun() throws {
         let data = try loadFixtureData("session.json")

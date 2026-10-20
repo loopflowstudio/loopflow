@@ -2,7 +2,7 @@
 //! the convention; the one rule is that a shipped migration is never edited.
 
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -56,7 +56,7 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
         .iter()
         .take_while(|m| (m.id.major, m.id.minor, m.id.patch.unwrap_or(0)) <= (0, 12, 29))
         .count();
-    apply_set(conn, &MIGRATIONS[..count]).unwrap();
+    apply_set(conn, &MIGRATIONS[..count], &mut Vec::new()).unwrap();
 }
 
 #[cfg(test)]
@@ -157,10 +157,13 @@ pub(crate) fn prepare_clone_sqlite(conn: &rusqlite::Connection) -> StoreResult<(
     if validate_experimental_schema(conn, drafts).is_ok() {
         return Ok(());
     }
-    _migration_transaction(conn, |conn| {
-        apply_set(conn, MIGRATIONS)?;
+    _migration_transaction(conn, |conn, guards| {
+        apply_set(conn, MIGRATIONS, guards)?;
         validate_schema(conn, MIGRATIONS)?;
         for draft in drafts {
+            if draft.name == "canonical_structured_ids" {
+                super::canonical_ids::preflight(conn, guards)?;
+            }
             conn.execute_batch(draft.sql)?;
             seed_peer_planning(conn, draft.sql)?;
         }
@@ -186,17 +189,20 @@ pub(crate) fn initialize_experimental_sqlite(
     })? {
         return Ok(());
     }
-    _migration_transaction(conn, |conn| _initialize_experiment_in(conn, drafts))
+    _migration_transaction(conn, |conn, guards| {
+        _initialize_experiment_in(conn, drafts, guards)
+    })
 }
 
 fn _initialize_experiment_in(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
+    guards: &mut Vec<File>,
 ) -> StoreResult<()> {
     if !user_tables(conn)?.is_empty() {
         return validate_experimental_schema(conn, drafts);
     }
-    apply_set(conn, MIGRATIONS)?;
+    apply_set(conn, MIGRATIONS, guards)?;
     for draft in drafts {
         conn.execute_batch(draft.sql)?;
         seed_peer_planning(conn, draft.sql)?;
@@ -285,7 +291,7 @@ pub(crate) fn experimental_store_diagnostic(
 /// binary could advance but an ordinary open must leave alone.
 #[cfg(test)]
 pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
-    apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1])
+    apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1], &mut Vec::new())
 }
 
 #[cfg(test)]
@@ -340,9 +346,9 @@ fn apply_sqlite_transaction(
     conn: &rusqlite::Connection,
     before_migration: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
 ) -> StoreResult<()> {
-    _migration_transaction(conn, |conn| {
+    _migration_transaction(conn, |conn, guards| {
         before_migration(conn)?;
-        apply_set(conn, MIGRATIONS)?;
+        apply_set(conn, MIGRATIONS, guards)?;
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)
     })
@@ -364,21 +370,22 @@ fn _read_snapshot<T>(
 
 fn _migration_transaction(
     conn: &rusqlite::Connection,
-    migrate: impl FnOnce(&rusqlite::Connection) -> StoreResult<()>,
+    migrate: impl FnOnce(&rusqlite::Connection, &mut Vec<File>) -> StoreResult<()>,
 ) -> StoreResult<()> {
     let foreign_keys_enabled: bool =
         conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     let migration_result = match conn.execute_batch("BEGIN EXCLUSIVE") {
         Ok(()) => {
-            let result = migrate(conn);
-            match result {
-                Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
-                Err(error) => {
-                    let _ = conn.execute_batch("ROLLBACK");
-                    Err(error)
-                }
+            // Even a preflight or validation error retains acquired OS fences
+            // until SQLite has rolled back. Waiting dispatchers then re-read authority.
+            let mut guards = Vec::new();
+            let result = migrate(conn, &mut guards)
+                .and_then(|()| conn.execute_batch("COMMIT").map_err(StoreError::from));
+            if result.is_err() {
+                let _ = conn.execute_batch("ROLLBACK");
             }
+            result
         }
         Err(error) => Err(StoreError::from(error)),
     };
@@ -763,7 +770,11 @@ fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
 /// Apply every migration in `set` the database has not seen, in id order, exactly
 /// once. Taking the set as an argument is what lets the fixtures below drive
 /// synthetic release histories without a test-only seam in the store.
-fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+fn apply_set(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+    guards: &mut Vec<File>,
+) -> StoreResult<()> {
     validate_set(set).map_err(StoreError::InvalidData)?;
 
     let tables = user_tables(conn)?;
@@ -787,7 +798,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     let applied = applied_versions(conn)?;
     for (offset, migration) in pending_migrations(&applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
-        migration_preflight(conn, migration)?;
+        migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
         seed_peer_planning(conn, migration.sql)?;
         if migration.sql.contains("CREATE TABLE wave_workflows (") {
@@ -868,7 +879,14 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
     Ok(())
 }
 
-fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+fn migration_preflight(
+    conn: &rusqlite::Connection,
+    migration: &Migration,
+    guards: &mut Vec<File>,
+) -> StoreResult<()> {
+    if migration_contains(migration, "canonical_structured_ids") {
+        super::canonical_ids::preflight(conn, guards)?;
+    }
     if migration.sql.contains("CREATE TABLE tasks_migration (")
         && migration.sql.contains("repository_id TEXT NOT NULL")
     {
@@ -887,7 +905,7 @@ fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> St
             )));
         }
     }
-    if migration.name != "durable_input_spine" {
+    if !migration_contains(migration, "durable_input_spine") {
         return Ok(());
     }
     let mut active = Vec::new();
@@ -935,6 +953,11 @@ fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> St
         )));
     }
     Ok(())
+}
+
+fn migration_contains(migration: &Migration, name: &str) -> bool {
+    let marker = format!("-- draft: {name}");
+    migration.name == name || migration.sql.lines().any(|line| line == marker)
 }
 
 fn migration_checksum(migration: &Migration) -> String {
@@ -1500,8 +1523,8 @@ mod tests {
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
-        super::_migration_transaction(conn, |conn| {
-            apply_set(conn, MIGRATIONS)?;
+        super::_migration_transaction(conn, |conn, guards| {
+            apply_set(conn, MIGRATIONS, guards)?;
             for draft in crate::build_info::migration_draft_manifest() {
                 conn.execute_batch(draft.sql)?;
                 super::seed_peer_planning(conn, draft.sql)?;
@@ -1655,7 +1678,7 @@ mod tests {
         };
         let before: Vec<_> = tables.iter().map(|table| rows(table)).collect();
         let sql = current_draft_sql("planning_peers");
-        super::_migration_transaction(&conn, |conn| {
+        super::_migration_transaction(&conn, |conn, _guards| {
             conn.execute_batch(&sql)?;
             super::seed_peer_planning(conn, &sql)
         })
@@ -1716,7 +1739,7 @@ mod tests {
             let conn = open();
             apply_before_current_draft(&conn, "planning_peers");
             conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,observed_at,body) VALUES('/repo','linear','unreadable','OTHER-1',17,?1)",[body]).unwrap();
-            let error = super::_migration_transaction(&conn, |conn| {
+            let error = super::_migration_transaction(&conn, |conn, _guards| {
                 conn.execute_batch(&current_draft_sql("planning_peers"))?;
                 Ok(())
             })
@@ -2097,7 +2120,7 @@ mod tests {
             // Exercise the combined release, not an intermediate draft schema.
             apply_sqlite(&conn).unwrap();
         } else {
-            super::_migration_transaction(&conn, |conn| {
+            super::_migration_transaction(&conn, |conn, _guards| {
                 conn.execute_batch(&current_draft_sql("local_planning"))?;
                 conn.execute_batch(&current_draft_sql("optional_task_pr"))?;
                 conn.execute_batch(&current_draft_sql("agent_process"))?;
@@ -2447,7 +2470,7 @@ mod tests {
             );
         }
         let older = open();
-        apply_set(&older, &MIGRATIONS[..1]).unwrap();
+        apply_set(&older, &MIGRATIONS[..1], &mut Vec::new()).unwrap();
         let history = applied_versions(&older).unwrap();
         assert!(initialize_experimental_sqlite(&older, &[]).is_err());
         assert_eq!(applied_versions(&older).unwrap(), history);
@@ -2457,7 +2480,7 @@ mod tests {
     fn expected_schema_reuse_keeps_prefixes_and_changed_sql_distinct() {
         let conn = open();
         let first = [baseline(), SECOND_IN_SAME_MINOR];
-        apply_set(&conn, &first).unwrap();
+        apply_set(&conn, &first, &mut Vec::new()).unwrap();
         validate_schema(&conn, &first).unwrap();
         assert!(validate_schema(&conn, &first[..1]).is_err());
 
@@ -2470,7 +2493,7 @@ mod tests {
         ];
         assert!(validate_schema(&conn, &changed).is_err());
         let other = open();
-        apply_set(&other, &changed).unwrap();
+        apply_set(&other, &changed, &mut Vec::new()).unwrap();
         validate_schema(&other, &changed).unwrap();
         assert!(validate_schema(&other, &first).is_err());
         validate_schema(&conn, &first).unwrap();
@@ -2570,7 +2593,7 @@ mod tests {
         );
         let drafts = vec![first, second];
         winner.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        _initialize_experiment_in(&winner, &drafts).unwrap();
+        _initialize_experiment_in(&winner, &drafts, &mut Vec::new()).unwrap();
         let (reached_tx, reached_rx) = sync_channel(1);
         let (resume_tx, resume_rx) = sync_channel(1);
         let contender = std::thread::spawn(move || {
@@ -2658,7 +2681,7 @@ mod tests {
             .iter()
             .position(|migration| migration.name == "interactive_handoffs")
             .unwrap();
-        apply_set(conn, &MIGRATIONS[..canonical_start]).unwrap();
+        apply_set(conn, &MIGRATIONS[..canonical_start], &mut Vec::new()).unwrap();
         for migration in &DIVERGENT_MIGRATIONS[..count] {
             conn.execute_batch(migration.sql).unwrap();
             conn.execute(
@@ -2674,7 +2697,7 @@ mod tests {
             .iter()
             .position(|migration| migration.name == "context_pressure")
             .unwrap();
-        apply_set(conn, &MIGRATIONS[..context_start]).unwrap();
+        apply_set(conn, &MIGRATIONS[..context_start], &mut Vec::new()).unwrap();
         conn.execute("UPDATE schema_migrations SET applied_at = rowid", [])
             .unwrap();
         let applied_at = conn
@@ -2899,7 +2922,7 @@ mod tests {
             .iter()
             .position(|migration| migration.name == name)
             .expect("named migration is registered");
-        apply_set(conn, &MIGRATIONS[..=index]).unwrap();
+        apply_set(conn, &MIGRATIONS[..=index], &mut Vec::new()).unwrap();
     }
 
     fn draft_location(name: &str) -> (usize, &'static str, usize) {
@@ -2918,7 +2941,7 @@ mod tests {
 
     fn apply_before_draft(conn: &rusqlite::Connection, name: &str) {
         let (migration_index, sql, draft_offset) = draft_location(name);
-        apply_set(conn, &MIGRATIONS[..migration_index]).unwrap();
+        apply_set(conn, &MIGRATIONS[..migration_index], &mut Vec::new()).unwrap();
         conn.execute_batch(&sql[..draft_offset]).unwrap();
     }
 
@@ -2976,13 +2999,13 @@ mod tests {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);
         } else {
-            apply_set(conn, MIGRATIONS).unwrap();
+            apply_set(conn, MIGRATIONS, &mut Vec::new()).unwrap();
         }
     }
 
     /// Finish a historical fixture's partial migration before using current readers.
     pub(crate) fn upgrade_from_draft(conn: &rusqlite::Connection, name: &str) {
-        super::_migration_transaction(conn, |conn| {
+        super::_migration_transaction(conn, |conn, guards| {
             if _draft_is_canonical(name) {
                 let (index, sql, offset) = draft_location(name);
                 conn.execute_batch(&sql[offset..])?;
@@ -2992,7 +3015,7 @@ mod tests {
                     &MIGRATIONS[index],
                     &super::migration_prefix_fingerprint(&MIGRATIONS[..index]),
                 )?;
-                apply_set(conn, MIGRATIONS)?;
+                apply_set(conn, MIGRATIONS, guards)?;
             }
             for draft in crate::build_info::migration_draft_manifest() {
                 conn.execute_batch(draft.sql)?;
@@ -3027,7 +3050,7 @@ mod tests {
             "../../tests/fixtures/migrations/optional_task_ancestry.sql"
         ))
         .unwrap();
-        super::_migration_transaction(&conn, |conn| {
+        super::_migration_transaction(&conn, |conn, _| {
             conn.execute_batch(&current_draft_sql("optional_task_ancestry"))?;
             validate_foreign_keys(conn)
         })
@@ -3620,8 +3643,8 @@ mod tests {
             [directory.path().to_str().unwrap()],
         )
         .unwrap();
-        super::_migration_transaction(&conn, |conn| {
-            apply_set(conn, MIGRATIONS)?;
+        super::_migration_transaction(&conn, |conn, guards| {
+            apply_set(conn, MIGRATIONS, guards)?;
             for draft in crate::build_info::migration_draft_manifest() {
                 conn.execute_batch(draft.sql)?;
             }
@@ -4219,7 +4242,7 @@ mod tests {
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
         let published = prefix_before("durable_input_spine");
-        apply_set(&conn, published).unwrap();
+        apply_set(&conn, published, &mut Vec::new()).unwrap();
 
         validate_sqlite(&conn).unwrap();
 
@@ -4248,7 +4271,7 @@ mod tests {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         // Bring the store to the frontier the installed binary shipped with.
-        apply_set(&conn, installed).unwrap();
+        apply_set(&conn, installed, &mut Vec::new()).unwrap();
         let installed_frontier = latest_applied_version_sqlite(&conn).unwrap().unwrap();
         assert_eq!(
             installed_frontier,
@@ -4284,7 +4307,7 @@ mod tests {
         );
 
         // Only the promotion boundary advances the frontier to the head.
-        apply_set(&conn, candidate).unwrap();
+        apply_set(&conn, candidate, &mut Vec::new()).unwrap();
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap().unwrap(),
             latest_known_version()
@@ -4296,7 +4319,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, prefix_before("lineage_boundary")).unwrap();
+        apply_set(&conn, prefix_before("lineage_boundary"), &mut Vec::new()).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -4351,7 +4374,12 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, prefix_before("capture_pruned_state")).unwrap();
+        apply_set(
+            &conn,
+            prefix_before("capture_pruned_state"),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"
@@ -4403,7 +4431,12 @@ mod tests {
     fn capture_terminal_states_preserve_history_and_keep_the_enum_closed() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, prefix_before("capture_terminal_states")).unwrap();
+        apply_set(
+            &conn,
+            prefix_before("capture_terminal_states"),
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert!(!capture_status_accepts(&conn, "interrupted"));
         assert!(!capture_status_accepts(&conn, "lost"));
 
@@ -4471,7 +4504,12 @@ mod tests {
     #[test]
     fn capture_terminal_states_repairs_half_control_trace_receipts() {
         let conn = open();
-        apply_set(&conn, prefix_before("run_launch_attention")).unwrap();
+        apply_set(
+            &conn,
+            prefix_before("run_launch_attention"),
+            &mut Vec::new(),
+        )
+        .unwrap();
         conn.execute_batch(
             "INSERT INTO agent_launches (
                  id, run_id, process_id, started_at, ended_at, repo, worktree,
@@ -4484,7 +4522,12 @@ mod tests {
         )
         .unwrap();
 
-        apply_set(&conn, prefix_before("capture_terminal_states")).unwrap();
+        apply_set(
+            &conn,
+            prefix_before("capture_terminal_states"),
+            &mut Vec::new(),
+        )
+        .unwrap();
         conn.execute_batch(
             "INSERT INTO agent_launches (
                  id, run_id, process_id, started_at, ended_at, repo, worktree,
@@ -4906,7 +4949,7 @@ mod tests {
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, prefix_before("accounts_first")).unwrap();
+        apply_set(&conn, prefix_before("accounts_first"), &mut Vec::new()).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
                 provider, account_id, home, login_email, credential_state,
@@ -5062,7 +5105,7 @@ mod tests {
     fn project_successor_migration_allows_one_current_successor() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..2], &mut Vec::new()).unwrap();
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('w1', 'infrastructure', '/repo', 1);
@@ -5081,7 +5124,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_set(&conn, &MIGRATIONS[..4]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..4], &mut Vec::new()).unwrap();
         conn.execute_batch(
             "INSERT INTO project_sessions (
                  id, project_id, project_slug, project_name,
@@ -5127,7 +5170,7 @@ mod tests {
     #[test]
     fn a_legacy_baseline_database_is_adopted_and_upgraded_without_data_loss() {
         let conn = open();
-        apply_set(&conn, &[baseline()]).unwrap();
+        apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
         conn.execute(
             "UPDATE schema_migrations SET version = '001_initial' WHERE version = ?1",
             [baseline().version()],
@@ -5142,6 +5185,7 @@ mod tests {
         apply_set(
             &conn,
             &[baseline(), SECOND_IN_SAME_MINOR, FIRST_IN_NEXT_MINOR],
+            &mut Vec::new(),
         )
         .unwrap();
 
@@ -5165,7 +5209,7 @@ mod tests {
     fn existing_task_rows_collapse_into_stable_work_and_prs() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..2], &mut Vec::new()).unwrap();
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at)
              VALUES ('wave-1', 'runtime', '/repo', 1)",
@@ -5498,7 +5542,7 @@ mod tests {
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..2], &mut Vec::new()).unwrap();
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at)
              VALUES ('00000000-0000-0000-0000-000000000001', 'runtime', '/repo', 1)",
@@ -5582,7 +5626,7 @@ mod tests {
         .unwrap();
 
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        apply_set(&conn, prefix_before("interaction_reviews")).unwrap();
+        apply_set(&conn, prefix_before("interaction_reviews"), &mut Vec::new()).unwrap();
         conn.execute_batch(
             "UPDATE task_sessions
              SET gate_proposal_json = CASE id
@@ -5602,7 +5646,7 @@ mod tests {
 
         // Prove the historical JSON repair before later releases retire its storage.
         let (repair_index, _, _) = draft_location(GATE_PROPOSAL_REPAIR_NAME);
-        apply_set(&conn, &MIGRATIONS[..=repair_index]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..=repair_index], &mut Vec::new()).unwrap();
         let current_gate: String = conn
             .query_row(
                 "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
@@ -5624,7 +5668,7 @@ mod tests {
             .unwrap();
         assert_eq!(stale_gate_count, 0);
 
-        let error = super::_migration_transaction(&conn, |conn| {
+        let error = super::_migration_transaction(&conn, |conn, _guards| {
             conn.execute(
                 "UPDATE tasks
                  SET pm_writeback_json='{\"state\":\"pending\",\"operation\":\"invented\",\"error\":\"offline\"}'
@@ -5646,7 +5690,7 @@ mod tests {
             "{\"state\":\"current\"}"
         );
         conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
         conn.execute_batch("COMMIT").unwrap();
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
@@ -5771,7 +5815,7 @@ mod tests {
     #[test]
     fn several_migrations_in_one_minor_release_apply_in_order() {
         let conn = open();
-        apply_set(&conn, &[baseline(), SECOND_IN_SAME_MINOR]).unwrap();
+        apply_set(&conn, &[baseline(), SECOND_IN_SAME_MINOR], &mut Vec::new()).unwrap();
 
         assert_eq!(
             applied_versions(&conn).unwrap(),
@@ -5785,11 +5829,11 @@ mod tests {
     #[test]
     fn a_database_from_the_previous_minor_applies_only_the_new_namespace() {
         let conn = open();
-        apply_set(&conn, &[baseline(), SECOND_IN_SAME_MINOR]).unwrap();
+        apply_set(&conn, &[baseline(), SECOND_IN_SAME_MINOR], &mut Vec::new()).unwrap();
 
         let next = [baseline(), SECOND_IN_SAME_MINOR, FIRST_IN_NEXT_MINOR];
-        apply_set(&conn, &next).unwrap();
-        apply_set(&conn, &next).unwrap();
+        apply_set(&conn, &next, &mut Vec::new()).unwrap();
+        apply_set(&conn, &next, &mut Vec::new()).unwrap();
 
         assert_eq!(
             applied_versions(&conn).unwrap(),
@@ -5812,9 +5856,9 @@ mod tests {
     #[test]
     fn an_unknown_migration_reports_both_database_and_binary_evidence() {
         let conn = open();
-        apply_set(&conn, &[baseline(), FIRST_IN_NEXT_MINOR]).unwrap();
+        apply_set(&conn, &[baseline(), FIRST_IN_NEXT_MINOR], &mut Vec::new()).unwrap();
 
-        let error = apply_set(&conn, &[baseline()]).unwrap_err();
+        let error = apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap_err();
         let message = error.to_string();
         assert!(message.contains("0.11.001_add_colour"), "{message}");
         assert!(
@@ -5859,7 +5903,7 @@ mod tests {
     #[test]
     fn a_skipped_migration_tells_the_user_to_recreate() {
         let conn = open();
-        apply_set(&conn, &[baseline()]).unwrap();
+        apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at) VALUES ('0.11.001_add_colour', 2)",
             [],
@@ -5869,6 +5913,7 @@ mod tests {
         let error = apply_set(
             &conn,
             &[baseline(), SECOND_IN_SAME_MINOR, FIRST_IN_NEXT_MINOR],
+            &mut Vec::new(),
         )
         .unwrap_err();
         assert!(error.to_string().contains("delete loopflow.db"));
@@ -5961,7 +6006,7 @@ mod tests {
     #[test]
     fn a_fresh_database_initializes_through_the_full_canonical_tail() {
         let conn = open();
-        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
 
         assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
         assert_eq!(
@@ -6000,7 +6045,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1], &mut Vec::new()).unwrap();
 
         apply_sqlite_with_backup(&conn, &path).unwrap();
 
@@ -6018,7 +6063,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1], &mut Vec::new()).unwrap();
         let old = |name: &str, age_secs: u64| {
             let file = directory.path().join(name);
             std::fs::write(&file, b"generation").unwrap();
@@ -6052,7 +6097,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1], &mut Vec::new()).unwrap();
         conn.execute_batch("PRAGMA journal_mode = WAL").unwrap();
         let writer_path = path.clone();
         let (start_writer, writer_start) = sync_channel(0);
@@ -6780,7 +6825,7 @@ mod tests {
         if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
             apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
         } else {
-            apply_set(&conn, MIGRATIONS).unwrap();
+            apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
         }
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
@@ -7296,3 +7341,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "canonical_ids_tests.rs"]
+mod canonical_ids_tests;

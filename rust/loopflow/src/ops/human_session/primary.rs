@@ -122,7 +122,7 @@ pub(super) async fn task_conversation(
         .max_by_key(|(session, opened)| {
             (
                 human
-                    .get(&session.id)
+                    .get(session.id.as_str())
                     .copied()
                     .or(*opened)
                     .unwrap_or(session.created_at.saturating_mul(1000)),
@@ -259,7 +259,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,
-        id: uuid::Uuid::new_v4().simple().to_string(),
+        id: uuid::Uuid::new_v4().simple().to_string().into(),
         artifact_key: crate::session_record::new_artifact_key(),
         caller_artifact_key: None,
         input_published: false,

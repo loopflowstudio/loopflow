@@ -152,6 +152,9 @@ When changing the SQLite schema:
 - Test the released frontier against the finished draft, not the steps between
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
   triggers to advance their domain in `store_revisions` inside the write.
+- Runtime migration preflights recognize draft markers inside release batches and
+  retain external lock guards through commit or rollback. Upgrade fixtures start
+  before the whole release batch, not before a draft within it.
 - Seed a released schema from SQL under `rust/loopflow/tests/fixtures/migrations/`; test sources name only current columns
 
 When editing `*.rs` files:

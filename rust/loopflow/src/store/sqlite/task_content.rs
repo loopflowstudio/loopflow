@@ -358,6 +358,9 @@ mod tests {
         let retained = store.task(&task.id).unwrap().unwrap();
         assert_eq!(retained.repository_id, task.repository_id);
         assert!(retained.project_id.is_none());
-        assert_eq!(store.bound_sessions().unwrap()[0].session_id, session.id);
+        assert_eq!(
+            store.bound_sessions().unwrap()[0].session_id,
+            session.id.as_str()
+        );
     }
 }

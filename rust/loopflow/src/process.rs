@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::{LfProcessId, TraceId, WaveId};
+use crate::id::{LfProcessId, LfSessionId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,12 +11,12 @@ pub struct LfProcess {
     pub id: LfProcessId,
     pub pid: Option<u32>,
     pub kind: ProcessKind,
-    pub agent_session_id: Option<String>,
+    pub agent_session_id: Option<LfSessionId>,
     pub os_started_at: Option<i64>,
     pub trace_id: TraceId,
     pub parent_lf_process_id: Option<LfProcessId>,
     pub via_agent: Option<bool>,
-    pub caller_session_id: Option<String>,
+    pub caller_session_id: Option<LfSessionId>,
     pub caller_agent_process_id: Option<LfProcessId>,
     pub command: Option<String>,
     pub repo: Option<String>,
@@ -44,7 +44,7 @@ pub struct LfProcessFilter {
     pub id: Option<LfProcessId>,
     pub repo: Option<String>,
     pub parent_lf_process_id: Option<LfProcessId>,
-    pub caller_session_id: Option<String>,
+    pub caller_session_id: Option<LfSessionId>,
     pub command_contains: Option<String>,
     pub identity_contains: Option<String>,
     pub outcome: Option<LfProcessOutcomeFilter>,
@@ -106,7 +106,7 @@ impl FlowHeld {
 /// Stable provenance installed in one provider conversation's tool environment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {
-    pub session_id: String,
+    pub session_id: LfSessionId,
     /// Absent in an environment installed before AgentProcess records: such a
     /// caller keeps its causal history and is never the current provider.
     pub agent_process_id: Option<LfProcessId>,
@@ -125,7 +125,7 @@ pub struct SessionAttachment {
 }
 
 impl SessionAttachment {
-    pub fn caller(&self, session_id: String) -> AgentCaller {
+    pub fn caller(&self, session_id: LfSessionId) -> AgentCaller {
         AgentCaller {
             session_id,
             agent_process_id: Some(self.agent_process_id.clone()),

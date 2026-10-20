@@ -93,42 +93,39 @@ Option<String>, machine_id: Option<MachineId>, at }`
   already crosses `lf --machine`, so a claim the laptop routes to mini records
   Jack.
 
-### Owning Machine (replaces Placement)
+### Wave Machine (replaces Placement; personal, never repository content)
 
-The owning Machine is read from committed repository configuration, so it
-travels in Linear and Git mode through the code itself:
+Jack Heart (2026-10-20): everyone in a repository has a repo Session, and everyone
+in a Wave has a Wave Session for it. Which Machine runs them is that person's
+choice. Nothing about Machines is committed: delete the `.lf/config.yaml`
+`machines:` block, `MachinesConfig` and its resolver.
 
-```yaml
-machines:
-  default: home_…           # standalone Tasks and unlisted Waves
-  waves:
-    infrastructure: home_…  # child Waves inherit their parent's entry
+```
+lf wave machine infrastructure mini   # your default for this Wave's Tasks
 ```
 
-Resolution walks Wave → parent Waves → `default` → this Machine. The last step
-keeps single-Machine use free of configuration. Jack Heart (2026-10-19): if two
-Machines never connect through a provider, they do not share the Task. If they
-do connect, both push their claims, and the second claim wins. Project and Task
-delegation go away: handoff is how a single Task moves. Cron install reads
-the same resolver.
+- Stored in this Machine's store as the person's Wave → Machine default, and
+  copied to the person's other registered Machines over `lf --machine`, so the
+  laptop knows to launch there and mini knows to receive the runs.
+- Setting it moves the person's Wave Session to that Machine, restarting it
+  there if it does not already live there.
+- Resolution for a new Task: its Wave's default → parent Waves → this Machine.
+  No setting means this Machine.
+- Captured, not inherited: a Task's Machine is the one in its claim. Changing
+  the Wave default later moves no existing Task; handoff is how a Task moves.
 
-### Writer rule (structural exclusion, no grant record)
+### Writer rule (forwarding stays within one person's Machines)
 
-Exactly one Machine may append the next entry:
+- Owned by you and its Machine is another of your Machines: the command reruns
+  there through `work_route` (`lf --machine <machine>`).
+- Unowned: your claim is written on your Wave Machine for that Task (forwarded
+  there when it is not this Machine).
+- Owned by someone else: never route to their Machine. A claim is written on
+  your own Machine; the later claim wins, as decided.
 
-- If the Task is owned and the owner's Machine is known, that Machine.
-- If the Task is unowned, or its owner's Machine is unknown, the inherited
-  owning Machine.
-
-`claim`, `handoff` and `unclaim` resolve the writer first. If the writer isn't
-this Machine, the command reruns there through the existing `work_route`
-dispatch (`lf --machine <writer>`). An unconnected writer fails with "LOO-9 is
-owned by home_… (no connection); `lf machine add` it". The local append runs in
-one IMMEDIATE transaction and re-checks the writer rule inside it. When owning
-Machines are configured, every append for a Task happens on one Machine at a
-time. The remaining case is an unconfigured or stale view, where two claims
-both reach the provider. Last-claim-wins settles that case without a grant or
-lock.
+The Machine in the Linear claim comment is informational: public by default,
+shown after the person; nothing another person does depends on it.
+The local append runs in one IMMEDIATE transaction.
 
 Writers:
 
@@ -410,6 +407,8 @@ The live Linear demo above is a demo/review step, not gate.
 
 ## Remaining work
 
+- Personal Wave Machine (above): `lf wave machine`, copy to own Machines, Wave Session move; delete committed `machines:` config and update docs, `scratch/questions.md` item 1, and the integration tests that use `machines.waves`.
+- Writer rule: forward only within the person's own Machines.
 - Desktop Task detail lists the log (needs the log in a Desktop-read DTO).
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.

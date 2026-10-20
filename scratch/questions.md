@@ -58,3 +58,28 @@
 14. **The ownership verbs are `claim`, `handoff` and `unclaim`** (Jack Heart, 2026-10-20).
     `lf task release` made `lf release` ambiguous; `unclaim` pairs with `claim` and
     keeps the shorthand.
+
+## Jack Heart's direction (2026-10-20): the Wave Machine is personal
+
+- Everyone in a repository has a repo Session; everyone in a Wave has a Wave
+  Session for it. Which Machine runs those Sessions is that person's choice, not
+  shared repository content: the committed `.lf/config.yaml` `machines:` block goes.
+- **Wave Machine default:** a person can set the Machine their Wave's Tasks run on
+  (laptop + mini: some Waves run on mini). A Task about that Wave starts there by
+  default, including when launched from the laptop. Both Machines know the
+  arrangement; the mini only needs to receive the runs.
+- **Captured, not inherited:** like a Workflow or Flow, a Task keeps the Machine it
+  started on. Changing the Wave default later does not move existing Tasks, and a
+  Task may move to another Machine.
+- **Visibility:** the Machine running a claimed Task is public by default (another
+  person can see it from the Linear Task), but deprioritized after the person.
+  Making it configurable is not essential. Audit anything that makes the Machine
+  *have* to be public; nothing another person does should depend on it.
+- **Decided by Jack Heart (2026-10-20): forwarding stays inside one person's
+  Machines.** Your laptop routes ownership commands to your mini. Another person
+  never routes to your Machine; their claim is written on their own Machine and the
+  later claim wins. The Machine in the Linear claim comment is informational only.
+- **Decided by Jack Heart (2026-10-20): `lf wave machine <wave> <machine>`** stores
+  the person's Wave Machine default on this Machine and copies it to their other
+  registered Machines over `lf --machine`. Setting it also moves that person's Wave
+  Session to the Machine, restarting it there if it does not already live there.

@@ -418,3 +418,14 @@ def test_preview_and_test_materialization_write_no_breaking_note(repo: Path) -> 
     assert "lf < 0.11.30" in run(repo, "0.11.30", "--check").stdout
     assert run(repo, "0.11.30", "--materialize-for-tests").returncode == 0
     assert not (repo / BREAKING_NOTE).exists()
+
+
+def test_an_unreplayable_released_history_proves_nothing_additive(repo: Path) -> None:
+    (repo / MIGRATIONS / "0.11.002_future.sql").write_text("CREATE TABLE future (id TEXT) STRICTER;\n")
+    draft(repo, "wave_note", body="ALTER TABLE waves ADD COLUMN note TEXT;\n")
+
+    result = run(repo, "0.11.30", "--check")
+
+    assert result.returncode == 0, result.stderr
+    assert "cannot replay 0.11.002_future.sql" in result.stderr
+    assert "lf < 0.11.30 can no longer open the store (raised by: wave_note)" in result.stdout

@@ -311,7 +311,17 @@ def breaking_drafts(drafts: list[Draft]) -> list[str]:
             "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
         )
         for path in _released_migrations():
-            conn.executescript(path.read_text())
+            try:
+                conn.executescript(path.read_text())
+            except sqlite3.OperationalError as error:
+                # Unproven counts as breaking: an older interpreter SQLite cannot
+                # replay newer released syntax, so it cannot prove a draft additive.
+                print(
+                    f"SQLite {sqlite3.sqlite_version} cannot replay {path.name} ({error}); "
+                    "treating every draft as breaking",
+                    file=sys.stderr,
+                )
+                return [draft.name for draft in drafts]
         return [draft.name for draft in drafts if not _is_additive(conn, draft.sql)]
 
 

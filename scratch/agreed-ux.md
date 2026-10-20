@@ -48,3 +48,19 @@ Flag for demo review: the local Machine reads “This Mac” inside the menu; no
 reachability is shown (only `lf machine status` probes, over the network);
 repository and Dashboard views have no control; a Dashboard crumb keeps `/` before
 its Task; the start offer takes 62% beside the brief.
+
+## 4. Working Tasks is every started Task of yours (October 20)
+
+Jack Heart: “The default sidebar is WOrkign Tasks = All tasks that are started on
+any of your machines we know about by you (and not completed)”.
+
+Observed on installed 0.14.9 (October 20): Working Tasks showed 0. It is built
+from visits (#1594, `WorkNavigation.retainWorkingTask` + `WorkCache`), so a fresh
+window never lists running work; the cache held empty lists for all 8 repositories.
+
+To build: the default Working Tasks list is derived from Work, not visits: every
+Task that is started, not completed, started by Jack, on any Machine Loopflow knows
+(local and saved Machines). Visit order may still order it; visits don't define
+membership. The cache stays display evidence only. Open: how "by you" is recorded
+today (starter attribution) and how other Machines' started Tasks are read
+(`peerPlanningReadings`); unknown provenance stays unknown, never dropped silently.

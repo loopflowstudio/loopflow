@@ -7,15 +7,16 @@ Status: accepted direction from Jack's 2026-10-20 steers; implemented, awaiting 
 Jack's laptop hit 98% full. Three layers (Jack, 2026-10-20):
 
 1. `lf disk` — product command, safe for any user.
-   - `lf disk [--json]`: footprint by category (database, backups, accounts,
-     captures, logs, runtime, other) plus every worktree of each Task repository
+   - `lf disk [--json]`: footprint by category (database, backups, copies,
+     accounts, captures (`runs/`), logs, runtime, other) plus every worktree of each Task repository
      (checkout and generated output), with Home usage against its budget.
    - `lf disk clean [--dry-run] [--json] [--keep-days N]`: remove merged/closed/
      stale clean worktrees (existing `lf wt prune` rules, every Task repository),
      completed Tasks' build output (existing `prune_builds`, no root/byte caps),
      dead process receipts, every DB backup but the newest per database,
-     captures/logs older than N days (default 7), then rotate to budget.
-   - `lf disk rotate [--quiet]`: rotate oldest backups, captures and logs until
+     draft store copies (`copies/`, from #1612; never the selected one),
+     captures and logs older than N days (default 7), then rotate to budget.
+   - `lf disk rotate [--quiet]`: rotate oldest backups, copies, captures and logs until
      Home fits `disk_budget` (global `~/.lf/config.yaml`, e.g. `disk_budget: 20G`;
      default 20G). Runs automatically: starting a Session capture spawns a detached
      `lf disk rotate` at most once an hour (stamp `runtime/disk-rotation.stamp`).
@@ -40,5 +41,5 @@ per-process primitives `lf disk clean` composes.
 - Install the launchd agent on the laptop and mini-heart after landing (the plist
   points at the main checkout's script).
 
-Check (after compress): `cargo test -p loopflow --lib disk::` 4 pass; clippy clean; dry runs on an APFS clone of
+Check (after compress; realign rebuilt and confirmed `lf disk clean|rotate --help` name store copies under a disposable LF_HOME): `cargo test -p loopflow --lib disk::` 4 pass; clippy clean; dry runs on an APFS clone of
 Jack's ~/.lf: footprint 107.8G (55s), clean would free 13.1G, rotation floor 28.5G.

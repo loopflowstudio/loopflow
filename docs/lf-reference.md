@@ -462,7 +462,7 @@ Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
 
 ## lf disk clean
 
-Reclaim finished worktrees and build output, dead receipts, old backups, captures and logs
+Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
 
 | Argument | What it does |
 |---|---|
@@ -473,7 +473,7 @@ Reclaim finished worktrees and build output, dead receipts, old backups, capture
 
 ## lf disk rotate
 
-Remove the oldest backups, captures and logs until ~/.lf fits its disk_budget
+Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
 
 | Argument | What it does |
 |---|---|

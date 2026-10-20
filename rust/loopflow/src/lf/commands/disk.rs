@@ -15,7 +15,7 @@ use crate::store::sqlite::{read_task_worktree_ownership, TaskWorktreeOwnership};
 
 #[derive(Debug, Subcommand)]
 pub enum DiskCommand {
-    /// Reclaim finished worktrees and build output, dead receipts, old backups, captures and logs
+    /// Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
     Clean {
         /// Show what would be removed without removing anything
         #[arg(long)]
@@ -26,7 +26,7 @@ pub enum DiskCommand {
         #[arg(long, default_value_t = 7)]
         keep_days: u64,
     },
-    /// Remove the oldest backups, captures and logs until ~/.lf fits its disk_budget
+    /// Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
     Rotate {
         /// Show what would be removed without removing anything
         #[arg(long)]

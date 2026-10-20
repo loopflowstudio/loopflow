@@ -36,7 +36,7 @@ pub enum ResumeOutcome {
     },
 }
 
-/// Interrupted Sessions on this machine, oldest identity first.
+/// Interrupted Sessions on this machine, ordered by id.
 async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSession>> {
     let mut sessions = Vec::new();
     for (id, owner) in store.sqlite.unexited_session_owners()? {

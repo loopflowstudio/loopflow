@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Loopflow
+import os
 
 private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
@@ -40,7 +41,14 @@ struct LoopflowApp: App {
         enrichProcessPathForGUILaunch()
         // A reboot leaves interrupted Sessions behind; bring them all back unasked.
         if AppTestMode.current() == nil, SessionFixture.query == nil {
-            Task.detached(priority: .utility) { try? await RegistryQueryLocal.shared.resumeInterrupted() }
+            Task.detached(priority: .utility) {
+                do {
+                    try await RegistryQueryLocal.shared.resumeInterrupted()
+                } catch {
+                    Logger(subsystem: "studio.loopflow", category: "sessions")
+                        .error("Resuming interrupted Sessions failed: \(String(describing: error), privacy: .public)")
+                }
+            }
         }
         // Ghostty borrows the process environment when appearance initializes it.
         // Finish environment changes before publishing the initial theme.

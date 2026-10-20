@@ -1584,10 +1584,11 @@ final class WorkModel {
         navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
     }
 
-    /// The Wave's uncompleted Tasks and child Waves, from its built-in plan.
-    var sidebarChildWaveIDs: [String] {
-        guard let id = navigation.sidebarWaveID else { return [] }
-        return builtInPlan(.wave(id))?.resolution.members.filter { $0.work.kind == .wave }.map(\.work.id) ?? []
+    /// Every Wave at the repository; a scoped Wave's child Waves from its built-in plan.
+    var sidebarWaves: [WaveRoadmap] {
+        guard let id = navigation.sidebarWaveID else { return visibleRoadmaps }
+        return (builtInPlan(.wave(id))?.resolution.members ?? []).filter { $0.work.kind == .wave }
+            .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
     }
 
     private func builtInPlan(_ expression: WorkSelection.Expression) -> WorkViewPlan? {

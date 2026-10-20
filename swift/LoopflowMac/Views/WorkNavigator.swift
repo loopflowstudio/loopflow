@@ -13,11 +13,6 @@ struct WorkNavigator: View {
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
 
-    private var listedWaves: [WaveRoadmap] {
-        guard model.navigation.sidebarWaveID != nil else { return model.visibleRoadmaps }
-        return model.sidebarChildWaveIDs.compactMap { id in model.visibleRoadmaps.first { $0.wave.id == id } }
-    }
-
     private var listTitle: String {
         let filter = model.navigation.sidebarFilter
         guard model.navigation.sidebarWaveID != nil else { return filter.rawValue }
@@ -26,7 +21,7 @@ struct WorkNavigator: View {
     }
 
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + listedWaves.map { .wave(id: $0.wave.id) }
+        model.sidebarTaskIDs.map { .task(id: $0) } + model.sidebarWaves.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -78,11 +73,11 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if !listedWaves.isEmpty {
+                    if !model.sidebarWaves.isEmpty {
                         Text(model.navigation.sidebarWaveID == nil ? "WAVES" : "SUBWAVES").font(Typography.code(10))
                             .foregroundStyle(palette.textSecondary).padding(10).padding(.top, 8)
                     }
-                    ForEach(listedWaves, id: \.wave.id) { wave in
+                    ForEach(model.sidebarWaves, id: \.wave.id) { wave in
                         Button { model.select(.wave(id: wave.wave.id)) } label: {
                             HStack {
                                 Image(systemName: "water.waves")

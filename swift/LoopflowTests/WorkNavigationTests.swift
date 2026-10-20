@@ -69,6 +69,7 @@ struct WorkNavigationTests {
         model.select(.wave(id: wave))
         #expect(model.navigation.sidebarWaveID == wave)
         #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarWaves.isEmpty)
         model.select(.task(id: "issue-review"))
         #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
         model.select(nil)

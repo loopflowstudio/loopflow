@@ -133,12 +133,45 @@ public struct WorkArrangementProjection: Codable, Equatable, Sendable {
     public let suppressed: [Suppressed]
 }
 
+/// A Dashboard page's fixed slots, owned by Rust. Members fill slots by number,
+/// in order, and overflow to further pages.
+public struct DashboardSlotLayout: Codable, Equatable, Sendable {
+    public indirect enum Node: Codable, Equatable, Sendable {
+        case slot(Int)
+        /// `.vertical` places children side by side; `.horizontal` stacks them.
+        case split(SplitAxis, [Double], [Node])
+        private enum Keys: String, CodingKey { case kind, slot, axis, weights, children }
+        private enum Kind: String, Codable { case slot, split }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            switch try c.decode(Kind.self, forKey: .kind) {
+            case .slot: self = .slot(try c.decode(Int.self, forKey: .slot))
+            case .split: self = .split(try c.decode(SplitAxis.self, forKey: .axis),
+                try c.decode([Double].self, forKey: .weights), try c.decode([Node].self, forKey: .children))
+            }
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Keys.self)
+            switch self {
+            case .slot(let slot): try c.encode(Kind.slot, forKey: .kind); try c.encode(slot, forKey: .slot)
+            case .split(let axis, let weights, let children):
+                try c.encode(Kind.split, forKey: .kind); try c.encode(axis, forKey: .axis)
+                try c.encode(weights, forKey: .weights); try c.encode(children, forKey: .children)
+            }
+        }
+    }
+    public let root: Node
+    public init(root: Node) { self.root = root }
+}
+
 public struct Dashboard: Codable, Equatable, Sendable {
     public let repository: String
     public let id: String
     public let revision: Int64
     public let name: String?
     public let pinned: Bool
+    /// Nil keeps the default slot layout.
+    public let slots: DashboardSlotLayout?
     public let selection: WorkSelection
     public let arrangement: WorkArrangement
 }
@@ -176,9 +209,11 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let resolution: WorkSelectionResolution
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
+    /// The page geometry visible members fill, in projection order.
+    public let slots: DashboardSlotLayout
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
-        case repository, selection, resolution, arrangement, projection, contents, name, pinned
+        case repository, selection, resolution, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", observedAt = "observed_at", savedRevision = "saved_revision"
     }
 }

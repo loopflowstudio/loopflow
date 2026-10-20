@@ -54,8 +54,14 @@ split (one sibling gets 38.2%); the default layout is n-ary data so the bottom b
 four-way group, matching the prototype. A Dashboard always has a focused tile (the
 registry focuses the first member), so slot 1 starts focused, which equals the golden
 base. Terminal views take their final frame rather than interpolating; confirm no
-flicker in the demo. Inspection still reports the plan's arrangement tree for Working
-Tasks, not slot geometry.
+flicker in the demo. Plans now report `slots`.
+
+October 20 order/slot assumptions: the person's Task order comes first; Tasks it never
+named append after it, waiting first. It is one repository order, so Wave sidebars and
+unarranged Dashboards follow it too. A drop puts the dragged Task in the target's place.
+Every saved Dashboard renders through slots (Jack: “theres always a fixed number of
+slots”); its visible occurrences fill them in arrangement order, and tile drag still swaps
+occurrences. Member-tree resize is removed; whether to also collapse the Rust tree is open.
 
 Historical notes removed October 20 (full text at `f492be7f19:scratch/`): the October 16
 Arrange handoff (owners: LOO-416 Session retention, LOO-453 readiness/events, LOO-422/415

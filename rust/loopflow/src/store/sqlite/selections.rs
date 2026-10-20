@@ -4,8 +4,9 @@ use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionResolution,
-    SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
+    Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
+    SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
+    WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -15,7 +16,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 }
 
 fn catalog_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
-    let mut statement = conn.prepare("SELECT s.id,s.revision,a.selection_json,a.arrangement_json,s.name,s.pinned FROM dashboards s JOIN dashboard_arrangements a ON a.repository_id=s.repository_id AND a.dashboard_id=s.id AND a.expression_key=s.expression_key WHERE s.repository_id=?1 ORDER BY s.id")?;
+    let mut statement = conn.prepare("SELECT s.id,s.revision,a.selection_json,a.arrangement_json,s.name,s.pinned,s.slots_json FROM dashboards s JOIN dashboard_arrangements a ON a.repository_id=s.repository_id AND a.dashboard_id=s.id AND a.expression_key=s.expression_key WHERE s.repository_id=?1 ORDER BY s.id")?;
     let rows = statement.query_map([repository.as_str()], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -24,16 +25,18 @@ fn catalog_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<D
             row.get::<_, String>(3)?,
             row.get::<_, Option<String>>(4)?,
             row.get::<_, bool>(5)?,
+            row.get::<_, Option<String>>(6)?,
         ))
     })?;
     rows.map(|row| {
-        let (id, revision, selection, arrangement, name, pinned) = row?;
+        let (id, revision, selection, arrangement, name, pinned, slots) = row?;
         Ok(Dashboard {
             repository: repository.to_string(),
             id: DashboardId(id),
             revision,
             name,
             pinned,
+            slots: slots.as_deref().map(serde_json::from_str).transpose()?,
             selection: serde_json::from_str(&selection)?,
             arrangement: serde_json::from_str(&arrangement)?,
         })
@@ -168,19 +171,42 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             activity_known,
         });
     }
-    // Stable sorting retains rank/ID within each attention class.
+    // The person's Task order comes first; Tasks it does not name follow, waiting
+    // first. Stable sorting retains rank/ID within each attention class.
+    let order = task_order_in(conn, repository)?;
     work.sort_by_key(|item| match item.key.kind {
-        WorkWorkspaceKind::Task
-            if item.states.contains(&SelectionState::Available)
-                || item.states.contains(&SelectionState::Blocked) =>
-        {
-            0
+        WorkWorkspaceKind::Task => {
+            let waiting = item.states.contains(&SelectionState::Available)
+                || item.states.contains(&SelectionState::Blocked);
+            let position = order.iter().position(|id| id == &item.key.id);
+            (0, position.unwrap_or(usize::MAX), u8::from(!waiting))
         }
-        WorkWorkspaceKind::Task => 1,
-        WorkWorkspaceKind::Wave => 2,
-        WorkWorkspaceKind::Repository => 3,
+        WorkWorkspaceKind::Wave => (1, 0, 0),
+        WorkWorkspaceKind::Repository => (2, 0, 0),
     });
     Ok(work)
+}
+
+fn task_order_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<String>> {
+    let order: Option<String> = conn
+        .query_row(
+            "SELECT task_ids_json FROM task_orders WHERE repository_id=?1",
+            [repository.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(order
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()?
+        .unwrap_or_default())
+}
+
+fn repository_default() -> Selection {
+    Selection {
+        id: SelectionId("repository-default".into()),
+        expression: SelectionExpression::Repository,
+    }
 }
 
 fn resolve_in(
@@ -323,6 +349,9 @@ fn plan_in(
         resolution,
         projection: arrangement.project(),
         arrangement,
+        slots: saved
+            .and_then(|saved| saved.slots.clone())
+            .unwrap_or_else(SlotLayout::golden),
         contents,
     })
 }
@@ -336,10 +365,7 @@ impl SqliteStore {
     ) -> StoreResult<crate::work::selection::ViewPlan> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
-            None => Selection {
-                id: crate::work::selection::SelectionId("repository-default".into()),
-                expression: crate::work::selection::SelectionExpression::Repository,
-            },
+            None => repository_default(),
         };
         self.plan_selection(repository, selection)
     }
@@ -379,10 +405,7 @@ impl SqliteStore {
         let mut plans = vec![plan_in(
             &snapshot,
             repository,
-            Selection {
-                id: crate::work::selection::SelectionId("repository-default".into()),
-                expression: crate::work::selection::SelectionExpression::Repository,
-            },
+            repository_default(),
             None,
             &queries,
             &work,
@@ -525,6 +548,7 @@ impl SqliteStore {
             revision: expected_revision.unwrap_or(0) + 1,
             name: prior.as_ref().and_then(|saved| saved.name.clone()),
             pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
+            slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
             selection: selection.clone(),
             arrangement: arrangement.clone(),
         };
@@ -577,6 +601,71 @@ impl SqliteStore {
             .ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(saved)
+    }
+
+    /// Replace a Dashboard's slot layout; None restores the default.
+    pub fn set_dashboard_slots(
+        &self,
+        repository: &RepositoryId,
+        id: &DashboardId,
+        expected_revision: i64,
+        slots: Option<&SlotLayout>,
+    ) -> StoreResult<Dashboard> {
+        if let Some(slots) = slots {
+            slots.validate().map_err(StoreError::from)?;
+        }
+        let json = slots.map(serde_json::to_string).transpose()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute("UPDATE dashboards SET slots_json=?1,revision=revision+1 WHERE repository_id=?2 AND id=?3 AND revision=?4",
+            params![json,repository.as_str(),id.0,expected_revision])?;
+        if changed == 0 {
+            return Err(invalid("Dashboard changed; read it again before editing"));
+        }
+        let saved = catalog_in(&tx, repository)?
+            .into_iter()
+            .find(|saved| &saved.id == id)
+            .ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(saved)
+    }
+
+    /// Move a Working Tasks member to `to`'s place in the repository's one Task
+    /// order, which the sidebar and every grid read. Returns the written order.
+    pub fn reorder_task(
+        &self,
+        repository: &RepositoryId,
+        task: &str,
+        to: &str,
+    ) -> StoreResult<Vec<String>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = work_in(&tx, repository)?;
+        let resolution = repository_default()
+            .resolve(repository.as_str(), &work, &BTreeMap::new())
+            .map_err(StoreError::from)?;
+        let mut order: Vec<String> = Vec::new();
+        for member in resolution.members {
+            if member.work.kind == WorkWorkspaceKind::Task && !order.contains(&member.work.id) {
+                order.push(member.work.id);
+            }
+        }
+        let from = order
+            .iter()
+            .position(|id| id == task)
+            .ok_or(StoreError::NotFound)?;
+        let target = order
+            .iter()
+            .position(|id| id == to)
+            .ok_or(StoreError::NotFound)?;
+        let moved = order.remove(from);
+        order.insert(target, moved);
+        tx.execute(
+            "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
+            params![repository.as_str(), serde_json::to_string(&order)?],
+        )?;
+        tx.commit()?;
+        Ok(order)
     }
 
     pub fn delete_dashboard(
@@ -730,6 +819,134 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             2
+        );
+    }
+
+    fn task_order(plan: &crate::work::selection::ViewPlan) -> Vec<String> {
+        let mut order: Vec<String> = Vec::new();
+        for member in &plan.resolution.members {
+            if member.work.kind == WorkWorkspaceKind::Task && !order.contains(&member.work.id) {
+                order.push(member.work.id.clone());
+            }
+        }
+        order
+    }
+
+    #[test]
+    fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
+        let (_dir, store, repo) = fixture();
+        let (one, two, three) = (
+            "task_11111111111111111111111111111111",
+            "task_22222222222222222222222222222222",
+            "task_33333333333333333333333333333333",
+        );
+        assert_eq!(
+            task_order(&store.view_plan(&repo, None).unwrap()),
+            [one, two]
+        );
+        assert_eq!(store.reorder_task(&repo, two, one).unwrap(), [two, one]);
+        assert_eq!(
+            task_order(&store.view_plan(&repo, None).unwrap()),
+            [two, one]
+        );
+        let plans = store.selection_plans(&repo).unwrap();
+        let wave = plans
+            .iter()
+            .find(|plan| {
+                plan.selection.id.0.starts_with("wave-default:")
+                    && plan.resolution.members.len() > 1
+            })
+            .unwrap();
+        assert_eq!(task_order(wave), [two, one, three]);
+
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); UPDATE tasks SET started_at=2 WHERE id='{three}';"
+            ))
+            .unwrap();
+        assert_eq!(
+            task_order(&store.view_plan(&repo, None).unwrap()),
+            [two, one, three]
+        );
+        assert_eq!(
+            store.reorder_task(&repo, three, two).unwrap(),
+            [three, two, one]
+        );
+
+        let revisions = store.revisions().unwrap();
+        // A done Task is not a Working Tasks member; nothing is written.
+        assert!(store
+            .reorder_task(&repo, "task_44444444444444444444444444444444", one)
+            .is_err());
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert_eq!(
+            task_order(&store.view_plan(&repo, None).unwrap()),
+            [three, two, one]
+        );
+    }
+
+    #[test]
+    fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
+        use crate::work::selection::{ArrangementAxis, SlotLayout, SlotNode};
+        let (_dir, store, repo) = fixture();
+        assert_eq!(
+            store.view_plan(&repo, None).unwrap().slots,
+            SlotLayout::golden()
+        );
+        assert_eq!(SlotLayout::golden().slots().len(), 7);
+        let id = DashboardId("slots".into());
+        let saved = store
+            .edit_dashboard(&repo, &id, "state:open", None)
+            .unwrap();
+        assert_eq!(saved.slots, None);
+        let query = format!("query:{}", id.0);
+        assert_eq!(
+            store.view_plan(&repo, Some(&query)).unwrap().slots,
+            SlotLayout::golden()
+        );
+
+        let two = SlotLayout {
+            root: SlotNode::Split {
+                axis: ArrangementAxis::Vertical,
+                weights: vec![2.0, 1.0],
+                children: vec![SlotNode::Slot { slot: 1 }, SlotNode::Slot { slot: 0 }],
+            },
+        };
+        let arranged = store
+            .set_dashboard_slots(&repo, &id, saved.revision, Some(&two))
+            .unwrap();
+        assert_eq!(arranged.revision, saved.revision + 1);
+        assert_eq!(store.view_plan(&repo, Some(&query)).unwrap().slots, two);
+        let edited = store
+            .edit_dashboard(&repo, &id, "state:backlog", Some(arranged.revision))
+            .unwrap();
+        assert_eq!(edited.slots, Some(two.clone()));
+
+        let revisions = store.revisions().unwrap();
+        let duplicate = SlotLayout {
+            root: SlotNode::Split {
+                axis: ArrangementAxis::Vertical,
+                weights: vec![1.0, 1.0],
+                children: vec![SlotNode::Slot { slot: 0 }, SlotNode::Slot { slot: 0 }],
+            },
+        };
+        assert!(store
+            .set_dashboard_slots(&repo, &id, edited.revision, Some(&duplicate))
+            .is_err());
+        assert!(store
+            .set_dashboard_slots(&repo, &id, arranged.revision, None)
+            .is_err());
+        assert_eq!(store.revisions().unwrap(), revisions);
+        let reset = store
+            .set_dashboard_slots(&repo, &id, edited.revision, None)
+            .unwrap();
+        assert_eq!(reset.slots, None);
+        assert_eq!(
+            store.view_plan(&repo, Some(&query)).unwrap().slots,
+            SlotLayout::golden()
         );
     }
 

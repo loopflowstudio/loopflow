@@ -74,6 +74,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "arrange", id, "--revision", String(revision), "--json"], repoPath, input))
     }
 
+    /// Nil restores the default slot layout.
+    public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
+        let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
+        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "slots", id, "--revision", String(revision), "--json"], repoPath, input))
+    }
+
+    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
+    public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
+        try Self.decode([String].self, from: await run(["desktop", "order", "task:" + task, "--to", "task:" + target, "--json"], repoPath))
+    }
+
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
         try Self.decode(WorkPaneLayout?.self, from: await run(["desktop", "layout", work, "--json"], repoPath))
     }

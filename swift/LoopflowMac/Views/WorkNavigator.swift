@@ -185,6 +185,7 @@ struct WorkNavigator: View {
                 .allowsHitTesting(false)
         }
         .onHover { hoveredTask = $0 ? id : nil }
+        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarWaveID == nil ? model.workingTaskWorkID(row: id) : nil))
         .contextMenu {
             actions(for: id)
         }
@@ -500,5 +501,25 @@ private struct SidebarResponderCapture: NSViewRepresentable {
         weak var view: NSView?
         var monitor: Any?
         init(memory: SidebarResponderMemory) { self.memory = memory }
+    }
+}
+
+/// Working Tasks rows reorder the repository's one Task order by drag; Wave lists don't.
+private struct TaskOrderDragging: ViewModifier {
+    let model: WorkModel
+    let workID: String?
+
+    func body(content: Content) -> some View {
+        if let workID {
+            content
+                .draggable(TaskOrderDrag.token(workID))
+                .dropDestination(for: String.self) { values, _ in
+                    guard let task = values.first.flatMap(TaskOrderDrag.taskID), task != workID else { return false }
+                    Task { await model.reorderWorkingTask(task, to: workID) }
+                    return true
+                }
+        } else {
+            content
+        }
     }
 }

@@ -189,6 +189,8 @@ pub enum SelectionError {
     Membership,
     #[error("split ratio must be finite and between 0.1 and 0.9")]
     Ratio,
+    #[error("slot layout: {0}")]
+    Slots(String),
 }
 
 impl Selection {
@@ -653,6 +655,111 @@ impl Arrangement {
     }
 }
 
+/// A Dashboard page's fixed slots. Members fill slots by number, in order, and
+/// overflow to further pages; they never add, remove or resize slots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SlotLayout {
+    pub root: SlotNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SlotNode {
+    Slot {
+        slot: usize,
+    },
+    /// `vertical` places children side by side; `horizontal` stacks them.
+    Split {
+        axis: ArrangementAxis,
+        weights: Vec<f64>,
+        children: Vec<SlotNode>,
+    },
+}
+
+impl SlotLayout {
+    /// Jack Heart's default, October 20: (1 | (2 | 3)) over (1 | 2 | 3 | 4), golden
+    /// proportions. The top band takes 61.8% of the height, slot 1 61.8% of its width.
+    pub fn golden() -> Self {
+        const GOLDEN: f64 = 0.618;
+        let slot = |slot| SlotNode::Slot { slot };
+        Self {
+            root: SlotNode::Split {
+                axis: ArrangementAxis::Horizontal,
+                weights: vec![GOLDEN, 1.0 - GOLDEN],
+                children: vec![
+                    SlotNode::Split {
+                        axis: ArrangementAxis::Vertical,
+                        weights: vec![GOLDEN, 1.0 - GOLDEN],
+                        children: vec![
+                            slot(0),
+                            SlotNode::Split {
+                                axis: ArrangementAxis::Vertical,
+                                weights: vec![1.0, 1.0],
+                                children: vec![slot(1), slot(2)],
+                            },
+                        ],
+                    },
+                    SlotNode::Split {
+                        axis: ArrangementAxis::Vertical,
+                        weights: vec![1.0; 4],
+                        children: (3..7).map(slot).collect(),
+                    },
+                ],
+            },
+        }
+    }
+
+    pub fn slots(&self) -> Vec<usize> {
+        fn collect(node: &SlotNode, slots: &mut Vec<usize>) {
+            match node {
+                SlotNode::Slot { slot } => slots.push(*slot),
+                SlotNode::Split { children, .. } => {
+                    children.iter().for_each(|child| collect(child, slots))
+                }
+            }
+        }
+        let mut slots = Vec::new();
+        collect(&self.root, &mut slots);
+        slots
+    }
+
+    /// Slots are numbered 0..n exactly once; every split has two or more children
+    /// with one finite, positive weight each.
+    pub fn validate(&self) -> Result<(), SelectionError> {
+        fn check(node: &SlotNode) -> Result<(), SelectionError> {
+            let SlotNode::Split {
+                weights, children, ..
+            } = node
+            else {
+                return Ok(());
+            };
+            if children.len() < 2 || weights.len() != children.len() {
+                return Err(SelectionError::Slots(
+                    "each split needs two or more children and one weight per child".into(),
+                ));
+            }
+            if weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight <= 0.0)
+            {
+                return Err(SelectionError::Slots(
+                    "weights must be finite and positive".into(),
+                ));
+            }
+            children.iter().try_for_each(check)
+        }
+        check(&self.root)?;
+        let mut slots = self.slots();
+        slots.sort_unstable();
+        if slots.iter().enumerate().any(|(index, slot)| index != *slot) {
+            return Err(SelectionError::Slots(
+                "slots must be numbered 0..n, each exactly once".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// A custom view with its own identity; members reference existing Work workspaces.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Dashboard {
@@ -661,6 +768,8 @@ pub struct Dashboard {
     pub revision: i64,
     pub name: Option<String>,
     pub pinned: bool,
+    /// None keeps the default slot layout.
+    pub slots: Option<SlotLayout>,
     pub selection: Selection,
     pub arrangement: Arrangement,
 }
@@ -686,6 +795,8 @@ pub struct ViewPlan {
     pub resolution: SelectionResolution,
     pub arrangement: Arrangement,
     pub projection: ArrangementProjection,
+    /// The page geometry visible members fill, in projection order.
+    pub slots: SlotLayout,
     pub contents: Vec<ViewContent>,
 }
 

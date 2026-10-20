@@ -5,6 +5,7 @@ CREATE TABLE dashboards (
     expression_key TEXT NOT NULL,
     name TEXT,
     pinned INTEGER NOT NULL CHECK(pinned IN (0,1)),
+    slots_json TEXT CHECK(slots_json IS NULL OR json_valid(slots_json)),
     PRIMARY KEY(repository_id, id),
     FOREIGN KEY(repository_id, id, expression_key)
         REFERENCES dashboard_arrangements(repository_id, dashboard_id, expression_key)
@@ -26,6 +27,10 @@ CREATE TABLE work_pane_layouts (
     layout_json TEXT NOT NULL CHECK(json_valid(layout_json))
         CHECK((json_extract(layout_json, '$.revision') > 0) IS TRUE),
     PRIMARY KEY(repository_id, kind, work_id)
+);
+CREATE TABLE task_orders (
+    repository_id TEXT PRIMARY KEY REFERENCES repository_plans(id),
+    task_ids_json TEXT NOT NULL CHECK(json_valid(task_ids_json))
 );
 CREATE TRIGGER store_revision_dashboards_insert AFTER INSERT ON dashboards BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
@@ -52,5 +57,14 @@ CREATE TRIGGER store_revision_work_pane_layouts_update AFTER UPDATE ON work_pane
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
 END;
 CREATE TRIGGER store_revision_work_pane_layouts_delete AFTER DELETE ON work_pane_layouts BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;
+CREATE TRIGGER store_revision_task_orders_insert AFTER INSERT ON task_orders BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;
+CREATE TRIGGER store_revision_task_orders_update AFTER UPDATE ON task_orders BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;
+CREATE TRIGGER store_revision_task_orders_delete AFTER DELETE ON task_orders BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
 END;

@@ -600,6 +600,27 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 &arrangement,
             )?)?
         }
+        DesktopCommand::Slots {
+            query, revision, ..
+        } => {
+            let slots: Option<crate::work::selection::SlotLayout> =
+                serde_json::from_reader(std::io::stdin().lock())?;
+            serde_json::to_value(store.set_dashboard_slots(
+                &repository,
+                &dashboard_id(query),
+                *revision,
+                slots.as_ref(),
+            )?)?
+        }
+        DesktopCommand::Order { task, to, .. } => {
+            let task_id = |selector: &str| {
+                selector
+                    .strip_prefix("task:")
+                    .unwrap_or(selector)
+                    .to_string()
+            };
+            serde_json::to_value(store.reorder_task(&repository, &task_id(task), &task_id(to))?)?
+        }
         DesktopCommand::Layout {
             work, save: true, ..
         } => {
@@ -623,6 +644,8 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         | DesktopCommand::Unpin { .. }
         | DesktopCommand::Rename { .. }
         | DesktopCommand::Arrange { .. }
+        | DesktopCommand::Slots { .. }
+        | DesktopCommand::Order { .. }
         | DesktopCommand::Layout { .. } => {
             return saved_intent(cli, command).map_err(selection_failure)
         }
@@ -653,6 +676,8 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
         | DesktopCommand::Unpin { .. }
         | DesktopCommand::Rename { .. }
         | DesktopCommand::Arrange { .. }
+        | DesktopCommand::Slots { .. }
+        | DesktopCommand::Order { .. }
         | DesktopCommand::Layout { .. }
         | DesktopCommand::View { .. }
         | DesktopCommand::Query { .. }
@@ -800,6 +825,8 @@ impl DesktopInspection {
             | DesktopCommand::Unpin { .. }
             | DesktopCommand::Rename { .. }
             | DesktopCommand::Arrange { .. }
+            | DesktopCommand::Slots { .. }
+            | DesktopCommand::Order { .. }
             | DesktopCommand::Layout { .. }
             | DesktopCommand::View { .. }
             | DesktopCommand::Query { .. }

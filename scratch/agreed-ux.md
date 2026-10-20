@@ -106,5 +106,9 @@ Implemented: sidebar Dashboards › Working Tasks (`WorkNavigation.Destination.w
 shows the repository built-in plan's Tasks, in sidebar order, through
 `DashboardSlotLayout.golden` (`DashboardSlotGrid.swift`); 7 per page, ⌥⌘←/→ or the
 chevrons turn pages with a push transition; empty slots stay as dashed outlines.
-`FocusSizing` grows the focused tile in the grid and at every split of saved Dashboards,
-never writing saved ratios. Remaining work is in design.md.
+`FocusSizing` grows the focused tile at every split of any slot layout, never writing
+weights. Order: lfdb `task_orders` per repository, written by `lf desktop order task:A
+--to task:B` (A takes B's place); sidebar rows and grid tiles drag to it. Slots: Rust
+`SlotLayout` (golden default) on every plan; saved Dashboards store theirs in
+`dashboards.slots_json` via `lf desktop slots`, edited under Edit Slots (add beside/below,
+remove, drag to exchange places, Default Slots). Remaining work is in design.md.

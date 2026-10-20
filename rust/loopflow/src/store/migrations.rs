@@ -480,6 +480,18 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
         >(
             conn, "work_pane_layouts", "work_id", "layout_json"
         )?);
+        failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
+            conn,
+            "dashboards",
+            "id",
+            "slots_json",
+        )?);
+        failures.extend(validate_json_column::<Vec<String>>(
+            conn,
+            "task_orders",
+            "repository_id",
+            "task_ids_json",
+        )?);
     }
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name='krs')",

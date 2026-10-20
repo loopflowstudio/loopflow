@@ -1459,6 +1459,8 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
                 | loopflow::lf::DesktopCommand::Unpin { .. }
                 | loopflow::lf::DesktopCommand::Rename { .. }
                 | loopflow::lf::DesktopCommand::Arrange { .. }
+                | loopflow::lf::DesktopCommand::Slots { .. }
+                | loopflow::lf::DesktopCommand::Order { .. }
                 | loopflow::lf::DesktopCommand::Layout { .. }
         })
     ) {

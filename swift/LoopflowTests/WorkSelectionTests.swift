@@ -79,7 +79,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content]) -
         observedAt: 0, selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(tree: nil, hidden: [], mode: .auto),
-        projection: WorkArrangementProjection(visible: nil, suppressed: []), contents: members)
+        projection: WorkArrangementProjection(visible: nil, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)), contents: members)
 }
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: title,

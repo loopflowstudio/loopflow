@@ -23,26 +23,9 @@ enum FocusSizing {
     }
 }
 
-/// A Dashboard page's fixed slots as data. Tasks fill slots in order; they never
-/// add, remove or resize slots.
-struct DashboardSlotLayout: Equatable {
-    indirect enum Node: Equatable {
-        case slot(Int)
-        /// `.vertical` places children side by side; `.horizontal` stacks them.
-        case split(SplitAxis, [Double], [Node])
-    }
-
-    let root: Node
-
-    /// Jack Heart's default, October 20: (1 | (2 | 3)) over (1 | 2 | 3 | 4), golden
-    /// proportions — the top band takes 61.8% of the height, slot 1 61.8% of its width.
-    static let golden = DashboardSlotLayout(root: .split(.horizontal, [FocusSizing.golden, 1 - FocusSizing.golden], [
-        .split(.vertical, [FocusSizing.golden, 1 - FocusSizing.golden], [
-            .slot(0), .split(.vertical, [1, 1], [.slot(1), .slot(2)]),
-        ]),
-        .split(.vertical, [1, 1, 1, 1], [.slot(3), .slot(4), .slot(5), .slot(6)]),
-    ]))
-
+/// Page geometry and slot edits. Each edit keeps the slot count fixed until the
+/// person adds or removes a slot; Tasks never change it.
+extension DashboardSlotLayout {
     var count: Int { Self.slots(root).count }
 
     /// Members in order, one page per `count` slots; an empty list is one empty page.
@@ -73,6 +56,51 @@ struct DashboardSlotLayout: Equatable {
         return frames
     }
 
+    /// A new last slot beside `slot`. Along the parent's own axis it takes half of
+    /// `slot`'s share; across it, the two divide `slot`'s place.
+    func adding(beside slot: Int, axis: SplitAxis) -> Self {
+        let new = count
+        func add(_ node: Node) -> Node {
+            switch node {
+            case .slot(let index): return index == slot ? .split(axis, [1, 1], [node, .slot(new)]) : node
+            case .split(let along, var weights, var children):
+                if along == axis, let at = children.firstIndex(of: .slot(slot)) {
+                    weights[at] /= 2
+                    weights.insert(weights[at], at: at + 1)
+                    children.insert(.slot(new), at: at + 1)
+                    return .split(along, weights, children)
+                }
+                return .split(along, weights, children.map(add))
+            }
+        }
+        return Self(root: add(root))
+    }
+
+    /// Nil for the last slot: a page always has one. Later slots move up a place.
+    func removing(_ slot: Int) -> Self? {
+        guard count > 1 else { return nil }
+        func remove(_ node: Node) -> Node? {
+            switch node {
+            case .slot(let index): return index == slot ? nil : .slot(index > slot ? index - 1 : index)
+            case .split(let axis, let weights, let children):
+                let kept = zip(weights, children).compactMap { weight, child in remove(child).map { (weight, $0) } }
+                return kept.count == 1 ? kept[0].1 : .split(axis, kept.map(\.0), kept.map(\.1))
+            }
+        }
+        return remove(root).map(Self.init(root:))
+    }
+
+    /// Exchange two slots' places in fill order; geometry stays.
+    func swapping(_ a: Int, _ b: Int) -> Self {
+        func swap(_ node: Node) -> Node {
+            switch node {
+            case .slot(let index): return .slot(index == a ? b : index == b ? a : index)
+            case .split(let axis, let weights, let children): return .split(axis, weights, children.map(swap))
+            }
+        }
+        return Self(root: swap(root))
+    }
+
     private static func slots(_ node: Node) -> [Int] {
         switch node {
         case .slot(let index): [index]
@@ -81,11 +109,17 @@ struct DashboardSlotLayout: Equatable {
     }
 }
 
+/// Slot edits a saved Dashboard writes through its revisioned owner.
+struct DashboardSlotEditing {
+    let write: (DashboardSlotLayout) -> Void
+}
+
 /// Members fill the layout's slots in order; beyond one page they page side to side.
 struct DashboardSlotGrid<Tile: View>: View {
     let members: [WorkMemberRef]
     let focused: WorkWorkspaceKey?
     let layout: DashboardSlotLayout
+    var editing: DashboardSlotEditing?
     @ViewBuilder let tile: (WorkMemberRef) -> Tile
     @State private var page = 0
     @State private var forward = true
@@ -115,6 +149,7 @@ struct DashboardSlotGrid<Tile: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: members.count) { _, _ in page = min(page, layout.pages(members).count - 1) }
+        .onChange(of: layout.count) { _, _ in page = min(page, layout.pages(members).count - 1) }
     }
 
     private func turn(to target: Int) {
@@ -138,11 +173,40 @@ struct DashboardSlotGrid<Tile: View>: View {
                                 .accessibilityIdentifier("dashboard-empty-slot")
                         }
                     }
+                    .overlay { if let editing { slotControls(index, editing) } }
                     .frame(width: max(0, frame.width), height: max(0, frame.height))
                     .offset(x: frame.minX, y: frame.minY)
                 }
             }
             .animation(FocusSizing.animation, value: focus)
+            .animation(FocusSizing.animation, value: layout)
         }
+    }
+
+    /// Drag a slot onto another to exchange their places; split or remove in place.
+    private func slotControls(_ index: Int, _ editing: DashboardSlotEditing) -> some View {
+        VStack(spacing: 8) {
+            Text("Slot \(index + 1)").font(Typography.strong(13))
+            HStack(spacing: 12) {
+                Button { editing.write(layout.adding(beside: index, axis: .vertical)) } label: {
+                    Image(systemName: "rectangle.split.2x1")
+                }.help("Add a slot beside")
+                Button { editing.write(layout.adding(beside: index, axis: .horizontal)) } label: {
+                    Image(systemName: "rectangle.split.1x2")
+                }.help("Add a slot below")
+                Button { layout.removing(index).map(editing.write) } label: { Image(systemName: "minus.rectangle") }
+                    .help("Remove this slot").disabled(layout.count == 1)
+            }.buttonStyle(.plain)
+        }
+        .foregroundStyle(palette.text)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.surface.opacity(0.85), in: RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
+        .contentShape(Rectangle())
+        .draggable("slot:\(index)")
+        .dropDestination(for: String.self) { values, _ in
+            guard let value = values.first, value.hasPrefix("slot:"), let other = Int(value.dropFirst(5)), other != index else { return false }
+            editing.write(layout.swapping(index, other)); return true
+        }
+        .accessibilityIdentifier("dashboard-slot-\(index)")
     }
 }

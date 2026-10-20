@@ -63,23 +63,11 @@ supersede the October 17 correction.
   Dashboards are additional destinations and never replace those default surfaces.
   Task Shell/Files remain single tools with tabs. No Shell/Files tools at higher scopes.
 
-## Current prototype and integration direction
+## Prototype
 
-Jack Heart requested rebasing/integrating LOO-489 and rebuilding the UX prototype
-from its latest work on October 17. `scratch/query-view` now contains a local
-snapshot of 489’s Console study plus separate Dashboard composition. The full
-accepted navigation contract is copied into `scratch/navigation-console-contract.md`;
-source SHA256 hashes are in `scratch/query-view/source-manifest.json`.
-
-The revised study explores Dashboards below Waves, separate name/query editing,
-Task tiles referencing existing drafts/tools, drag-to-swap, split resize and
-hide/restore. Product watch demonstrates overlapping queries; explicit unstarted
-Tasks show briefs. The study adds no production lifecycle or query evaluator.
-These new Dashboard controls are reviewable proposals, not a completed native demo.
-
-The integrated Console source snapshot is preserved at `8d4f2d8ea1430fd41d946d328145ce87e26c7b7b:scratch/history/loo489-console-source-2026-10-17`.
-The original 497 work is checkpointed at `16c1b19c92`; committed Console ancestry
-is merged at `6e63af826e`. Snapshot changes are reconciled through existing owners.
+`scratch/query-view` snapshots LOO-489's Console study plus Dashboard composition
+(source hashes in `source-manifest.json`; contract in `navigation-console-contract.md`).
+History: `a21f32ff7c:scratch/design.md`.
 
 ## Owners and implemented boundary
 
@@ -162,6 +150,8 @@ reintroduce:
 - The repo-name chevron that opened Find Work, then the `This Mac ›` crumb and
   `WorkJumpScope.repositories` (October 19; jump bar and Machine control replace them).
 
+- Member-tree split resize (October 20): `DashboardSplit`, `resizing`, `node()` and
+  Swift's `DashboardSlotLayout.golden`; Rust `SlotLayout::golden` and plan `slots` replace them.
 - Visit-derived Working Tasks (October 20): `WorkNavigation.workingTaskIDs`/
   `retainWorkingTask`, `WorkModel.retainWorkingTask`, `WorkCache.saveWorkingTasks`
   and `Repository.workingTaskIDs`; the repository built-in plan replaces them.
@@ -187,13 +177,9 @@ The CLI result schema includes passive plans and live opening receipts.
 
 ## Reconciliation — October 19
 
-Baseline `0f08742fc4` (v0.14.8 release batch: structured IDs, `LfSessionId`).
-Its new Task-Project/repository trigger required `repository_id` in the
-`saved_selections` upgrade fixture; main's canonical-ID upgrade tests now apply
-build drafts before opening (`apply_build_drafts`), since a draft-bearing build
-refuses a release-only schema. Saved panes follow the Task's repository (LOO-505). Anonymous-query
-save-before-arrange (`questions.md`) remains an assumption, not accepted removal
-of arrangement parity.
+Baseline `0f08742fc4` (v0.14.8 batch). Upgrade tests apply build drafts before opening
+(`apply_build_drafts`); saved panes follow the Task's repository (LOO-505). Anonymous-query
+save-before-arrange remains an assumption (`questions.md`).
 
 Linear LOO-497 is retitled for Dashboards, but its acceptance body (still so on
 its October 19 05:41 revision) lists
@@ -202,10 +188,11 @@ to LOO-519 and removed; the body needs rewriting before review.
 
 ## Remaining implementation, verification and transport
 
-- Working Tasks Dashboard (agreed-ux.md §5): one Task order shared by the sidebar and
-  the grid, writable from both (needs a persisted order for the repository plan);
-  adding/rearranging slots on saved Dashboards with a fixed slot count; demo checks of
-  golden geometry, focus growth, page turns and terminal behavior during animation.
+- Demo checks (agreed-ux.md §5): golden geometry, focus growth, page turns, drag
+  reorder in sidebar and grid, slot editing, terminal behavior during animation.
+- Saved Dashboards now render through slots, so `ArrangementTree` axes/ratios no longer
+  shape native geometry; they remain only as occurrence order. Collapsing the tree to an
+  ordered occurrence list (Rust, CLI `arrange`, fixtures) awaits Jack's call (questions.md).
 
 - Demo preparation: #1612 draft-copy builds and `lf-world` fixtures are merged here;
   the CLI↔native targeting gap remains ([desktop-dashboard-demo.md](desktop-dashboard-demo.md)).
@@ -232,7 +219,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 20, slot grid): `cargo test -p loopflow --lib -- lf::commands::waves store::sqlite::selections store::sqlite::chapters ops::chapter` 41 passed, clippy clean; `swift test --filter 'WorkNavigationTests|DashboardWorkspaceTests|TaskRowMetadataTests|WorkSelectionTests|ThemeWorkflowTests|WorkModelTests'` 96 passed. Native and broader suites stay gate-owned.
+Check (October 20, order + slots): `cargo test --lib -- store::sqlite::selections work::selection lf::commands::desktop store::migrations` 162 passed, `--test integration dto_fixtures` 44 passed, clippy clean; `swift test --filter 'DashboardWorkspaceTests|WorkSelectionTests|WorkNavigationTests|WorkModelTests|TaskRowMetadataTests|ThemeWorkflowTests'` 98 passed. Native and broader suites stay gate-owned.
 
 ## History
 

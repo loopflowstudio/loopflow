@@ -79,6 +79,7 @@ struct DashboardView: View {
     let workspaces: SessionsWorkspaceRegistry
     let sessions: SessionsStore
     @State private var editing = false
+    @State private var editingSlots = false
     @Environment(\.palette) private var palette
     var body: some View {
         VStack(spacing: 8) {
@@ -92,6 +93,13 @@ struct DashboardView: View {
                     }
                     Spacer()
                     if !workingTasks {
+                        if plan.dashboardID != nil {
+                            if editingSlots {
+                                Button("Default Slots") { writeSlots(plan, nil) }.disabled(model.dashboardSaving)
+                            }
+                            Button(editingSlots ? "Done" : "Edit Slots") { editingSlots.toggle() }
+                                .accessibilityIdentifier("dashboard-edit-slots")
+                        }
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
                 }.padding(10)
@@ -105,14 +113,12 @@ struct DashboardView: View {
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
                 }
-                if workingTasks {
-                    DashboardSlotGrid(members: model.workingTaskMembers, focused: workspaces.selectedWork,
-                                      layout: .golden) { tile($0, plan: plan) }
-                } else if let tree = plan.projection.visible { node(tree, plan: plan) }
-                else {
-                    ContentUnavailableView("No visible Work", systemImage: "rectangle.split.2x2")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                // Working Tasks fill in the shared Task order; a saved Dashboard's
+                // visible occurrences fill in its arrangement order.
+                DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible?.members ?? [],
+                                  focused: workspaces.selectedWork, layout: plan.slots,
+                                  editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
+                                      ? DashboardSlotEditing { writeSlots(plan, $0) } : nil) { tile($0, plan: plan) }
                 if !plan.arrangement.hidden.isEmpty {
                     HStack {
                         Text("Hidden")
@@ -133,25 +139,14 @@ struct DashboardView: View {
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) { DashboardEditor(model: model, plan: model.selectedViewPlan) }
+            .onChange(of: model.navigation.dashboardID) { _, _ in editingSlots = false }
     }
 
     private var workingTasks: Bool { model.navigation.destination == .workingTasks }
 
-    private func node(_ tree: WorkArrangementTree, plan: WorkViewPlan) -> AnyView {
-        switch tree {
-        case .member(let member):
-            return AnyView(tile(member, plan: plan).id(member.work))
-        case .split(let axis, let ratio, let first, let second):
-            let focused = workspaces.selectedWork
-            let side = focused.flatMap { work in
-                first.contains { $0.work == work } ? 0 : second.contains { $0.work == work } ? 1 : nil
-            }
-            return AnyView(DashboardSplit(axis: axis, ratio: ratio, focusedSide: side,
-                first: node(first, plan: plan), second: node(second, plan: plan), saving: model.dashboardSaving) { value in
-                    let updated = plan.arrangement.tree?.resizing(first: first.firstMember, second: second.firstMember, ratio: value)
-                    save(plan, tree: updated)
-                })
-        }
+    private func writeSlots(_ plan: WorkViewPlan, _ slots: DashboardSlotLayout?) {
+        guard let id = plan.dashboardID, let revision = plan.savedRevision else { return }
+        Task { await model.setDashboardSlots(id, slots: slots, revision: revision) }
     }
 
     private func tile(_ member: WorkMemberRef, plan: WorkViewPlan) -> some View {
@@ -179,9 +174,13 @@ struct DashboardView: View {
                 }
             }.padding(8).background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)
-                .draggable(member.token)
+                .draggable(workingTasks ? TaskOrderDrag.token(member.work.id) : member.token)
                 .dropDestination(for: String.self) { values, _ in
-                    guard arrangeable, !model.dashboardSaving, let other = plan.resolution.members.first(where: { $0.token == values.first }), other != member else { return false }
+                    guard let value = values.first else { return false }
+                    if workingTasks, let task = TaskOrderDrag.taskID(value) {
+                        Task { await model.reorderWorkingTask(task, to: member.work.id) }; return true
+                    }
+                    guard arrangeable, !model.dashboardSaving, let other = plan.resolution.members.first(where: { $0.token == value }), other != member else { return false }
                     save(plan, tree: plan.arrangement.tree?.swapping(member, other)); return true
                 }
             if let entry, let content {
@@ -228,28 +227,14 @@ extension WorkMemberRef {
     fileprivate var token: String { String(decoding: (try? JSONEncoder().encode(self)) ?? Data(), as: UTF8.self) }
 }
 extension WorkArrangementTree {
-    fileprivate var firstMember: WorkMemberRef {
-        switch self { case .member(let ref): ref; case .split(_, _, let first, _): first.firstMember }
+    fileprivate var members: [WorkMemberRef] {
+        switch self { case .member(let ref): [ref]; case .split(_, _, let first, let second): first.members + second.members }
     }
     fileprivate func swapping(_ a: WorkMemberRef, _ b: WorkMemberRef) -> Self {
         switch self {
         case .member(let ref): return .member(ref == a ? b : ref == b ? a : ref)
         case .split(let axis, let ratio, let first, let second):
             return .split(axis: axis, ratio: ratio, first: first.swapping(a, b), second: second.swapping(a, b))
-        }
-    }
-    fileprivate func contains(where match: (WorkMemberRef) -> Bool) -> Bool {
-        switch self {
-        case .member(let ref): match(ref)
-        case .split(_, _, let first, let second): first.contains(where: match) || second.contains(where: match)
-        }
-    }
-    fileprivate func resizing(first a: WorkMemberRef, second b: WorkMemberRef, ratio: Double) -> Self {
-        switch self {
-        case .member: return self
-        case .split(let axis, let old, let first, let second):
-            return .split(axis: axis, ratio: first.contains { $0 == a } && second.contains { $0 == b } ? ratio : old,
-                first: first.resizing(first: a, second: b, ratio: ratio), second: second.resizing(first: a, second: b, ratio: ratio))
         }
     }
 }
@@ -272,36 +257,6 @@ extension WorkSelection {
             case .kind(let kind): return "kind:" + kind.rawValue
             case .state(let state): return "state:" + state.rawValue
             }
-        }
-    }
-}
-
-
-private struct DashboardSplit: View {
-    let axis: SplitAxis
-    let ratio: Double
-    /// 0 or 1 when focus lies in that branch; focus never rewrites `ratio`.
-    let focusedSide: Int?
-    let first: AnyView
-    let second: AnyView
-    let saving: Bool
-    let commit: (Double) -> Void
-    @State private var dragRatio: Double?
-    var body: some View {
-        GeometryReader { geometry in
-            let vertical = axis == .vertical
-            let extent = vertical ? geometry.size.width : geometry.size.height
-            let sizing = SplitSizing(extent: extent, firstMinimum: 180, secondMinimum: 180)
-            let displayed = sizing.constrain(dragRatio ?? FocusSizing.shares([ratio, 1 - ratio], focused: focusedSide)[0])
-            let stack = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-            stack {
-                first.frame(width: vertical ? max(0, extent * displayed - sizing.divider / 2) : nil,
-                            height: vertical ? nil : max(0, extent * displayed - sizing.divider / 2))
-                SplitDivider(axis: axis, ratio: displayed, sizing: sizing, update: { dragRatio = $0 },
-                    commit: { value in commit(value); dragRatio = nil }).disabled(saving)
-                second
-            }
-            .animation(FocusSizing.animation, value: focusedSide)
         }
     }
 }

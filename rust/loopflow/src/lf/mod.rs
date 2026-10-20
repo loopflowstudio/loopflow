@@ -655,6 +655,24 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+    Slots {
+        query: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a Working Tasks member into another's place in the repository's Task order
+    Order {
+        /// task:<durable-id> to move
+        task: String,
+        /// task:<durable-id> whose place it takes
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read portable pane intent, or save a complete revision-checked record from stdin
     Layout {
         work: String,

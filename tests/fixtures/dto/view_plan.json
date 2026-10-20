@@ -162,5 +162,25 @@
     }
   ],
   "name": null,
-  "pinned": false
+  "pinned": false,
+  "slots": {
+    "root": {
+      "kind": "split",
+      "axis": "vertical",
+      "weights": [
+        2.0,
+        1.0
+      ],
+      "children": [
+        {
+          "kind": "slot",
+          "slot": 1
+        },
+        {
+          "kind": "slot",
+          "slot": 0
+        }
+      ]
+    }
+  }
 }

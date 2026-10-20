@@ -2448,6 +2448,38 @@ extension WorkModel {
         } catch { dashboardError = error.localizedDescription }
     }
 
+    func setDashboardSlots(_ id: String, slots: DashboardSlotLayout?, revision: Int64) async {
+        guard !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            _ = try await query.saveDashboardSlots(id: id, slots: slots, revision: revision, repoPath: repoPath)
+            try await refreshDashboard(id, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    /// The sidebar and the Working Tasks grid write the same order; both read the
+    /// repository plan, so each shows the other's move.
+    func reorderWorkingTask(_ task: String, to target: String) async {
+        guard task != target, let repoPath else { return }
+        dashboardError = nil
+        do {
+            _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
+            let plan = try await query.viewPlan(expression: nil, repoPath: repoPath)
+            guard self.repoPath == repoPath else { return }
+            var plans = selectionPlans.value ?? []
+            plans.removeAll { $0.dashboardID == nil && $0.selection.expression == .repository }
+            plans.insert(plan, at: 0)
+            applySelectionPlans(plans, reason: "")
+        } catch { dashboardError = error.localizedDescription }
+    }
+
+    /// The Working Tasks member a sidebar row shows; rows may use the planning ID.
+    func workingTaskWorkID(row id: String) -> String? {
+        workingTaskMembers.first { (task(id: $0.work.id)?.task.id ?? $0.work.id) == id }?.work.id
+    }
+
     private func refreshDashboard(_ id: String, repoPath: String) async throws {
         let plan = try await query.viewPlan(expression: "query:" + id, repoPath: repoPath)
         guard self.repoPath == repoPath else { return }
@@ -2504,5 +2536,13 @@ extension WorkModel {
             dashboardError = error.localizedDescription
             selectionOpening = DesktopOpening(url: link, status: .failed, reason: error.localizedDescription)
         }
+    }
+}
+
+/// Drag payload for moving a Task in the shared Working Tasks order.
+enum TaskOrderDrag {
+    static func token(_ workID: String) -> String { "task-order:" + workID }
+    static func taskID(_ token: String) -> String? {
+        token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
     }
 }

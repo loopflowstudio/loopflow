@@ -9,7 +9,7 @@ import Testing
 struct DashboardWorkspaceTests {
     @Test func goldenSlotsMatchJacksLayoutAndFocusGrowsInPlace() {
         let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
-        let layout = DashboardSlotLayout.golden
+        let layout = Self.golden
         #expect(layout.count == 7)
         let base = layout.frames(in: bounds, focus: nil)
         #expect(abs(base[0]!.width - 618) < 0.5 && abs(base[0]!.height - 618) < 0.5)
@@ -24,12 +24,80 @@ struct DashboardWorkspaceTests {
         #expect(FocusSizing.shares([0.7, 0.3], focused: 1) == [1 - FocusSizing.golden, FocusSizing.golden])
     }
 
+    /// Rust's `SlotLayout::golden`, as every built-in plan reports it.
+    static let golden = DashboardSlotLayout(root: .split(.horizontal, [0.618, 0.382], [
+        .split(.vertical, [0.618, 0.382], [.slot(0), .split(.vertical, [1, 1], [.slot(1), .slot(2)])]),
+        .split(.vertical, [1, 1, 1, 1], [.slot(3), .slot(4), .slot(5), .slot(6)]),
+    ]))
+
+    @Test func editedSlotsKeepAFixedCountAndFocusStillGrowsInPlace() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        let added = Self.golden.adding(beside: 6, axis: .vertical)
+        #expect(added.count == 8)
+        let base = added.frames(in: bounds, focus: nil)
+        // Along the bottom band's own axis the new slot halves slot 7's column.
+        #expect(abs(base[6]!.width - 125) < 0.5 && abs(base[7]!.width - 125) < 0.5 && base[7]!.minX == base[6]!.maxX)
+        let below = added.adding(beside: 0, axis: .horizontal)
+        #expect(below.count == 9)
+        #expect(abs(below.frames(in: bounds, focus: nil)[8]!.minY - 309) < 0.5)
+        // Focus on an arbitrary edited arrangement takes the golden share at each split on its path.
+        let focused = below.frames(in: bounds, focus: 8)
+        #expect(abs(focused[8]!.height - 618 * 0.618) < 0.5 && abs(focused[8]!.width - 618) < 0.5)
+
+        let removed = try #require(below.removing(1))
+        #expect(removed.count == 8)
+        #expect(Set(removed.frames(in: bounds, focus: nil).keys) == Set(0..<8))
+        let swapped = Self.golden.swapping(0, 6)
+        #expect(swapped.count == 7)
+        #expect(swapped.frames(in: bounds, focus: nil)[6] == Self.golden.frames(in: bounds, focus: nil)[0])
+        let single = DashboardSlotLayout(root: .slot(0))
+        #expect(single.removing(0) == nil)
+        // Members past the slot count page; they never add slots.
+        let members = (0..<9).map { WorkMemberRef(source: ["repo"], work: .init(repository: "repo", kind: .task, id: "t\($0)")) }
+        #expect(added.pages(members).map(\.count) == [8, 1])
+        let encoded = try JSONEncoder().encode(below)
+        #expect(try JSONDecoder().decode(DashboardSlotLayout.self, from: encoded) == below)
+    }
+
+    @Test func sidebarAndGridShareTheOrderTheRustWriterReturns() async throws {
+        let ids = ["task_a", "task_b", "task_c"]
+        func plan(_ order: [String]) throws -> String {
+            var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
+            json["dashboard_id"] = NSNull()
+            json["saved_revision"] = NSNull()
+            json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
+            var resolution = try #require(json["resolution"] as? [String: Any])
+            resolution["members"] = order.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
+            json["resolution"] = resolution
+            return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        }
+        let initial = try plan(ids)
+        let moved = try plan(["task_c", "task_a", "task_b"])
+        let query = RegistryQuery { args, _ in
+            switch args {
+            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--json"]: return #"["task_c","task_a","task_b"]"#
+            case ["desktop", "view", "--plan", "--json"]: return moved
+            default: throw RegistryQueryError("Unexpected command \(args)")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
+        #expect(model.workingTaskIDs == ids)
+        // A sidebar row drop and a grid tile drop both name Work IDs.
+        let row = try #require(model.workingTaskWorkID(row: "task_c"))
+        let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token(row)))
+        await model.reorderWorkingTask(dragged, to: "task_a")
+        #expect(model.dashboardError == nil)
+        #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
+        #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
+    }
+
     @Test func slotPagesHoldSevenTasksInOrder() {
         let members = (0..<9).map { WorkMemberRef(source: ["repo"], work: .init(repository: "repo", kind: .task, id: "t\($0)")) }
-        let pages = DashboardSlotLayout.golden.pages(members)
+        let pages = Self.golden.pages(members)
         #expect(pages.map { $0.count } == [7, 2])
         #expect(pages.flatMap { $0 } == members)
-        #expect(DashboardSlotLayout.golden.pages([]) == [[]])
+        #expect(Self.golden.pages([]) == [[]])
     }
 
     @Test func dashboardsReuseWorkAndKeepRepositoryNavigation() throws {
@@ -85,7 +153,7 @@ struct DashboardWorkspaceTests {
             observedAt: 0, selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(tree: tree, hidden: [], mode: .touched),
-            projection: WorkArrangementProjection(visible: tree, suppressed: []),
+            projection: WorkArrangementProjection(visible: tree, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
             contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)

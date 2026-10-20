@@ -2767,7 +2767,9 @@ mod tests {
         let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let observed_at = task.created_at - time::Duration::SECOND;
-        let settled_at = task.created_at + time::Duration::SECOND;
+        // The steer below is stamped with wall time; a loaded runner can take
+        // seconds to reach it, so the incident stays open well past that.
+        let settled_at = task.created_at + time::Duration::HOUR;
         store
             .observe_ci_incident(&CiIncident {
                 identity: "human-help-proof".to_string(),

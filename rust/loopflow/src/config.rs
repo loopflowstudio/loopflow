@@ -440,6 +440,13 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
         LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
+    if value.get("linear").is_some() {
+        return Err(LoadError::InvalidFlow(format!(
+            "{}: `linear.team` moved to `planning.team`; replace the `linear:` block \
+             with `planning: {{provider: linear, team: <team-id>}}`",
+            path.display()
+        )));
+    }
     Ok(Some(value))
 }
 
@@ -661,6 +668,19 @@ mod tests {
         let (harness, model) = parse_agent("custom:model-v2");
         assert_eq!(harness, "custom");
         assert_eq!(model, Some("model-v2".to_string()));
+    }
+
+    #[test]
+    fn repo_config_with_linear_block_names_the_move() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(temp.path().join(".lf")).expect("create .lf dir");
+        std::fs::write(
+            temp.path().join(".lf/config.yaml"),
+            "planning:\n  provider: linear\nlinear:\n  team: team-loo\n",
+        )
+        .expect("write config");
+        let error = load_repo_config(temp.path()).unwrap_err().to_string();
+        assert!(error.contains("moved to `planning.team`"), "{error}");
     }
 
     #[test]

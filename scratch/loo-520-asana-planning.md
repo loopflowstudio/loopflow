@@ -204,6 +204,9 @@ after 43a1f85ce3.
   Live: Asana rich text stored exactly; Notion client create/body/edit/status/archive
   passed (links gain a `/` after the host once). clippy clean. Broader suites → gate. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.
 
+- 2026-10-20 after merging main: clippy clean; `cargo test --lib -- work_watch status_tests asana_planning notion_planning` 58 passed; touched integration suites 116 passed after the DTO label fix.
+- Landing: manabot and fantasia commit `linear: team:`; the new lf names the move and refuses those configs until they say `planning: {provider: linear, team}`. Deploy lf right after landing.
+
 ## Wave Projects in Asana and Notion (implemented 2026-10-20)
 
 - A Wave's Projects scope to the team: `planning_client::wave_scope` is the Linear

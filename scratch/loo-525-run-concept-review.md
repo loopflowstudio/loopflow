@@ -78,7 +78,9 @@ commit 7f77629862.
 
 ## Scope
 
-In: the two flow YAMLs, concept-review.md, the two Rust tests, the prose above.
+In: the two flow YAMLs, concept-review.md, the two Rust tests, the prose above
+(`docs/authoring.md`, `launch-plan.md`), and the pursue YAML shown on
+`website/home.html` (hand-authored, not generated).
 Out: runner/compiler changes; `ship`, workflows (`code`, `feature`) — they
 reference `pursue` by name and inherit the change; LOO-521 (PR #1608).
 
@@ -99,3 +101,11 @@ reference `pursue` by name and inherit the change; LOO-521 (PR #1608).
   fmt/clippy clean; `lf flow show pursue` (LF_HOME isolated, past the installed
   entry gate) lists the eight steps. Also updated
   `builtin_flows_keep_their_delivery_boundaries_without_review_steps` (returns 2).
+- realign (2026-10-19): `website/home.html` pursue listing updated; no build/test
+  needed (static HTML, no website test references it). Headless `lf flow pursue`
+  behavior (iterate / advance / Blocked) is demo-owned, not yet observed.
+
+## Proposed Wave memory (not written; realign ran outside a memory-curating Flow)
+
+- A plain skill step in a Flow cannot return Blocked; it records the open
+  choice in the working design and the following `loop-or-next` blocks on it.

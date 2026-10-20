@@ -41,8 +41,9 @@ struct WaveTaskGroups {
     let notStarted: [RoadmapTask]
 
     init(_ tasks: [RoadmapTask], now: Date) {
+        let filter = TaskHistoryFilter()
         let current = tasks.sorted { $0.task.rank < $1.task.rank }
-            .filter { TaskHistoryFilter().includes($0.task, condition: $0.condition, now: now) }
+            .filter { filter.includes($0.task, condition: $0.condition, now: now) }
         started = current.filter { $0.runtime?.started == true }
         notStarted = current.filter { $0.runtime?.started != true }
     }

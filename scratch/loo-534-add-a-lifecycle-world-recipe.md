@@ -1,6 +1,6 @@
 # LOO-534: lifecycle world recipe
 
-Status: implemented and reconciled (2026-10-20); gate pending. Jack Heart requested this as an
+Status: implemented, reconciled and gated (2026-10-20). Jack Heart requested this as an
 autonomous follow-up to lf-world (#1612) on 2026-10-20.
 
 ## Problem
@@ -97,14 +97,12 @@ holds and the rung could not fire; an unstarted canceled Task is not modeled.
 
 ### Desktop fix
 
-Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks, filter and
-`now`, it returns Started / Not started (current: `filter.includes` with
-completion off) and Completed (successful terminal Tasks the filter admits when
-`showCompleted` is on). `WaveTaskInventory` renders those groups with the
-existing `TaskHistoryControls` beside the heading. `@State` holds the filter for
-each inventory instance, as `WaveDetailPane` does. Product memory says "A Wave
-pairs its conversation with all current planned and started Tasks", so this
-restores #1403's accepted behavior in the live surface.
+Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks and `now`, it
+returns current Started / Not started Tasks by rank (`TaskHistoryFilter`'s
+default, completion off). `WaveTaskInventory` renders those groups with no
+history control, keeping #1594's assertion; completed history stays behind
+Project history. Product memory: "A Wave pairs its conversation with all
+current planned and started Tasks".
 
 ### Sidebar coverage
 
@@ -140,10 +138,11 @@ it. The tension with the brief is recorded in `scratch/questions.md`.
    world with `target/debug/lf-world`, opens `WorkModel` with a `RegistryQuery`
    running `target/debug/lf` under the world env (the `WorkCLIFixture` pattern),
    and asserts:
-   - `WaveTaskGroups` default: completed/abandoned absent; paused, canceled
+   - `WaveTaskGroups`: completed/abandoned absent; paused, canceled
      upstream, lost checkout and in-progress under Started; Not started holds the
      unstarted Task;
-   - Completed at 7 → 2 rows, 30 → 3, 0 → 4; never abandoned/canceled;
+   - `TaskHistoryFilter` over the settled world rows admits 7 → 2, 30 → 3,
+     0 → 4 completions; never abandoned/canceled;
    - `visibleWork.standaloneTasks` holds both standalone Tasks;
    - after `select(.task)` on a completed, abandoned, in-progress and paused
      Task, `workingTaskIDs` contains the first three and excludes the paused one.
@@ -209,4 +208,6 @@ the built world, not hand-written rows.
 Kickoff: portfolio world reproduced `88a613` done with `condition.state=waiting`.
 `cargo test -p loopflow --test integration world_recipes`: passed 2/2; fmt, clippy passed (publish).
 `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests|WaveDetail'`: 50 passed (publish). Full Swift suite: gate/CI.
+Gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `world_recipes` 2/2, `commands::waves` 19/19, integration `wave` 15/15: passed.
+Gate: `scripts/test_desktop.sh -Xswiftc -gnone`: 615/616; `ProgramStatusTests` "later status event recovers an exited observer" missed its 5 s deadline by 2 ms under full-suite load, passed on rerun with `LifecycleWorldTests` (14/14). Untouched by this branch.
 Publish revision: inventory is current-only with no history control (#1594's assertion); completed ranges are proved on `TaskHistoryFilter` over world rows.

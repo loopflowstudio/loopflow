@@ -11,6 +11,7 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py record --sec
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-recording
 
 # Compare native workspace journeys on the same host and build mode.
+cargo build -p loopflow --bin lf --bin lf-world
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-baseline
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after --baseline /tmp/desktop-baseline
 ```
@@ -51,6 +52,10 @@ uv run python scripts/desktop_performance.py report /tmp/task-before
 startup reads against copied state. `--built` reuses its bundle; `--home` selects
 a prior private fixture. Native launches need a display host. `startup.py`
 replays captured reader responses without a display and makes no rendering claim.
+
+The owned Task and Session come from an `lf-world` one-task world built by the
+`lf-world` beside `--cli`/`--lf`; its stub `claude` resumes the world transcript
+and echoes input, so no account or network is involved.
 
 Workspace journeys use mounted controls, bitmap capture and text recognition.
 They cover hierarchy interactions, retained panes, Task details and file editing.

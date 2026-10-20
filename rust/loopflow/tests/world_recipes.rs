@@ -41,19 +41,17 @@ fn build(recipe: &str) -> (tempfile::TempDir, std::path::PathBuf, Value) {
     (root, world, env)
 }
 
-fn lf(root: &Path, world: &Path, env: &Value, args: &[&str]) -> Value {
+fn world_lf(root: &Path, world: &Path, env: &Value, args: &[&str]) -> Command {
     let mut command = clean(env!("CARGO_BIN_EXE_lf"), root);
     for (name, value) in env.as_object().unwrap() {
         command.env(name, value.as_str().unwrap());
     }
-    serde_json::from_str(&success(
-        command
-            .current_dir(world.join("repo"))
-            .args(args)
-            .output()
-            .unwrap(),
-    ))
-    .unwrap()
+    command.current_dir(world.join("repo")).args(args);
+    command
+}
+
+fn lf(root: &Path, world: &Path, env: &Value, args: &[&str]) -> Value {
+    serde_json::from_str(&success(world_lf(root, world, env, args).output().unwrap())).unwrap()
 }
 
 #[test]
@@ -85,4 +83,26 @@ fn every_recipe_builds_a_world_lf_reads() {
             "{recipe} has no Sessions"
         );
     }
+}
+
+#[test]
+fn world_sessions_resume_live_through_the_stub_provider() {
+    let (root, world, env) = build("one-task");
+    let sessions = lf(
+        root.path(),
+        &world,
+        &env,
+        &["session", "list", "--json", "--all"],
+    );
+    let id = sessions[0]["id"].as_str().unwrap();
+    let mut connect = world_lf(root.path(), &world, &env, &["session", "connect", id])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(connect.stdin.as_mut().unwrap(), b"hello world\nquit\n").unwrap();
+    let output = success(connect.wait_with_output().unwrap());
+    assert!(output.contains("resumed "), "{output}");
+    assert!(output.contains(": hello world"), "{output}");
 }

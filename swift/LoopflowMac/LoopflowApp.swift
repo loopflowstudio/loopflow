@@ -39,7 +39,7 @@ struct LoopflowApp: App {
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
         // A reboot leaves interrupted Sessions behind; bring them all back unasked.
-        if AppTestMode.current() == nil, SessionFixture.query == nil {
+        if AppTestMode.current() == nil {
             Task.detached(priority: .utility) {
                 do {
                     try await RegistryQueryLocal.shared.resumeInterrupted()

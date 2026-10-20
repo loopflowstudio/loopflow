@@ -353,9 +353,18 @@ impl Selection {
                             if in_scope && item.open.is_none() {
                                 result
                                     .unavailable
-                                    .push(format!("Task {} state is unavailable", item.key.id));
+                                    .push(format!("Task {} state is unavailable", item.name));
                             }
-                            in_scope && item.open == Some(true)
+                            // The repository lists started work; a Wave lists all its
+                            // uncompleted Tasks, so unstarted ones can offer Start.
+                            in_scope
+                                && match wave {
+                                    None => item.open == Some(true),
+                                    Some(_) => {
+                                        item.open.is_some()
+                                            && !item.states.contains(&SelectionState::Done)
+                                    }
+                                }
                         }
                     };
                     if included {

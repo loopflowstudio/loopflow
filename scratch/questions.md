@@ -42,3 +42,9 @@ after repository and Wave). `TaskWorkflowHeader` has no production caller on `ma
 its deletion belongs to that header's owner. Machine control choices beyond Jack
 Heart's direction (local “This Mac” label, no reachability, no control on repository
 or Dashboard views) are flagged in agreed-ux.md §3.
+
+October 20 assumptions (agreed-ux.md §4): lfdb records no starter, so every Task
+this store records as started (any Machine, via `tasks.started_at`) counts as
+Jack's. Paused Tasks stay in Working Tasks, superseding the October 17 Console
+rule. The Wave sidebar/built-in plan lists uncompleted Tasks, unstarted included,
+plus child Waves. Flag for demo: plan order (waiting first) moves ⌘1–9 positions.

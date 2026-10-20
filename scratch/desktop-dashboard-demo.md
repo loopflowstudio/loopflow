@@ -30,9 +30,19 @@ Observed (Jack Heart's screenshots):
    unavailable”. Cause: `selections.rs` marks a Task's activity unknown when any
    uncompleted Session has `ProcessIdentityEvidence::Unknown`; real history has many
    never-completed Sessions. Defects: stale Sessions poison activity, and `unavailable`
-   is rendered as raw IDs instead of one summary. Applies to real data. Not fixed.
-3. Working Tasks still 0 after the fix. Unconfirmed: the private home may be a
-   different Machine, so no started Task is local. Needs checking before judging.
-4. LOO-426 (Unstarted) tile shows an empty box, not the Start offer. Not diagnosed.
+   is rendered as raw IDs instead of one summary. Applies to real data.
+   Fixed October 20: Jack's lfdb had 100 uncompleted Sessions whose agent Process had
+   no OS identity, all begun before the last boot, plus 12 never attached. A restart
+   now proves such a Process dead (`agent_process_evidence` `began_at`); unattached
+   Sessions no longer hide activity; messages name the Task (`FIX-2`), and a Dashboard
+   shows one line (`+N more`, all reasons in help).
+3. Working Tasks still 0 after the fix. Superseded October 20: Working Tasks is now
+   the repository plan's started Tasks (agreed-ux.md §4), not visits.
+4. LOO-426 (Unstarted) tile shows an empty box, not the Start offer. Likely cause,
+   not reproduced: planning refresh had failed (finding 1), so Swift showed saved
+   planning in which LOO-426 was unstarted (it started October 18 per Jack's lfdb),
+   and the 24-line wall squeezed the tile's offer out of view. October 20: the tile's
+   Start offer now follows the plan's `backlog` state from the same frame, and the
+   wall is one line. Needs demo confirmation.
 
 Not yet exercised: jump-bar menus, Machine control, Start, Dashboard arrangement.

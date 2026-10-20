@@ -132,7 +132,11 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
         let mut activity_known = true;
         for session in sessions_by_task.get(&task.id).into_iter().flatten() {
-            if session.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Unknown {
+            // A conversation Loopflow never attached cannot be running here.
+            if session.agent_process_id.is_some()
+                && session.agent_process_evidence
+                    == crate::journal::ProcessIdentityEvidence::Unknown
+            {
                 activity_known = false;
             }
             if session.available {
@@ -1228,6 +1232,48 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    #[test]
+    fn stale_conversations_leave_task_activity_known() {
+        let (_dir, store, repo) = fixture();
+        let task = "task_22222222222222222222222222222222";
+        let running = Selection::parse("state:running", None).unwrap();
+        for id in ["never-attached", "before-boot"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET repo='/repo', task_id=?2, wave_id='11111111-1111-1111-1111-111111111111' WHERE id=?1",
+                    [id, task],
+                )
+                .unwrap();
+        }
+        let unattached = store.resolve_selection(&repo, &running).unwrap();
+        let attachment = store
+            .claim_session_attachment("before-boot", None, &crate::id::LfProcessId::new(), true)
+            .unwrap();
+        let started: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT started_at FROM processes WHERE id=?1",
+                [&attachment.agent_process_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        crate::journal::set_test_machine_booted_at(Some(started - 1));
+        let unknown = store.resolve_selection(&repo, &running).unwrap();
+        crate::journal::set_test_machine_booted_at(Some(started + 1));
+        let restarted = store.resolve_selection(&repo, &running).unwrap();
+        crate::journal::set_test_machine_booted_at(None);
+        // Only the attached Process without OS identity, begun since boot, is unknown.
+        assert!(unattached.unavailable.is_empty());
+        assert_eq!(unknown.unavailable, ["Task FIX-2 activity is unavailable"]);
+        assert!(restarted.unavailable.is_empty());
     }
 
     #[test]

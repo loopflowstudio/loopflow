@@ -200,17 +200,11 @@ final class WorkNavigation {
         case available = "Available"
         case running = "Running"
     }
-    /// Presentation order, independent of query arrivals, attention and recency.
-    var workingTaskIDs: [String] = []
+    /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
+    var sidebarWaveID: String?
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false
-
-    func retainWorkingTask(_ id: String, aliases: [String] = []) {
-        var seen = Set<String>()
-        workingTaskIDs = (workingTaskIDs.map { aliases.contains($0) ? id : $0 } + [id])
-            .filter { seen.insert($0).inserted }
-    }
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {
         case search
@@ -325,7 +319,7 @@ final class WorkNavigation {
         backStack = []
         forwardStack = []
         selectedTaskEvidence = nil
-        workingTaskIDs = []
+        sidebarWaveID = nil
         content = .overview
     }
 

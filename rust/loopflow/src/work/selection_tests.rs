@@ -1,10 +1,10 @@
 use super::selection::{
     Arrangement, ArrangementAxis, ArrangementTree, DashboardId, MemberRef, Selection,
-    SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionWork,
-    WorkWorkspaceKey, WorkWorkspaceKind,
+    SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
+    SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use crate::id::WaveId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn key(id: &str, kind: WorkWorkspaceKind) -> WorkWorkspaceKey {
     WorkWorkspaceKey {
@@ -40,7 +40,7 @@ fn leaf(member: &MemberRef) -> ArrangementTree {
 }
 
 #[test]
-fn defaults_include_child_waves_and_descendant_tasks_without_execution_filters() {
+fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_filters() {
     let root = WaveId::new();
     let child = WaveId::new();
     let empty = WaveId::new();
@@ -84,11 +84,15 @@ fn defaults_include_child_waves_and_descendant_tasks_without_execution_filters()
     ]
     .into_iter()
     .map(|(key, parent_wave, open)| SelectionWork {
+        states: match key.id.as_str() {
+            "backlog" => BTreeSet::from([SelectionState::Backlog]),
+            "done" => BTreeSet::from([SelectionState::Done]),
+            _ => BTreeSet::new(),
+        },
         key,
         parent_wave,
         open,
         name: String::new(),
-        states: Default::default(),
         activity_known: false,
     })
     .collect();
@@ -100,7 +104,13 @@ fn defaults_include_child_waves_and_descendant_tasks_without_execution_filters()
             .iter()
             .map(|member| member.work.id.as_str())
             .collect::<Vec<_>>(),
-        [work[1].key.id.as_str(), empty.as_str(), "paused", "idle"]
+        [
+            work[1].key.id.as_str(),
+            empty.as_str(),
+            "paused",
+            "idle",
+            "backlog"
+        ]
     );
     assert_eq!(wave.unavailable.len(), 1);
     let filtered = Selection::parse(&format!("wave:{root} state:open"), None)
@@ -291,7 +301,6 @@ fn invalid_authored_ids_fail_in_compositions_and_referenced_definitions() {
 }
 
 fn query_work() -> Vec<SelectionWork> {
-    use super::selection::SelectionState;
     let wave = WaveId::new();
     vec![
         SelectionWork {

@@ -1,6 +1,6 @@
 # Agreed UX changes — October 18–19
 
-Jack Heart agreed these in demo review; all three are implemented. PR #1580 is
+Jack Heart agreed these in demo review; all four are implemented. PR #1580 is
 for review only — no merge, no completion.
 
 ## 1. Unstarted Task tiles offer Start (October 18)
@@ -58,9 +58,20 @@ Observed on installed 0.14.9 (October 20): Working Tasks showed 0. It is built
 from visits (#1594, `WorkNavigation.retainWorkingTask` + `WorkCache`), so a fresh
 window never lists running work; the cache held empty lists for all 8 repositories.
 
-To build: the default Working Tasks list is derived from Work, not visits: every
-Task that is started, not completed, started by Jack, on any Machine Loopflow knows
-(local and saved Machines). Visit order may still order it; visits don't define
-membership. The cache stays display evidence only. Open: how "by you" is recorded
-today (starter attribution) and how other Machines' started Tasks are read
-(`peerPlanningReadings`); unknown provenance stays unknown, never dropped silently.
+Jack Heart, October 20: “that should be a Query in the same sense as the dashboard.
+If you click through a wave then the sidebar should have a back button to go back
+home, to the repo, or it should show all the work items. Once you click into a wave
+you should see all the work items in that wave as well as all subwaves And there are
+no subways yet” (“subways” = subwaves).
+
+Implemented: the home sidebar lists the repository built-in plan's Task members
+(Rust `SelectionExpression::Repository`: started and not done), in plan order
+(attention first, then rank). Visit retention (`WorkNavigation.retainWorkingTask`,
+`WorkCache.saveWorkingTasks`) is deleted. Selecting a Wave scopes the sidebar to
+that Wave's built-in plan — its uncompleted Tasks (started and unstarted) plus child
+Waves — with a back control to the repository. Explicitly paused Tasks now stay in
+Working Tasks: they are started and not completed.
+
+“By you”: lfdb records no starter; it is one person's store, so every Task started
+in it counts as Jack's. Other Machines' starts count once this store records them
+(`tasks.started_at`); peer-only readings are not merged. See questions.md.

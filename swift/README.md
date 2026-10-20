@@ -37,20 +37,20 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
-Open a started Task to add it to the working list. Reopening it keeps its position;
-activity, completion, Wave navigation and sidebar filtering do not reorder it.
-Paused Tasks leave the list and number slots while keeping their stored position,
-panes and drafts. They remain reachable in their Wave and search. Unstarted Tasks
-open their brief beside **Start**, which runs the Task's Workflow; opening alone
-neither joins the list nor starts execution. Waves follow Tasks
-in the same scrolling sidebar, with counts from the planning inventory.
+Working Tasks lists every started, uncompleted Task, on any Machine this store
+records, in the repository plan's order (waiting first, then rank). It is the
+repository's built-in query, so opening a Task neither adds nor reorders it.
+Click a Wave to scope the sidebar to its uncompleted Tasks and subwaves;
+**‹ Repo** returns to Working Tasks. Unstarted Tasks open their brief beside
+**Start**, which runs the Task's Workflow; opening alone starts nothing. Waves
+follow Tasks in the same scrolling sidebar, with counts from the planning inventory.
 
-Click a row to select its retained workspace. The title-bar **This Mac › Repo › Wave › Task**
+Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
-changing the selected Work. **⌘1–9** selects stable working slots regardless of the
+changing the selected Work. **⌘1–9** selects Working Tasks by position regardless of the
 filter; **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without

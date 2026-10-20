@@ -226,7 +226,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,p.completed_at,p.pid,p.os_started_at,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
-         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL)
+         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
+        p.started_at
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -282,6 +283,7 @@ fn read_summary(
             row.get(32)?,
             row.get(33)?,
             row.get(34)?,
+            row.get(37)?,
             crate::journal::process_identity_evidence,
         );
         let live = agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
@@ -507,6 +509,7 @@ impl SqliteStore {
                     None,
                     pid,
                     start,
+                    None,
                     crate::journal::process_identity_evidence,
                 ) == crate::journal::ProcessIdentityEvidence::Live
                 {

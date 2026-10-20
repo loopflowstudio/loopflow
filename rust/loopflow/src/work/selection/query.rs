@@ -159,7 +159,7 @@ impl Selection {
                 }),
                 None => result
                     .unavailable
-                    .push(format!("Task {} activity is unavailable", item.key.id)),
+                    .push(format!("Task {} activity is unavailable", item.name)),
                 Some(false) => {}
             }
         }

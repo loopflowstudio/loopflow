@@ -21,7 +21,6 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
         /// The default interactive Session listing, one wire page each.
         var sessionPages: [String]?
         var selection: WorkReference?
-        var workingTaskIDs: [String]?
         var savedAt: Date
     }
 
@@ -115,15 +114,6 @@ final class WorkCache: @unchecked Sendable {
         update("selection:\(repo)", input: selection.map { "\($0.kind):\($0.id)" } ?? "") { snapshot in
             var entry = snapshot.repositories[repo] ?? .init(savedAt: date)
             entry.selection = selection
-            entry.savedAt = date
-            snapshot.repositories[repo] = entry
-        }
-    }
-
-    func saveWorkingTasks(_ ids: [String], repo: String, at date: Date = Date()) {
-        update("working:\(repo)", input: ids.joined(separator: "\n")) { snapshot in
-            var entry = snapshot.repositories[repo] ?? .init(savedAt: date)
-            entry.workingTaskIDs = ids
             entry.savedAt = date
             snapshot.repositories[repo] = entry
         }

@@ -506,6 +506,7 @@ impl SqliteStore {
             completed,
             pid,
             start,
+            None,
             crate::journal::process_identity_evidence,
         ) {
             crate::journal::ProcessIdentityEvidence::Live => Ok(Some((endpoint, thread))),

@@ -24,9 +24,11 @@ supersede the October 17 correction.
 
 ## Contract
 
-- Repository is implicit window scope, never a query predicate. Repository/Wave
-  built-in selection plans select started unfinished Tasks throughout descendants
-  and immediate child Waves, including empty Waves; these are not the native
+- Repository is implicit window scope, never a query predicate. The repository
+  built-in plan selects started unfinished Tasks and top-level Waves, and is the
+  Working Tasks sidebar (agreed-ux.md §4). Wave built-in plans select uncompleted
+  (started or unstarted) Tasks throughout descendants and immediate child Waves,
+  including empty Waves, and are the Wave-scoped sidebar; these are not the native
   repository/Wave presentation. LOO-489’s Console contract below owns that UX.
   Paused/idle/waiting Tasks remain queryable. Explicit
   queries may include backlog/finished Tasks; an unstarted Task shows its brief
@@ -56,8 +58,8 @@ supersede the October 17 correction.
   no file. Native restore must compare the base with current disk.
 - Use LOO-489’s October 17 Console: stable working Task sidebar, direct Wave rows,
   repository conversation, Wave conversation beside all current planned/started
-  Tasks, one titlebar, and Cmd K Find Work. Explicitly paused Tasks stay in search
-  and Wave inventory while leaving working slots; query membership is independent.
+  Tasks, one titlebar, and Cmd K Find Work. Explicitly paused Tasks stay in Working
+  Tasks since October 20 (started, not completed; questions.md).
   Dashboards are additional destinations and never replace those default surfaces.
   Task Shell/Files remain single tools with tabs. No Shell/Files tools at higher scopes.
 
@@ -160,8 +162,11 @@ reintroduce:
 - The repo-name chevron that opened Find Work, then the `This Mac ›` crumb and
   `WorkJumpScope.repositories` (October 19; jump bar and Machine control replace them).
 
-Kept on purpose: Console working-slot predicates differ from Dashboard membership;
-exact-pane hide/focus/move commands and revisioned `arrange` are distinct scopes.
+- Visit-derived Working Tasks (October 20): `WorkNavigation.workingTaskIDs`/
+  `retainWorkingTask`, `WorkModel.retainWorkingTask`, `WorkCache.saveWorkingTasks`
+  and `Repository.workingTaskIDs`; the repository built-in plan replaces them.
+
+Kept on purpose: exact-pane hide/focus/move commands and revisioned `arrange` are distinct scopes.
 Pane ownership reads `tasks.repository_id`; leaving a Project keeps saved panes.
 Saved and ad hoc Dashboards share `selectDestination` (history, palette dismissal).
 Validation covers only the edited selection and its references.
@@ -222,7 +227,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 19, after v0.14.8 merge): `cargo test -p loopflow --lib -- store::migration store::sqlite::selections` — 136 passed after the fixture/draft repair; clippy clean. Native and broader suites stay gate-owned.
+Check (October 20): `cargo test -p loopflow --lib -- work::selection store::sqlite::selections journal::tests` 50 passed, clippy clean; `swift test --filter 'WorkNavigationTests|TaskRowMetadataTests|WorkCacheTests|DashboardWorkspaceTests|WorkSelectionTests|ThemeWorkflowTests|WorkModelTests'` 105 passed. Native and broader suites stay gate-owned.
 
 ## History
 

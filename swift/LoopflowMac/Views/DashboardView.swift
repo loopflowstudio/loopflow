@@ -85,7 +85,13 @@ struct DashboardView: View {
                 if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
                     Text(error).foregroundStyle(palette.waiting).textSelection(.enabled)
                 }
-                ForEach(plan.resolution.unavailable, id: \.self) { Text($0).foregroundStyle(palette.waiting) }
+                // One line: membership may be incomplete; every reason stays in its help.
+                if let first = plan.resolution.unavailable.first {
+                    let more = plan.resolution.unavailable.count - 1
+                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.waiting).lineLimit(1)
+                        .help(plan.resolution.unavailable.joined(separator: "\n"))
+                        .accessibilityIdentifier("dashboard-unavailable")
+                }
                 if let tree = plan.projection.visible { node(tree, plan: plan) }
                 else { ContentUnavailableView("No visible Work", systemImage: "rectangle.split.2x2") }
                 if !plan.arrangement.hidden.isEmpty {
@@ -149,7 +155,8 @@ struct DashboardView: View {
                 }
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.waiting).textSelection(.enabled) }
-                if let task = model.task(id: member.work.id)?.task, task.awaitsStart {
+                // The plan read in this frame decides; saved planning may still say otherwise.
+                if let task = model.task(id: member.work.id)?.task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task)
                 } else if let pane = entry.multiplexer.zoomedPaneId.flatMap({ entry.multiplexer.layout.pane(for: $0) })
                     ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) }) {

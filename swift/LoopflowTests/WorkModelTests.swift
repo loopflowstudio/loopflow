@@ -933,7 +933,6 @@ struct WorkModelStreamTests {
         let now = Date(timeIntervalSince1970: 1000)
         let entries = try fixture.sessionEntries()
         let original = try #require((JSONSerialization.jsonObject(with: Data(entries.json.utf8)) as? [[String: Any]])?.first)
-        model.navigation.retainWorkingTask("preview-task")
         var answers = 0
         func sessionFrame(_ sequence: Int, turn: String?, available: Bool = false) throws -> WorkFrame {
             var entry = original
@@ -963,6 +962,9 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: answers))
         await feed.send(try sessionFrame(2, turn: "Previous result", available: true))
         try await eventually { preview() == "Previous result" }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "preview-task"), title: "Preview")
+        ])], reason: "")
         model.navigation.sidebarFilter = .available
         #expect(model.sidebarTaskIDs == ["preview-task"])
         await feed.send(try sessionFrame(3, turn: nil))

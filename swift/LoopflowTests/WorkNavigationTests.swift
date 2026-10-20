@@ -30,7 +30,7 @@ struct WorkNavigationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         model.select(.task(id: "issue-now"))
         let selection = model.selection
-        let order = model.navigation.workingTaskIDs
+        let order = model.workingTaskIDs
         let expected = Set(model.sidebarTaskIDs.map { WorkDestination.task($0) }
             + model.visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
         #expect(!expected.isEmpty)
@@ -45,43 +45,35 @@ struct WorkNavigationTests {
         })
         #expect(model.searchDestinations("", sidebarOnly: false).contains { $0.id == .repository })
         #expect(model.selection == selection)
-        #expect(model.navigation.workingTaskIDs == order)
+        #expect(model.workingTaskIDs == order)
     }
 
-    @Test("Planned work stays out of slots; pause and resume preserve stored relative order")
-    func workingSetLifecycle() throws {
+    @Test("Working Tasks are the repository plan's members, not visits; a Wave scopes the sidebar until Back")
+    func workingTasksFollowTheRepositoryPlan() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing planning must not execute") }, repoPath: "/src/loopflow")
-        func apply(started: Bool, status: String) throws {
-            var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
-            var allTasks = try #require(json["tasks"] as? [String: Any])
-            var allItems = try #require(allTasks["items"] as? [[String: Any]])
-            let index = try #require(allItems.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
-            var runtime = try #require(allItems[index]["runtime"] as? [String: Any])
-            runtime["started"] = started
-            runtime["status"] = status
-            allItems[index]["runtime"] = runtime
-            allTasks["items"] = allItems
-            json["tasks"] = allTasks
-            let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-            model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let wave = try #require(snapshot.waves.first?.wave.id)
+        func task(_ id: String) -> WorkViewPlan.Content {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
         }
-        try apply(started: false, status: "ready")
-        model.select(.task(id: "issue-now"))
-        #expect(model.workingTaskIDs.isEmpty)
-        try apply(started: true, status: "paused")
-        model.select(.task(id: "issue-now"))
-        #expect(model.workingTaskIDs.isEmpty)
-        #expect(model.task(id: "issue-now")?.task.runtime?.status == .paused)
-        try apply(started: true, status: "ready")
         model.select(.task(id: "issue-review"))
-        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
-        try apply(started: true, status: "paused")
-        #expect(model.workingTaskIDs == ["issue-review"])
-        #expect(model.navigation.workingTaskIDs == ["issue-now", "issue-review"])
-        try apply(started: true, status: "ready")
-        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
-        try apply(started: true, status: "done")
-        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.workingTaskIDs.isEmpty)
+        model.applySelectionPlans([
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [task("issue-now")]),
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now"), task("issue-review")]),
+        ], reason: "")
+        #expect(model.workingTaskIDs == ["issue-now"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
+
+        model.select(.wave(id: wave))
+        #expect(model.navigation.sidebarWaveID == wave)
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        model.select(.task(id: "issue-review"))
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        model.select(nil)
+        #expect(model.selection == nil)
+        #expect(model.sidebarTaskIDs == ["issue-now"])
     }
 
     @Test("Breadcrumb navigation and sidebar toggling retain panes and width")

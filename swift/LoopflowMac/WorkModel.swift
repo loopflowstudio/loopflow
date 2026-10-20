@@ -174,9 +174,6 @@ final class WorkModel {
         workspaceRegistry = registry
         workspaceRepository = repository
         reconcileSelectionRepository()
-        for key in registry.openWork where key.kind == .task {
-            retainWorkingTask(key.reference)
-        }
         openSelectedWorkspace()
     }
 
@@ -810,10 +807,6 @@ final class WorkModel {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
                     navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
-                    if task.runtime?.started == true, task.runtime?.status != .paused {
-                        navigation.retainWorkingTask(task.id, aliases: [task.runtime?.workId].compactMap { $0 })
-                        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repo)
-                    }
                 }
             }
         }
@@ -979,9 +972,6 @@ final class WorkModel {
             waves = .available(value.map { $0.toWave() })
         }
         for (repo, entry) in saved.repositories {
-            let state = navigationByRepo[repo] ?? WorkNavigation()
-            for id in entry.workingTaskIDs ?? [] { state.retainWorkingTask(id) }
-            navigationByRepo[repo] = state
             if let pages = entry.sessionPages,
                let records = try? pages.flatMap({ try RegistryQuery.decode(SessionPage.self, from: $0).entries }) {
                 sessionReadings[RepositoryReadingKey(machineId: saved.machineId, repository: repo)] = .available(records)
@@ -1586,13 +1576,35 @@ final class WorkModel {
         select(requested, preservingOpening: false)
     }
 
-    /// Unknown retained Work stays reachable; explicit pause only hides its slot.
-    var workingTaskIDs: [String] {
-        navigation.workingTaskIDs.filter { task(id: $0)?.task.runtime?.status != .paused }
+    /// Working Tasks: the repository plan's started, uncompleted Tasks, in plan order.
+    var workingTaskIDs: [String] { taskIDs(in: builtInPlan(.repository)) }
+
+    /// The Wave the sidebar lists, while its planning is current.
+    var sidebarWave: WaveRoadmap? {
+        navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
+    }
+
+    /// The Wave's uncompleted Tasks and child Waves, from its built-in plan.
+    var sidebarChildWaveIDs: [String] {
+        guard let id = navigation.sidebarWaveID else { return [] }
+        return builtInPlan(.wave(id))?.resolution.members.filter { $0.work.kind == .wave }.map(\.work.id) ?? []
+    }
+
+    private func builtInPlan(_ expression: WorkSelection.Expression) -> WorkViewPlan? {
+        selectionPlans.value?.first { $0.dashboardID == nil && $0.selection.expression == expression }
+    }
+
+    /// Plan members name Tasks by Work ID; rows use the planning ID when it is known.
+    private func taskIDs(in plan: WorkViewPlan?) -> [String] {
+        var seen = Set<String>()
+        return (plan?.resolution.members ?? []).filter { $0.work.kind == .task }
+            .map { task(id: $0.work.id)?.task.id ?? $0.work.id }
+            .filter { seen.insert($0).inserted }
     }
 
     var sidebarTaskIDs: [String] {
-        workingTaskIDs.filter { id in
+        let scoped = navigation.sidebarWaveID.map { taskIDs(in: builtInPlan(.wave($0))) } ?? workingTaskIDs
+        return scoped.filter { id in
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
@@ -1628,18 +1640,6 @@ final class WorkModel {
         let index = ids.firstIndex { isSelected(.task(id: $0)) }
         let next = index.map { ($0 + offset + ids.count) % ids.count } ?? (offset > 0 ? 0 : ids.count - 1)
         select(.task(id: ids[next]))
-    }
-
-    private func retainWorkingTask(_ reference: WorkReference?) {
-        guard let reference, reference.kind == .task else { return }
-        let found = task(id: reference.id)?.task
-        let started = found?.runtime?.started ?? selectionPlans.value?.contains { plan in
-            plan.dashboardID == nil && plan.contents.contains { $0.work.reference == reference && !$0.states.contains(.backlog) }
-        } ?? false
-        guard started, found?.runtime?.status != .paused else { return }
-        navigation.retainWorkingTask(found?.id ?? reference.id,
-                                     aliases: [reference.id, found?.runtime?.workId].compactMap { $0 })
-        cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repoPath ?? "")
     }
 
     func goBack() {
@@ -1691,7 +1691,8 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
-        retainWorkingTask(selection)
+        if selection == nil { navigation.sidebarWaveID = nil }
+        if let selection, selection.kind == .wave { navigation.sidebarWaveID = selection.id }
         clearSelectionIfOutsideScope()
         openSelectedWorkspace()
     }

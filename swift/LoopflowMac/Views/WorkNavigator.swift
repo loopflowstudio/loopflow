@@ -13,8 +13,20 @@ struct WorkNavigator: View {
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
 
+    private var listedWaves: [WaveRoadmap] {
+        guard model.navigation.sidebarWaveID != nil else { return model.visibleRoadmaps }
+        return model.sidebarChildWaveIDs.compactMap { id in model.visibleRoadmaps.first { $0.wave.id == id } }
+    }
+
+    private var listTitle: String {
+        let filter = model.navigation.sidebarFilter
+        guard model.navigation.sidebarWaveID != nil else { return filter.rawValue }
+        let wave = model.sidebarWave?.wave.displayName ?? "Wave unavailable"
+        return filter == .working ? wave : "\(wave) · \(filter.rawValue)"
+    }
+
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
+        model.sidebarTaskIDs.map { .task(id: $0) } + listedWaves.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -36,28 +48,41 @@ struct WorkNavigator: View {
             }
             WorkTaskList(navigation: model.navigation) {
                 VStack(alignment: .leading, spacing: 5) {
+                    if model.navigation.sidebarWaveID != nil {
+                        Button { model.select(nil) } label: {
+                            Label(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
+                                  systemImage: "chevron.left")
+                        }.buttonStyle(.plain).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
+                            .padding(.horizontal, 10).padding(.top, 6)
+                            .help("Back to Working Tasks")
+                            .accessibilityIdentifier("work-sidebar-back")
+                    }
                     HStack {
-                        Text(model.navigation.sidebarFilter.rawValue.uppercased())
+                        Text(listTitle.uppercased()).lineLimit(1)
                         Spacer()
                         Text("\(model.sidebarTaskIDs.count)")
                     }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
                     ForEach(model.sidebarTaskIDs, id: \.self) { id in taskRow(id) }
                     if model.sidebarTaskIDs.isEmpty {
-                        Text("No working Tasks in this list").font(Typography.body(12))
+                        Text(model.navigation.sidebarWaveID == nil ? "No working Tasks in this list" : "No open Tasks in this Wave")
+                            .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
                     if let selection = model.selection, selection.kind == .task,
                        !model.sidebarTaskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
-                            Button("Show working tasks") { model.navigation.sidebarFilter = .working }
+                            Button("Show working tasks") {
+                                model.navigation.sidebarFilter = .working
+                                model.navigation.sidebarWaveID = nil
+                            }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if !model.visibleRoadmaps.isEmpty {
-                        Text("WAVES").font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-                            .padding(10).padding(.top, 8)
+                    if !listedWaves.isEmpty {
+                        Text(model.navigation.sidebarWaveID == nil ? "WAVES" : "SUBWAVES").font(Typography.code(10))
+                            .foregroundStyle(palette.textSecondary).padding(10).padding(.top, 8)
                     }
-                    ForEach(model.visibleRoadmaps, id: \.wave.id) { wave in
+                    ForEach(listedWaves, id: \.wave.id) { wave in
                         Button { model.select(.wave(id: wave.wave.id)) } label: {
                             HStack {
                                 Image(systemName: "water.waves")
@@ -78,7 +103,7 @@ struct WorkNavigator: View {
                             .accessibilityLabel("\(wave.wave.displayName), \(wave.tasks.items.count) Tasks")
                             .accessibilityIdentifier("work-wave-\(wave.wave.id)")
                     }
-                    DashboardSidebar(model: model)
+                    if model.navigation.sidebarWaveID == nil { DashboardSidebar(model: model) }
                 }.padding(8)
             }
         }

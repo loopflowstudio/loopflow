@@ -414,7 +414,9 @@ struct DesktopPerformanceTests {
         }
         let surfaces = try terminals.map { try #require($0.surface) }
         multiplexer.setFocusedPane(sessionPane)
-        for index in 0..<taskCount { model.select(.task(id: "perf-task-\(index)")) }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+            members: (0..<taskCount).map { fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "perf-task-\($0)"), title: "") })],
+            reason: "")
         model.select(.task(id: "perf-task-0"))
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: checkout.path, workspaces: registry, query: query)

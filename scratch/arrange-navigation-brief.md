@@ -51,65 +51,31 @@ or live state. Borrow terminal polish; differentiate through knowing the Work.
 - **D13:** Click and CLI call the same model; `lf desktop state --json` comes
   first and exposes enough state to drive and verify every operation.
 
-## API boundary (original §1.4a governs)
+## API boundary (historical)
 
-Historical boundary: October 17's accepted corrections in `design.md` replace
-repository shells and shell-per-pane creation with Task-only Shell/Files tabs,
-and replace custom default-view binding with independent Dashboards. The original
-proposal below remains dated context, not the current implementation contract.
-
-Arrangement: `split --pane <target> --axis v|h`, `move`, `swap`, `resize`,
-`zoom`/`unzoom`, `hide`/`restore`, direct/spatial `focus`, and `state --json`.
-Targets include `session:<id>`, `task:#N`, `wave:<name>`, `query:<id>` and raw
-pane IDs. Hidden members remain in state and restorable. Arrangement never
-changes membership or ownership.
-
-Selection: `view <ref|query>` replaces the focused selection; `open <ref|query>`
-opens beside it; `query <container> "<expression>"` changes membership;
-`shell`/`files`/`log --task <ref>` create scoped companions; a repo shell uses
-the repo root. `pin`/`unpin` persist sidebar queries. `rename` writes through
-to the Work owner, so all titles follow. `view --plan` emits a derived tree
-without touching Desktop, with Work ref, cwd, command, title and attention.
-
-Nested query references expand live. Removing a predicate-matched Task requires
-editing the query; hide only changes visibility. The transcript's illustrative
-`add` and Task summary's `add` are superseded by §1.4a. No pane-local names,
-cross-repo arrangement, ownerless shell, or `new-pane` escape hatch.
-
-Query seeds: `repo:`, `wave:`, `state:open|available|running|blocked`, `pr:open`,
-and `task:#412 or task:#418`. Grammar and sorting syntax were not accepted.
+The original §1.4a arrangement/selection command proposal (split, move, `open`
+beside, repo shells, query seeds) is superseded by `design.md`'s Task-only
+Shell/Files tabs, independent Dashboards and October 18 no-outer-split decision.
+Text: `d813d4157b:scratch/arrange-navigation-brief.md`. Still true: arrangement
+never changes membership or ownership; hidden members remain restorable; nested
+query references expand live; no pane-local names or ownerless shell.
 
 ## Owners and unsettled details
 
-- LOO-489: navigation, sidebar, title bar/menu audit, grid, queries/pinning UI,
-  Work-keyed layout integration and click acceptance; update DESIGN.md to allow
-  derived layouts while rejecting arbitrary monitoring walls.
-- LOO-497: selection/arrangement API and shared model, state first, headless plan.
-- LOO-416: Session retention, app-close survival, reattachment, switching and
-  measured surface capacity. No new resident daemon is selected by this brief.
-- LOO-498: consume plans in cmux/Rex/Herder; not selected for this launch.
+Owners: LOO-489 navigation UX; LOO-497 Dashboards and the selection/arrangement
+model; LOO-416 Session lifetime; LOO-498 external hosts (see arrange-handoff.md).
 
 Open product choices: Project crumb versus grouping, inbox appearance, pinned
 query UI, query sorting syntax, literal Dock icons, Rex menu/title-bar inventory.
 Surface capacity and lifecycle mechanism need evidence from LOO-416. A focused
 workspace's crumb is already accepted; no need to reopen that choice.
 
-The comparison favors permanent IDs, explicit ambiguity, JSON, bounded
-send/capture/wait, events and OSC 7501 status. Those are directions, not evidence
-that every command is absent or cheap. Check existing implementations.
-LOO-453 owns readiness/events; LOO-422/415 own status transport; LOO-414 owns
-remote launch. “Maestro” in the conversation does not establish an additional
-service or planning writer.
-
-The title-bar audit belongs to navigation: keep Open Repo readily reachable;
-consider File/Open Repo/New Window, Go/crumbs/back/forward/⌘K, View/sidebar,
-zoom/splits, and Window/repo entries. No actual Rex chrome inventory was made.
+Competitor comparisons and the title-bar/Rex inventory notes are dated evidence;
+see the preserved text above.
 
 ## Why these choices matter
 
-The sidebar supplies a working set; ⌘K supplies reach; crumbs supply hierarchy.
-Tasks participate in queries rather than acquiring duplicate layouts. A primary
-Session gives a stable tile face while shells take focus inside the Task. Auto
-layout makes entry useful; touched layout protects deliberate arrangement.
-Success is the same Work loop through clicks, CLI and later another multiplexer.
-Failure is drifting state or duplicate native surfaces for repeated references.
+Sidebar: working set; ⌘K: reach; crumbs: hierarchy. Tasks join queries without
+duplicate layouts; a primary Session is the stable tile face. Auto layout makes
+entry useful; touched layout protects deliberate arrangement. Failure is drifting
+state or duplicate native surfaces for repeated references.

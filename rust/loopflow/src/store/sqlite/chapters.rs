@@ -33,9 +33,9 @@ impl SqliteStore {
         task_started_in(&conn, task)
     }
 
-    pub fn task_began(&self, task: &TaskId) -> StoreResult<bool> {
+    pub fn task_started_or_published(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        task_began_in(&conn, task)
+        task_started_or_published_in(&conn, task)
     }
 
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
@@ -76,7 +76,10 @@ impl SqliteStore {
 
 /// The one definition of a started Task that Work surfaces show: recorded Task
 /// work, or a published PR on its current delivery.
-pub(super) fn task_began_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+pub(super) fn task_started_or_published_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<bool> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
              OR EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1 AND historical=0

@@ -115,7 +115,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
     }
     for task in tasks {
-        let started = super::chapters::task_began_in(conn, &task.id)?;
+        let started = super::chapters::task_started_or_published_in(conn, &task.id)?;
         let state = super::durable::task_state_in(conn, &task.id)?;
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();

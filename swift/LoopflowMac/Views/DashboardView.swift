@@ -143,7 +143,9 @@ struct DashboardView: View {
             return AnyView(tile(member, plan: plan).id(member.work))
         case .split(let axis, let ratio, let first, let second):
             let focused = workspaces.selectedWork
-            let side = focused.flatMap { first.holds($0) ? 0 : second.holds($0) ? 1 : nil }
+            let side = focused.flatMap { work in
+                first.contains { $0.work == work } ? 0 : second.contains { $0.work == work } ? 1 : nil
+            }
             return AnyView(DashboardSplit(axis: axis, ratio: ratio, focusedSide: side,
                 first: node(first, plan: plan), second: node(second, plan: plan), saving: model.dashboardSaving) { value in
                     let updated = plan.arrangement.tree?.resizing(first: first.firstMember, second: second.firstMember, ratio: value)
@@ -236,23 +238,17 @@ extension WorkArrangementTree {
             return .split(axis: axis, ratio: ratio, first: first.swapping(a, b), second: second.swapping(a, b))
         }
     }
-    private func contains(_ member: WorkMemberRef) -> Bool {
+    fileprivate func contains(where match: (WorkMemberRef) -> Bool) -> Bool {
         switch self {
-        case .member(let ref): ref == member
-        case .split(_, _, let first, let second): first.contains(member) || second.contains(member)
-        }
-    }
-    fileprivate func holds(_ work: WorkWorkspaceKey) -> Bool {
-        switch self {
-        case .member(let ref): ref.work == work
-        case .split(_, _, let first, let second): first.holds(work) || second.holds(work)
+        case .member(let ref): match(ref)
+        case .split(_, _, let first, let second): first.contains(where: match) || second.contains(where: match)
         }
     }
     fileprivate func resizing(first a: WorkMemberRef, second b: WorkMemberRef, ratio: Double) -> Self {
         switch self {
         case .member: return self
         case .split(let axis, let old, let first, let second):
-            return .split(axis: axis, ratio: first.contains(a) && second.contains(b) ? ratio : old,
+            return .split(axis: axis, ratio: first.contains { $0 == a } && second.contains { $0 == b } ? ratio : old,
                 first: first.resizing(first: a, second: b, ratio: ratio), second: second.resizing(first: a, second: b, ratio: ratio))
         }
     }

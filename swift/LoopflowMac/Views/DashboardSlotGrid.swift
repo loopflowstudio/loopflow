@@ -61,15 +61,11 @@ struct DashboardSlotLayout: Equatable {
                 let hit = focus.flatMap { slot in children.firstIndex { Self.slots($0).contains(slot) } }
                 var offset: CGFloat = 0
                 for (child, share) in zip(children, FocusSizing.shares(weights, focused: hit)) {
-                    if axis == .vertical {
-                        let width = rect.width * share
-                        lay(child, CGRect(x: rect.minX + offset, y: rect.minY, width: width, height: rect.height))
-                        offset += width
-                    } else {
-                        let height = rect.height * share
-                        lay(child, CGRect(x: rect.minX, y: rect.minY + offset, width: rect.width, height: height))
-                        offset += height
-                    }
+                    let part = axis == .vertical
+                        ? CGRect(x: rect.minX + offset, y: rect.minY, width: rect.width * share, height: rect.height)
+                        : CGRect(x: rect.minX, y: rect.minY + offset, width: rect.width, height: rect.height * share)
+                    lay(child, part)
+                    offset += axis == .vertical ? part.width : part.height
                 }
             }
         }

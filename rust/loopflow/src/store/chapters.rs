@@ -37,9 +37,12 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_started(&task)).await
     }
 
-    pub async fn task_began(&self, task: &TaskId) -> StoreResult<bool> {
+    pub async fn task_started_or_published(&self, task: &TaskId) -> StoreResult<bool> {
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.task_began(&task)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.task_started_or_published(&task)
+        })
+        .await
     }
 
     pub async fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {

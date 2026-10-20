@@ -1324,7 +1324,7 @@ async fn snapshot_task_detail(
     .await?;
     let status = store.task_state(&task.id).await?;
     let pending = crate::ops::task::completion_pending(store, task)?;
-    let started = store.task_began(&task.id).await?;
+    let started = store.task_started_or_published(&task.id).await?;
     let runtime = snapshot_task_runtime(&execution, task, status, pending, started);
     let machine_id = shared
         .checkouts

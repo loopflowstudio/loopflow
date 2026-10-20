@@ -6,6 +6,44 @@ implementation to a demo, without a design review, then asked (2026-10-19) to pu
 Notion on this Task too, built on today's Work ↔ planning model rather than the old
 `PmProvider` data model.
 
+## Use cases (Jack Heart, 2026-10-19)
+
+The tracker serves two jobs; acceptance walks both end to end, not provider calls:
+
+1. **Interchange with coworkers.** A coworker creates, assigns, edits, comments on,
+   completes or deletes a task in the tracker and Loopflow follows; Loopflow's
+   progress (in progress, PR, shipped) shows up where the coworker looks.
+2. **Meeting capture.** People talk (formally or not) and capture Tasks for later,
+   in Loopflow chat or in the tracker; either way the Task exists in both places.
+
+Conflict policy (Jack, 2026-10-19): the latest edit sent wins. An offline local
+edit delivered after a tracker edit overwrites it; the overwritten value stays as
+a receipt. This replaces today's tracker-wins adoption for every provider.
+
+## Gaps against the use cases (2026-10-19 audit)
+
+docs/planning.md states the target UX. Done on this branch:
+
+- Tracker-created items become Tasks: the repository check reads changes through
+  `PlanningClient::changes` for every provider; Asana/Notion items take a
+  deterministic identity (v5 from the Asana gid; the Notion page ID). Standalone
+  Linear issues arrive too, and the check runs before any Task exists.
+- Deletion in the tracker removes the Task from the plan on positive evidence
+  (Linear trash, Asana 404, archived Notion page via its URL).
+- Starting work (checkout) queues a `started` state delivery; draft migration
+  `task_state_started` widens the delivery target check.
+- PR state reaches Asana/Notion as one comment per state.
+
+Remaining before the docs are true:
+
+- Projects in Asana/Notion (sections / `Project` select). Project acceptance is
+  Linear-shaped (`pm_projects`, Initiatives, `ACCEPTED_WAVE_PROJECTS`); an item
+  observed with no project clears local membership, so export stays gated.
+- Latest-sent-wins conflicts: `observe_attempts` sets `conflict_json` and
+  acceptance adopts the provider; flipping it changes Linear's tested policy.
+- Asana identifier footer: belongs with Task codes (`scratch/task-codes.md`).
+- Unverified: assignment between coworkers.
+
 ## Outcome
 
 A repository selects its planning provider the way it selects an agent harness:

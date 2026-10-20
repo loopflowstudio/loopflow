@@ -96,6 +96,8 @@ async fn graphql(
             comment["issue"] = json!({"id":"issue-uuid"});
         }
         json!({"comment":comment})
+    } else if query.contains("query IssueTrash") {
+        json!({"issue": {"id": vars["id"], "updatedAt": "2026-09-24T12:00:00Z", "trashed": false}})
     } else if query.contains("query IssueObservation") {
         assert_eq!(
             vars["id"], "issue-uuid",

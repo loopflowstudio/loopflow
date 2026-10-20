@@ -4,9 +4,9 @@
 # any "AttributeGraph: cycle detected" line appears while you exercise the
 # interaction matrix.
 #
-# SwiftUI logs dependency cycles to the unified logging system (os_log), not
-# stderr — so `log stream` on the app process is the authoritative source. An
-# empty stderr proves nothing; this script reads the right place.
+# SwiftUI reports dependency cycles to the unified logging system (os_log) and
+# can also print them to the app's stderr, so the capture reads both: `log
+# stream` on the app process and the app's own output share one log.
 #
 # Usage:
 #   scripts/check_attributegraph_cycles.sh [--repo <path> | --world | --sheet] [--seconds N]
@@ -68,9 +68,9 @@ if [ "$WORLD" -eq 1 ]; then
       "$WORLD_DIR/env.json")
   if [ "$SHEET" -eq 1 ]; then WORLD_ENV+=("LOOPFLOW_UI_TEST_PRESENT_SHEET=1"); fi
   env "${WORLD_ENV[@]}" LOOPFLOW_UI_TEST_SELECT_BRANCH=desktop \
-    "$BIN" -ui-test-mode live --repo "$WORLD_DIR/repo" >/dev/null 2>&1 &
+    "$BIN" -ui-test-mode live --repo "$WORLD_DIR/repo" >>"$LOG" 2>&1 &
 else
-  "$BIN" --repo "$TARGET_REPO" >/dev/null 2>&1 &
+  "$BIN" --repo "$TARGET_REPO" >>"$LOG" 2>&1 &
 fi
 APP_PID=$!
 

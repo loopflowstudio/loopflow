@@ -202,6 +202,11 @@ to LOO-519 and removed; the body needs rewriting before review.
 
 ## Remaining implementation, verification and transport
 
+- Working Tasks Dashboard (agreed-ux.md §5): one Task order shared by the sidebar and
+  the grid, writable from both (needs a persisted order for the repository plan);
+  adding/rearranging slots on saved Dashboards with a fixed slot count; demo checks of
+  golden geometry, focus growth, page turns and terminal behavior during animation.
+
 - Demo preparation: main's #1612 (not yet merged here) runs draft builds on an
   APFS copy of the real store and adds `lf-world` fixtures, superseding the clone
   repair and hand-applied draft; the CLI↔native targeting gap remains
@@ -229,7 +234,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 20): `cargo test -p loopflow --lib -- work::selection store::sqlite::selections journal::tests` 50 passed, clippy clean; `swift test --filter 'WorkNavigationTests|TaskRowMetadataTests|WorkCacheTests|DashboardWorkspaceTests|WorkSelectionTests|ThemeWorkflowTests|WorkModelTests'` 105 passed. Native and broader suites stay gate-owned.
+Check (October 20, slot grid): `cargo test -p loopflow --lib -- lf::commands::waves store::sqlite::selections store::sqlite::chapters ops::chapter` 41 passed, clippy clean; `swift test --filter 'WorkNavigationTests|DashboardWorkspaceTests|TaskRowMetadataTests|WorkSelectionTests|ThemeWorkflowTests|WorkModelTests'` 96 passed. Native and broader suites stay gate-owned.
 
 ## History
 

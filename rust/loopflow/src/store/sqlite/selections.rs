@@ -115,7 +115,7 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
         }
     }
     for task in tasks {
-        let started = super::chapters::task_started_in(conn, &task.id)?;
+        let started = super::chapters::task_began_in(conn, &task.id)?;
         let state = super::durable::task_state_in(conn, &task.id)?;
         let open = started && !state.is_terminal();
         let mut states = BTreeSet::new();
@@ -1274,6 +1274,34 @@ mod tests {
         assert!(unattached.unavailable.is_empty());
         assert_eq!(unknown.unavailable, ["Task FIX-2 activity is unavailable"]);
         assert!(restarted.unavailable.is_empty());
+    }
+
+    #[test]
+    fn a_published_pr_starts_a_task_for_queries_as_for_its_runtime() {
+        let (_dir, store, repo) = fixture();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,
+                    parent_pr_id,publication_requested_at,created_at,updated_at)
+                 SELECT 'pr_backlog',id,1,'backlog',branch,base_commit,parent_pr_id,1,1,1
+                 FROM tasks WHERE issue_identifier='FIX-3'",
+                [],
+            )
+            .unwrap();
+        assert!(store
+            .view_plan(&repo, Some("state:backlog"))
+            .unwrap()
+            .contents
+            .is_empty());
+        assert!(store
+            .view_plan(&repo, Some("state:open"))
+            .unwrap()
+            .contents
+            .iter()
+            .any(|content| content.title == "Backlog"));
     }
 
     #[test]

@@ -266,16 +266,19 @@ final class WorkNavigation {
         case work(WorkReference?)
         case dashboard(String)
         case view(WorkViewPlan)
+        /// The default Dashboard: the Working Tasks plan as a grid of slots.
+        case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
         case zoomed(dashboard: String, work: WorkReference)
     }
+    static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)
     var selection: WorkReference? {
         get {
             switch destination {
             case .work(let work): work
             case .zoomed(_, let work): work
-            case .dashboard, .view: nil
+            case .dashboard, .view, .workingTasks: nil
             }
         }
         set { destination = .work(newValue) }
@@ -283,7 +286,7 @@ final class WorkNavigation {
     var showsSelection: Bool {
         switch destination {
         case .work, .zoomed: false
-        case .dashboard, .view: true
+        case .dashboard, .view, .workingTasks: true
         }
     }
     var dashboardID: String? {
@@ -293,7 +296,7 @@ final class WorkNavigation {
     var trailDashboardID: String? {
         switch destination {
         case .dashboard(let id), .zoomed(let id, _): id
-        case .work, .view: nil
+        case .work, .view, .workingTasks: nil
         }
     }
     /// Repository-local visits; nil names the repository conversation.

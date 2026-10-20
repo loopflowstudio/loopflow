@@ -7,6 +7,31 @@ import Testing
 @Suite("Dashboard workspace integration", .serialized)
 @MainActor
 struct DashboardWorkspaceTests {
+    @Test func goldenSlotsMatchJacksLayoutAndFocusGrowsInPlace() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        let layout = DashboardSlotLayout.golden
+        #expect(layout.count == 7)
+        let base = layout.frames(in: bounds, focus: nil)
+        #expect(abs(base[0]!.width - 618) < 0.5 && abs(base[0]!.height - 618) < 0.5)
+        #expect(abs(base[1]!.width - 191) < 0.5 && base[1]!.minX == base[0]!.maxX)
+        #expect((3...6).allSatisfy { abs(base[$0]!.width - 250) < 0.5 && abs(base[$0]!.minY - 618) < 0.5 })
+        // Focus takes the golden share at every split on its path; the rest keep their base proportions.
+        let focused = layout.frames(in: bounds, focus: 5)
+        #expect(abs(focused[5]!.height - 618) < 0.5 && abs(focused[5]!.width - 618) < 0.5)
+        #expect(abs(focused[3]!.width - focused[4]!.width) < 0.5 && abs(focused[4]!.width - focused[6]!.width) < 0.5)
+        #expect(abs(focused[0]!.width / bounds.width - 0.618) < 0.001)
+        #expect(layout.frames(in: bounds, focus: nil) == base)
+        #expect(FocusSizing.shares([0.7, 0.3], focused: 1) == [1 - FocusSizing.golden, FocusSizing.golden])
+    }
+
+    @Test func slotPagesHoldSevenTasksInOrder() {
+        let members = (0..<9).map { WorkMemberRef(source: ["repo"], work: .init(repository: "repo", kind: .task, id: "t\($0)")) }
+        let pages = DashboardSlotLayout.golden.pages(members)
+        #expect(pages.map { $0.count } == [7, 2])
+        #expect(pages.flatMap { $0 } == members)
+        #expect(DashboardSlotLayout.golden.pages([]) == [[]])
+    }
+
     @Test func dashboardsReuseWorkAndKeepRepositoryNavigation() throws {
         let plan = try JSONDecoder().decode(WorkViewPlan.self, from: loadFixtureData("view_plan.json"))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Offline") }, repoPath: "/repo")

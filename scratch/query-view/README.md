@@ -29,19 +29,7 @@ shell commands do not execute, and document edits never write repository files.
 HTML retention is not evidence of native terminal attachment or restoration.
 There are no invisible named-query fixtures in the Dashboard editor.
 
-`source-manifest.json` records the captured LOO-489 source before adaptation.
-`dashboard.mjs` adds Dashboard interactions to that Console; `model.mjs` retains
-the earlier disposable query/tree evaluator. The accepted navigation contract is
-copied locally in `../navigation-console-contract.md`. The previous dirty study
-was preserved at `/tmp/loo497-query-view-before-console.tar.gz` before replacement.
-
-```sh
-node --test scratch/query-view/model.test.mjs scratch/query-view/model.test.cjs
-```
-
-October 17: 18 model checks pass. Browser checks passed for draft round-trip and
-reload, Shell selected-tab/input retention, Files document draft retention,
-first-visible duplicate promotion, hide/resize/restore, unstarted brief isolation,
-implicit repository validation, Wave plan, and Dashboard discovery in Find Work.
-No native build was needed for this HTML-only revision. Remaining native work is
-in `../design.md`; no pursue worker was launched for this prototype revision.
+`source-manifest.json` records the captured LOO-489 source; `dashboard.mjs` adds the
+Dashboard interactions; `model.mjs` is the earlier disposable evaluator
+(`node --test scratch/query-view/model.test.mjs scratch/query-view/model.test.cjs`).
+October 17 model and browser checks: `f492be7f19:scratch/query-view/README.md`.

@@ -221,15 +221,16 @@ struct TaskWorkflowHeader: View {
 }
 
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
+/// Its container sets the primary and secondary text styles.
 struct TaskHeading: View {
     let task: RoadmapTask
-    @Environment(\.palette) private var palette
 
-    private var state: String {
+    /// Started is durable Task evidence, the definition Working Tasks lists by;
+    /// Linear's planning state never overrides it.
+    var state: String {
         if let label = task.task.terminalLabel { return label }
         if task.runtime?.status == .paused { return "Paused" }
-        if task.runtime?.started != true { return "Unstarted" }
-        return task.task.state?.capitalized ?? "Started"
+        return task.runtime?.started == true ? "Started" : "Unstarted"
     }
 
     var body: some View {
@@ -237,7 +238,7 @@ struct TaskHeading: View {
             Text(task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
             Text(task.task.name).lineLimit(1).truncationMode(.tail)
                 .frame(minWidth: 60, alignment: .leading).help(task.task.name)
-            Text(state).foregroundStyle(palette.textSecondary).fixedSize()
+            Text(state).foregroundStyle(.secondary).fixedSize()
                 .accessibilityIdentifier("task-heading-state")
         }
     }

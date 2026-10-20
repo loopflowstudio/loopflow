@@ -150,6 +150,39 @@ struct WorkNavigationTests {
         _ = try started.inspect().find(text: "Started on Unrecorded Machine; moving it is explicit takeover")
     }
 
+    @Test("The heading's started state is durable Task evidence, never Linear's planning state")
+    func headingAgreesWithWorkingTasks() throws {
+        let snapshot = try roadmap()
+        let review = try #require(snapshot.tasks.items.first { $0.id == "issue-review" })
+        #expect(review.task.state == "unstarted")
+        #expect(TaskHeading(task: review).state == "Started")
+        #expect(TaskHeading(task: try #require(snapshot.tasks.items.first { $0.id == "issue-now" })).state == "Unstarted")
+    }
+
+    @Test("Working Tasks opens as a Dashboard; a sidebar Task then shows that Task, not a stale trail")
+    func workingTasksDashboardYieldsToSidebarTask() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        model.bindWorkspaces(registry, repository: "repo")
+        let tasks = ["issue-review", "issue-now"].map {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: $0), title: $0)
+        }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
+        model.select(.task(id: "issue-review"))
+        model.navigation.selectedSessionId = "a-session-of-issue-review"
+        model.selectWorkingTasksDashboard()
+        #expect(model.navigation.showsSelection)
+        #expect(model.navigation.selectedSessionId == nil)
+        #expect(model.breadcrumb == nil)
+        #expect(model.workingTaskMembers.map(\.work.id) == ["issue-review", "issue-now"])
+        model.select(.task(id: "issue-now"))
+        #expect(model.navigation.destination == .work(.task(id: "issue-now")))
+        #expect(model.breadcrumb?.task?.task.id == "issue-now")
+        model.goBack()
+        #expect(model.navigation.destination == .workingTasks)
+    }
+
     @Test("An unstarted Task's Session slot offers Start; showing it starts nothing")
     func unstartedTaskOffersStart() async throws {
         let model = try model()

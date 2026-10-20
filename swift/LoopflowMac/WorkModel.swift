@@ -134,7 +134,10 @@ final class WorkModel {
             return old
         })
         reconcileSelectionRepository()
-        if let id = navigation.dashboardID, let plan = dashboard(id) { presentView(plan) }
+        switch navigation.destination {
+        case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
+        case .work, .view, .zoomed: break
+        }
     }
 
     private func reconcileSelectionRepository() {
@@ -779,6 +782,8 @@ final class WorkModel {
         WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
     }
     var breadcrumb: WorkBreadcrumb? {
+        // A Dashboard heads its own trail; no member Task or Session does.
+        if navigation.showsSelection { return nil }
         if let current = projection.breadcrumb(selection: selection, sessionId: navigation.selectedSessionId) {
             return current
         }
@@ -2363,7 +2368,7 @@ extension WorkModel {
         case .zoomed(let dashboard, let work):
             select(work, preservingOpening: false, recordingHistory: recordingHistory)
             navigation.destination = .zoomed(dashboard: dashboard, work: work)
-        case .dashboard, .view:
+        case .dashboard, .view, .workingTasks:
             if recordingHistory, navigation.destination != destination {
                 navigation.backStack.append(navigation.destination)
                 navigation.forwardStack = []
@@ -2373,12 +2378,24 @@ extension WorkModel {
             selectionOpening = nil
             navigation.destination = destination
             navigation.palette = nil
+            navigation.selectedSessionId = nil
             if let plan = selectedViewPlan { presentView(plan) }
         }
     }
 
     func selectDashboard(_ id: String) {
         selectDestination(.dashboard(id), recordingHistory: true)
+    }
+
+    func selectWorkingTasksDashboard() {
+        selectDestination(.workingTasks, recordingHistory: true)
+    }
+
+    /// The Working Tasks Dashboard's Tasks, in the sidebar's order.
+    var workingTaskMembers: [WorkMemberRef] {
+        var seen = Set<WorkWorkspaceKey>()
+        return (builtInPlan(.repository)?.resolution.members ?? [])
+            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
     }
 
     func zoom(into work: WorkReference, from dashboard: String) {
@@ -2448,6 +2465,7 @@ extension WorkModel {
         case .work, .zoomed: nil
         case .dashboard(let id): dashboard(id)
         case .view(let plan): plan
+        case .workingTasks: builtInPlan(.repository)
         }
     }
 

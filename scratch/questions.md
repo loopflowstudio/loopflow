@@ -48,3 +48,17 @@ this store records as started (any Machine, via `tasks.started_at`) counts as
 Jack's. Paused Tasks stay in Working Tasks, superseding the October 17 Console
 rule. The Wave sidebar/built-in plan lists uncompleted Tasks, unstarted included,
 plus child Waves. Flag for demo: plan order (waiting first) moves ⌘1–9 positions.
+
+October 20 assumptions (agreed-ux.md §5): binary Dashboard splits apply the focus rule per
+split (one sibling gets 38.2%); the default layout is n-ary data so the bottom band is one
+four-way group, matching the prototype. A Dashboard always has a focused tile (the
+registry focuses the first member), so slot 1 starts focused, which equals the golden
+base. Terminal views take their final frame rather than interpolating; confirm no
+flicker in the demo. Inspection still reports the plan's arrangement tree for Working
+Tasks, not slot geometry.
+
+Historical notes removed October 20 (full text at `f492be7f19:scratch/`): the October 16
+Arrange handoff (owners: LOO-416 Session retention, LOO-453 readiness/events, LOO-422/415
+status transport, LOO-414 remote launch, LOO-498 external multiplexers) and the October
+18 operator readback (PR #1580 demo-only; demo review in Session
+`session_421decfc3b31459fb10e4771e231a704`).

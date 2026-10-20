@@ -206,6 +206,7 @@ struct WorkNavigator: View {
 
 struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
+    @Environment(\.palette) private var palette
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -214,6 +215,7 @@ struct WorkBreadcrumbs: View {
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))
+        .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
     }
 
@@ -239,6 +241,9 @@ struct WorkBreadcrumbs: View {
                     model.navigation.content = .terminals
                 }.lineLimit(1).fixedSize()
                 WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
+            }
+            if model.navigation.destination == .workingTasks {
+                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
             }
             if let id = model.navigation.trailDashboardID {
                 Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }

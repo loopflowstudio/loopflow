@@ -1,6 +1,6 @@
-# Agreed UX changes — October 18–19
+# Agreed UX changes — October 18–20
 
-Jack Heart agreed these in demo review; all four are implemented. PR #1580 is
+Jack Heart agreed these in demo review; §1–4 are implemented, §5 in part. PR #1580 is
 for review only — no merge, no completion.
 
 ## 1. Unstarted Task tiles offer Start (October 18)
@@ -62,7 +62,7 @@ Jack Heart, October 20: “that should be a Query in the same sense as the dashb
 If you click through a wave then the sidebar should have a back button to go back
 home, to the repo, or it should show all the work items. Once you click into a wave
 you should see all the work items in that wave as well as all subwaves And there are
-no subways yet” (“subways” = subwaves).
+no subways yet” (“subways”: subwaves).
 
 Implemented: the home sidebar lists the repository built-in plan's Task members
 (Rust `SelectionExpression::Repository`: started and not done), in plan order
@@ -75,3 +75,36 @@ Working Tasks: they are started and not completed.
 “By you”: lfdb records no starter; it is one person's store, so every Task started
 in it counts as Jack's. Other Machines' starts count once this store records them
 (`tasks.started_at`); peer-only readings are not merged. See questions.md.
+
+## 5. The default Dashboard is Working Tasks as a grid of slots (October 20)
+
+Jack Heart: “can we make so that the default dashboard is just all the tasks in that
+sidebar, but as a grid view”; “lets set a limit of 8 per screen or something and then
+institute (side to side) paging beyond that”, corrected to “the lay out is 7 panes at a
+time”. Layout, verbatim: “(1 | (2 | 3)) | (1 | 2 | 3 | 4)”; “the first goup / second
+group is a horizontal split”; “inner splits are vertical”. So: a top band of slot 1
+beside the pair 2 | 3, over a bottom band of four columns. Jack chose the golden
+proportions in `scratch/slot-layouts/index.html` (“i like the golden layout”): top band
+61.8% of the height, slot 1 61.8% of its width, 2 and 3 split the rest; bottom four equal.
+
+Slots: “you can add slots and rearrange them to your dashboard, but theres always a
+fixed number of slots”. Tasks fill slots in query order and overflow to further pages;
+they never grow or shrink the layout. Order: “you can reorder the tasks but they always
+get arranged in order”; “the order of tasks should also apply to the sidebar and
+reordering in sidebar should do same thing” — one shared order, nobody pins a Task to a slot.
+
+Focus: “we will need this built into our sizing system so that even after you rearrange
+the setup arbitraily, theres a way to expand and shrink everything else”; then “lets
+build it” for the tree rule (prototype tab “7 slots, golden, tree rule”): at each split
+on the path to the focused pane its branch takes 61.8% and the siblings share the rest
+by base weight; unfocused, base weights apply; focus never rewrites them; nested panes
+grow less. Animation: “make sure to add some nice animation to smooth out the
+transiitons” — one ~0.25 s spring for focus resizing and page turns. Jack is still
+weighing an 8-slot 4×2 alternative; not chosen, not built; geometry stays data.
+
+Implemented: sidebar Dashboards › Working Tasks (`WorkNavigation.Destination.workingTasks`)
+shows the repository built-in plan's Tasks, in sidebar order, through
+`DashboardSlotLayout.golden` (`DashboardSlotGrid.swift`); 7 per page, ⌥⌘←/→ or the
+chevrons turn pages with a push transition; empty slots stay as dashed outlines.
+`FocusSizing` grows the focused tile in the grid and at every split of saved Dashboards,
+never writing saved ratios. Remaining work is in design.md.

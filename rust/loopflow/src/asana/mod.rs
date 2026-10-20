@@ -46,7 +46,7 @@ struct NextPage {
     offset: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Task {
     gid: String,
     external: Option<External>,
@@ -63,18 +63,18 @@ struct Task {
     memberships: Vec<Membership>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct External {
     gid: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Reference {
     gid: String,
     name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Membership {
     project: Option<Reference>,
 }
@@ -187,6 +187,10 @@ impl AsanaClient {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{id}"), None)
             .await?;
+        self.observation(task).await
+    }
+
+    async fn observation(&self, task: Task) -> LinearResult<LinearIssueObservation> {
         let mut comments = self.comments(&task.gid).await?;
         comments.sort_by(|left, right| {
             left.revision
@@ -199,6 +203,57 @@ impl AsanaClient {
             description: rich_text::to_markdown(&task.html_notes),
             comments,
         })
+    }
+
+    /// Tasks in the repository project modified in `since..`, with their
+    /// observations. A task someone created in Asana has no Loopflow identity
+    /// yet; it takes one derived from its gid, so every machine claims the same
+    /// one. Completed tasks Loopflow never tracked, and `finished` ones, are skipped.
+    pub(crate) async fn changes(
+        &self,
+        since: Option<&str>,
+        live: &[String],
+        finished: &[String],
+    ) -> LinearResult<Vec<(LinearIssue, LinearIssueObservation)>> {
+        let mut tasks: Vec<Task> = Vec::new();
+        let mut offset = None;
+        loop {
+            let mut path = format!("/projects/{}/tasks?limit={PAGE_LIMIT}", self.project);
+            if let Some(since) = since {
+                path.push_str(&format!("&modified_since={since}"));
+            }
+            if let Some(offset) = &offset {
+                path.push_str(&format!("&offset={offset}"));
+            }
+            let page: Envelope<Vec<Task>> = self.request(Method::GET, &path, None).await?;
+            tasks.extend(page.data);
+            match page.next_page {
+                Some(next) => offset = Some(next.offset),
+                None => break,
+            }
+        }
+        let mut changes = Vec::new();
+        for mut task in tasks {
+            let known = task.external.as_ref().and_then(|e| e.gid.clone());
+            let id = known
+                .clone()
+                .unwrap_or_else(|| acquired_identity(&task.gid));
+            if finished.contains(&id) || (task.completed && !live.contains(&id)) {
+                continue;
+            }
+            if known.is_none() {
+                task = self
+                    .send(
+                        Method::PUT,
+                        &format!("/tasks/{}", task.gid),
+                        Some(json!({"external": {"gid": id}})),
+                    )
+                    .await?;
+            }
+            let observation = self.observation(task.clone()).await?;
+            changes.push((self.issue(&id, task)?, observation));
+        }
+        Ok(changes)
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
@@ -374,6 +429,15 @@ impl From<AsanaFailure> for LinearError {
             AsanaFailure::Provider(error) => error,
         }
     }
+}
+
+/// The Loopflow identity of a task first created in Asana.
+fn acquired_identity(gid: &str) -> String {
+    uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        format!("https://app.asana.com/task/{gid}").as_bytes(),
+    )
+    .to_string()
 }
 
 fn message(text: impl Into<String>) -> LinearError {

@@ -201,6 +201,45 @@ impl PlanningClient {
         }
     }
 
+    /// Whether the provider positively reports the item deleted: Linear's trash,
+    /// Asana's missing task, or Notion's archived page (found through the
+    /// Task's page URL). A lookup that merely finds nothing is not evidence.
+    pub(crate) async fn removed(&self, id: &str, url: Option<&str>) -> LinearResult<bool> {
+        match self {
+            Self::Linear(client) => Ok(client
+                .issue_trash(id)
+                .await?
+                .is_some_and(|(trashed, _)| trashed)),
+            Self::Asana(client) => Ok(client.task(id).await?.is_none()),
+            Self::Notion(client) => client.removed(url).await,
+        }
+    }
+
+    /// Items in the repository's planning scope changed since `since`: new items
+    /// people created there and edits to known ones, with their observations.
+    pub(crate) async fn changes(
+        &self,
+        scope: &str,
+        since: Option<&str>,
+        through: &str,
+        live: &[String],
+        finished: &[String],
+    ) -> LinearResult<Vec<(LinearIssue, Option<LinearProject>, LinearIssueObservation)>> {
+        let changes = match self {
+            Self::Linear(client) => {
+                return client
+                    .team_changes(scope, since, through, live, finished)
+                    .await
+            }
+            Self::Asana(client) => client.changes(since, live, finished).await?,
+            Self::Notion(client) => client.changes(since, live, finished).await?,
+        };
+        Ok(changes
+            .into_iter()
+            .map(|(issue, observation)| (issue, None, observation))
+            .collect())
+    }
+
     pub(crate) async fn observe_issue(&self, id: &str) -> LinearResult<LinearIssueObservation> {
         match self {
             Self::Linear(client) => client.observe_issue(id).await,

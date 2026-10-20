@@ -204,8 +204,75 @@ impl NotionClient {
     }
 
     pub(crate) async fn observe(&self, id: &str) -> LinearResult<LinearIssueObservation> {
-        let page = self.require_page(id).await?;
-        let page_id = object_id(&page)?;
+        self.observation(&self.require_page(id).await?).await
+    }
+
+    /// Pages in the repository database edited in `since..`, with their
+    /// observations. A page someone created in Notion has no Loopflow ID yet; it
+    /// takes its own page ID, so every machine claims the same one. Completed
+    /// pages Loopflow never tracked, and `finished` ones, are skipped.
+    pub(crate) async fn changes(
+        &self,
+        since: Option<&str>,
+        live: &[String],
+        finished: &[String],
+    ) -> LinearResult<Vec<(LinearIssue, LinearIssueObservation)>> {
+        let schema = self.schema().await?;
+        let mut pages = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut query = json!({"page_size": PAGE_SIZE});
+            if let Some(since) = since {
+                query["filter"] = json!({
+                    "timestamp": "last_edited_time",
+                    "last_edited_time": {"on_or_after": since},
+                });
+            }
+            if let Some(cursor) = &cursor {
+                query["start_cursor"] = json!(cursor);
+            }
+            let found: Value = self
+                .send(
+                    Method::POST,
+                    &format!("/databases/{}/query", self.database),
+                    Some(query),
+                )
+                .await?;
+            pages.extend(found["results"].as_array().cloned().unwrap_or_default());
+            match found["next_cursor"].as_str() {
+                Some(next) if found["has_more"] == true => cursor = Some(next.to_owned()),
+                _ => break,
+            }
+        }
+        let mut changes = Vec::new();
+        for mut page in pages {
+            let claimed = identity(&page);
+            let id = if claimed.is_empty() {
+                object_id(&page)?
+            } else {
+                claimed.clone()
+            };
+            let complete = matches!(observed_state(schema, &page), "completed" | "canceled");
+            if finished.contains(&id) || (complete && !live.contains(&id)) {
+                continue;
+            }
+            if claimed.is_empty() {
+                page = self
+                    .send(
+                        Method::PATCH,
+                        &format!("/pages/{}", object_id(&page)?),
+                        Some(json!({"properties": {IDENTITY_PROPERTY: {"rich_text": blocks::plain(&id)}}})),
+                    )
+                    .await?;
+            }
+            let observation = self.observation(&page).await?;
+            changes.push((self.issue(&id, &page).await?, observation));
+        }
+        Ok(changes)
+    }
+
+    async fn observation(&self, page: &Value) -> LinearResult<LinearIssueObservation> {
+        let page_id = object_id(page)?;
         let schema = self.schema().await?;
         // Without comment access, title and description still direct the Task.
         let mut comments = match self.comments(&page_id).await {
@@ -223,10 +290,30 @@ impl NotionClient {
         });
         Ok(LinearIssueObservation {
             revision: page["last_edited_time"].as_str().unwrap_or_default().into(),
-            title: title(schema, &page),
+            title: title(schema, page),
             description: self.body(&page_id).await?,
             comments,
         })
+    }
+
+    /// Whether the page at `url` is archived or in the trash.
+    pub(crate) async fn removed(&self, url: Option<&str>) -> LinearResult<bool> {
+        let Some(page) = url
+            .map(database_id)
+            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        else {
+            return Ok(false);
+        };
+        match self
+            .request::<Value>(Method::GET, &format!("/pages/{page}"), None)
+            .await
+        {
+            Ok(page) => Ok(page["archived"] == true || page["in_trash"] == true),
+            Err(Failure::Provider(error)) if error.to_string().contains("Could not find") => {
+                Ok(true)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     // ── Pages ───────────────────────────────────────────────────────
@@ -277,13 +364,7 @@ impl NotionClient {
     async fn issue(&self, id: &str, page: &Value) -> LinearResult<LinearIssue> {
         let schema = self.schema().await?;
         let properties = &page["properties"];
-        let identity = blocks::plain_text(
-            properties[IDENTITY_PROPERTY]["rich_text"]
-                .as_array()
-                .map(Vec::as_slice)
-                .unwrap_or(&[]),
-        );
-        if identity != id {
+        if identity(page) != id {
             return Err(message(
                 "Notion returned a page with a different Loopflow identity",
             ));
@@ -557,6 +638,15 @@ fn object_id(object: &Value) -> LinearResult<String> {
         .as_str()
         .map(str::to_owned)
         .ok_or_else(|| message("Notion response has no id"))
+}
+
+fn identity(page: &Value) -> String {
+    blocks::plain_text(
+        page["properties"][IDENTITY_PROPERTY]["rich_text"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    )
 }
 
 fn title(schema: &Schema, page: &Value) -> String {

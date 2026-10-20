@@ -147,12 +147,14 @@ async fn query(State(state): State<Shared>, Json(body): Json<Value>) -> Response
     if notion.offline {
         return offline();
     }
-    assert_eq!(body["filter"]["property"], "Loopflow ID");
-    let wanted = body["filter"]["rich_text"]["equals"].as_str().unwrap();
+    // Lookups filter by Loopflow ID; the change feed reads every live page.
+    let wanted = body["filter"]["rich_text"]["equals"].as_str();
     let results: Vec<Value> = notion
         .pages
         .values()
-        .filter(|page| page["archived"] == false && Notion::identity(page) == wanted)
+        .filter(|page| {
+            page["archived"] == false && wanted.is_none_or(|id| Notion::identity(page) == id)
+        })
         .cloned()
         .collect();
     Json(json!({"results": results, "has_more": false, "next_cursor": null})).into_response()
@@ -635,5 +637,74 @@ fn notion_renames_and_completion_reach_the_task() {
             .block_on(fixture.store.task_state(&saved.id))
             .unwrap()
             .is_terminal());
+    });
+}
+
+#[test]
+fn notion_pages_coworkers_create_become_tasks() {
+    with_notion(|runtime, fixture, repo, state| {
+        runtime.block_on(async {
+            let mut notion = state.lock().await;
+            let id = notion.id();
+            let edited = notion.tick();
+            notion.pages.insert(
+                id.clone(),
+                json!({
+                    "object": "page", "id": id, "archived": false, "last_edited_time": edited,
+                    "url": "https://www.notion.so/filed", "parent": {"database_id": DATABASE},
+                    "properties": {
+                        "Name": {"title": [{"plain_text": "Filed in Notion"}]},
+                        "Status": {"status": {"name": "Not started"}},
+                    },
+                }),
+            );
+            notion.append(
+                &id,
+                &[json!({"type": "paragraph", "paragraph": {"rich_text": [
+                    {"type": "text", "text": {"content": "From the meeting"}}
+                ]}})],
+            );
+        });
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
+        let task = tasks
+            .iter()
+            .find(|task| task.title == "Filed in Notion")
+            .expect("the Notion page became a Task");
+        assert_eq!(task.description, "From the meeting");
+        // The page now carries the Loopflow ID every machine derives: its own ID.
+        let id = task.linear_id.as_ref().unwrap().as_str();
+        let page = mirrored(runtime, &state, id);
+        assert_eq!(page["id"], id);
+    });
+}
+
+#[test]
+fn notion_pages_coworkers_archive_leave_the_plan() {
+    with_notion(|runtime, fixture, repo, state| {
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("Archived in Notion".into()), None)
+                .unwrap();
+        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let page = mirrored(runtime, &state, &id)["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        runtime.block_on(state.lock()).pages.get_mut(&page).unwrap()["archived"] = json!(true);
+        let task = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        runtime
+            .block_on(crate::ops::linear_observe::refresh_task_comments(
+                &fixture.store,
+                &task,
+            ))
+            .unwrap();
+        let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
+        assert!(tasks.iter().all(|task| task.id != saved.id));
     });
 }

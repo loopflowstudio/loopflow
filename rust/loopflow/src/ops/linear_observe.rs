@@ -51,6 +51,19 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         return Ok(());
     }
     let client = super::planning_client::PlanningClient::for_items(&repository).await?;
+    // A coworker deleted the item: remove the Task from the plan, keeping its work.
+    let url = store.sqlite.task_issue_url(&task.id).map_err(message)?;
+    if client
+        .removed(issue.as_str(), url.as_deref())
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+    {
+        store
+            .sqlite
+            .observe_pm_issue_change(issue.as_str(), None, true)
+            .map_err(message)?;
+        return Ok(());
+    }
     let mut observation = client
         .observe_issue(issue.as_str())
         .await
@@ -86,7 +99,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
 /// Loopflow comment's visible text is that comment: delivery settles and nothing
 /// echoes back.
 fn claim_local_comments(
-    store: &SharedStore,
+    store: &Store,
     task: &Task,
     client: &super::planning_client::PlanningClient,
     observation: &mut crate::linear::LinearIssueObservation,
@@ -126,14 +139,16 @@ pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> 
     Ok(())
 }
 
-/// Acquire only when a caller can consume the result. Freshness belongs to the
-/// team, even when several repositories or processes share it.
+/// Bring the repository's planning scope (a Linear Team, Asana project or
+/// Notion database) up to date: items people created or edited there become or
+/// update Tasks. Freshness belongs to the scope, even when several repositories
+/// or processes share it.
 pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
-    if !super::planning_client::is_linear(repository) {
+    if !super::planning_client::connected(repository) {
         return Ok(false);
     }
     let repo = std::path::Path::new(repository);
-    let team = super::linear::repository_team_id(repo)?;
+    let team = super::planning_client::repository_scope(repo)?;
     let mut live = Vec::new();
     let mut finished = Vec::new();
     let waves: Vec<_> = store
@@ -142,7 +157,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         .map_err(message)?
         .into_iter()
         .filter(|wave| {
-            super::linear::repository_team_id(std::path::Path::new(wave.repo()))
+            super::planning_client::repository_scope(std::path::Path::new(wave.repo()))
                 .ok()
                 .as_ref()
                 == Some(&team)
@@ -150,7 +165,11 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         .collect();
     for task in store.list_tasks(None).await.map_err(message)? {
         let task_repo = super::task::repository_for_task(store, &task)?;
-        if super::linear::repository_team_id(&task_repo).ok().as_ref() != Some(&team) {
+        if super::planning_client::repository_scope(&task_repo)
+            .ok()
+            .as_ref()
+            != Some(&team)
+        {
             continue;
         }
         let Some(issue) = task.linear_id else {
@@ -166,9 +185,6 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         } else {
             live.push(issue.as_str().to_owned());
         }
-    }
-    if live.is_empty() {
-        return Ok(false);
     }
     let key = format!("{:x}", Sha256::digest(team.as_bytes()));
     let path = store
@@ -191,9 +207,9 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let through = now
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(message)?;
-    let client = super::linear::issue_client().await?;
+    let client = super::planning_client::PlanningClient::for_items(repo).await?;
     let changes = client
-        .team_changes(&team, since.as_deref(), &through, &live, &finished)
+        .changes(&team, since.as_deref(), &through, &live, &finished)
         .await
         .map_err(message)?;
     let changed = !changes.is_empty();
@@ -230,6 +246,8 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
                         })
                 })
                 .map(|wave| wave.repo().to_owned())
+                // An item in no Wave Project is a standalone Task of this repository.
+                .or_else(|| Some(repository.to_owned()))
         };
         let Some(owner) = owner else { continue };
         super::planning_delivery::ingest_task(
@@ -241,6 +259,8 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         )
         .await?;
         if let Some(task) = store.get_task_by_issue(&issue.id).await.map_err(message)? {
+            let mut observation = observation;
+            claim_local_comments(store, &task, &client, &mut observation)?;
             store
                 .apply_linear_observation(&task.id, observation, now)
                 .await

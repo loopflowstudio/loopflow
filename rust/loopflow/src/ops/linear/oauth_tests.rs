@@ -652,7 +652,7 @@ async fn oauth_trace_process_entry() {
     let value = fixture.resolve(&url).await.unwrap();
     assert!(value == original.access_token);
     let captured = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
-    assert!(captured.contains("proactive Linear refresh failed"));
+    assert!(captured.contains("proactive planning refresh failed"));
     assert!(!captured.contains("synthetic-secret"));
 }
 

@@ -41,6 +41,14 @@ fn external(gid: &str) -> String {
         .to_string()
 }
 
+/// A task addressed by `external:<id>` or by Asana's own gid.
+fn key(asana: &Asana, gid: &str) -> Option<String> {
+    match gid.strip_prefix("external:") {
+        Some(id) => asana.tasks.contains_key(id).then(|| id.to_string()),
+        None => owner(asana, gid),
+    }
+}
+
 /// Asana lists stories only under its own task gid.
 fn owner(asana: &Asana, gid: &str) -> Option<String> {
     asana
@@ -105,9 +113,20 @@ async fn update(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     let modified = asana.tick();
-    let Some(task) = asana.tasks.get_mut(&external(&gid)) else {
+    let Some(mut id) = key(&asana, &gid) else {
         return missing();
     };
+    // Claiming a task created in Asana files it under its new Loopflow identity.
+    if let Some(claimed) = body["data"]["external"]["gid"].as_str() {
+        let task = asana.tasks.remove(&id).unwrap();
+        let thread = asana.stories.remove(&id);
+        id = claimed.to_string();
+        asana.tasks.insert(id.clone(), task);
+        if let Some(thread) = thread {
+            asana.stories.insert(id.clone(), thread);
+        }
+    }
+    let task = asana.tasks.get_mut(&id).unwrap();
     for (field, value) in body["data"].as_object().unwrap() {
         task[field] = value.clone();
     }
@@ -118,6 +137,14 @@ async fn update(
         Value::Null
     };
     data(task.clone())
+}
+
+async fn project_tasks(State(state): State<Shared>) -> Response {
+    let asana = state.lock().await;
+    if asana.offline {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    data(json!(asana.tasks.values().cloned().collect::<Vec<_>>()))
 }
 
 async fn remove(State(state): State<Shared>, Segment(gid): Segment<String>) -> Response {
@@ -158,6 +185,7 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
     let url = format!("http://{}", listener.local_addr().unwrap());
     let app = axum::Router::new()
         .route("/tasks", axum::routing::post(create))
+        .route("/projects/{project}/tasks", get(project_tasks))
         .route("/tasks/{gid}", get(read).put(update).delete(remove))
         .route("/tasks/{gid}/stories", get(stories).post(comment))
         .with_state(state);
@@ -361,5 +389,62 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             .unwrap()
             .unwrap();
         assert_eq!(local.title, "Take direction from Asana");
+    });
+}
+
+#[test]
+fn asana_tasks_coworkers_create_become_tasks() {
+    with_asana(|runtime, fixture, repo, state| {
+        runtime.block_on(async {
+            let mut asana = state.lock().await;
+            let modified = asana.tick();
+            asana.tasks.insert(
+                "coworker".into(),
+                json!({
+                    "gid": "7100", "external": null, "name": "Filed in Asana",
+                    "html_notes": "<body>From the <strong>meeting</strong></body>",
+                    "completed": false, "completed_at": null, "modified_at": modified,
+                    "permalink_url": "https://app.asana.com/0/1/7100", "due_on": null,
+                    "assignee": null, "memberships": [{"project": {"gid": PROJECT}}],
+                }),
+            );
+        });
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
+        let task = tasks
+            .iter()
+            .find(|task| task.title == "Filed in Asana")
+            .expect("the Asana task became a Task");
+        assert_eq!(task.description, "From the **meeting**");
+        // Asana now carries the Loopflow identity every machine derives.
+        let asana = runtime.block_on(state.lock());
+        let id = task.linear_id.as_ref().unwrap().as_str();
+        assert_eq!(asana.tasks[id]["external"]["gid"], id);
+    });
+}
+
+#[test]
+fn asana_tasks_coworkers_delete_leave_the_plan() {
+    with_asana(|runtime, fixture, repo, state| {
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("Deleted in Asana".into()), None)
+                .unwrap();
+        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        runtime.block_on(state.lock()).tasks.remove(&id);
+        let task = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        runtime
+            .block_on(crate::ops::linear_observe::refresh_task_comments(
+                &fixture.store,
+                &task,
+            ))
+            .unwrap();
+        let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
+        assert!(tasks.iter().all(|task| task.id != saved.id));
     });
 }

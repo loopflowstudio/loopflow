@@ -87,11 +87,6 @@ fn validate_reply(
     Ok(())
 }
 
-/// The Task's owner's Machine, or the Machine that may claim it.
-pub fn resolve(store: &SqliteStore, task: &TaskId) -> Result<TaskExecutionRoute> {
-    Ok(store.task_execution_route(task)?)
-}
-
 pub fn render(readings: &[TaskLocationObservation]) -> String {
     readings
         .iter()
@@ -119,13 +114,13 @@ pub fn explain(
     task: &TaskId,
     resolution: &mut ContextExplanation,
 ) -> Result<TaskExecutionRoute> {
-    let route = match resolve(store, task) {
+    let route = match store.task_execution_route(task) {
         Ok(route) => route,
         Err(error) => {
             resolution.execution_machine = ContextFact::Unavailable {
                 reason: error.to_string(),
             };
-            return Err(error);
+            return Err(error.into());
         }
     };
     let source = match &route.source {

@@ -42,15 +42,11 @@
     Desktop-read DTO; deferred.
 12. **`lf wave place` is deleted; `lf wave rename` moved to its own module.**
 
-## Proposed Wave memory update (infrastructure MEMORY.md is read-only here)
+## Wave memory
 
-- Line ~300 says Machine removal keeps "identity, route and placements". Placements
-  no longer exist; proposed: "identity and route survive, and ownership entries that
-  name the Machine keep it".
-- Add: "LOO-523 (2026-10-19): Tasks are owned by (person, Machine) through an
-  append-only `task_ownership` log; Started, Work placement and first-start
-  admission are deleted. Each person's Wave Machine is Machine-local
-  (`lf wave machine`), copied to their other Machines."
+Applied during compress (2026-10-20): infrastructure MEMORY.md drops placement,
+admission and Started claims and records LOO-523 in the LOO-412 section.
+
 14. **The ownership verbs are `claim`, `handoff` and `unclaim`** (Jack Heart, 2026-10-20).
     `lf task release` made `lf release` ambiguous; `unclaim` pairs with `claim` and
     keeps the shorthand.

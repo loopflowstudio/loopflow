@@ -182,20 +182,6 @@ pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(reading_in(conn, task)?.1.owner.is_some())
 }
 
-/// Your Machine for an unowned Task: its Wave's or a parent Wave's setting,
-/// then this Machine.
-pub(super) fn owning_machine_in(
-    conn: &Connection,
-    task: &TaskId,
-) -> StoreResult<(MachineId, OwningMachineSource)> {
-    let wave: Option<String> = conn.query_row(
-        "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-        [task.as_str()],
-        |row| row.get(0),
-    )?;
-    resolve_owning_machine(conn, wave)
-}
-
 fn resolve_owning_machine(
     conn: &Connection,
     mut wave: Option<String>,
@@ -255,7 +241,14 @@ pub(super) fn writer_in(
             }
         }
     }
-    let (machine, source) = owning_machine_in(conn, task)?;
+    // Your Machine for an unowned Task: its Wave's or a parent Wave's setting,
+    // then this Machine.
+    let wave: Option<String> = conn.query_row(
+        "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    let (machine, source) = resolve_owning_machine(conn, wave)?;
     Ok((machine, TaskExecutionSource::OwningMachine(source)))
 }
 
@@ -603,10 +596,9 @@ impl SqliteStore {
             )));
         }
         let entry = append_in(&tx, task, OwnershipKind::Handoff, person, target)?;
-        tx.execute(
-            "UPDATE agent_sessions SET completed_at=?2 WHERE completed_at IS NULL
-             AND id=(SELECT primary_session_id FROM tasks WHERE id=?1)",
-            params![task.as_str(), crate::store::rows::now_unix()],
+        super::sessions::complete_primary_session_in(
+            &tx,
+            &crate::session::PrimaryScope::Task(task.clone()),
         )?;
         tx.commit()?;
         Ok(entry)

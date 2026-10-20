@@ -332,7 +332,7 @@ Task or planning provider. `lf connect` finds or admits it, prepares its
 workspace, reserves the first input and owns the foreground launch; `--prepare`
 stops before launch. Task primaries are admitted lazily on the owner Machine, on first connect;
 explicit Wave admission also admits the repository conversation. A Session may
-have no current capture: metadata admission does not mark a Task Started, prepare
+have no current capture: metadata admission does not claim a Task, prepare
 a prompt or start a provider. The first captured input, or binding a previously
 captured conversation, starts work.
 `resume` is an alias. `connect --fresh` retires the predecessor as primary and

@@ -382,6 +382,20 @@ fn primary_session_in(
     }
 }
 
+pub(super) fn complete_primary_session_in(
+    conn: &Connection,
+    scope: &PrimaryScope,
+) -> StoreResult<Option<LfSession>> {
+    let current = primary_session_in(conn, scope)?;
+    if let Some(current) = &current {
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
+            params![current.id, crate::store::rows::now_unix()],
+        )?;
+    }
+    Ok(current)
+}
+
 fn ensure_primary_session_in(
     conn: &Connection,
     scope: &PrimaryScope,
@@ -1032,13 +1046,7 @@ impl SqliteStore {
     ) -> StoreResult<Option<LfSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = primary_session_in(&tx, scope)?;
-        if let Some(current) = &current {
-            tx.execute(
-                "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
-                params![current.id, crate::store::rows::now_unix()],
-            )?;
-        }
+        let current = complete_primary_session_in(&tx, scope)?;
         tx.commit()?;
         Ok(current)
     }

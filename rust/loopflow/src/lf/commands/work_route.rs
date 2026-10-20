@@ -263,7 +263,7 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| crate::ops::task_location::resolve(store, &task))
+        .map(|task| store.task_execution_route(&task).map_err(Into::into))
         .transpose()
 }
 

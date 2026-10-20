@@ -303,7 +303,7 @@ impl SqliteStore {
         }
         // Ownership entries ride on marked comments. An owner whose open claim
         // the exchanged log no longer shows claims again.
-        let mut owned = std::collections::HashSet::new();
+        let mut touched = std::collections::HashSet::new();
         for &(table, target) in grouped.keys() {
             if table != "task_comments" || conflicts.contains_key(&(table, target)) {
                 continue;
@@ -315,9 +315,9 @@ impl SqliteStore {
             )?;
             let task = crate::durable::TaskId::from_raw(task);
             super::task_ownership::ingest_marker_in(&tx, &task, &body, created_at.as_deref())?;
-            owned.insert(task);
+            touched.insert(task);
         }
-        for task in &owned {
+        for task in &touched {
             super::task_ownership::reassert_in(&tx, task)?;
         }
 

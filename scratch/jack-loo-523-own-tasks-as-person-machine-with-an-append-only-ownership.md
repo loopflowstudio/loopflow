@@ -447,6 +447,7 @@ The live Linear demo above is a demo/review step, not gate.
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
+Compress (2026-10-20): lib `ownership task_location` 29/29, integration `ownership wave_machine handoff` 18/18, clippy clean; `docs/architecture.html` re-rendered.
 Check results (2026-10-20): ownership + wave machine integration 5/5, cli_discovery/documented/dto/global 78/78, clippy clean, `check_migrations.py` pass. Earlier (2026-10-19): ownership integration 3/3, `dto_fixtures` 42/42,
 release/CLI integration 61/61, focused Swift 76/76, `check_migrations.py` pass;
 full integration otherwise green except `auth_tests::banked_resets…` (passes alone);

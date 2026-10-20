@@ -4,6 +4,10 @@
 //! repository. Recipes in [`recipes`] describe what goes in it; everything is
 //! written by the same ops and store calls `lf` uses, so a migration never
 //! leaves a recipe behind. Times are relative to the moment of building.
+//!
+//! The world's `bin/` leads its `PATH` with a stand-in `claude` ([`STUB_CLAUDE`]):
+//! resuming a world Session finds its transcript and echoes each input line, so
+//! Sessions open live without an account or network.
 
 pub mod recipes;
 
@@ -26,6 +30,42 @@ pub use crate::work::wave::metrics::Threshold;
 
 const DAY: i64 = 24 * 60 * 60;
 
+/// The world's `claude`. `--resume <id>` prints `resumed <id>: <n> lines`
+/// after reading the world transcript (exit 1 when there is none), then answers
+/// each input line with `reply <id>: <line>` until `quit` or EOF. A new
+/// conversation (`--session-id <id>`) echoes the same way. Transcripts are
+/// never written. It needs only `sh` and `grep`, which the Desktop benchmark's
+/// exec policy allows.
+pub const STUB_CLAUDE: &str = r#"#!/bin/sh
+# Stand-in claude for an lf-world world.
+if [ "$1" = --version ]; then echo "2.1.0 (Claude Code)"; exit 0; fi
+id=
+new=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume|-r) id=$2; shift ;;
+    --session-id) id=$2; new=1; shift ;;
+  esac
+  shift
+done
+if [ -z "$id" ]; then echo "world claude only resumes or starts identified conversations" >&2; exit 2; fi
+if [ -z "$new" ]; then
+  transcript=
+  for candidate in "$CLAUDE_CONFIG_DIR"/projects/*/"$id".jsonl; do
+    [ -f "$candidate" ] && transcript=$candidate
+  done
+  if [ -z "$transcript" ]; then echo "No conversation found with session ID: $id" >&2; exit 1; fi
+  lines=$(grep -c . "$transcript") || exit 1
+  echo "resumed $id: $lines lines"
+else
+  echo "started $id"
+fi
+while IFS= read -r input; do
+  [ "$input" = quit ] && exit 0
+  echo "reply $id: $input"
+done
+"#;
+
 /// The environment a World's commands run under, written as `env.json`.
 #[derive(Debug, Clone, Serialize)]
 pub struct WorldEnv {
@@ -35,14 +75,19 @@ pub struct WorldEnv {
     pub claude_config_dir: PathBuf,
     #[serde(rename = "CODEX_HOME")]
     pub codex_home: PathBuf,
+    /// The world's `bin/` ahead of the builder's `PATH`.
+    #[serde(rename = "PATH")]
+    pub path: String,
 }
 
 impl WorldEnv {
     fn new(dir: &Path) -> Self {
+        let inherited = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string());
         Self {
             lf_home: dir.join("home"),
             claude_config_dir: dir.join("claude"),
             codex_home: dir.join("codex"),
+            path: format!("{}:{inherited}", dir.join("bin").display()),
         }
     }
 
@@ -81,9 +126,18 @@ impl World {
         }
         let dir = dir.canonicalize()?;
         let env = WorldEnv::new(&dir);
+        // A builder launched from an lf Session inherits that Session's
+        // identity; the world's writes must not attribute to it.
+        for (name, _) in std::env::vars_os() {
+            let name = name.to_string_lossy();
+            if name.starts_with("LF_") && name != "LF_BIN" {
+                std::env::remove_var(&*name);
+            }
+        }
         for (name, value) in env.vars() {
             std::env::set_var(name, value);
         }
+        write_stub_claude(&dir.join("bin"))?;
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
@@ -403,6 +457,15 @@ impl World {
         let store = self.runtime.block_on(crate::store::open_store(&config))?;
         Ok(std::sync::Arc::new(store))
     }
+}
+
+fn write_stub_claude(bin: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(bin)?;
+    let path = bin.join("claude");
+    std::fs::write(&path, STUB_CLAUDE)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
 }
 
 fn create_repo(repo: &Path, origin: &Path) -> Result<()> {

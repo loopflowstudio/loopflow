@@ -39,7 +39,7 @@ struct LoopflowApp: App {
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
         // A reboot leaves interrupted Sessions behind; bring them all back unasked.
-        if AppTestMode.current() == nil, SessionFixture.query == nil {
+        if AppTestMode.current() == nil {
             Task.detached(priority: .utility) {
                 do {
                     try await RegistryQueryLocal.shared.resumeInterrupted()
@@ -56,19 +56,24 @@ struct LoopflowApp: App {
 
     var body: some Scene {
         let launchRepoURL = LaunchArguments.repoURL()
-        let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
+        let registryQuery = RegistryQueryLocal.shared
 
         WindowGroup(id: "workspace", for: RepositoryWorkspace.self) { $workspace in
             Group {
+                // A capture opens its target window from a window that stays:
+                // the launch view hands off to a repository window, and opening
+                // another window during that hand-off aborts in AttributeGraph.
                 if let workspace {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
                                             openRepository: requestRepository)
+                        .task { openCaptureViewIfNeeded() }
                 } else if AppTestMode.shouldBypassRegistry {
                     RepoView(portfolioService: portfolioService,
                              sessionWorkspaces: workspaces.registry(for: "fixture"), initialRepoPath: launchRepoURL?.path,
                              query: registryQuery)
+                        .task { openCaptureViewIfNeeded() }
                 } else {
                     WorkspaceLaunchView {
                         if let path = launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath {
@@ -83,7 +88,6 @@ struct LoopflowApp: App {
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
-            .task { openCaptureViewIfNeeded() }
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
@@ -219,7 +223,7 @@ struct LoopflowApp: App {
         default:
             taskLinks.receiveAddress { isLatest in
                 do {
-                    let query = SessionFixture.query ?? RegistryQueryLocal.shared
+                    let query = RegistryQueryLocal.shared
                     let resolved = try await query.workLink(url)
                     let link = LinkedWork(resolved)
                     var path = resolved.target.repositoryPath
@@ -255,7 +259,7 @@ struct LoopflowApp: App {
     @MainActor
     private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil,
                                 raises: @MainActor () -> Bool = { true }) async throws {
-        let query = SessionFixture.query ?? RegistryQueryLocal.shared
+        let query = RegistryQueryLocal.shared
         let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query,
                                                            raises: raises) { workspace in
             openWindow(id: "workspace", value: workspace)
@@ -343,6 +347,9 @@ private extension View {
                     if captureWindow != nil { break }
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
+                // A launch view that hands off to a repository window is
+                // replaced before it settles; the replacement captures.
+                if Task.isCancelled { return }
 
                 if let window = captureWindow {
                     if let width = AppTestMode.windowWidth {
@@ -352,6 +359,7 @@ private extension View {
                         window.setContentSize(NSSize(width: width, height: height))
                     }
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if Task.isCancelled { return }
                     if window.isVisible {
                         do {
                             _ = try SnapshotService().snapshotWindow(window, to: path)

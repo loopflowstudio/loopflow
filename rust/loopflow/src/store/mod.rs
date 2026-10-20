@@ -14,6 +14,7 @@ pub(crate) mod changes;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
+pub mod copy;
 mod durable;
 mod metrics;
 mod migration_catalog;
@@ -155,8 +156,10 @@ pub(crate) fn custom_home_selected() -> bool {
     !same_database_file(&lf_home_dir(), &default_lf_home_dir()).unwrap_or(false)
 }
 
+/// The default home's database, or this build's copy of it when the build
+/// carries unreleased drafts (see [`copy`]).
 pub fn default_db_path() -> PathBuf {
-    lf_home_dir().join("loopflow.db")
+    copy::selected().unwrap_or_else(|| lf_home_dir().join("loopflow.db"))
 }
 
 /// The selected Machine's database. A Machine has exactly one, at a fixed name.

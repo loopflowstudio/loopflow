@@ -1398,6 +1398,10 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
+    if let Err(error) = loopflow::store::copy::enter() {
+        eprintln!("Error: {error}");
+        return std::process::ExitCode::FAILURE;
+    }
     loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {

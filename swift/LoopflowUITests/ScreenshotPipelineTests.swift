@@ -12,6 +12,7 @@ final class ScreenshotPipelineTests: XCTestCase {
         launch.detailState = environment["LOOPFLOW_UI_TEST_DETAIL_STATE"]
         launch.selectBranch = environment["LOOPFLOW_UI_TEST_SELECT_BRANCH"]
         launch.width = environment["LOOPFLOW_UI_TEST_WIDTH"].flatMap(Double.init)
+        launch.world = environment["LOOPFLOW_UI_TEST_WORLD"]
 
         let app = launch.makeApp()
         app.launch()

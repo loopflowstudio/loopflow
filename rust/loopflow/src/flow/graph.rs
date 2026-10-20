@@ -850,10 +850,12 @@ mod tests {
                     "sync",
                     "realign",
                     "loop-or-next",
+                    "concept-review",
+                    "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
-                1,
+                2,
             ),
             ("deploy", &["gate", "pr land"], &[], 0),
             ("ship", &["gate", "land --wait-and-fix"], &[], 0),
@@ -918,6 +920,8 @@ mod tests {
                 "sync",
                 "realign",
                 "loop-or-next",
+                "concept-review",
+                "loop-or-next",
                 "pr-publish",
             ]
         );
@@ -927,7 +931,13 @@ mod tests {
             .iter()
             .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
             .collect();
-        assert_eq!(returns, [(graph.steps[4].key, &implement)]);
+        assert_eq!(
+            returns,
+            [
+                (graph.steps[4].key, &implement),
+                (graph.steps[6].key, &implement)
+            ]
+        );
         // Review and landing are the conversation's to launch, not this Flow's.
         assert!(graph.steps.iter().all(|node| !node.human));
         assert!(graph

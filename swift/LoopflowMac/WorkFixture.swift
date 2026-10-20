@@ -19,14 +19,11 @@ enum WorkFixture {
                     repos: [],
                     fixed: true
                 )
-            case .mockWaves, .sessionFixtures:
+            case .mockWaves:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: WorkReading<RoadmapSnapshot>
                 let workActivity: WorkReading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
-                case .selected:
-                    reading = .available(fixture.roadmap)
-                    workActivity = .available(try loadWorkActivity(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
                     workActivity = .loading
@@ -82,11 +79,6 @@ enum WorkFixture {
             return PortfolioRepo(path: path, error: nil)
         }
         return (roadmap, waves, repos)
-    }
-
-    private static func loadWorkActivity(sourceFile: String) throws -> WorkActivitySnapshot {
-        let url = try fixtureURL(named: "work_activity_snapshot.json", sourceFile: sourceFile)
-        return try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(contentsOf: url))
     }
 
     private static func emptyWorkActivity() throws -> WorkActivitySnapshot {

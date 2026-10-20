@@ -1076,10 +1076,7 @@ final class WorkModel {
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
-        if usesFixedFixture {
-            if AppTestMode.current() == .sessionFixtures { await refreshSessions() }
-            return
-        }
+        if usesFixedFixture { return }
         guard query.streamsWork else {
             // This transport has no reader: one reading, shown until asked again.
             await refresh()
@@ -1746,7 +1743,7 @@ final class WorkModel {
     }
 
     func refreshSessions() async {
-        guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
+        guard !usesFixedFixture else { return }
         if workObservation != nil {
             syncWorkScope()
             return
@@ -2179,7 +2176,7 @@ final class WorkModel {
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
-        if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
+        if fixed { self.sessions = .available([]) }
         self.waves = waves
         self.workActivity = workActivity
         self.repos = repos

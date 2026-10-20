@@ -1,5 +1,5 @@
 ---
-requires: a person present, their intended experience, and the current product design
+requires: the intended experience, the current product design, and a person when a product choice must be made
 produces: accepted product decisions and unresolved choices in the working design
 action_style: exploratory
 ---
@@ -50,9 +50,21 @@ Do not create a per-slice review or repeat implementation evidence; realign
 reconciles the plan and code using what the work has taught us. Do not rewrite implementation or
 restart execution unless requested.
 
-Use this skill on request or in the ongoing Wave conversation when a
-Flow needs a product decision. It is not a routine headless loop step. If no
-person is present, state the exact product choice requiring conversation and
-return through the caller's existing blocked protocol. Do not invent approval,
-create a Task, publish, merge, or choose navigation. Completing the conversation
-returns evidence to the caller; loop-or-next reassesses it.
+## In a Flow without a person
+
+Run the same review against the accepted design and the implemented change.
+Settle what accepted product decisions already imply: clearer names, merged
+concepts, machinery a clearer contract makes unnecessary. Record those in the
+working design as the next implement direction; do not rewrite code here.
+
+A genuine product choice changes what the product should be and is not settled
+by an accepted decision. Record each one as unresolved in the working design,
+with the exact question and its evidence. Never invent approval for it.
+
+Then report one of three outcomes for the following loop-or-next:
+- nothing to change and no open choice: say so briefly; it advances.
+- the design changed: name the change; it iterates to implement.
+- an open product choice: state the question; it returns Blocked with it.
+
+Do not create a Task, publish, merge, or choose navigation. This step's result
+is evidence; loop-or-next decides.

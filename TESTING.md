@@ -521,7 +521,7 @@ source. A Markdown-only edit can fail that check.
 App build and headless tests for models, protocols, and production views.
 
 ```bash
-cargo build -p loopflow --bin lf # Required by the real CLI transport proof
+cargo build -p loopflow --bin lf --bin lf-world # Real CLI transport and world proofs
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

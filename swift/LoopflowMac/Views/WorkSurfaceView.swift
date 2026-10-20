@@ -23,23 +23,9 @@ struct WaveTaskInventory: View {
                     switch wave.tasks {
                     case .unavailable(let reason): Text(reason).foregroundStyle(palette.warning)
                     case .available(let tasks, let truncated):
-                        ForEach([true, false], id: \.self) { started in
-                            let group = tasks.filter { ($0.runtime?.started == true) == started }
-                                .sorted { $0.task.rank < $1.task.rank }
-                            Text("\(started ? "Started" : "Not started") · \(group.count)")
-                                .font(.caption).foregroundStyle(palette.textSecondary)
-                            ForEach(group) { task in
-                                Button { model.select(.task(id: task.id)) } label: {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(task.task.name).font(.body).lineLimit(2)
-                                        HStack {
-                                            Text(task.task.identifier).font(.caption.monospaced())
-                                            if task.runtime?.status == .paused { Label("Paused", systemImage: "pause.circle") }
-                                        }.foregroundStyle(palette.textSecondary)
-                                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                                }.buttonStyle(.plain).accessibilityIdentifier("wave-task-\(task.id)")
-                            }
-                        }
+                        let groups = WaveTaskGroups(tasks, now: Date())
+                        taskGroup("Started", groups.started)
+                        taskGroup("Not started", groups.notStarted)
                         if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
                     }
                     WaveMetricPortfolioView(portfolio: wave.metricPortfolio)
@@ -47,6 +33,23 @@ struct WaveTaskInventory: View {
             }.padding(16).accessibilityIdentifier("loopflow-detail-wave")
         }.background(palette.background).accessibilityIdentifier("wave-task-inventory")
     }
+    @ViewBuilder
+    private func taskGroup(_ title: String, _ group: [RoadmapTask]) -> some View {
+        Text("\(title) · \(group.count)")
+            .font(.caption).foregroundStyle(palette.textSecondary)
+        ForEach(group) { task in
+            Button { model.select(.task(id: task.id)) } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(task.task.name).font(.body).lineLimit(2)
+                    HStack {
+                        Text(task.task.identifier).font(.caption.monospaced())
+                        if task.runtime?.status == .paused { Label("Paused", systemImage: "pause.circle") }
+                    }.foregroundStyle(palette.textSecondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }.buttonStyle(.plain).accessibilityIdentifier("wave-task-\(task.id)")
+        }
+    }
+
     private func planningNotice(_ task: UnavailableTaskEvidence) -> some View {
         let open = model.navigation.expandedNotices.contains(task.taskId)
         return VStack(alignment: .leading, spacing: Spacing.xs) {

@@ -35,6 +35,19 @@ struct TaskHistoryFilter: Equatable {
     }
 }
 
+/// A Wave's current Tasks by rank, split by whether their work has started.
+struct WaveTaskGroups {
+    let started: [RoadmapTask]
+    let notStarted: [RoadmapTask]
+
+    init(_ tasks: [RoadmapTask], now: Date) {
+        let current = tasks.sorted { $0.task.rank < $1.task.rank }
+            .filter { TaskHistoryFilter().includes($0.task, condition: $0.condition, now: now) }
+        started = current.filter { $0.runtime?.started == true }
+        notStarted = current.filter { $0.runtime?.started != true }
+    }
+}
+
 struct TaskHistoryControls: View {
     @Binding var filter: TaskHistoryFilter
     @Environment(\.palette) private var palette

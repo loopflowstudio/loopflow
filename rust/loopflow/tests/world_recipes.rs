@@ -86,3 +86,65 @@ fn every_recipe_builds_a_world_lf_reads() {
         );
     }
 }
+
+#[test]
+fn lifecycle_world_reports_each_state() {
+    let (root, world, env) = build("lifecycle");
+    let shown = lf(
+        root.path(),
+        &world,
+        &env,
+        &["wave", "show", "--all", "--json"],
+    );
+    let tasks = shown["tasks"]["items"].as_array().unwrap();
+    let task = |name: &str| {
+        tasks
+            .iter()
+            .find(|task| task["task"]["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is missing"))
+    };
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    for (name, days) in [
+        ("Shipped yesterday", 1),
+        ("Shipped this week", 5),
+        ("Shipped last fortnight", 12),
+        ("Shipped last quarter", 40),
+    ] {
+        let completed_at = time::OffsetDateTime::parse(
+            task(name)["task"]["completed_at"].as_str().unwrap(),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap()
+        .unix_timestamp();
+        assert!(
+            (now - days * 86_400 - completed_at).abs() < 3_600,
+            "{name} completed at {completed_at}"
+        );
+    }
+    for name in [
+        "Shipped yesterday",
+        "Shipped this week",
+        "Shipped last fortnight",
+        "Shipped last quarter",
+        "Abandoned attempt",
+    ] {
+        assert_eq!(task(name)["condition"]["state"], "clear", "{name}");
+    }
+    assert_eq!(task("Paused mid-flight")["runtime"]["status"], "paused");
+    assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
+    let canceled = task("Canceled upstream");
+    assert_eq!(canceled["task"]["state"], "canceled");
+    assert_eq!(canceled["runtime"]["status"], "not_ready");
+    // Started local work survives an upstream cancel until someone disposes of it.
+    assert_eq!(canceled["condition"]["unresolved_execution"], true);
+    let lost = task("Lost checkout");
+    assert_eq!(lost["condition"]["local_progress"]["state"], "missing");
+    assert_eq!(lost["condition"]["state"], "blocked");
+    let mut standalone: Vec<_> = tasks
+        .iter()
+        .filter(|task| task["task"]["wave_id"].is_null())
+        .map(|task| task["task"]["name"].as_str().unwrap())
+        .collect();
+    standalone.sort_unstable();
+    assert_eq!(standalone, ["Standalone fix", "Standalone idea"]);
+}

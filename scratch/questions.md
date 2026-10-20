@@ -43,3 +43,7 @@ reads “This Mac” and does not navigate (no machines destination exists); a D
 crumb keeps `/` before its Task because B puts › only after repository and Wave
 levels. `TaskWorkflowHeader` has no production caller on `main` either (only tests mount
 it); its deletion belongs to whoever owns that header, not this Task.
+
+October 19, Machine: Jack Heart rejected the `This Mac ›` crumb — work is grouped by
+Work, and Machine is set per Wave or per Task. He wants one place to view and set the
+Machine for the current Work. Direction and agent interpretation: agreed-ux.md §3.

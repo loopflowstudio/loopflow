@@ -54,3 +54,28 @@ repository rows; the start offer takes 62% beside the brief, like a Wave's split
 
 Headless Swift view tests for both (see AGENTS.md Verification Cadence). Native
 demo stays demo-owned. Publish to PR #1580 for review only — no merge, no completion.
+
+## 3. No machine crumb; a Machine control on the Work — October 19
+
+Jack Heart: “This mac shouldnt be in our design. Our model is different. the model
+is not grouped by machine, model is grouped by work, machine is somethign you can
+set on a per wave or per task basis. What we want is a place to both view and set
+the machine that this work is happening on”.
+
+- Remove the `This Mac ›` crumb and its repositories menu. Breadcrumbs are
+  `repo › Wave › Task`. Other repositories stay reachable through Find Work (⌘K),
+  which already opens them in their own window. (Agent choice; flag in demo.)
+- Add one Machine control for the current Work (Wave or Task), at the trailing end
+  of the breadcrumb row. It shows the effective Machine and where it comes from:
+  set on this Task, inherited from the Wave (name it), or recorded for a started Task.
+- Setting it: the menu lists saved Machines (`lf machine list`, with reachability
+  where known). Choosing one places the current Wave or unstarted Task on that
+  Machine; “Inherit from <Wave>” clears a Task override (null restores inheritance).
+  Wave placement uses `lf wave place`. Add the missing Task equivalent over the
+  existing `DurableStore::place_work` (e.g. `lf task place <issue> <machine>`), the same
+  path the Desktop control calls. No second placement store.
+- Accepted model (product memory, October 9): unstarted/future Tasks inherit the
+  nearest explicit Machine; narrower Task overrides win; started Tasks stay on their
+  recorded Machine. So for a started Task the control shows the recorded Machine
+  read-only and says moving it is explicit takeover, which this Task does not build.
+- The control shows the execution Machine, never the Machine Desktop is displaying on.

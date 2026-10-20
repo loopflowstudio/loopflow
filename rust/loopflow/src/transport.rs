@@ -24,6 +24,7 @@ use crate::id::LfProcessId;
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
+const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
@@ -32,6 +33,37 @@ static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 struct Handoff {
     owner: LfProcessId,
     key: String,
+    parent: u32,
+}
+
+impl Handoff {
+    /// Read and remove the environment handoff; only a direct child adopts it.
+    fn take() -> Option<Self> {
+        let parent = std::env::var(PARENT_ENV)
+            .ok()
+            .and_then(|p| p.parse::<u32>().ok());
+        let owner = std::env::var(OWNER_ENV)
+            .ok()
+            .and_then(|id| LfProcessId::parse(&id).ok());
+        let key = std::env::var(CONTROL_ENV).ok();
+        std::env::remove_var(CONTROL_ENV);
+        std::env::remove_var(PARENT_ENV);
+        std::env::remove_var(OWNER_ENV);
+        // SAFETY: getppid has no preconditions.
+        let parent = parent.filter(|p| *p == unsafe { libc::getppid() } as u32)?;
+        Some(Self {
+            owner: owner?,
+            key: key?,
+            parent,
+        })
+    }
+
+    fn pass(&self, command: &mut Command, parent: u32) {
+        command
+            .env(OWNER_ENV, self.owner.as_str())
+            .env(PARENT_ENV, parent.to_string())
+            .env(CONTROL_ENV, &self.key);
+    }
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -110,24 +142,9 @@ enum Response {
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
 /// not inherit the right to run inside this execution's owner.
 pub fn initialize() {
-    let parent = std::env::var(PARENT_ENV)
-        .ok()
-        .and_then(|p| p.parse::<u32>().ok());
-    // SAFETY: getppid has no preconditions.
-    let direct = parent == Some(unsafe { libc::getppid() } as u32);
-    if direct {
-        if let (Some(owner), Ok(key)) = (
-            std::env::var(OWNER_ENV)
-                .ok()
-                .and_then(|id| LfProcessId::parse(&id).ok()),
-            std::env::var("LF_TRANSPORT_CONTROL"),
-        ) {
-            let _ = HANDOFF.set(Handoff { owner, key });
-        }
+    if let Some(handoff) = Handoff::take() {
+        let _ = HANDOFF.set(handoff);
     }
-    std::env::remove_var("LF_TRANSPORT_CONTROL");
-    std::env::remove_var(PARENT_ENV);
-    std::env::remove_var(OWNER_ENV);
 }
 
 pub(crate) fn current() -> Option<&'static LfProcessId> {
@@ -388,7 +405,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     listener.set_nonblocking(true)?;
     let control_key = uuid::Uuid::new_v4().to_string();
     let mut command = Command::new(&argv[0]);
-    command.env("LF_TRANSPORT_CONTROL", &control_key);
+    command.env(CONTROL_ENV, &control_key);
     command
         .args(&argv[1..])
         .env(OWNER_ENV, id.as_str())
@@ -910,10 +927,15 @@ pub(crate) fn detach_viewers() -> Result<()> {
 /// handoff, not authority inferred from process ancestry.
 pub(crate) fn configure_child(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
-        command
-            .env(OWNER_ENV, handoff.owner.as_str())
-            .env(PARENT_ENV, std::process::id().to_string())
-            .env("LF_TRANSPORT_CONTROL", &handoff.key);
+        handoff.pass(command, std::process::id());
+    }
+}
+
+/// An exec keeps this PID and its parent, so the replacing lf binary is still
+/// the direct child the handoff names.
+pub(crate) fn carry_across_exec(command: &mut Command) {
+    if let Some(handoff) = HANDOFF.get() {
+        handoff.pass(command, handoff.parent);
     }
 }
 
@@ -963,4 +985,56 @@ pub fn report_exit(code: u8) {
         false,
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::process::Command;
+
+    use super::{carry_across_exec, Handoff, CONTROL_ENV, OWNER_ENV, PARENT_ENV};
+    use crate::id::LfProcessId;
+
+    fn env<'a>(command: &'a Command, key: &str) -> Option<&'a OsStr> {
+        command
+            .get_envs()
+            .find(|(name, _)| *name == key)
+            .and_then(|(_, value)| value)
+    }
+
+    #[test]
+    fn exec_keeps_the_handoff_with_its_original_parent() {
+        let _env = crate::journal::test_env_lock();
+        let owner = LfProcessId::new();
+        // SAFETY: getppid has no preconditions.
+        let parent = unsafe { libc::getppid() } as u32;
+        std::env::set_var(OWNER_ENV, owner.as_str());
+        std::env::set_var(PARENT_ENV, parent.to_string());
+        std::env::set_var(CONTROL_ENV, "key");
+        let handoff = Handoff::take().expect("direct child adopts the handoff");
+        assert!(std::env::var_os(CONTROL_ENV).is_none());
+
+        let mut exec = Command::new("lf");
+        handoff.pass(&mut exec, handoff.parent);
+        assert_eq!(env(&exec, OWNER_ENV), Some(OsStr::new(owner.as_str())));
+        assert_eq!(
+            env(&exec, PARENT_ENV),
+            Some(OsStr::new(&parent.to_string()))
+        );
+        assert_eq!(env(&exec, CONTROL_ENV), Some(OsStr::new("key")));
+    }
+
+    #[test]
+    fn a_non_child_neither_adopts_nor_carries_a_handoff() {
+        let _env = crate::journal::test_env_lock();
+        std::env::set_var(OWNER_ENV, LfProcessId::new().as_str());
+        std::env::set_var(PARENT_ENV, "0");
+        std::env::set_var(CONTROL_ENV, "key");
+        assert!(Handoff::take().is_none());
+        assert!(std::env::var_os(CONTROL_ENV).is_none());
+
+        let mut exec = Command::new("lf");
+        carry_across_exec(&mut exec);
+        assert_eq!(exec.get_envs().count(), 0);
+    }
 }

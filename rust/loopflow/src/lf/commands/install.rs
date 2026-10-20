@@ -85,6 +85,15 @@ pub enum Compatibility {
     AheadPending {
         applied_frontier: String,
         latest_known: String,
+        /// The reader floor the pending migrations raise the store to; lf below
+        /// it can no longer open the store. `None` when no reader is locked out.
+        raised_reader_floor: Option<String>,
+    },
+    /// A newer release migrated the store, and its reader floor still admits the
+    /// candidate. Selecting it applies nothing, so rollback stays possible.
+    Behind {
+        applied_frontier: String,
+        reader_floor: String,
     },
     /// The store carries a migration, checksum, or schema the candidate does not
     /// recognize — the 2026-07-17 case. Reason is `store::migrations`' own text.
@@ -198,7 +207,7 @@ pub fn decide(
         Compatibility::Incompatible { reason } => reasons.push(format!(
             "candidate cannot operate the shared store: {reason}"
         )),
-        Compatibility::Exact { .. } => {}
+        Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
         Compatibility::AheadPending { .. } => match authority {
             MigrationAuthority::Published => migrate = true,
             MigrationAuthority::ValidationOnly => {}
@@ -258,14 +267,31 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
             }
         }
     };
-    match migrations::validate_sqlite(conn) {
-        Ok(()) => {
+    let newer_floor =
+        migrations::validate_sqlite(conn).and_then(|()| migrations::newer_store_floor(conn));
+    match newer_floor {
+        Ok(Some(reader_floor)) => {
+            return Compatibility::Behind {
+                applied_frontier: frontier.unwrap_or_default(),
+                reader_floor,
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return Compatibility::Incompatible {
+                reason: error.to_string(),
+            }
+        }
+    }
+    match migrations::raised_reader_floor(conn) {
+        Ok(raised_reader_floor) => {
             let latest_known = migrations::latest_known_version();
             match frontier {
                 Some(frontier) if frontier == latest_known => Compatibility::Exact { frontier },
                 Some(applied_frontier) => Compatibility::AheadPending {
                     applied_frontier,
                     latest_known,
+                    raised_reader_floor,
                 },
                 // `validate_sqlite` refuses an empty store ("a validation-only
                 // lf cannot initialize the release database"), so `Ok` with no
@@ -273,6 +299,7 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
                 None => Compatibility::AheadPending {
                     applied_frontier: "(uninitialized)".to_string(),
                     latest_known,
+                    raised_reader_floor: None,
                 },
             }
         }
@@ -289,6 +316,7 @@ fn read_store_evidence(store_path: &Path) -> Compatibility {
         return Compatibility::AheadPending {
             applied_frontier: "(uninitialized)".to_string(),
             latest_known: migrations::latest_known_version(),
+            raised_reader_floor: None,
         };
     }
     let conn = match rusqlite::Connection::open_with_flags(
@@ -380,7 +408,10 @@ fn _read_executable_compatibility(
     store_path: &Path,
     compatibility: &Compatibility,
 ) -> ExecutableCompatibility {
-    if matches!(compatibility, Compatibility::Exact { .. }) {
+    if matches!(
+        compatibility,
+        Compatibility::Exact { .. } | Compatibility::Behind { .. }
+    ) {
         return match rusqlite::Connection::open_with_flags(
             store_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -525,8 +556,20 @@ fn render_human(preview: &PromotionPreview) {
         Compatibility::AheadPending {
             applied_frontier,
             latest_known,
+            raised_reader_floor,
+        } => {
+            println!(
+                "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
+            );
+            if let Some(floor) = raised_reader_floor {
+                println!("  lf < {floor} can no longer open the store");
+            }
+        }
+        Compatibility::Behind {
+            applied_frontier,
+            reader_floor,
         } => println!(
-            "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
+            "  store frontier {applied_frontier}; candidate is behind\n  reader floor {reader_floor} admits it"
         ),
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
@@ -696,6 +739,7 @@ mod compatibility_tests {
         let compatibility = Compatibility::AheadPending {
             applied_frontier: "older".to_string(),
             latest_known: "current".to_string(),
+            raised_reader_floor: None,
         };
         assert_eq!(
             decide(Published, &[], &compatibility, &executable()),
@@ -797,6 +841,45 @@ mod compatibility_tests {
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
         );
+    }
+
+    #[test]
+    fn rollback_stays_open_within_the_reader_floor() {
+        let directory = tempfile::tempdir().unwrap();
+        let additive = directory.path().join("additive.db");
+        let connection = rusqlite::Connection::open(&additive).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        crate::store::migrations::apply_newer_release(
+            &connection,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            true,
+        )
+        .unwrap();
+        let compatibility = read_store_evidence(&additive);
+        assert!(
+            matches!(compatibility, Compatibility::Behind { .. }),
+            "{compatibility:?}"
+        );
+        let executable = super::_read_executable_compatibility(&additive, &compatibility);
+        assert_eq!(
+            decide(Published, &[], &compatibility, &executable),
+            Verdict::Promote
+        );
+
+        let breaking = directory.path().join("breaking.db");
+        let connection = rusqlite::Connection::open(&breaking).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        let release = crate::store::migrations::apply_newer_release(
+            &connection,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;",
+            false,
+        )
+        .unwrap();
+        assert!(matches!(
+            read_store_evidence(&breaking),
+            Compatibility::Incompatible { reason }
+                if reason.ends_with(&format!("this store needs lf {release} or newer; install it with lf install"))
+        ));
     }
 
     #[test]

@@ -232,7 +232,6 @@ pub struct ConcreteXor {
 
 /// A captured branch body; unresolved authored paths cannot decode as this type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ConcretePath {
     pub description: String,
     pub steps: Vec<ConcreteStep>,

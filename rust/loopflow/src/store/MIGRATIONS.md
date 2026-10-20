@@ -93,6 +93,42 @@ history cannot be mistaken for the state being repaired. Once a migration
 commits, the two newest backups with that fingerprinted name stay and older ones
 are removed; a file named any other way is never touched.
 
+## Older lf keeps opening an additively extended store
+
+Every ledger row records a `reader_floor`: the oldest lf that can open the store
+once that migration is applied. The release cut proves each draft additive by
+applying it over the released schema — every old object survives unchanged, new
+objects are tables or non-unique indexes, new columns are nullable or defaulted,
+and no existing row is inserted, updated or deleted. An all-additive batch keeps
+the previous floor; anything else raises it to the release being cut. Force a
+semantic break, such as a new status value an older reader rejects, with
+`-- breaks: <reason>` in the draft. Nothing declares a draft additive.
+
+```text
+canonicalizing 1 draft(s) into 0.15.0.001_release:
+  draft drop_waves [(none)]
+lf < 0.15.0 can no longer open the store (raised by: drop_waves)
+```
+
+A raised floor goes to `release/unreleased/BREAKING.md`, from there into the
+release notes and the release PR title, and `lf install promote` prints it
+before advancing. It is visibility, not a gate. Releases cut before floors
+existed count as breaking at their own version.
+
+An ordinary open accepts a newer tail when its highest floor is at or below the
+running lf, and then requires every object this build expects to be present
+unchanged; tables may have gained columns. Otherwise it refuses with
+`this store needs lf 0.15.0 or newer; install it with lf install`.
+Promotion never applies history it does not know; selecting an older lf the
+floor admits, as a rollback does, applies nothing and is allowed.
+
+New code must accept what an older writer leaves behind. While older lf still
+runs, it writes rows without the new columns, so read `NULL` there sensibly, and
+avoid `INSERT OR REPLACE` on extended tables: an older writer's replace drops
+the newer columns. Runtime SQL names its columns — `check_migrations.py` rejects
+positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
+in the store tolerates fields it does not know.
+
 ## The one rule
 
 **A published migration is never edited, renamed, or deleted.** `origin/main`
@@ -116,7 +152,9 @@ the last release tag and fails the build if one moved.
 - Every draft under `drafts/` is well-formed: a snake_case `<name>.sql`, no
   collision with a released migration name, and a `depends_on` graph that resolves
   to other drafts or released migrations with no cycle. Drafts have no ordinal, so they
-  are never compared against `origin/main`.
+  are never compared against `origin/main`. The check prints which drafts would
+  raise the reader floor.
+- Runtime SQL names its columns: no positional `INSERT ... VALUES`, no `SELECT *`.
 
 It runs in CI, and — because `lf repo release` cuts a tag from local state and never
 reads a CI result — `lf repo release check` and `lf repo release run` run it themselves
@@ -161,7 +199,9 @@ The cache contains no database validity results or open SQLite connections.
 | Unpublished build against `~/.lf/loopflow.db` | validates the applied prefix without running its pending migrations |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
-| Carries an unknown id | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
+| Newer migrations within this lf's reader floor | opens; this build's schema must survive unchanged |
+| Newer migrations above this lf's reader floor | names the lf version the store needs |
+| Carries an unknown id not past this build's history | reports the unknown and latest-known ids — a newer release or a divergent local build wrote it |
 | Skipped a migration, or drifted from the chain's schema | *delete loopflow.db and rerun* |
 
 ## Why there is no separate "schema change without a migration" check

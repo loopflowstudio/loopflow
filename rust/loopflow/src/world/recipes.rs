@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::World;
+use super::{Threshold, World};
 
 /// Rows: store records through production writers. Artifacts: also files a
 /// reader opens, such as provider transcripts.
@@ -51,9 +51,11 @@ pub fn find(name: &str) -> Option<&'static Recipe> {
 }
 
 fn one_task(world: &World) -> Result<()> {
-    world.wave(
+    world.wave("search")?;
+    world.plan(
         "search",
         &[("Session search finds a phrase from any turn", false)],
+        &[],
     )?;
     let task = world.task(
         "search",
@@ -84,7 +86,34 @@ fn one_task(world: &World) -> Result<()> {
 }
 
 fn portfolio(world: &World) -> Result<()> {
-    world.wave(
+    for wave in ["desktop", "systems", "quality"] {
+        world.wave(wave)?;
+    }
+    world.metric(
+        "desktop",
+        "tasks-opened-fast",
+        "Tasks open in under 200 ms",
+        "graduated",
+        Some(42.0),
+        1.0,
+    )?;
+    world.metric(
+        "desktop",
+        "row-states-distinct",
+        "Task states with a distinct row",
+        "installed",
+        Some(3.0),
+        2.0,
+    )?;
+    world.metric(
+        "desktop",
+        "demo-worlds-used",
+        "Demos run on a built world",
+        "installed",
+        None,
+        0.0,
+    )?;
+    world.plan(
         "desktop",
         &[
             (
@@ -93,15 +122,19 @@ fn portfolio(world: &World) -> Result<()> {
             ),
             ("Every Task state has a distinct row treatment", false),
         ],
+        &[
+            ("tasks-opened-fast", Threshold::AtLeast { value: 40.0 }),
+            ("row-states-distinct", Threshold::AtLeast { value: 4.0 }),
+        ],
     )?;
-    world.wave(
+    world.plan(
         "systems",
         &[(
             "Older lf keeps opening the store after additive releases",
             false,
         )],
+        &[],
     )?;
-    world.wave("quality", &[])?;
 
     let shipped = world.task(
         "desktop",

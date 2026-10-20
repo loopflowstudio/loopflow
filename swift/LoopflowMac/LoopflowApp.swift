@@ -56,7 +56,7 @@ struct LoopflowApp: App {
 
     var body: some Scene {
         let launchRepoURL = LaunchArguments.repoURL()
-        let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
+        let registryQuery = RegistryQueryLocal.shared
 
         WindowGroup(id: "workspace", for: RepositoryWorkspace.self) { $workspace in
             Group {
@@ -215,7 +215,7 @@ struct LoopflowApp: App {
         default:
             taskLinks.receiveAddress { isLatest in
                 do {
-                    let query = SessionFixture.query ?? RegistryQueryLocal.shared
+                    let query = RegistryQueryLocal.shared
                     let resolved = try await query.workLink(url)
                     let link = LinkedWork(resolved)
                     var path = resolved.target.repositoryPath
@@ -244,7 +244,7 @@ struct LoopflowApp: App {
     @MainActor
     private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil,
                                 raises: @MainActor () -> Bool = { true }) async throws {
-        let query = SessionFixture.query ?? RegistryQueryLocal.shared
+        let query = RegistryQueryLocal.shared
         let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query,
                                                            raises: raises) { workspace in
             openWindow(id: "workspace", value: workspace)

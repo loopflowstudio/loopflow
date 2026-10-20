@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Capture deterministic control-room evidence from fixtures.
+"""Capture deterministic control-room evidence from built worlds and fixtures.
 
     uv run python scripts/generate_screenshots.py
 
 Renders the `wave-proof` manifest set offline through the UI test target, so the
-same states are comparable across commits. The website's live product images are
-a different pipeline: see scripts/capture_screenshots.py.
+same states are comparable across commits. A shot naming a `world` reads an
+`lf-world` recipe through the app's real registry; the rest use fixture modes.
+The website's live product images are a different pipeline: see
+scripts/capture_screenshots.py.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -49,6 +52,7 @@ class WaveProofShot:
     view: str | None
     wave: str | None
     detail_state: str | None
+    world: str | None
 
 
 def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
@@ -61,12 +65,13 @@ def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
             view=raw.get("view"),
             wave=raw.get("wave"),
             detail_state=raw.get("detail_state"),
+            world=raw.get("world"),
         )
         for raw in data["wave-proof"]
     ]
 
 
-def shot_environment(shot: WaveProofShot) -> dict[str, str]:
+def shot_environment(shot: WaveProofShot, worlds: dict[str, Path]) -> dict[str, str]:
     env = {
         **os.environ,
         "LOOPFLOW_UI_TEST_NAME": shot.name,
@@ -80,7 +85,29 @@ def shot_environment(shot: WaveProofShot) -> dict[str, str]:
         env["LOOPFLOW_UI_TEST_VIEW"] = shot.view
     if shot.detail_state:
         env["LOOPFLOW_UI_TEST_DETAIL_STATE"] = shot.detail_state
+    if shot.world:
+        env["LOOPFLOW_UI_TEST_WORLD"] = str(worlds[shot.world])
     return env
+
+
+def build_worlds(recipes: set[str], root: Path) -> dict[str, Path]:
+    """Build each named `lf-world` recipe once into `root`."""
+    if not recipes:
+        return {}
+    subprocess.run(
+        ["cargo", "build", "-p", "loopflow", "--bin", "lf-world"], cwd=REPO_ROOT, check=True
+    )
+    binary = REPO_ROOT / "target/debug/lf-world"
+    worlds = {}
+    for recipe in sorted(recipes):
+        worlds[recipe] = root / recipe
+        subprocess.run(
+            [str(binary), "build", recipe, str(worlds[recipe])],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+        )
+    return worlds
 
 
 def _write_log(
@@ -107,7 +134,7 @@ def _write_log(
     )
 
 
-def capture(shot: WaveProofShot) -> Path:
+def capture(shot: WaveProofShot, worlds: dict[str, Path]) -> Path:
     output = OUTPUT_DIR / f"{shot.name}.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{shot.name}.log"
@@ -128,7 +155,7 @@ def capture(shot: WaveProofShot) -> Path:
     result = subprocess.run(
         args,
         cwd=REPO_ROOT / "swift",
-        env=shot_environment(shot),
+        env=shot_environment(shot, worlds),
         capture_output=True,
         text=True,
         timeout=TIMEOUT,
@@ -156,13 +183,15 @@ def main() -> None:
     subprocess.run(["xcodegen", "generate"], cwd=REPO_ROOT / "swift", check=True)
 
     failures = []
-    for shot in shots:
-        print(f"Capturing {shot.name}...")
-        try:
-            print(f"  -> {capture(shot)}")
-        except (RuntimeError, subprocess.SubprocessError) as exc:
-            failures.append(str(exc))
-            print(f"  FAIL: {exc}", file=sys.stderr)
+    with tempfile.TemporaryDirectory(prefix="lf-worlds-") as root:
+        worlds = build_worlds({shot.world for shot in shots if shot.world}, Path(root))
+        for shot in shots:
+            print(f"Capturing {shot.name}...")
+            try:
+                print(f"  -> {capture(shot, worlds)}")
+            except (RuntimeError, subprocess.SubprocessError) as exc:
+                failures.append(str(exc))
+                print(f"  FAIL: {exc}", file=sys.stderr)
 
     if failures:
         raise SystemExit(f"{len(failures)}/{len(shots)} captures failed")

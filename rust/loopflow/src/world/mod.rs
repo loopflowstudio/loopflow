@@ -21,6 +21,8 @@ use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
 use crate::work::project::ProjectKR;
 use crate::work::task::Task;
+use crate::work::wave::metrics::MetricTarget;
+pub use crate::work::wave::metrics::Threshold;
 
 const DAY: i64 = 24 * 60 * 60;
 
@@ -106,25 +108,87 @@ impl World {
         self.now - (days * DAY as f64) as i64
     }
 
-    /// Ensure a Wave and its current Project, with optional KRs.
-    pub fn wave(&self, name: &str, krs: &[(&str, bool)]) -> Result<()> {
+    /// Ensure a Wave and its current Project.
+    pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
             .block_on(crate::ops::project::ensure(&self.repo, name))?;
-        if !krs.is_empty() {
-            let krs: Vec<ProjectKR> = krs
-                .iter()
-                .map(|(text, holds)| ProjectKR {
-                    text: (*text).to_string(),
-                    holds: *holds,
-                })
-                .collect();
-            self.runtime.block_on(crate::ops::project::update_plan(
+        Ok(())
+    }
+
+    /// Set the current Project's KRs and metric targets, as `lf wave edit-plan`
+    /// does. Targets name metrics already authored with [`Self::metric`].
+    pub fn plan(
+        &self,
+        wave: &str,
+        krs: &[(&str, bool)],
+        targets: &[(&str, Threshold)],
+    ) -> Result<()> {
+        let krs: Vec<ProjectKR> = krs
+            .iter()
+            .map(|(text, holds)| ProjectKR {
+                text: (*text).to_string(),
+                holds: *holds,
+            })
+            .collect();
+        let targets: Vec<MetricTarget> = targets
+            .iter()
+            .map(|(metric_id, target)| MetricTarget {
+                metric_id: (*metric_id).to_string(),
+                target: target.clone(),
+            })
+            .collect();
+        self.runtime.block_on(crate::ops::project::update_plan(
+            &self.repo,
+            Some(wave),
+            &krs,
+            &targets,
+        ))?;
+        Ok(())
+    }
+
+    /// Author a weekly metric contract for `wave` and, with `value`, publish one
+    /// complete observation for the week ending `ended_days_ago`, the way a
+    /// metric producer does. `None` leaves the metric uninstrumented.
+    pub fn metric(
+        &self,
+        wave: &str,
+        id: &str,
+        title: &str,
+        stage: &str,
+        value: Option<f64>,
+        ended_days_ago: f64,
+    ) -> Result<()> {
+        let instrument = "world";
+        let dir = self.repo.join(".lf/wave").join(wave).join("metrics");
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join(format!("{id}.md")),
+            format!(
+                "---\nschema: 1\nid: {id}\nstage: {stage}\ninstrument: {instrument}\n\
+                 unit: count\nwindow: 7d\nfreshness: 8d\n---\n\n# {title}\n\n\
+                 Counted over the latest complete week.\n"
+            ),
+        )?;
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let end = time::OffsetDateTime::from_unix_timestamp(self.days_ago(ended_days_ago))?;
+        let store = self.store()?;
+        self.runtime
+            .block_on(crate::ops::metrics::publish_metric_observations(
+                &store,
                 &self.repo,
-                Some(name),
-                &krs,
-                &[],
+                vec![crate::ops::metrics::MetricProducerObservation::Observed {
+                    wave: wave.to_string(),
+                    metric_id: id.to_string(),
+                    instrument: instrument.to_string(),
+                    value,
+                    source_window_start: end - time::Duration::days(7),
+                    source_window_end: end,
+                    complete: true,
+                }],
+                time::OffsetDateTime::now_utc(),
             ))?;
-        }
         Ok(())
     }
 

@@ -9,7 +9,7 @@
 # empty stderr proves nothing; this script reads the right place.
 #
 # Usage:
-#   scripts/check_attributegraph_cycles.sh [--repo <path>] [--seconds N]
+#   scripts/check_attributegraph_cycles.sh [--repo <path> | --world | --sheet] [--seconds N]
 #
 # Cold launch, repository switch, refresh, and Chat-in-the-default-pane are all
 # exercised by the RoadmapView default surface that renders at launch. To cover
@@ -20,23 +20,23 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SECONDS_TO_CAPTURE=15
 TARGET_REPO="$REPO"
-MOCK=0
+WORLD=0
 SHEET=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) TARGET_REPO="$2"; shift 2 ;;
     --seconds) SECONDS_TO_CAPTURE="$2"; shift 2 ;;
-    # --mock launches the `mock-waves` UI-test mode: a fixture-seeded populated
-    # Wave surface, auto-selected into its full detail hierarchy, with NO
-    # registry. This drives the WaveDetailPane selection + Chat-render path (the
-    # @StateObject->@ObservedObject fix site) at cold launch on a machine whose
-    # `lf` can't serve W2-123 lens data — no interaction needed.
-    --mock) MOCK=1; shift ;;
-    # --sheet implies --mock and additionally raises the create sheet over the
+    # --world builds an `lf-world portfolio` world and opens it in `live` mode
+    # with a populated Wave auto-selected into its full detail hierarchy, so the
+    # WaveDetailPane selection + Chat-render path (the
+    # @StateObject->@ObservedObject fix site) runs at cold launch through the
+    # real registry — no interaction needed.
+    --world) WORLD=1; shift ;;
+    # --sheet implies --world and additionally raises the create sheet over the
     # settled populated surface (~1.5s in), so the sheet/dialog-presentation leg
     # of the zero-cycle matrix is captured headlessly too — no click required.
-    --sheet) MOCK=1; SHEET=1; shift ;;
+    --sheet) WORLD=1; SHEET=1; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -52,24 +52,29 @@ LOG="$(mktemp -t lf_attributegraph.XXXXXX.log)"
 LOG_PID=$!
 sleep 1.5
 
-if [ "$MOCK" -eq 1 ]; then
-  if [ "$SHEET" -eq 1 ]; then
-    LOOPFLOW_UI_TEST_PRESENT_SHEET=1 "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
-  else
-    "$BIN" -ui-test-mode mock-waves >/dev/null 2>&1 &
-  fi
+if [ "$WORLD" -eq 1 ]; then
+  ( cd "$REPO" && cargo build -p loopflow --bin lf-world >/dev/null 2>&1 )
+  WORLD_DIR="$(mktemp -d -t lf_world)/portfolio"
+  "$REPO/target/debug/lf-world" build portfolio "$WORLD_DIR" </dev/null >/dev/null
+  WORLD_ENV=()
+  while IFS= read -r pair; do WORLD_ENV+=("$pair"); done < <(
+    python3 -c 'import json,sys; [print(f"{k}={v}") for k, v in json.load(open(sys.argv[1])).items()]' \
+      "$WORLD_DIR/env.json")
+  if [ "$SHEET" -eq 1 ]; then WORLD_ENV+=("LOOPFLOW_UI_TEST_PRESENT_SHEET=1"); fi
+  env "${WORLD_ENV[@]}" LOOPFLOW_UI_TEST_SELECT_BRANCH=desktop \
+    "$BIN" -ui-test-mode live --repo "$WORLD_DIR/repo" >/dev/null 2>&1 &
 else
   "$BIN" --repo "$TARGET_REPO" >/dev/null 2>&1 &
 fi
 APP_PID=$!
 
 if [ "$SHEET" -eq 1 ]; then
-  echo "App launched (pid $APP_PID) in mock-waves mode with auto-sheet — a"
+  echo "App launched (pid $APP_PID) on a built world with auto-sheet — a"
   echo "populated Wave is auto-selected, then the create sheet is raised over it"
   echo "~1.5s in. Cold launch + Wave selection + Chat render + sheet presentation"
   echo "are all captured with no interaction."
-elif [ "$MOCK" -eq 1 ]; then
-  echo "App launched (pid $APP_PID) in mock-waves mode — a populated Wave is"
+elif [ "$WORLD" -eq 1 ]; then
+  echo "App launched (pid $APP_PID) on a built world — a populated Wave is"
   echo "auto-selected, so cold launch + Wave selection + Chat render are captured"
   echo "with no interaction. Use --sheet to also cover sheet presentation."
 else

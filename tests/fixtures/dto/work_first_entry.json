@@ -18,7 +18,7 @@
       }
     ],
     "agent_process_id": null,
-    "attention": null,
+    "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
     "detail": "opencode:opencode/test-model",
     "flow_membership": {
@@ -67,7 +67,7 @@
       }
     ],
     "agent_process_id": null,
-    "attention": null,
+    "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
     "detail": "opencode:opencode/test-model",
     "flow_membership": {
@@ -369,7 +369,7 @@
         }
       ],
       "agent_process_id": null,
-      "attention": null,
+      "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.repo",
       "detail": "opencode:opencode/test-model",
       "flow_membership": {
@@ -418,7 +418,7 @@
         }
       ],
       "agent_process_id": null,
-      "attention": null,
+      "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK",
       "detail": "opencode:opencode/test-model",
       "flow_membership": {
@@ -472,7 +472,7 @@
         }
       ],
       "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
-      "attention": null,
+      "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
       "detail": "opencode",
       "flow_membership": {
@@ -521,7 +521,7 @@
       }
     ],
     "agent_process_id": null,
-    "attention": null,
+    "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK",
     "detail": "opencode:opencode/test-model",
     "flow_membership": {

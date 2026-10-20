@@ -226,7 +226,7 @@ impl PiHarness {
         let raw = self.raw.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
-            let mut attention = super::attention::Attention::default();
+            let mut activity = super::activity_tracker::SessionActivityTracker::default();
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
                     if let Some(raw) = &raw {
@@ -259,7 +259,7 @@ impl PiHarness {
                         let mapped = turn.event(&value);
                         let (store, session, attachment) = &owner;
                         let signals = super::pi_history::signals(&value, &mapped);
-                        attention.record(store, session, attachment, signals);
+                        activity.record(store, session, attachment, signals);
                         let thread = store.session_thread(session)?;
                         if let Some(thread) = thread {
                             super::pi_history::record(store, session, &thread, &mapped)?;
@@ -289,11 +289,11 @@ impl PiHarness {
                         tracing::warn!(%error, "could not retain Pi failure");
                     }
                 }
-                attention.record(
+                activity.record(
                     store,
                     session,
                     attachment,
-                    vec![super::attention::Signal::Yielded(false)],
+                    vec![super::activity_tracker::Signal::Yielded(false)],
                 );
                 for event in mapped {
                     let _ = events.send(event);

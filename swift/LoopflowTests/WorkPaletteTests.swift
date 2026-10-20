@@ -22,8 +22,8 @@ struct WorkPaletteTests {
         let surfaces = [palette.background, palette.surface, palette.surfaceMuted, palette.surfaceElement]
         let text = [palette.text, palette.textSecondary, palette.textTertiary, palette.linkInk,
                     palette.linkHover, palette.actionInk, palette.emphasisInk, palette.accentInk, palette.working,
-                    palette.waiting, palette.failure, palette.success]
-        for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
+                    palette.available, palette.warning, palette.failure, palette.success]
+        for tone in [WorkTone.running, .done, .available, .warning, .failure, .stopped] {
             #expect(ratio(rgb(tone.text(in: palette), environment), rgb(tone.fill(in: palette), environment)) >= 4.5)
         }
         let workSelection = rgb(palette.workSelectedFill, environment)
@@ -57,7 +57,9 @@ struct WorkPaletteTests {
         #expect(palette.keyboardFocus != palette.selectionEdge)
         #expect(palette.keyboardFocus != palette.failure)
         #expect(WorkTone.failure.ink(in: palette) == palette.failure)
-        #expect(WorkTone.waiting.ink(in: palette) == palette.waiting)
+        #expect(WorkTone.warning.ink(in: palette) == palette.warning)
+        #expect(WorkTone.available.ink(in: palette) == palette.available)
+        #expect(palette.available != palette.warning, "availability is not a warning")
         #expect(WorkTone.running.ink(in: palette) == palette.working)
     }
 
@@ -65,7 +67,7 @@ struct WorkPaletteTests {
     func chipPalette() {
         var environment = EnvironmentValues()
         environment.colorScheme = .light
-        for tone in [WorkTone.running, .done, .waiting, .failure, .stopped] {
+        for tone in [WorkTone.running, .done, .available, .warning, .failure, .stopped] {
             let darkFill = rgb(tone.fill(in: .dark), environment)
             let lightFill = rgb(tone.fill(in: .light), environment)
             #expect(darkFill != lightFill)

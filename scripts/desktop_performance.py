@@ -28,8 +28,6 @@ from pathlib import Path
 from types import FrameType
 from typing import Callable, TextIO
 
-import yaml
-
 REPO = Path(__file__).resolve().parent.parent
 RECORDER = REPO / "scripts/benchmarks/desktop-performance/record_live.py"
 BUILD_COMMAND = [
@@ -427,24 +425,28 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
-        *([
-            "Endpoint: another process's commit to a private Machine, through the real work "
-            "reader, to native bitmap capture with text verification.",
-            "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
-            "The interval starts when the sqlite3 writer exits; "
-            "each write waits for an idle reader.",
-        ] if metadata.get("journey") == "write-visible" else [
-        "Endpoint: in-process native bitmap capture with text verification."
-        + " Session return also waits for owned PTY replies.",
-        "**Not compositor paint time. Soak trace evidence is reported separately.**",
-        "",
-        "Fixture data excludes CLI/registry discovery, network and provider startup. "
-        "Three retained cat PTYs per population."
-        if not snapshot_run
-        else "Snapshot mode uses real CLI reads and Task links; "
-        "copied Session connections are disabled; the same workspace reopens one owned "
-        "Task-bound Session with a synthetic provider.",
-        ]),
+        *(
+            [
+                "Endpoint: another process's commit to a private Machine, through the real work "
+                "reader, to native bitmap capture with text verification.",
+                "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+                "The interval starts when the sqlite3 writer exits; "
+                "each write waits for an idle reader.",
+            ]
+            if metadata.get("journey") == "write-visible"
+            else [
+                "Endpoint: in-process native bitmap capture with text verification."
+                + " Session return also waits for owned PTY replies.",
+                "**Not compositor paint time. Soak trace evidence is reported separately.**",
+                "",
+                "Fixture data excludes CLI/registry discovery, network and provider startup. "
+                "Three retained cat PTYs per population."
+                if not snapshot_run
+                else "Snapshot mode uses real CLI reads and Task links; "
+                "copied Session connections are disabled; the same workspace reopens one owned "
+                "Task-bound Session with a synthetic provider.",
+            ]
+        ),
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
@@ -587,19 +589,29 @@ def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -
     checkout = home / "checkout"
     checkout.mkdir(parents=True)
     (checkout / "notes.txt").write_text("Original notes")
-    native = home / "codex"
+    claude = home / "claude"
     bin_dir = home / "bin"
     bin_dir.mkdir(parents=True)
     native_id = str(uuid.uuid4())
-    transcript = native / "sessions/2026/10/05" / f"rollout-time-{native_id}.jsonl"
+    transcript = claude / "projects" / str(checkout).replace("/", "-") / f"{native_id}.jsonl"
     transcript.parent.mkdir(parents=True)
-    history = json.dumps({"cwd": str(checkout), "message": "retained-history"}) + "\n"
+    history = (
+        json.dumps(
+            {
+                "type": "user",
+                "sessionId": native_id,
+                "cwd": str(checkout),
+                "message": {"role": "user", "content": "retained-history"},
+            }
+        )
+        + "\n"
+    )
     transcript.write_text(history)
-    provider = bin_dir / "codex"
+    provider = bin_dir / "claude"
     provider.write_text(
         "#!/bin/sh\n"
-        'if [ "$1" = --version ]; then exit 0; fi\n'
-        'case " $* " in *" $PERF_NATIVE_ID "*) ;; *) exit 42;; esac\n'
+        'if [ "$1" = --version ]; then echo "2.1.0 (Claude Code)"; exit 0; fi\n'
+        'case " $* " in *" --resume $PERF_NATIVE_ID "*) ;; *) exit 42;; esac\n'
         'grep -q retained-history "$PERF_TRANSCRIPT" || exit 43\n'
         'printf "native:%s:retained-history\\n" "$PERF_NATIVE_ID"\n'
         "while IFS= read -r input; do\n"
@@ -613,8 +625,8 @@ def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -
         "HOME": str(home),
         "LF_HOME": str(home),
         "LF_BIN": str(cli),
-        "CODEX_HOME": str(native),
-        "CLAUDE_CONFIG_DIR": str(home / "claude"),
+        "CODEX_HOME": str(home / "codex"),
+        "CLAUDE_CONFIG_DIR": str(claude),
         "PATH": f"{bin_dir}:{git.parent}:/usr/bin:/bin",
         "TMPDIR": str(home),
         "PERF_NATIVE_ID": native_id,
@@ -632,7 +644,7 @@ def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -
     )
     if len(records) != 1:
         raise RuntimeError("Native fixture did not retain exactly one Session")
-    task_id, issue = _seed_native_task(home, checkout, repo or checkout, records[0]["id"])
+    task_id, issue = _create_native_task(cli, repo or checkout, environment)
     record = json.loads(
         _fixture_cli(
             cli,
@@ -667,89 +679,27 @@ def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -
     return fixture
 
 
-def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> tuple[str, str]:
-    """Seed owned planning facts; the public bind and shared Rust reader own membership."""
-    project, task = (prefix + uuid.uuid4().hex for prefix in ("proj_", "task_"))
-    wave = str(uuid.uuid4())
-    issue = f"PERF-{int(task[-8:], 16)}"
-    now = int(time.time())
-    config_path = repo / ".lf/config.yaml"
-    config = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
-    team = ((config or {}).get("planning") or {}).get("team") or wave
-    plan = dict(
-        id=project,
-        slug="desktop-performance",
-        name="Owned performance fixture",
-        summary="",
-        metric_targets=[],
-        flow="",
-        status="started",
-        krs=[],
-        initiative_ids=[wave],
-        team_ids=[team],
-    )
-    item = dict(
-        id=task,
-        identifier=issue,
-        url=f"https://example.invalid/{issue}",
-        name="Owned native Session",
-        description="Synthetic performance fixture",
-        rank=1,
-        completed=False,
-        project_id=project,
-        project=plan["slug"],
-        team_id=team,
-        assignee=None,
-    )
-    with sqlite3.connect(home / "loopflow.db") as db:
-        db.execute("PRAGMA foreign_keys=ON")
-        db.execute(
-            "INSERT INTO waves(id,name,repo,created_at) VALUES(?,?,?,?)",
-            (wave, "desktop-performance", str(repo), now),
-        )
-        db.execute(
-            """INSERT INTO projects(id,wave_id,external_project_id,created_at,
-            project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?)""",
-            (project, wave, project, now, plan["slug"], plan["name"], "", now, now),
-        )
-        db.execute(
-            """INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,
-            issue_title,issue_description,pm_snapshot_synced_at,worktree,workspace_slug,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                task,
-                project,
-                task,
-                issue,
-                now,
-                item["name"],
-                item["description"],
-                now,
-                str(checkout),
+def _create_native_task(cli: Path, repo: Path, environment: dict[str, str]) -> tuple[str, str]:
+    """Create the owning Task through lf, which also ensures its Wave and Project."""
+    task = json.loads(
+        _fixture_cli(
+            cli,
+            [
+                "task",
+                "create",
+                "--wave",
                 "desktop-performance",
-                now,
-            ),
+                "--title",
+                "Owned native Session",
+                "--notes",
+                "Synthetic performance fixture",
+                "--json",
+            ],
+            repo,
+            environment,
         )
-        db.execute(
-            "INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES(?,?,?,?,?)",
-            (str(repo), "linear", project, now, json.dumps(plan)),
-        )
-        db.execute(
-            "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (str(repo), "linear", task, issue, project, now, json.dumps(item)),
-        )
-        for column, identity in (("wave_id", wave), ("project_id", project), ("task_id", task)):
-            db.execute(
-                f"INSERT INTO work_placements({column},machine_id,placed_at) "
-                "SELECT ?,id,? FROM machines WHERE route='local'",
-                (identity, now),
-            )
-        db.execute("INSERT INTO pm_wave_sync VALUES(?,?,?,?)", (wave, "linear", wave, now))
-        db.execute("INSERT INTO pm_wave_projects VALUES(?,?,?)", (wave, project, 0))
-        db.execute("UPDATE agent_sessions SET repo=? WHERE id=?", (str(repo), session))
-    return task, issue
+    )
+    return task["id"], task["identifier"]
 
 
 def _snapshot(source: Path, output: Path) -> None:
@@ -880,7 +830,8 @@ def _repository_configs(database: Path) -> list[dict]:
                 str(path.resolve())
                 for repo, wave in db.execute("SELECT repo,name FROM waves")
                 for path in [
-                    Path(repo) / ".lf/config.yaml", Path(repo) / ".lf/wave" / wave / "GOAL.md"
+                    Path(repo) / ".lf/config.yaml",
+                    Path(repo) / ".lf/wave" / wave / "GOAL.md",
                 ]
             }
         )
@@ -1502,7 +1453,8 @@ def _run(
             metadata.setdefault("exit_code", None)
     metadata["source_after"] = _sources()
     metadata["resources_after"] = {
-        "load_average": os.getloadavg(), "free_bytes": shutil.disk_usage(output).free
+        "load_average": os.getloadavg(),
+        "free_bytes": shutil.disk_usage(output).free,
     }
     metadata["cli_sha256_after"] = hashlib.sha256(cli.read_bytes()).hexdigest()
     _write(output / "run.json", metadata)
@@ -1521,7 +1473,9 @@ def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) ->
         source.mkdir()
         repo = output / "repository"
         (repo / ".lf").mkdir(parents=True)
-        (repo / ".lf/config.yaml").write_text("linear:\n  team: " + str(uuid.uuid4()) + "\n")
+        (repo / ".lf/config.yaml").write_text(
+            "planning:\n  provider: linear\n  team: " + str(uuid.uuid4()) + "\n"
+        )
         subprocess.run(
             [str(_benchmark_git()), "init", "--quiet", str(repo)], check=True, capture_output=True
         )
@@ -1721,8 +1675,10 @@ def main() -> int:
         "--output", type=Path, required=True, help="New directory; never overwrites evidence"
     )
     written.add_argument(
-        "--home", type=Path, required=True,
-        help="A private copy of a Machine; rows are written to it"
+        "--home",
+        type=Path,
+        required=True,
+        help="A private copy of a Machine; rows are written to it",
     )
     written.add_argument(
         "--repo", type=Path, required=True, help="Repository whose Waves the window shows"

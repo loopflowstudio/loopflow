@@ -45,6 +45,7 @@ const RELEASE_CONTEXT_MAX_TITLE_BYTES: usize = 300;
 const RELEASE_CONTEXT_MAX_PATH_BYTES: usize = 512;
 const RELEASE_CONTEXT_MAX_PR_BODY_BYTES: usize = 4 * 1024;
 const RELEASE_CONTEXT_MAX_DECISIONS_BYTES: usize = 16 * 1024;
+const RELEASE_CONTEXT_MAX_BREAKING_BYTES: usize = 4 * 1024;
 const RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES: usize = 16 * 1024;
 const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
 const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
@@ -510,7 +511,7 @@ pub fn preview_release_notes(
         changes.commits.len(),
         changes.merged_prs.len()
     ));
-    let ((previous, previous_omitted), (decisions, decisions_omitted)) =
+    let ((previous, previous_omitted), (decisions, decisions_omitted), (breaking, _)) =
         if tagged_revision.is_some() {
             (
                 read_bounded_revision_text(
@@ -523,20 +524,34 @@ pub fn preview_release_notes(
                     &format!("{revision}:release/v{version}/DECISIONS.md"),
                     RELEASE_CONTEXT_MAX_DECISIONS_BYTES,
                 )?,
+                read_bounded_revision_text(
+                    &repo,
+                    &format!("{revision}:release/v{version}/BREAKING.md"),
+                    RELEASE_CONTEXT_MAX_BREAKING_BYTES,
+                )?,
             )
         } else {
-            let unreleased = repo.join("release/unreleased/DECISIONS.md");
-            let decisions_path = if unreleased.exists() {
-                unreleased
-            } else {
-                repo.join(format!("release/v{version}/DECISIONS.md"))
+            let release_file = |name: &str| {
+                let unreleased = repo.join("release/unreleased").join(name);
+                if unreleased.exists() {
+                    unreleased
+                } else {
+                    repo.join(format!("release/v{version}")).join(name)
+                }
             };
             (
                 read_bounded_text(
                     &repo.join("RELEASE_NOTES.md"),
                     RELEASE_CONTEXT_MAX_PREVIOUS_NOTES_BYTES,
                 )?,
-                read_bounded_text(&decisions_path, RELEASE_CONTEXT_MAX_DECISIONS_BYTES)?,
+                read_bounded_text(
+                    &release_file("DECISIONS.md"),
+                    RELEASE_CONTEXT_MAX_DECISIONS_BYTES,
+                )?,
+                read_bounded_text(
+                    &release_file("BREAKING.md"),
+                    RELEASE_CONTEXT_MAX_BREAKING_BYTES,
+                )?,
             )
         };
     let (context, json) = build_release_notes_context(
@@ -547,6 +562,7 @@ pub fn preview_release_notes(
         &target,
         decisions,
         decisions_omitted,
+        breaking_lines(breaking.as_deref()),
         previous,
         previous_omitted,
     )?;
@@ -2811,6 +2827,9 @@ struct ReleaseNotesContext {
     commits: Vec<ReleaseCommit>,
     merged_prs: Vec<MergedPr>,
     decisions: Option<String>,
+    /// Release-cut lines that every reader must see, such as
+    /// `lf < 0.15.0 can no longer open the store`; finalized notes carry them verbatim.
+    breaking: Vec<String>,
     previous_release_notes: Option<String>,
     source_limits: ReleaseNotesSourceLimits,
     omissions: ReleaseNotesOmissions,
@@ -2868,6 +2887,10 @@ fn run_release_notes_stage(
             .join("DECISIONS.md");
         let (decisions, decisions_omitted) =
             read_bounded_text(&decisions_path, RELEASE_CONTEXT_MAX_DECISIONS_BYTES)?;
+        let (breaking, _) = read_bounded_text(
+            &breaking_path(repo, version),
+            RELEASE_CONTEXT_MAX_BREAKING_BYTES,
+        )?;
         let (context, context_json) = build_release_notes_context(
             version,
             prev_tag,
@@ -2876,6 +2899,7 @@ fn run_release_notes_stage(
             target,
             decisions,
             decisions_omitted,
+            breaking_lines(breaking.as_deref()),
             previous_notes,
             previous_notes_omitted,
         )?;
@@ -2945,7 +2969,7 @@ fn generate_notes_file(
         },
     };
 
-    finalize_release_notes(output, &context.version, degradation)?;
+    finalize_release_notes(output, &context.version, &context.breaking, degradation)?;
     match degradation {
         None => progress.status("Release notes: narrative; release gate safe."),
         Some(reason) => progress.warning(&format!(
@@ -2992,6 +3016,7 @@ fn build_release_notes_context(
     target: &ReleaseTarget,
     decisions: Option<String>,
     decisions_omitted: usize,
+    breaking: Vec<String>,
     previous_release_notes: Option<String>,
     previous_release_notes_omitted: usize,
 ) -> OpsResult<(ReleaseNotesContext, Vec<u8>)> {
@@ -3054,6 +3079,7 @@ fn build_release_notes_context(
             .map(|pr| bound_merged_pr(pr, &mut omissions))
             .collect(),
         decisions,
+        breaking,
         previous_release_notes,
         source_limits: ReleaseNotesSourceLimits {
             context_bytes: RELEASE_CONTEXT_MAX_BYTES,
@@ -3321,6 +3347,7 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
 fn finalize_release_notes(
     repo: &Path,
     version: &str,
+    breaking: &[String],
     degradation: Option<ReleaseNotesDegradation>,
 ) -> OpsResult<()> {
     let path = repo.join("RELEASE_NOTES.md");
@@ -3372,7 +3399,15 @@ fn finalize_release_notes(
             reason.slug()
         ),
     };
-    let content = format!("{expected_header}\n\n{marker}\n\n{body}");
+    let missing: Vec<String> = breaking
+        .iter()
+        .filter(|line| !body.contains(line.as_str()))
+        .map(|line| format!("**{line}**\n\n"))
+        .collect();
+    let content = format!(
+        "{expected_header}\n\n{marker}\n\n{}{body}",
+        missing.concat()
+    );
     if content.len() > RELEASE_NOTES_MAX_BYTES {
         return Err(OpsError::Message(format!(
             "release gate blocked: release notes are {} bytes; maximum queue metadata is {RELEASE_NOTES_MAX_BYTES} bytes",
@@ -3515,9 +3550,36 @@ fn release_commit_message(target: &ReleaseTarget, version: &str) -> String {
     }
 }
 
+/// A release cut records lines every reader of the release must see here,
+/// one per line; `release/unreleased/` becomes this directory at the notes stage.
+fn breaking_path(repo: &Path, version: &str) -> PathBuf {
+    repo.join("release")
+        .join(format!("v{version}"))
+        .join("BREAKING.md")
+}
+
+fn breaking_lines(text: Option<&str>) -> Vec<String> {
+    text.unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 fn release_pr_copy(repo: &Path, target: &ReleaseTarget, version: &str) -> OpsResult<PrCopy> {
+    let (breaking, _) = read_bounded_text(
+        &breaking_path(repo, version),
+        RELEASE_CONTEXT_MAX_BREAKING_BYTES,
+    )?;
+    let mut title = release_commit_message(target, version);
+    // The title names the break; the notes name what raised it.
+    if let Some(line) = breaking_lines(breaking.as_deref()).last() {
+        let line = line.split(" (raised by:").next().unwrap_or(line);
+        title = format!("{title}: {line}");
+    }
     Ok(PrCopy {
-        title: release_commit_message(target, version),
+        title,
         body: fs::read_to_string(repo.join("RELEASE_NOTES.md"))?,
     })
 }
@@ -3828,6 +3890,7 @@ fn generate_release_with_target(
         target,
         None,
         0,
+        Vec::new(),
         None,
         0,
     )?;
@@ -5206,6 +5269,7 @@ mod tests {
             &target,
             None,
             0,
+            Vec::new(),
             None,
             0,
         )
@@ -5708,6 +5772,37 @@ version = "2.0.0"
 
         assert_eq!(copy.title, "release: v1.2.3");
         assert_eq!(copy.body, "# v1.2.3\n\n## Highlights\n\n- Releases work.");
+    }
+
+    #[test]
+    fn a_raised_reader_floor_reaches_the_pr_title_and_the_notes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = default_release_target(tmp.path());
+        let line = "lf < 1.2.3 can no longer open the store (raised by: drop_waves)";
+        fs::create_dir_all(tmp.path().join("release/unreleased")).unwrap();
+        fs::write(
+            tmp.path().join("release/unreleased/BREAKING.md"),
+            format!("{line}\n"),
+        )
+        .unwrap();
+        promote_unreleased_dir(tmp.path(), "1.2.3").unwrap();
+        fs::write(
+            tmp.path().join("RELEASE_NOTES.md"),
+            "# v1.2.3\n\n## Highlights\n\n- Releases work.",
+        )
+        .unwrap();
+        let breaking = breaking_lines(Some(
+            &fs::read_to_string(breaking_path(tmp.path(), "1.2.3")).unwrap(),
+        ));
+
+        finalize_release_notes(tmp.path(), "1.2.3", &breaking, None).unwrap();
+        let copy = release_pr_copy(tmp.path(), &target, "1.2.3").unwrap();
+
+        assert_eq!(
+            copy.title,
+            "release: v1.2.3: lf < 1.2.3 can no longer open the store"
+        );
+        assert!(copy.body.contains(&format!("**{line}**\n\n## Highlights")));
     }
 
     // ======================================================================

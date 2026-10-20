@@ -731,7 +731,7 @@ lf implement --context --json
 lf flow pursue --context --json
 lf implement --context --explain
 lf task run LOO-427 --explain --json
-lf --task LOO-427 desktop open --diff --explain --json
+lf open loopflow://loopflow/task/LOO-427 --diff --explain --json
 ```
 
 `--context` assembles a skill or inline request's input from local sources using
@@ -799,12 +799,10 @@ the save owner's path, text and pinned-file checks. It writes neither files nor
 recovery receipts. Concurrent changes and publication permissions remain unreserved.
 Other Task commands still explain identity only, not their mutation arguments.
 
-`desktop open --explain` reports `resolution`, the proposed `url`, `impediments`
-and `unavailable` evidence using the same Work and opening checks as launch.
-It includes `--session` and `--diff`, and reports unsupported platforms without
-opening the app. Display stays on the command's Machine, separate from Task
-execution. The URL is not a window reservation, readiness receipt or input target;
-installed-app and retained-window state remain uninspected.
+`open --explain` reports each resolved link and its proposed route without
+opening anything, including `--session` and `--diff`. Display stays on the
+command's Machine, separate from Task execution. A link is not a window
+reservation, readiness receipt or input target.
 
 `session connect SESSION --explain` reports start, native resume or possible live
 connection, takeover/try intent and the shared Session actions.
@@ -825,6 +823,59 @@ unavailable evidence. This observes the selected Machine, not peer-exclusive sta
 permission. Flow-wide input is still undefined. Bare-agent and new operator-checkout
 input is not predicted by creating Work. `lf context` remains the budget report.
 
+## Open Work
+
+```sh
+lf open loopflow://loopflow/task/LOO-507       # the Task's conversation
+lf open loopflow://loopflow/wave/product       # a Wave's conversation
+lf open loopflow://loopflow                    # the repository's conversation
+lf open --available                            # every conversation available to you
+lf --task LOO-507 open --link --format markdown
+lf open loopflow://loopflow/task/LOO-507 --host cmux
+lf open loopflow://loopflow/task/LOO-507 --diff  # conversation plus Changes (Desktop)
+lf open --task LOO-507 --session SESSION_ID      # an exact Task-associated Session
+```
+
+A Work address names the repository by folder name, then the Task or Wave.
+It never carries a path, Session or host. Several registered repositories with
+one folder name need `?repository=<id>`; an unqualified link to them changes
+nothing and lists the qualified links. Emitted links add the qualifier when needed.
+
+`--host auto` opens where you are: a new workspace in this Herdr pane or cmux
+workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
+this terminal for a person at a prompt, otherwise a new Terminal window on macOS
+or the desktop's terminal launcher on Linux. A host is current only through its
+own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+running applications. A clicked link carries no caller, so it opens in Desktop.
+Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
+explicit `--host` wins. A destination that refuses lets the next one try; an
+unanswered request is reported and never repeated elsewhere.
+
+Terminal destinations run `lf session connect` for the resolved Work, so its
+primary conversation, admission and attachment fences decide what opens. A
+conversation already live in a cmux or Herdr workspace is focused there, draft
+intact, when this caller is in that host. Live in any other client, it is
+reported as `elsewhere` with its `--takeover` command; ordinary opening never
+moves it. Openings of one Work are serialized: a repeat while its new workspace
+is still starting focuses that workspace instead of creating another. `--available` opens
+conversations the shared reader judges available, across registered
+repositories unless `--repo`, `--task` or `--wave` narrows it. A Task's primary
+opens as its Work; another available conversation opens as its exact Session.
+Several destinations open without focus, then one is raised.
+
+`--link` prints the readable label and opens nothing: a clickable span on a
+terminal, plain text when piped, or Markdown with `--format markdown`. JSON adds
+the target, the copyable `lf open` fallback, the proposed route and
+`conversation`: `current_conversation` when the caller is already in the
+destination, `other_conversation`, or `unknown` without caller identity.
+
+Clicked links open without Desktop too. Installation registers a `loopflow:`
+receiver when Desktop is absent (a small app on macOS, a desktop entry
+elsewhere) and leaves a handler you chose in place. It runs `lf open URL` with
+no inherited host context, so a click takes the Desktop-or-terminal route.
+With Herdr installed, installation links a Herdr link handler: Control-click
+opens the Work beside the clicked pane.
+
 ## Desktop navigation
 
 ```sh
@@ -832,8 +883,6 @@ lf task run LOO-427 --explain --json
 lf --explain                                # resolve the current checkout
 lf session connect SESSION_ID --explain
 lf history show PROCESS_LFID --explain
-lf --task LOO-427 desktop open --diff --json  # conversation plus Changes
-lf desktop open --session SESSION_ID --diff  # exact Task-associated Session
 lf desktop list --json                       # read an already-running Mac app
 ```
 
@@ -846,24 +895,22 @@ permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
-`desktop open` resolves Work before handing its repository-qualified link to the
-Mac app. Without a Task it opens the current repository. `--session` selects an
-existing Task-associated conversation; `--diff` reveals its retained Changes
-browser without replacing file selection or drafts. Bare Task opening acquires no
-conversation or checkout, even when its execution location is unavailable.
-Session and Changes requests still require that location. A `--diff` request without `--session` uses the Task's
-ordinary primary-Session owner to choose/prepare its conversation.
+Desktop receives the Work address and resolves it through `lf open --link
+--json`; it never repeats repository selection. A Task address opens the Task's
+primary conversation through its ordinary primary-Session owner. `--session`
+selects an existing Task-associated conversation; `--diff` reveals its retained
+Changes browser without replacing file selection or drafts. Session and Changes
+requests require the Task's execution location.
 
 JSON returns `opening`, not `usable`: macOS accepting a link proves no native
 endpoint. `desktop list --json` includes each window's latest Task `opening`
 reading and lookup failures. Page mounting and requested Session/Changes readiness
 settle that request; connection/comparison failures remain visible. These receipts
 are not configured/native acceptance, and `opening` must not authorize pane input.
-Display opening stays on the Mac. For a recorded remote owner, the Task link carries
+Display opening stays on the Mac. For a recorded remote owner, the resolved link carries
 Machine and repository identity into the same repository window; Session and Files
 operations run on that owner after a fresh location read. Missing owners never create
-a local checkout or transfer execution. Bare `open` is ambiguous with `pr open`;
-Sessions use `session connect`.
+a local checkout or transfer execution.
 
 Desktop inspection reports registered repository/window identities, selection,
 reading availability and retained Work pane trees with focus, zoom
@@ -975,12 +1022,12 @@ active IME composition must finish first. Input is not idempotent: never replay
 an uncertain reply. Native/configured-SSH acceptance remains with the fixture demo.
 
 ```sh
-open 'loopflow://task/LOO-303'
+lf open loopflow://loopflow/task/LOO-303
 lf wave show --task LOO-303 --all --json
 ```
 
-Task links open details without starting work, including retained and completed
-Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
+Task links open the Task's conversation without starting a Flow, including
+retained and completed Tasks.
 Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
 Task destinations open details; selecting a Flow opens its folded graph.
 

@@ -20,6 +20,10 @@ path = "src/bin/lf.rs"
 name = "lf-prompt"
 path = "src/bin/lf-prompt.rs"
 
+[[bin]]
+name = "lf-world"
+path = "src/bin/lf-world.rs"
+
 # Keep dedicated proof entrypoints and process-global environment fixtures separate.
 [[test]]
 name = "integration"

@@ -58,6 +58,7 @@ pub mod store;
 pub mod subscription;
 pub mod trace;
 pub mod work;
+pub mod world;
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]

@@ -34,7 +34,8 @@ struct ThemeEditor: View {
             }
             colors("Activity", fields: [
                 ("Working text", \.workingTone.inkRGB), ("Working fill", \.workingTone.fillRGB),
-                ("Waiting text", \.waitingTone.inkRGB), ("Waiting fill", \.waitingTone.fillRGB),
+                ("Available text", \.availableTone.inkRGB), ("Available fill", \.availableTone.fillRGB),
+                ("Warning text", \.warningTone.inkRGB), ("Warning fill", \.warningTone.fillRGB),
                 ("Error text", \.failureTone.inkRGB), ("Error fill", \.failureTone.fillRGB),
                 ("Success text", \.successTone.inkRGB), ("Success fill", \.successTone.fillRGB),
                 ("Stopped text", \.stoppedTone.inkRGB), ("Stopped fill", \.stoppedTone.fillRGB),

@@ -93,7 +93,7 @@ impl Fixture {
             socket: BufReader::new(socket),
             token: None,
         };
-        viewer.send(json!({"kind":"attach","control":control,"rows":24,"cols":80}));
+        viewer.send(json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}));
         let attached = viewer.read();
         assert_eq!(attached["kind"], "attached");
         viewer.token = attached["token"].as_str().map(str::to_owned);
@@ -170,7 +170,7 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     assert!(observer.token.is_none());
     observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
     let old = first.token.clone();
-    first.send(json!({"kind":"attach","control":true,"rows":24,"cols":80}));
+    first.send(json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80}));
     let claimed = loop {
         let frame = first.read();
         if frame["kind"] == "attached" {
@@ -184,7 +184,7 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     drop(second); // zero viewers while the same read remains pending
     let mut replacement = fixture.viewer(&owner, true);
     let mut passive = fixture.viewer(&owner, false);
-    passive.send(json!({"kind":"attach","control":false,"rows":24,"cols":80}));
+    passive.send(json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80}));
     loop {
         if passive.read()["kind"] == "attached" {
             break;
@@ -201,6 +201,60 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
             fixture.home.path().display()
         )
     );
+}
+
+#[test]
+fn automatic_attachment_preserves_an_existing_viewers_control() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    let mut controller = fixture.viewer(&owner, true);
+    let mut waiting = fixture.viewer(&owner, false);
+    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    loop {
+        if waiting.read()["kind"] == "busy" {
+            break;
+        }
+    }
+    controller.input("original-controller\n");
+    controller.finish();
+    assert_eq!(fixture.wait_file("answer"), "original-controller");
+}
+
+#[test]
+fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&[
+        "/bin/sh",
+        "-c",
+        "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
+    ]);
+    let controller = fixture.viewer(&owner, true);
+    let token = controller.token.clone();
+    // SHUT_WR lets the owner observe EOF before it accepts the next viewer.
+    controller
+        .socket
+        .get_ref()
+        .shutdown(std::net::Shutdown::Both)
+        .unwrap();
+    drop(controller);
+    let mut waiting = fixture.viewer(&owner, false);
+    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    loop {
+        let frame = waiting.read();
+        assert_ne!(frame["kind"], "busy");
+        if frame["kind"] == "attached" {
+            waiting.token = frame["token"].as_str().map(str::to_owned);
+            break;
+        }
+    }
+    assert_ne!(waiting.token, token);
+    waiting.input("reconnected\n");
+    waiting.finish();
+    assert_eq!(fixture.wait_file("answer"), "reconnected");
 }
 
 #[test]
@@ -498,6 +552,30 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
         )
         .unwrap();
     let attachment: (String, String) = sql.query_row("SELECT id,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    let prepared = fixture
+        .command(&[
+            "session",
+            "attach",
+            &session,
+            "--if-free",
+            "--prepare",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let argv = prepared["open_argv"].as_array().unwrap();
+    assert_eq!(
+        &argv[argv.len() - 4..],
+        &[
+            json!("session"),
+            json!("attach"),
+            json!(session),
+            json!("--if-free")
+        ]
+    );
+    assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
     drop(first);
     if let Some(cancel) = silent_owner {
@@ -554,6 +632,305 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     );
     let provider_id: String = sql.query_row("SELECT id FROM processes WHERE agent_session_id=?1 AND kind='agent' ORDER BY started_at LIMIT 1", [&session], |r| r.get(0)).unwrap();
     assert_eq!(provider_id, attachment.0);
+}
+
+/// A restart kills every owner and provider without recording an exit. `lf resume
+/// --all` reopens exactly those conversations from saved history, once; one the
+/// person left stays stopped.
+#[test]
+fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
+    let fixture = Fixture::new();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let launches = |count: usize| -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let text =
+                std::fs::read_to_string(fixture.home.path().join("launches")).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= count {
+                return lines;
+            }
+            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let mut owners = Vec::new();
+    for input in ["first", "second", "left"] {
+        let output = fixture
+            .command(&[
+                "transport",
+                "start",
+                "--terminal",
+                "--",
+                env!("CARGO_BIN_EXE_lf"),
+                "--interactive",
+                "--agent",
+                "claude",
+                ":",
+                input,
+            ])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        owners.push(String::from_utf8(output.stdout).unwrap().trim().to_owned());
+        launches(owners.len());
+    }
+    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let session_of = |line: &str| -> String {
+        let capture = line.split(':').nth(1).unwrap();
+        sql.query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [capture],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let started = launches(3);
+    let sessions: Vec<String> = started.iter().map(|line| session_of(line)).collect();
+    // The person leaves the third conversation through the provider's own exit.
+    let mut viewer = fixture.viewer(&owners[2], true);
+    viewer.input("exit\n");
+    viewer.finish();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while sql
+        .query_row(
+            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+            [&owners[2]],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "left owner never recorded its exit"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A restart: the owner, its lf and the provider die without a word.
+    let crash = |owner: &str, line: &str| {
+        let receipt: Value = serde_json::from_slice(
+            &std::fs::read(
+                fixture
+                    .home
+                    .path()
+                    .join(format!("runtime/exec-processes/{owner}.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let provider: i64 = line.split(':').next().unwrap().parse().unwrap();
+        let parent = Command::new("ps")
+            .args(["-o", "ppid=", "-p", &provider.to_string()])
+            .output()
+            .unwrap();
+        let inner: i64 = String::from_utf8(parent.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let pids = [receipt["pid"].as_i64().unwrap(), inner, provider];
+        // Freeze first so no survivor observes another's death and records an exit.
+        for signal in [libc::SIGSTOP, libc::SIGKILL] {
+            for pid in pids {
+                // SAFETY: test-owned PIDs read from this fixture's receipts and launches.
+                unsafe { libc::kill(pid as libc::pid_t, signal) };
+            }
+        }
+    };
+    for (owner, line) in owners.iter().zip(&started).take(2) {
+        crash(owner, line);
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    // The first was mid-turn when the machine went down; the second was waiting.
+    sql.execute(
+        r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+           SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1
+           ON CONFLICT(session_id) DO UPDATE SET program_status=excluded.program_status,
+               agent_process_id=excluded.agent_process_id"#,
+        [&sessions[0]],
+    )
+    .unwrap();
+    let resume_all = || -> Value {
+        let output = fixture
+            .command(&["resume", "--all", "--json"])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let resumed = resume_all();
+    let ids: Vec<&str> = resumed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids.iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        sessions[..2]
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        "{resumed}"
+    );
+    assert!(
+        resumed
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["outcome"]["kind"] == "resumed"),
+        "{resumed}"
+    );
+    for entry in resumed.as_array().unwrap() {
+        assert_eq!(
+            entry["turn_cut_off"],
+            entry["id"] == sessions[0].as_str(),
+            "{resumed}"
+        );
+    }
+    let reopened = launches(5);
+    assert_eq!(reopened.len(), 5, "{reopened:?}");
+    for line in &reopened[3..] {
+        let (_, resumed) = line
+            .split_once(" --resume ")
+            .unwrap_or_else(|| panic!("reopened without history: {line}"));
+        assert!(!resumed.contains(' '), "input replayed: {line}");
+    }
+    // Rerunning finds nothing to do and starts no provider.
+    assert_eq!(resume_all(), json!([]));
+    std::thread::sleep(Duration::from_millis(300));
+    let reopened = launches(5);
+    assert_eq!(reopened.len(), 5);
+    // Resumed owners outlive the command; stop them with the fixture.
+    for line in &reopened[3..] {
+        let owner: String = sql
+            .query_row(
+                "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN session_events e
+                 ON e.session_id=s.id WHERE e.kind='captured' AND e.receipt_key=?1",
+                [line.split(':').nth(1).unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        crash(&owner, line);
+    }
+}
+
+#[test]
+fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
+    let fixture = Fixture::new();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+if mkdir "$HOME/outer" 2>/dev/null; then
+    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" > "$HOME/caller"
+    "$LF_BIN" --interactive --agent claude : 'nested original input' < /dev/tty &
+    printf '%s\n' "$!" > "$HOME/nested-viewer"
+    wait
+else
+    stty -echo < /dev/tty
+    printf '%s:%s\n' "$$" "$LF_CAPTURE_KEY" >> "$HOME/nested-launches"
+    read -r answer < /dev/tty
+    printf '%s:%s\n' "$$" "$answer" > "$HOME/nested-answer"
+fi
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let launched = fixture
+        .command(&["transport", "start", "--terminal", "--"])
+        .args([
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "call the nested CLI",
+        ])
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .output()
+        .unwrap();
+    assert!(launched.status.success(), "{launched:?}");
+    let caller = fixture.wait_file("caller");
+    let nested = fixture.wait_file("nested-launches");
+    let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();
+    let (caller_pid, caller_capture) = caller.trim().split_once(':').unwrap();
+    let (nested_pid, nested_capture) = nested.trim().split_once(':').unwrap();
+    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let identity = |capture: &str| -> (String, String, String) {
+        sql.query_row(
+            "SELECT s.id,s.agent_process_id,s.transport_lf_process_id
+             FROM agent_sessions s JOIN session_events e ON e.session_id=s.id
+             WHERE e.kind='captured' AND e.receipt_key=?1",
+            [capture],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+    };
+    let parent = identity(caller_capture);
+    let child = identity(nested_capture);
+    assert_ne!(parent.0, child.0);
+    assert_ne!(
+        parent.2, child.2,
+        "nested execution inherited its caller's owner"
+    );
+    let descendants: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM processes WHERE caller_session_id=?1",
+            [&parent.0],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(descendants > 0, "nested CLI lost its caller provenance");
+    // SAFETY: both PIDs are reported by this fixture's live processes. Kill
+    // precisely the calling provider and nested viewer, never either owner.
+    unsafe {
+        assert_eq!(libc::kill(caller_pid.parse().unwrap(), libc::SIGKILL), 0);
+        assert_eq!(libc::kill(viewer, libc::SIGKILL), 0);
+    }
+    let mut attached = fixture.viewer(&child.2, true);
+    assert_eq!(identity(nested_capture), child);
+    let settled: i64 = sql.query_row(
+        "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'",
+        [&child.0], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(settled, 0, "caller death settled the nested request");
+    attached.input("accepted-once\n");
+    attached.finish();
+    assert_eq!(
+        fixture.wait_file("nested-answer").trim(),
+        format!("{nested_pid}:accepted-once")
+    );
+    assert_eq!(fixture.wait_file("nested-launches"), nested);
 }
 
 #[test]

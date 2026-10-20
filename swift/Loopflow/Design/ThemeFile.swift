@@ -25,11 +25,16 @@ public struct ThemeFile: Sendable {
         ("work-selected-text", \.workSelectedText), ("work-selected-secondary-text", \.workSelectedSecondaryText),
         ("selection-fill", \.selectionFill.rgb),
         ("working-ink", \.workingTone.inkRGB), ("working-fill", \.workingTone.fillRGB),
-        ("waiting-ink", \.waitingTone.inkRGB), ("waiting-fill", \.waitingTone.fillRGB),
+        ("warning-ink", \.warningTone.inkRGB), ("warning-fill", \.warningTone.fillRGB),
+        ("available-ink", \.availableTone.inkRGB), ("available-fill", \.availableTone.fillRGB),
         ("failure-ink", \.failureTone.inkRGB), ("failure-fill", \.failureTone.fillRGB),
         ("success-ink", \.successTone.inkRGB), ("success-fill", \.successTone.fillRGB),
         ("stopped-ink", \.stoppedTone.inkRGB), ("stopped-fill", \.stoppedTone.fillRGB),
     ]
+    /// Keys an earlier release wrote. `waiting` was one role for warnings and
+    /// availability; its colors stay with the warning role it mostly served.
+    public static let retiredRoles = ["loopflow-waiting-ink": "loopflow-warning-ink",
+                                      "loopflow-waiting-fill": "loopflow-warning-fill"]
     private static let terminalKeys: [(key: String, path: WritableKeyPath<TerminalPalette, ThemeRGB> & Sendable)] = [
         ("background", \.background), ("foreground", \.foreground), ("cursor-color", \.cursor),
         ("cursor-text", \.cursorText), ("selection-background", \.selectionBackground),
@@ -42,6 +47,23 @@ public struct ThemeFile: Sendable {
                                                     options: [.skipsHiddenFiles])
             .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Rename retired role keys in your theme files, in place. Returns the files changed.
+    public static func migrateRetiredRoles(in directory: URL) throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return try Self.directory(directory).filter { url in
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else { return false }
+            var changed = false
+            let lines = source.components(separatedBy: "\n").map { line in
+                let key = line.split(separator: "=", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) }
+                guard let key, let renamed = retiredRoles[key], let range = line.range(of: key) else { return line }
+                changed = true
+                return line.replacingCharacters(in: range, with: renamed)
+            }
+            if changed { try Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic) }
+            return changed
+        }
     }
 
     public static func read(_ url: URL, complete: Bool = false) throws -> Self {
@@ -105,6 +127,8 @@ public struct ThemeFile: Sendable {
             } else if key.hasPrefix("loopflow-"), appRoles.contains(where: { "loopflow-\($0.key)" == key }) {
                 repeated(roles[key], line: line, key: key)
                 roles[key] = try rgb(value, line: line, key: key)
+            } else if let renamed = retiredRoles[key] {
+                diagnostics.append("Line \(line): \(key) is now \(renamed); not applied.")
             } else {
                 diagnostics.append("Line \(line): omitted \(key) (themes import only colors).")
             }

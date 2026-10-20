@@ -45,6 +45,11 @@ impl MigrationId {
             _ => None,
         }
     }
+
+    /// The package release that cut this migration; legacy ids count as `.0`.
+    pub fn release(&self) -> String {
+        format!("{}.{}.{}", self.major, self.minor, self.patch.unwrap_or(0))
+    }
 }
 
 impl fmt::Display for MigrationId {
@@ -68,6 +73,9 @@ pub struct Migration {
     pub id: MigrationId,
     pub name: &'static str,
     pub sql: &'static str,
+    /// The oldest lf that can open the store once this is applied. `None` on
+    /// releases cut before reader floors, which count as breaking.
+    pub reader_floor: Option<&'static str>,
 }
 
 impl Migration {
@@ -88,6 +96,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "initial",
         sql: include_str!("migrations/0.10.001_initial.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -98,6 +107,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "session_execution_context",
         sql: include_str!("migrations/0.10.002_session_execution_context.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -108,6 +118,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_prs",
         sql: include_str!("migrations/0.11.001_task_prs.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -118,6 +129,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "project_session_successors",
         sql: include_str!("migrations/0.11.002_project_session_successors.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -128,6 +140,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "child_body_lease",
         sql: include_str!("migrations/0.11.003_child_body_lease.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -138,6 +151,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_pr_ci_state",
         sql: include_str!("migrations/0.11.004_task_pr_ci_state.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -148,6 +162,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "provider_accounts",
         sql: include_str!("migrations/0.11.005_provider_accounts.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -158,6 +173,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "context_launch_work",
         sql: include_str!("migrations/0.11.006_context_launch_work.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -168,6 +184,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_pr_parent",
         sql: include_str!("migrations/0.11.007_task_pr_parent.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -178,6 +195,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "interactive_handoffs",
         sql: include_str!("migrations/0.11.008_interactive_handoffs.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -188,6 +206,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "context_pressure",
         sql: include_str!("migrations/0.11.009_context_pressure.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -198,6 +217,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "context_input_normalization",
         sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -208,6 +228,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "profiles",
         sql: include_str!("migrations/0.11.011_profiles.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -218,6 +239,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "provider_account_lifecycle",
         sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -228,6 +250,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_review_state",
         sql: include_str!("migrations/0.11.013_task_review_state.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -238,6 +261,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_lifecycle",
         sql: include_str!("migrations/0.11.014_task_lifecycle.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -248,6 +272,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "interaction_reviews",
         sql: include_str!("migrations/0.11.015_interaction_reviews.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -258,6 +283,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_linear_observations",
         sql: include_str!("migrations/0.11.016_task_linear_observations.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -268,6 +294,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "migration_provenance",
         sql: include_str!("migrations/0.11.017_migration_provenance.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -278,6 +305,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "session_body_provenance",
         sql: include_str!("migrations/0.11.018_session_body_provenance.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -288,6 +316,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_pr_github_observation",
         sql: include_str!("migrations/0.11.019_task_pr_github_observation.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -298,6 +327,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_pr_linear_linkage",
         sql: include_str!("migrations/0.11.020_task_pr_linear_linkage.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -308,6 +338,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "provider_deliveries",
         sql: include_str!("migrations/0.11.021_provider_deliveries.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -318,6 +349,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "task_session_successors",
         sql: include_str!("migrations/0.11.022_task_session_successors.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -328,6 +360,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "capture_pruned_state",
         sql: include_str!("migrations/0.11.023_capture_pruned_state.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -338,6 +371,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "ci_incidents",
         sql: include_str!("migrations/0.11.024_ci_incidents.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -348,6 +382,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "usage_deltas",
         sql: include_str!("migrations/0.11.025_usage_deltas.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -358,6 +393,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "lineage_boundary",
         sql: include_str!("migrations/0.11.026_lineage_boundary.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -368,6 +404,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "accounts_first",
         sql: include_str!("migrations/0.11.027_accounts_first.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -378,6 +415,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "ci_incident_repaired_head",
         sql: include_str!("migrations/0.11.029_ci_incident_repaired_head.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -388,6 +426,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "one_spend_grain",
         sql: include_str!("migrations/0.11.030_one_spend_grain.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -398,6 +437,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "durable_input_spine",
         sql: include_str!("migrations/0.11.031_durable_input_spine.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -408,6 +448,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "run_launch_attention",
         sql: include_str!("migrations/0.11.032_run_launch_attention.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -418,6 +459,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "launch_attention_only",
         sql: include_str!("migrations/0.11.033_launch_attention_only.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -428,6 +470,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "typed_ci_runs",
         sql: include_str!("migrations/0.11.034_typed_ci_runs.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -438,6 +481,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "drop_child_commands",
         sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -448,6 +492,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "delete_sessions",
         sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -458,6 +503,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "capture_terminal_states",
         sql: include_str!("migrations/0.11.037_capture_terminal_states.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -468,6 +514,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.2.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -478,6 +525,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.3.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -488,6 +536,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.4.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -498,6 +547,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.5.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -508,6 +558,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.7.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -518,6 +569,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.8.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -528,6 +580,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.10.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -538,6 +591,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.12.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -548,6 +602,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.13.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -558,6 +613,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.14.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -568,6 +624,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.15.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -578,6 +635,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.16.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -588,6 +646,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.20.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -598,6 +657,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.21.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -608,6 +668,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.22.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -618,6 +679,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.23.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -628,6 +690,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.24.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -638,6 +701,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.26.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -648,6 +712,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.27.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -658,6 +723,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.29.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -668,6 +734,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.30.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -678,6 +745,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.12.31.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -688,6 +756,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.1.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -698,6 +767,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.2.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -708,6 +778,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.6.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -718,6 +789,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.7.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -728,6 +800,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.9.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -738,6 +811,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.9.002_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -748,6 +822,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.10.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -758,6 +833,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.11.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -768,6 +844,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.12.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -778,6 +855,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.12.002_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -788,6 +866,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.12.003_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -798,6 +877,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.13.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -808,6 +888,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.14.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -818,6 +899,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.13.16.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -828,6 +910,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.1.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -838,6 +921,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.4.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -848,6 +932,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.6.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -858,6 +943,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.7.001_release.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -868,5 +954,17 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         },
         name: "release",
         sql: include_str!("migrations/0.14.8.001_release.sql"),
+        reader_floor: None,
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 14,
+            patch: Some(10),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.14.10.001_release.sql"),
+        reader_floor: None,
     },
 ];

@@ -234,7 +234,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(palette.waiting)
+                    Text(reason).foregroundStyle(palette.warning)
                 case .available(let inventory, let truncated):
                     let tasks = inventory.filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
@@ -253,7 +253,7 @@ private struct WavePlanView: View {
             }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
                 Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                    .foregroundStyle(palette.waiting)
+                    .foregroundStyle(palette.warning)
             }
         }.accessibilityIdentifier("wave-tasks")
     }
@@ -362,7 +362,7 @@ struct WaveMetricPortfolioView: View {
                             systemImage: "exclamationmark.triangle.fill"
                         )
                         .font(Typography.strong(11))
-                        .foregroundStyle(palette.waiting)
+                        .foregroundStyle(palette.warning)
                         ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
                             Text(issue.summary)
                                 .font(Typography.caption(11))
@@ -373,9 +373,9 @@ struct WaveMetricPortfolioView: View {
                     }
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
-                    .background(palette.waiting.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .background(palette.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .leading) {
-                        Rectangle().fill(palette.waiting).frame(width: 2)
+                        Rectangle().fill(palette.warning).frame(width: 2)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .accessibilityIdentifier("wave-metric-contract-issues")
@@ -464,7 +464,7 @@ private struct WaveMetricTableRow: View {
             }
             Text(detail(presentation))
                 .font(Typography.caption(11))
-                .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.waiting)
+                .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.warning)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = presentation.reason {
@@ -602,7 +602,7 @@ private extension MetricEvidence {
         case .met: return .done
         case .missed: return .failure
         case .unknown, .untargeted: return .neutral
-        case .unavailable: return .waiting
+        case .unavailable: return .warning
         }
     }
 

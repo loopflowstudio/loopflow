@@ -1,40 +1,39 @@
-# v0.14.8
+# v0.14.10
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.8 makes returning to work more predictable: structured IDs resolve regardless of casing, Codex reconnects retain the saved conversation without automatically replaying uncertain input, and stacked Tasks can sync after a parent's checkout is removed. Codex relay failures now appear in Session history, giving operators evidence when a connection fails. Startup recovery remains unresolved; this release improves continuity and diagnosis without establishing a fix for the original fresh-launch reset.
+v0.14.10 keeps your conversations when Desktop doesn't. Before this release, closing a repository window, switching Tasks or restarting the Mac could cut you off from a running Session. Getting back took several manual reattaches, and after a reboot you had to find each interrupted Session yourself. Now Desktop keeps each repository's panes and drafts until it quits and reattaches to running Sessions without restarting them. At launch it brings back every conversation a reboot or crash interrupted. Upgrade if you keep several Tasks open at once or have lost a Session to a restart. (#1605, LOO-416)
 
-## Find work with the ID you have
+## Interrupted conversations come back
 
-Commands now accept structured IDs in any casing and store and print one canonical spelling. Task and Session selection distinguish Loopflow identities from provider-owned values, so convenience in lookup preserves the exact identity of native conversations. (#1602)
+`lf resume --all` reopens every Session whose execution owner is gone without recording an exit. A reboot, crash or kill leaves Sessions in that state. Sessions you exited deliberately are left alone. Desktop runs the command at launch, so after a restart your conversations are already back.
 
-- Use `LOO-506` or `loo-506`, mixed-case Task and Session IDs, or mixed-case Linear UUIDs to find the same record.
-- Structured UUIDs and prefixed IDs use lowercase; Linear ticket labels use uppercase. Desktop decodes the same canonical identities across the CLI transport.
-- Provider conversation IDs, tokens, hashes, names and paths retain their exact bytes. UUIDs with and without hyphens remain distinct.
+- `lf resume --all` resumes each Session through the ordinary `lf resume` path, in a new owner with no viewer. It skips Sessions you exited through the provider or detached from with Ctrl+].
+- The output lists each Session as resumed, still starting or failed. It also flags any turn the restart cut off. That turn is not replayed.
+- It waits up to 20 seconds for each Session's owner to bind. If the owner hasn't bound by then, the Session is reported as still starting.
+- Leaving a Session now prints the `lf resume` command that returns to it, on every harness. A resume that fails during launch is logged rather than silently dropped.
 
-## Return to Codex with better continuity and evidence
+## Desktop holds its place
 
-Reconnects use the Session's saved Codex thread, including when its identity arrives after the terminal disconnects. Initial-input submission evidence distinguishes explicit rejection from uncertain delivery, reducing the risk of duplicate submissions while keeping connection failures inspectable. (#1598, #1599)
+Desktop now treats a repository window as a view onto work that keeps running, not as the owner of that work. Closing the window, switching Tasks or showing a pane again no longer costs you anything.
 
-- Explicitly rejected initial input remains retryable. Dispatched input without an acknowledgment is never replayed automatically.
-- Client failures leave the reconnect listener available; stale attachments cannot overwrite the current attachment's submission evidence.
-- Run `lf history show SESSION` to inspect retained relay failures and their original AgentProcess. Add `--events` for the failed operation, connection direction and error payload, including failures before a native turn starts.
-- Diagnostics live in private Session events, replacing the separate `codex-relay.log`. Retention is capped at the first 16 failures per captured input and 2048 UTF-8 bytes per error. Explicit client closes stay quiet; diagnostic writes are best-effort and do not settle turns or interrupt the native terminal.
+- Closing a repository window keeps its panes, selected Work and file drafts until Desktop quits. Reopening a repository you have used before shows that content immediately, even while repository lookup is still running or has failed.
+- **Resume** in Desktop now does the same thing as `lf resume`. It attaches to a conversation that is still running, or reopens its saved provider history.
+- `lf session attach --if-free` attaches only if no other viewer has input control, and never takes control from one. `lf session attach --prepare --json` returns an attach-only command without starting a provider. Desktop uses both to restore panes, so a pane becoming visible never takes input away from anyone.
+- CLI requests from Desktop time out after 30 seconds, and canceling one stops only that request. When a change times out, its outcome is treated as unknown and the change is never retried automatically.
 
-## Keep automated work moving
+## Conversations exist from the moment work does
 
-Flow routing can now read answers captured when transport delegates execution to another process. The lookup follows that delegation while keeping captures from ordinary agent-issued nested commands separate. (#1600)
+Creating a Task now saves its primary conversation in the same step. Wave admission does the same for the Wave and repository conversations. Saving a conversation starts no provider and doesn't mark the Task Started. Both happen on the first input reserved by `lf connect`. This replaces the earlier step that prepared the first input in advance.
 
-- Routing steps find their captured Session turn through `lf transport serve` delegation.
-- This repair requires no schema, command or wire-format change.
+## Limits
+
+- If Desktop itself dies, its in-app state is lost. The Session, its native history and a repaint come back, but live input and exact scrollback do not. The owner keeps a bounded vt100 text state, not a full terminal snapshot.
+- A turn cut off mid-flight is flagged and never replayed. With Codex, leaving during the `after-thread` startup window stops the provider, so a first turn it had already accepted can lose its input.
+- Not included: preserving layouts across Desktop installations and keeping a durable record of the intended layout. That work is tracked as LOO-497 and LOO-489. Full acceptance of LOO-416 still needs that integration, plus a measured check that native Sessions survive in an installed build.
 
 ## Operational notes
 
-- **Identifier migration:** existing structured IDs and declared JSON references convert in one transaction. A collision after case normalization aborts the migration; subsequent non-canonical writes are rejected with `canonical identity required: <table>`. Existing fence, receipt and trace paths are retained without renaming files, and metric payloads and hashes remain unchanged. (#1602)
-- **Live work delays migration:** the upgrade defers without changes when dispatch is busy, an affected owner is live, or a receipt is unreadable or malformed. An older client holding a mixed-case live claim must settle before the upgrade can proceed. (#1602)
-- **Codex recovery limits:** disposable probes verified retained startup diagnostics and preserved edited Unicode drafts across reconnects. Injected faults do not establish the original installed reset's cause. An after-thread reset with Codex 0.163.0 displayed “Reconnect failed” and timed out; startup recovery remains unresolved. (#1598, #1599)
-- **Verification limits:** the supplied branch records leave Linux and the full hosted matrix to CI. Compiled acceptance and Clippy for the transport-routing repair were deferred for insufficient disk space; its recorded query simulation does not replace compiled tests. (#1599, #1600)
-
-## Small changes
-
-- `lf sync` in a stacked child Task targets the default branch after its parent lands, even when the parent's worktree has been removed. PR observation falls back to the Task's repository instead of failing with a missing-directory error. (#1597)
+- **Schema migration:** the `session_admission` draft is released with this version. It stores the conversations that Task creation and Wave admission save. Seed fixtures for the previously released schema live at `tests/fixtures/migrations/conversation_admission_released.sql`.
+- **New CLI surface:** `lf resume --all`, `lf session attach --if-free` and `lf session attach --prepare --json`.
+- **Verification:** new Rust tests cover `resume --all` flagging a cut-off turn and stopping the owners it resumes. New transport tests cover `--if-free` and attach-only preparation. On the Swift side, `WorkspaceRetentionTests` checks that twelve Work layouts and their drafts survive window closure. These are twelve layouts, not twelve live providers. `SessionsStoreTests` and the local Wave agent launcher tests were also updated.

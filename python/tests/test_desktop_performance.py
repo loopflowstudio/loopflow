@@ -508,7 +508,7 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
     assert performance._report(tmp_path, None)["status"] == "incomplete"
 
 
-def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path, monkeypatch) -> None:
+def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -> None:
     cli = tmp_path / "lf"
     cli.write_text(
         f"#!{sys.executable}\n"
@@ -519,16 +519,16 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path, m
         "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
         "(directory / f'lf-{os.getpid()}.jsonl').write_text("
         "json.dumps(start) + '\\n' + json.dumps(end))\n"
-        'print(json.dumps({"task_ids":["owned-task"]} if sys.argv[1:3] == ["session", "bind"] '
-        'else [{"id":"retained-session"}]))\n'
+        "answers = {('session', 'bind'): {'task_ids': ['owned-task']}, "
+        "('task', 'create'): {'id': 'owned-task', 'identifier': 'PERF-304'}}\n"
+        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), [{'id': 'retained-session'}])))\n"
     )
     cli.chmod(0o755)
-    monkeypatch.setattr(performance, "_seed_native_task", lambda *_: ("owned-task", "PERF-304"))
     fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
     assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
     report = _report(tmp_path, _events())
-    assert report["fixture_setup_cli_volume"]["processes_started"] == 3
-    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 36
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 4
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 48
     assert report["cli_volume"]["status"] == "unmeasured"
     assert report["cli_volume"]["observed_totals"]["statements"] is None
 

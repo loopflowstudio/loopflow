@@ -30,6 +30,14 @@ Test the upgrade from the released frontier to the finished draft. A custom
 `LF_HOME` is initialized once with the build's exact schema; after editing a
 draft, start a fresh one.
 
+To see a draft on real data, run the branch's lf on the default home. A build
+with drafts never opens `~/.lf/loopflow.db`: the first command clones it to
+`~/.lf/copies/<draft digest>/` (an instant APFS clone of one pinned snapshot),
+applies the drafts there and keeps working on that copy. Editing a draft selects
+a new copy; removing the directory refreshes it. The copy shares captures and
+account homes, so agents run on real credentials, but it cannot push, call
+GitHub or reach Linear, and it never signals the shared store's processes.
+
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical

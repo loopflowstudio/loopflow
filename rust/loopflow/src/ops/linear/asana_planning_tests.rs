@@ -72,7 +72,7 @@ async fn create(State(state): State<Shared>, Json(body): Json<Value>) -> Respons
     let modified = asana.tick();
     let task = json!({
         "gid": format!("9{}", asana.creations), "external": {"gid": id, "data": null},
-        "name": input["name"], "notes": input["notes"],
+        "name": input["name"], "html_notes": input["html_notes"],
         "completed": input["completed"].as_bool().unwrap_or(false), "completed_at": null,
         "modified_at": modified, "permalink_url": format!("https://app.asana.com/0/{PROJECT}/{id}"),
         "due_on": input["due_on"], "assignee": null,
@@ -146,7 +146,7 @@ async fn comment(
     let thread = asana.stories.entry(id).or_default();
     let story = json!({
         "gid": format!("8{}", thread.len()), "created_at": created,
-        "text": body["data"]["text"], "resource_subtype": "comment_added",
+        "html_text": body["data"]["html_text"], "resource_subtype": "comment_added",
         "created_by": {"gid": "100", "name": "Loopflow"},
     });
     thread.push(story.clone());
@@ -208,7 +208,7 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
             repo,
             None,
             Some("Ship the Asana provider".into()),
-            Some("Mirror Tasks into Asana".into()),
+            Some("Mirror **Tasks** into Asana".into()),
         )
         .unwrap();
         let id = saved
@@ -220,7 +220,11 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         assert!(id.replace('-', "").starts_with(&saved.identifier));
         let task = mirrored(runtime, &state, id);
         assert_eq!(task["name"], "Ship the Asana provider");
-        assert_eq!(task["notes"], "Mirror Tasks into Asana");
+        // Asana renders rich text, so markdown arrives formatted.
+        assert_eq!(
+            task["html_notes"],
+            "<body>Mirror <strong>Tasks</strong> into Asana</body>"
+        );
         assert_eq!(task["completed"], false);
     });
 }
@@ -255,7 +259,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             repo,
             saved.id.as_str(),
             None,
-            Some("Delivered once"),
+            Some("Delivered **once**"),
             false,
         )
         .unwrap();
@@ -276,7 +280,10 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             .unwrap();
         let thread = runtime.block_on(state.lock()).stories[id].clone();
         assert_eq!(thread.len(), 1);
-        assert_eq!(thread[0]["text"], "Delivered once");
+        assert_eq!(
+            thread[0]["html_text"],
+            "<body>Delivered <strong>once</strong></body>"
+        );
         let comments = fixture.store.sqlite.task_comments(&saved.id).unwrap();
         assert_eq!(comments.comments.len(), 1);
         assert!(comments.pending_sync.is_empty());
@@ -328,7 +335,8 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             let mut asana = state.lock().await;
             let created = asana.tick();
             asana.stories.entry(id.clone()).or_default().push(json!({
-                "gid": "7001", "created_at": created, "text": "Also cover retries",
+                "gid": "7001", "created_at": created,
+                "html_text": "<body>Also cover <em>retries</em></body>",
                 "resource_subtype": "comment_added",
                 "created_by": {"gid": "1204429107704617", "name": "Jack Heart"},
             }));
@@ -343,7 +351,7 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             .unwrap();
         assert!(steers
             .iter()
-            .any(|steer| steer.text.contains("Also cover retries")
+            .any(|steer| steer.text.contains("Also cover *retries*")
                 && steer.text.contains("Jack Heart")));
         assert!(steers
             .iter()

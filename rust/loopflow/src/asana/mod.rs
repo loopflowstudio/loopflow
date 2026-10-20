@@ -6,6 +6,9 @@
 //! accepts a caller-supplied issue ID, so a lost creation reply is resolved by
 //! lookup rather than a second create. Asana returns the shared planning
 //! observations, so acceptance, receipts and steering stay one path.
+//! Descriptions and comments travel as Asana rich text (see [`rich_text`]).
+
+mod rich_text;
 
 use reqwest::{Method, StatusCode};
 use serde::Deserialize;
@@ -17,8 +20,11 @@ use crate::linear::{
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
-const TASK_FIELDS: &str = "gid,external,name,notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
-const STORY_FIELDS: &str = "gid,created_at,text,resource_subtype,created_by.gid,created_by.name";
+const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
+const STORY_FIELDS: &str =
+    "gid,created_at,html_text,resource_subtype,created_by.gid,created_by.name";
+/// Asana's largest page; a long-lived Task can outgrow one.
+const PAGE_LIMIT: &str = "100";
 
 #[derive(Debug, Clone)]
 pub struct AsanaClient {
@@ -32,6 +38,12 @@ pub struct AsanaClient {
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
     data: T,
+    next_page: Option<NextPage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NextPage {
+    offset: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,7 +52,7 @@ struct Task {
     external: Option<External>,
     name: String,
     #[serde(default)]
-    notes: String,
+    html_notes: String,
     completed: bool,
     completed_at: Option<String>,
     modified_at: String,
@@ -72,7 +84,7 @@ struct Story {
     gid: String,
     created_at: Option<String>,
     #[serde(default)]
-    text: String,
+    html_text: String,
     resource_subtype: Option<String>,
     created_by: Option<Reference>,
 }
@@ -150,7 +162,7 @@ impl AsanaClient {
     /// Post `body` once. Asana stories carry no caller identity, so a Loopflow
     /// comment is its visible text on the task: an existing match is the delivery.
     pub(crate) async fn sync_comment(&self, issue: &str, body: &str) -> LinearResult<()> {
-        let text = comment_text(body);
+        let text = comment_markdown(body);
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{issue}"), None)
             .await?;
@@ -166,7 +178,7 @@ impl AsanaClient {
             .send(
                 Method::POST,
                 &format!("/tasks/external:{issue}/stories"),
-                Some(json!({"text": text})),
+                Some(json!({"html_text": rich_text::to_html(&text)})),
             )
             .await?;
         Ok(())
@@ -185,16 +197,27 @@ impl AsanaClient {
         Ok(LinearIssueObservation {
             revision: task.modified_at,
             title: task.name,
-            description: task.notes,
+            description: rich_text::to_markdown(&task.html_notes),
             comments,
         })
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.
     async fn comments(&self, gid: &str) -> LinearResult<Vec<LinearComment>> {
-        let stories: Vec<Story> = self
-            .send(Method::GET, &format!("/tasks/{gid}/stories"), None)
-            .await?;
+        let mut stories = Vec::new();
+        let mut offset = None;
+        loop {
+            let mut path = format!("/tasks/{gid}/stories?limit={PAGE_LIMIT}");
+            if let Some(offset) = &offset {
+                path.push_str(&format!("&offset={offset}"));
+            }
+            let page: Envelope<Vec<Story>> = self.request(Method::GET, &path, None).await?;
+            stories.extend(page.data);
+            match page.next_page {
+                Some(next) => offset = Some(next.offset),
+                None => break,
+            }
+        }
         Ok(stories
             .into_iter()
             .filter(|story| story.resource_subtype.as_deref() == Some("comment_added"))
@@ -202,7 +225,7 @@ impl AsanaClient {
                 id: story.gid,
                 revision: story.created_at.clone(),
                 created_at: story.created_at,
-                body: story.text,
+                body: rich_text::to_markdown(&story.html_text),
                 author_id: story.created_by.as_ref().map(|author| author.gid.clone()),
                 author_name: story.created_by.and_then(|author| author.name),
             })
@@ -242,7 +265,7 @@ impl AsanaClient {
             branch_name: None,
             url: task.permalink_url,
             name: task.name,
-            description: task.notes,
+            description: rich_text::to_markdown(&task.html_notes),
             rank: 0,
             completed: task.completed,
             completed_at: task.completed_at,
@@ -267,16 +290,31 @@ impl AsanaClient {
         path: &str,
         data: Option<Value>,
     ) -> Result<T, AsanaFailure> {
-        let fields = if path.ends_with("/stories") {
+        Ok(self.request(method, path, data).await?.data)
+    }
+
+    async fn request<T: serde::de::DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        data: Option<Value>,
+    ) -> Result<Envelope<T>, AsanaFailure> {
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
+        let fields = if route.ends_with("/stories") {
             STORY_FIELDS
         } else {
             TASK_FIELDS
+        };
+        let query = if query.is_empty() {
+            String::new()
+        } else {
+            format!("{query}&")
         };
         let mut request = self
             .client
             .request(
                 method,
-                format!("{}{path}?opt_fields={fields}", self.base_url),
+                format!("{}{route}?{query}opt_fields={fields}", self.base_url),
             )
             .bearer_auth(&self.token);
         if let Some(data) = data {
@@ -313,9 +351,8 @@ impl AsanaClient {
                 .unwrap_or_else(|| format!("HTTP {status}"));
             return Err(message(format!("Asana rejected the request: {detail}")).into());
         }
-        let envelope: Envelope<T> = serde_json::from_slice(&body)
-            .map_err(|error| message(format!("invalid Asana response: {error}")))?;
-        Ok(envelope.data)
+        serde_json::from_slice(&body)
+            .map_err(|error| message(format!("invalid Asana response: {error}")).into())
     }
 }
 
@@ -344,9 +381,14 @@ fn message(text: impl Into<String>) -> LinearError {
     LinearError::Message(text.into())
 }
 
-/// Asana renders plain text, so Loopflow's hidden `<!-- loopflow-… -->` markers
-/// would show. Asana receives the visible text; read-back claims it by that text.
-pub(crate) fn comment_text(body: &str) -> String {
+/// A Loopflow comment as Asana shows and returns it: the visible text, without
+/// hidden `<!-- loopflow-… -->` markers, in the markdown its rich text reads back
+/// as. Delivery and read-back claim a story by this text.
+pub(crate) fn comment_markdown(body: &str) -> String {
+    rich_text::to_markdown(&rich_text::to_html(&comment_text(body)))
+}
+
+fn comment_text(body: &str) -> String {
     let mut text = String::new();
     let mut rest = body;
     while let Some(start) = rest.find("<!-- loopflow-") {
@@ -387,7 +429,8 @@ fn task_fields(input: &Value) -> LinearResult<Value> {
                 data.insert("name".into(), value.clone());
             }
             "description" => {
-                data.insert("notes".into(), value.clone());
+                let markdown = value.as_str().unwrap_or_default();
+                data.insert("html_notes".into(), json!(rich_text::to_html(markdown)));
             }
             "assigneeId" => {
                 data.insert("assignee".into(), value.clone());
@@ -427,7 +470,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             fields,
-            json!({"name": "Ship", "notes": "Notes", "due_on": null, "completed": true})
+            json!({"name": "Ship", "html_notes": "<body>Notes</body>", "due_on": null, "completed": true})
         );
         assert!(task_fields(&json!({"projectId": "section"})).is_err());
     }

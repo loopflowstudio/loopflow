@@ -80,7 +80,7 @@ fn claim_local_comments(
     for comment in &mut observation.comments {
         if let Some(saved) = local.iter().find(|saved| {
             uuid::Uuid::parse_str(&saved.id).is_ok()
-                && crate::asana::comment_text(&saved.body) == comment.body
+                && crate::asana::comment_markdown(&saved.body) == comment.body
         }) {
             comment.id = saved.id.clone();
             comment.body = saved.body.clone();

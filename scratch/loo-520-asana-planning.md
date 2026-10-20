@@ -38,9 +38,15 @@ stays the default remote provider; Git stays the default transport.
   comments read by the task's Asana gid.
 - State: `completed` ↔ `completed: true`; `unstarted`/`canceled` targets map to
   `completed: false` / `true`. Observed state is `completed` or `unstarted`.
+- Rich text: descriptions and comments travel as `html_notes`/`html_text`, via
+  `asana::rich_text` (ported from the deleted `asana_html.rs`, made line-faithful).
+  Live Asana stores that HTML byte for byte except `<hr/>` → `<hr />`, so supported
+  markdown round-trips exactly; h3+, `* ` bullets, list numbering and fence
+  languages normalize once on first read-back, then stay fixed.
 - Comments ↔ Asana comment stories. Asana gets the visible text, without
-  Loopflow's hidden markers. Delivery and read-back claim a story by that text,
-  so nothing echoes back as a steer.
+  Loopflow's hidden markers. Delivery and read-back claim a story by
+  `comment_markdown` (that text after the rich-text round trip), so nothing
+  echoes back as a steer. Story reads page at 100.
 - Auth: `lf account connect asana`, the same loopback OAuth broker as Linear
   (`PmOAuthBroker` over a per-provider `PmOAuthSpec`), with the client ID and
   secret from Doppler (`ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`). Asana keeps one
@@ -56,7 +62,8 @@ follow-up relations, project content documents, chapter sweeps.
 - Projects: Loopflow Project ↔ Asana mirror (section or project). Until then a
   Task in a Project awaits its Project mapping in an Asana repository.
 - Inbound acquisition of tasks created in Asana (team delta equivalent).
-- Notion provider: follow-up Task; the seam holds (see questions.md).
+- Notion provider: follow-up Task; the seam holds (see questions.md). Start from
+  `1c925c0c18` and `63b39a6cd2^:rust/loopflow/src/lfd/pm/notion.rs` + `notion_blocks.rs`.
 - Rename shared observation types off the `Linear` prefix; wire field `linear_id`
   → provider-neutral (touches Swift DTO mirrors).
 
@@ -75,6 +82,26 @@ lf task complete <id>                           # Asana task shows completed
 lf task comment <id> "From lf"                  # appears as an Asana comment
 ```
 
+## What the deleted providers taught (Jack asked, 2026-10-19)
+
+- `43a1f85ce3^:…/lfd/pm/asana_html.rs`: ported as `asana::rich_text`. Its parser
+  joined paragraph lines with spaces and collapsed whitespace on read-back, which
+  merged paragraphs; Asana keeps newlines, so the port keeps them. Added `<pre>`
+  for fenced code and `<blockquote>`, both verified live.
+- `43a1f85ce3^:…/lfd/pm/asana.rs`: pagination (`limit=100` + `next_page.offset`)
+  is ported for stories. Its in-client 429 retry is not: Asana returns
+  `RateLimited`, which delivery already defers, like Linear. Workspace/team
+  resolution, priority and working-branch custom fields and `claim_item` were
+  Wave/claim machinery that now stays Linear-only.
+- Old OAuth: PKCE + client secret, scope `default` (`ASANA_OAUTH_SCOPE` override),
+  redirect `urn:ietf:wg:oauth:2.0:oob` with `complete_oauth_code_paste`. The same
+  Doppler client ID still refreshes the July grant, so the app is the old one and
+  OOB is its registered redirect; the loopback URL likely needs adding (questions.md).
+- `fffbada8c9` cut the `PmProvider` trait + `PmProviderKind`: an open trait whose
+  main second implementations were in-memory test mocks, removed when Asana became
+  the sole provider. `PlanningClient` is a closed enum over concrete clients with
+  shared observations; tests use HTTP stand-ins, not trait mocks.
+
 ## Deleted
 
 `linear_observe::connected` is gone; shared paths now call `planning_client::connected`.
@@ -83,4 +110,4 @@ after 43a1f85ce3.
 
 ## Checks
 
-- `cargo test --lib asana` (LF_* unset): 8 passed. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.
+- `cargo test --lib asana` (LF_* unset): 13 passed; live probe of rich-text storage: exact. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.

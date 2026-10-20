@@ -156,9 +156,33 @@ async fn create_project(
     assert_eq!(team, TEAM);
     let mut asana = state.lock().await;
     let gid = format!("12000000000000{:02}", asana.projects.len() + 1);
-    let project = json!({"gid": gid, "name": body["data"]["name"]});
+    let modified = asana.tick();
+    let project = json!({"gid": gid, "name": body["data"]["name"],
+        "html_notes": body["data"]["html_notes"], "modified_at": modified});
     asana.projects.push(project.clone());
     data(project)
+}
+
+/// `addProject` and `removeProject`, by Asana's own task gid.
+async fn membership(
+    State(state): State<Shared>,
+    Segment((gid, action)): Segment<(String, String)>,
+    Json(body): Json<Value>,
+) -> Response {
+    let mut asana = state.lock().await;
+    let modified = asana.tick();
+    let Some(id) = owner(&asana, &gid) else {
+        return missing();
+    };
+    let project = body["data"]["project"].clone();
+    let task = asana.tasks.get_mut(&id).unwrap();
+    let memberships = task["memberships"].as_array_mut().unwrap();
+    memberships.retain(|member| member["project"]["gid"] != project);
+    if action == "addProject" {
+        memberships.push(json!({"project": {"gid": project}}));
+    }
+    task["modified_at"] = json!(modified);
+    data(json!({}))
 }
 
 async fn project_tasks(State(state): State<Shared>) -> Response {
@@ -214,6 +238,7 @@ async fn serve(state: Shared) -> (String, tokio::task::JoinHandle<()>) {
         .route("/projects/{project}/tasks", get(project_tasks))
         .route("/tasks/{gid}", get(read).put(update).delete(remove))
         .route("/tasks/{gid}/stories", get(stories).post(comment))
+        .route("/tasks/{gid}/{action}", axum::routing::post(membership))
         .with_state(state);
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (url, server)
@@ -275,10 +300,10 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         let task = mirrored(runtime, &state, id);
         assert_eq!(task["name"], "Ship the Asana provider");
         // The Task lives in the team project Loopflow made for the repository.
-        assert_eq!(
-            runtime.block_on(state.lock()).projects,
-            [json!({"gid": PROJECT, "name": "fixture"})]
-        );
+        let projects = runtime.block_on(state.lock()).projects.clone();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0]["gid"], PROJECT);
+        assert_eq!(projects[0]["name"], "fixture");
         assert_eq!(task["memberships"], json!([{"project": {"gid": PROJECT}}]));
         // Asana renders rich text, so markdown arrives formatted.
         assert_eq!(
@@ -484,5 +509,72 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             .unwrap();
         let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
         assert!(tasks.iter().all(|task| task.id != saved.id));
+    });
+}
+
+#[test]
+fn asana_wave_projects_become_team_projects_holding_their_tasks() {
+    with_asana(|runtime, fixture, repo, state| {
+        runtime
+            .block_on(crate::ops::project::ensure(repo, "product"))
+            .unwrap();
+        let saved =
+            crate::ops::task::task_create(repo, Some("product"), Some("Planned work".into()), None)
+                .unwrap();
+        let id = saved
+            .linear_id
+            .clone()
+            .expect("the Task reached Asana after its Project");
+        let project = runtime
+            .block_on(
+                fixture
+                    .store
+                    .get_project(saved.project_id.as_ref().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        let mirrored = project
+            .linear_id
+            .clone()
+            .expect("the Project reached Asana");
+        let (repository, wave_project, task) = runtime.block_on(async {
+            let asana = state.lock().await;
+            let repository = asana
+                .projects
+                .iter()
+                .find(|candidate| candidate["name"] == "fixture")
+                .cloned()
+                .unwrap();
+            let wave_project = asana
+                .projects
+                .iter()
+                .find(|candidate| candidate["name"] == project.name)
+                .cloned()
+                .expect("the Wave Project is an Asana project in the team");
+            (repository, wave_project, asana.tasks[id.as_str()].clone())
+        });
+        // Asana projects take no caller ID; the notes' last line carries it.
+        assert!(wave_project["html_notes"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("Loopflow ID: {}", mirrored.as_str())));
+        let members: Vec<&Value> = task["memberships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|member| &member["project"]["gid"])
+            .collect();
+        assert_eq!(members, [&repository["gid"], &wave_project["gid"]]);
+
+        // Read back, the Task keeps its Project.
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        let local = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(local.project_id, saved.project_id);
     });
 }

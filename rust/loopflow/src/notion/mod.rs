@@ -47,6 +47,7 @@ pub struct NotionClient {
     base_url: String,
     databases: Arc<OnceCell<Databases>>,
     schema: Arc<OnceCell<Schema>>,
+    projects_title: Arc<OnceCell<String>>,
 }
 
 /// The team page's two databases.
@@ -63,6 +64,8 @@ struct Schema {
     state: StateProperty,
     due: Option<String>,
     assignee: Option<String>,
+    /// The relation to the Projects database.
+    project: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +93,7 @@ impl NotionClient {
             base_url,
             databases: Arc::default(),
             schema: Arc::default(),
+            projects_title: Arc::default(),
         }
     }
 
@@ -102,6 +106,9 @@ impl NotionClient {
         let schema = self.schema().await?;
         let mut properties = properties(schema, input)?;
         properties[IDENTITY_PROPERTY] = json!({"rich_text": blocks::plain(id)});
+        if let Some(project) = input.get("projectId").filter(|project| !project.is_null()) {
+            self.relate(schema, &mut properties, project).await?;
+        }
         if input.get("stateId").is_none() {
             properties[&state_name(schema)] = state_value(schema, "unstarted")?;
         }
@@ -137,7 +144,11 @@ impl NotionClient {
         input: &Value,
     ) -> LinearResult<PlanningResponse> {
         let page_id = object_id(&self.require_page(id).await?)?;
-        let properties = properties(self.schema().await?, input)?;
+        let schema = self.schema().await?;
+        let mut properties = properties(schema, input)?;
+        if let Some(project) = input.get("projectId") {
+            self.relate(schema, &mut properties, project).await?;
+        }
         if properties
             .as_object()
             .is_some_and(|fields| !fields.is_empty())
@@ -405,7 +416,7 @@ impl NotionClient {
                     .map(|start| start.chars().take(10).collect())
             }),
             state: Some(state.into()),
-            project_id: None,
+            project_id: self.related_project(schema, page).await?,
             team_id: in_scope.then(|| self.team.clone()),
             assignee: schema.assignee.as_ref().and_then(|assignee| {
                 properties[assignee]["people"][0]["id"]
@@ -413,6 +424,136 @@ impl NotionClient {
                     .map(str::to_owned)
             }),
         })
+    }
+
+    // ── Projects ────────────────────────────────────────────────────
+
+    /// Create a Wave Project's page in the Projects database from its export
+    /// input (`id`, `name`, `description`), answering its revision. The
+    /// summary is the page body.
+    pub(crate) async fn create_project(&self, input: &Value) -> LinearResult<Option<String>> {
+        let id = input["id"]
+            .as_str()
+            .ok_or_else(|| message("Notion Project export has no Loopflow identity"))?;
+        let title = self.projects_title().await?;
+        let name = input["name"].as_str().unwrap_or_default();
+        let body = blocks::to_blocks(input["description"].as_str().unwrap_or_default());
+        let (first, rest) = body.split_at(body.len().min(PAGE_SIZE));
+        let page: Value = self
+            .send(
+                Method::POST,
+                "/pages",
+                Some(json!({
+                    "parent": {"database_id": self.databases().await?.projects},
+                    "properties": {
+                        title: {"title": blocks::plain(name)},
+                        IDENTITY_PROPERTY: {"rich_text": blocks::plain(id)},
+                    },
+                    "children": first,
+                })),
+            )
+            .await?;
+        self.append(&object_id(&page)?, rest).await?;
+        Ok(page["last_edited_time"].as_str().map(str::to_owned))
+    }
+
+    /// The revision of the Projects page carrying Loopflow ID `id`, if any.
+    pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
+        Ok(self
+            .project_page(id)
+            .await?
+            .map(|page| page["last_edited_time"].as_str().map(str::to_owned)))
+    }
+
+    async fn project_page(&self, id: &str) -> LinearResult<Option<Value>> {
+        self.projects_title().await?;
+        let found: Value = self
+            .send(
+                Method::POST,
+                &format!("/databases/{}/query", self.databases().await?.projects),
+                Some(json!({
+                    "filter": {"property": IDENTITY_PROPERTY, "rich_text": {"equals": id}},
+                    "page_size": 2,
+                })),
+            )
+            .await?;
+        Ok(found["results"]
+            .as_array()
+            .and_then(|pages| match pages.as_slice() {
+                [page] => Some(page.clone()),
+                _ => None,
+            }))
+    }
+
+    /// Point the Task's `Project` relation at the Loopflow Project `project`,
+    /// or clear it for null.
+    async fn relate(
+        &self,
+        schema: &Schema,
+        properties: &mut Value,
+        project: &Value,
+    ) -> LinearResult<()> {
+        let relation = schema
+            .project
+            .as_ref()
+            .ok_or_else(|| message("Notion Tasks database has no Project relation"))?;
+        let related = match project.as_str() {
+            Some(id) => {
+                let page = self.project_page(id).await?.ok_or_else(|| {
+                    message(format!(
+                        "Notion Projects database has no page for Project {id}"
+                    ))
+                })?;
+                json!([{"id": object_id(&page)?}])
+            }
+            None => json!([]),
+        };
+        properties[relation] = json!({"relation": related});
+        Ok(())
+    }
+
+    /// The Loopflow Project a Task page's relation names, when it is one Loopflow mirrors.
+    async fn related_project(&self, schema: &Schema, page: &Value) -> LinearResult<Option<String>> {
+        let Some(related) = schema
+            .project
+            .as_ref()
+            .and_then(|relation| page["properties"][relation]["relation"][0]["id"].as_str())
+        else {
+            return Ok(None);
+        };
+        let project: Value = self
+            .send(Method::GET, &format!("/pages/{related}"), None)
+            .await?;
+        Ok(Some(identity(&project)).filter(|id| !id.is_empty()))
+    }
+
+    /// The Projects database's title property, adding `Loopflow ID` once per client.
+    async fn projects_title(&self) -> LinearResult<&str> {
+        self.projects_title
+            .get_or_try_init(|| async {
+                let path = format!("/databases/{}", self.databases().await?.projects);
+                let database: Value = self.send(Method::GET, &path, None).await?;
+                if database["properties"][IDENTITY_PROPERTY]["type"] != "rich_text" {
+                    let _: Value = self
+                        .send(
+                            Method::PATCH,
+                            &path,
+                            Some(json!({"properties": {IDENTITY_PROPERTY: {"rich_text": {}}}})),
+                        )
+                        .await?;
+                }
+                database["properties"]
+                    .as_object()
+                    .and_then(|fields| {
+                        fields
+                            .iter()
+                            .find(|(_, property)| property["type"] == "title")
+                            .map(|(name, _)| name.clone())
+                    })
+                    .ok_or_else(|| message("Notion Projects database has no title property"))
+            })
+            .await
+            .map(String::as_str)
     }
 
     // ── Blocks and comments ─────────────────────────────────────────
@@ -593,7 +734,10 @@ impl NotionClient {
                 if state_property(&database["properties"]).is_none() {
                     missing.insert("Status".into(), json!({"status": {}}));
                 }
-                if database["properties"][PROJECT_PROPERTY]["type"] != "relation" {
+                if read_schema(&database["properties"])
+                    .ok()
+                    .is_none_or(|schema| schema.project.is_none())
+                {
                     missing.insert(PROJECT_PROPERTY.into(), relation(&databases.projects));
                 }
                 if !missing.is_empty() {
@@ -838,6 +982,7 @@ fn read_schema(properties: &Value) -> LinearResult<Schema> {
         state,
         due: named("date", &["Due", "Due date"]),
         assignee: named("people", &["Assignee", "Assignees"]),
+        project: named("relation", &[PROJECT_PROPERTY, PROJECTS]),
     })
 }
 
@@ -968,9 +1113,9 @@ fn properties(schema: &Schema, input: &Value) -> LinearResult<Value> {
                     )),
                 }
             }
-            // Loopflow identity, scope and body are not page properties.
-            "id" | "teamId" | "description" => {}
-            "projectId" if value.is_null() => {}
+            // Loopflow identity and scope are not page properties; the body and
+            // the Project relation are written by the caller.
+            "id" | "teamId" | "description" | "projectId" => {}
             other => {
                 return Err(message(format!(
                     "Notion does not mirror the planning field `{other}` yet"
@@ -1039,7 +1184,7 @@ mod tests {
         assert_eq!(fields["Due"], json!({"date": {"start": "2026-10-20"}}));
         assert_eq!(fields["Status"], json!({"status": {"name": "Done"}}));
         assert!(fields.get("Assignee").is_none());
-        assert!(properties(&schema(), &json!({"projectId": "p"})).is_err());
+        assert!(properties(&schema(), &json!({"parentId": "p"})).is_err());
     }
 
     #[test]

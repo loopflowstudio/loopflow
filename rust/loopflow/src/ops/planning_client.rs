@@ -54,6 +54,17 @@ pub(crate) fn repository_scope(repo: &Path) -> OpsResult<String> {
     }
 }
 
+/// Where a Wave's Projects belong in the provider: its Linear Initiative, or
+/// for Asana and Notion the repository's team itself.
+pub(crate) fn wave_scope(repo: &Path, wave: &str) -> OpsResult<Option<String>> {
+    match transport(repo) {
+        Some(PlanningConfig::Asana { .. } | PlanningConfig::Notion { .. }) => {
+            repository_scope(repo).map(Some)
+        }
+        _ => Ok(super::linear::read_initiative(repo, wave)),
+    }
+}
+
 /// The repository's name, which names its Asana team project: the origin's
 /// repository name, else the main checkout's directory.
 fn repository_name(repo: &Path) -> String {
@@ -94,7 +105,8 @@ impl PlanningClient {
         }
     }
 
-    /// Linear-only planning: Projects, Initiatives, attachments and relations.
+    /// Linear-only planning: Project edits and order, Initiatives, attachments
+    /// and relations.
     pub(crate) fn linear(&self) -> OpsResult<&LinearClient> {
         let provider = match self {
             Self::Linear(client) => return Ok(client),
@@ -102,8 +114,32 @@ impl PlanningClient {
             Self::Notion(_) => "Notion",
         };
         Err(OpsError::Message(format!(
-            "{provider} does not mirror Projects yet; the Project stays local"
+            "{provider} mirrors a Project when it is created; later Project edits stay local"
         )))
+    }
+
+    /// Create an Asana or Notion Project from its export receipt input
+    /// (`id`, `name`, `description`), answering the provider revision.
+    pub(crate) async fn create_project(
+        &self,
+        input: &serde_json::Value,
+    ) -> LinearResult<Option<String>> {
+        match self {
+            Self::Linear(_) => Err(crate::linear::LinearError::Message(
+                "Linear Projects are created through their Initiative".into(),
+            )),
+            Self::Asana(client) => client.create_project(input).await,
+            Self::Notion(client) => client.create_project(input).await,
+        }
+    }
+
+    /// The revision of the Asana or Notion Project carrying Loopflow ID `id`.
+    pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
+        match self {
+            Self::Linear(_) => Ok(None),
+            Self::Asana(client) => client.project_revision(id).await,
+            Self::Notion(client) => client.project_revision(id).await,
+        }
     }
 
     /// Asana and Notion comments carry no caller identity, so a Loopflow comment

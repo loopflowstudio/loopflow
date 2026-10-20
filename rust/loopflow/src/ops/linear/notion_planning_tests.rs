@@ -195,7 +195,11 @@ async fn create_database(State(state): State<Shared>, Json(body): Json<Value>) -
     Json(json!({"object": "database", "id": id})).into_response()
 }
 
-async fn query(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn query(
+    State(state): State<Shared>,
+    Segment(db): Segment<String>,
+    Json(body): Json<Value>,
+) -> Response {
     let notion = state.lock().await;
     if notion.offline {
         return offline();
@@ -206,7 +210,9 @@ async fn query(State(state): State<Shared>, Json(body): Json<Value>) -> Response
         .pages
         .values()
         .filter(|page| {
-            page["archived"] == false && wanted.is_none_or(|id| Notion::identity(page) == id)
+            page["parent"]["database_id"] == db.as_str()
+                && page["archived"] == false
+                && wanted.is_none_or(|id| Notion::identity(page) == id)
         })
         .cloned()
         .collect();
@@ -875,5 +881,62 @@ fn notion_pages_show_the_pr() {
             "https://github.com/loopflowstudio/fixture/pull/42"
         );
         assert_eq!(spans[1]["plain_text"], " — Open");
+    });
+}
+
+#[test]
+fn notion_wave_projects_become_project_pages_related_to_their_tasks() {
+    with_notion(|runtime, fixture, repo, state| {
+        runtime
+            .block_on(crate::ops::project::ensure(repo, "product"))
+            .unwrap();
+        let saved =
+            crate::ops::task::task_create(repo, Some("product"), Some("Planned work".into()), None)
+                .unwrap();
+        let page = mirrored(
+            runtime,
+            &state,
+            saved
+                .linear_id
+                .as_ref()
+                .expect("the Task reached Notion after its Project")
+                .as_str(),
+        );
+        let project = runtime
+            .block_on(
+                fixture
+                    .store
+                    .get_project(saved.project_id.as_ref().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        let project_page = mirrored(
+            runtime,
+            &state,
+            project
+                .linear_id
+                .as_ref()
+                .expect("the Project reached Notion")
+                .as_str(),
+        );
+        assert_eq!(
+            project_page["properties"]["Name"]["title"][0]["text"]["content"],
+            project.name.as_str()
+        );
+        assert_eq!(
+            page["properties"]["Project"]["relation"],
+            json!([{"id": project_page["id"]}])
+        );
+
+        // Read back, the Task keeps its Project.
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        let local = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(local.project_id, saved.project_id);
     });
 }

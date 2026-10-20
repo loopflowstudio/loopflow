@@ -355,6 +355,45 @@ impl PlanningExport {
             })
             .ok_or_else(|| StoreError::InvalidData("creation Project status is missing".into()))
     }
+
+    /// The created Project as an Asana or Notion mirror holds it. Those
+    /// providers show its name and summary; status, KRs and targets stay the
+    /// creation values Loopflow owns, so acceptance reads them from the receipt.
+    pub(crate) fn mirrored_project(
+        &self,
+        team: &str,
+        revision: Option<String>,
+    ) -> StoreResult<crate::linear::LinearProject> {
+        let mut project = crate::linear::LinearProject {
+            id: self.id.clone(),
+            revision,
+            slug: String::new(),
+            name: String::new(),
+            summary: String::new(),
+            description: None,
+            metric_targets: Vec::new(),
+            status: self.project_status()?,
+            krs: Vec::new(),
+            initiative_ids: vec![team.to_string()],
+            team_ids: vec![team.to_string()],
+        };
+        for value in &self.baseline {
+            match value {
+                WorkValue::ProjectName(Some(name)) => {
+                    project.slug = crate::linear::project_slug(name);
+                    project.name = name.clone();
+                }
+                WorkValue::ProjectSummary(summary) => project.summary = summary.clone(),
+                WorkValue::ProjectDescription(description) => {
+                    project.description = description.clone()
+                }
+                WorkValue::Krs(krs) => project.krs = krs.clone(),
+                WorkValue::MetricTargets(targets) => project.metric_targets = targets.clone(),
+                _ => {}
+            }
+        }
+        Ok(project)
+    }
 }
 
 #[cfg(test)]

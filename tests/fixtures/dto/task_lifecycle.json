@@ -951,7 +951,7 @@
         },
         "pm_snapshot_synced_at": 1791502111,
         "pm_writeback": {
-          "error": "Saved locally; pending Linear synchronization",
+          "error": "Saved locally; pending planning synchronization",
           "operation": "complete_task",
           "state": "pending"
         },
@@ -2778,7 +2778,7 @@
         },
         "pm_snapshot_synced_at": 1791502111,
         "pm_writeback": {
-          "error": "Saved locally; pending Linear synchronization",
+          "error": "Saved locally; pending planning synchronization",
           "operation": "complete_task",
           "state": "pending"
         },

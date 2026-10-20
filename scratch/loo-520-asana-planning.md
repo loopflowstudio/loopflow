@@ -1,7 +1,8 @@
 # LOO-520: Asana and Notion as planning providers
 
 Status: Tasks implemented for Asana and Notion, each verified against the live
-provider (2026-10-19); Projects remain. Jack Heart asked for autonomous work through
+provider (2026-10-19). Team-scoped config and Wave Projects implemented against
+stand-ins (2026-10-20); live verification of the new scope remains. Jack Heart asked for autonomous work through
 implementation to a demo, without a design review, then asked (2026-10-19) to put
 Notion on this Task too, built on today's Work ↔ planning model rather than the old
 `PmProvider` data model.
@@ -36,11 +37,9 @@ docs/planning.md states the target UX. Done on this branch:
 
 Remaining before the docs are true:
 
-- Projects in Asana/Notion (sections / `Project` select). Project acceptance is
-  Linear-shaped (`pm_projects`, Initiatives, `ACCEPTED_WAVE_PROJECTS`); an item
-  observed with no project clears local membership, so export stays gated.
-- Latest-sent-wins conflicts: `observe_attempts` sets `conflict_json` and
-  acceptance adopts the provider; flipping it changes Linear's tested policy.
+- Latest-sent-wins conflicts (Jack, 2026-10-19): `observe_attempts` sets
+  `conflict_json` and acceptance adopts the provider; flipping it changes Linear's
+  tested policy. docs/planning.md states today's tracker-wins until then.
 - Asana identifier footer: belongs with Task codes (`scratch/task-codes.md`).
 - Unverified: assignment between coworkers.
 
@@ -51,8 +50,8 @@ A repository selects its planning provider the way it selects an agent harness:
 ```yaml
 # .lf/config.yaml
 planning:
-  provider: asana
-  project: "1209…"   # the repository's Asana project
+  provider: asana    # or linear, or notion
+  team: "1209…"      # Linear Team ID, Asana team gid/URL, Notion page URL/ID
 ```
 
 `lf task create`, `lf task list`, `lf task complete/reopen/edit/comment` and Desktop
@@ -61,8 +60,8 @@ stays the default remote provider; Git stays the default transport.
 
 ## Shape
 
-- `PlanningConfig` is the one selection seam: `Git | Linear | Asana { project } |
-  Notion { database }`. `ops::planning_client` resolves it into one `PlanningClient`
+- `PlanningConfig` is the one selection seam: `Git | Linear { team? } | Asana { team } |
+  Notion { team }`. `ops::planning_client` resolves it into one `PlanningClient`
   enum (`Linear | Asana | Notion`), mirroring `HarnessKind`.
   Linear-only operations reach their client through `PlanningClient::linear()`.
 - Local Work stays authoritative. Export, field, state and comment receipts are
@@ -73,7 +72,9 @@ stays the default remote provider; Git stays the default transport.
   Loopflow writes the export UUID as `external.gid` and addresses every task as
   `external:<uuid>`, so `external_issue_id` stays the Loopflow-assigned identity and
   a lost creation reply is resolved by exact lookup, never by a second create.
-- Asana scope ("team"): the repository project gid. Identifier: the local
+- Asana scope: the team gid (`asana::team_gid` reads URLs). Tasks live in the team
+  project named after the repository (origin name, else the main checkout's
+  directory), found or created once per client. Identifier: the local
   `lf-<uuid>` identifier (Asana has none). Story listing rejects `external:`, so
   comments read by the task's Asana gid.
 - State: `completed` ↔ `completed: true`; `unstarted`/`canceled` targets map to
@@ -94,8 +95,9 @@ stays the default remote provider; Git stays the default transport.
 
 ## Notion
 
-- Scope: the repository database (`database:` takes the ID or its URL;
-  `notion::database_id` normalizes both). A Task is a page; the description is
+- Scope: the team page (`notion::notion_id` normalizes URLs). Its child databases
+  titled Tasks and Projects are found, or created (Tasks with Status, Due,
+  Assignee, Loopflow ID and a two-way `Project` relation). A Task is a page; the description is
   the page body as blocks (`notion::blocks`, line-faithful like `asana::rich_text`).
 - Identity: Notion takes no caller IDs, so the export UUID goes in a `Loopflow ID`
   rich-text property and every request finds the page by an exact filter query.
@@ -129,28 +131,34 @@ follow-up relations, project content documents, chapter sweeps.
 - Notion live comments: the Loopflow integration lacks Read/Insert comments
   capabilities (live 403); Jack enables them in Notion's integration settings.
 
-- Projects: Loopflow Project ↔ Asana mirror (section or project). Until then a
-  Task in a Project awaits its Project mapping in an Asana repository.
-- Inbound acquisition of tasks created in Asana (team delta equivalent).
+- Live check of the 2026-10-20 scope: Asana `POST /teams/{team}/projects` and
+  project `html_notes` footer; Notion `POST /databases` with an empty `status`
+  config (Notion may refuse creating status properties via API; fall back to a
+  `Done` checkbox if so) and a `dual_property` relation.
+- Project edits after creation (name, summary, status, order) stay local for
+  Asana/Notion: field delivery reaches `PlanningClient::linear()` and records
+  its error. Coworker-created Asana projects / Notion Projects pages are not
+  acquired; a Task related to one reads as having no Project.
+- Asana lists the team's projects on each observation of a task in a Wave
+  Project (and on Project lookup); cache per client if team size makes it slow.
+- `lf repo connect` writes `planning.team` for Linear only; Asana/Notion teams are
+  written by hand.
 - Rename shared observation types off the `Linear` prefix; wire field `linear_id`
   → provider-neutral (touches Swift DTO mirrors).
 
 ## Demo (for Jack)
 
-Notion: scratch database "LOO-520 Notion planning demo"
-(`3fff8f99-3d81-8141-bd3d-f63d878a7c74`) under the Waves page. Same steps as below
-with `lf account connect notion` and
-`planning: {provider: notion, database: "3fff8f99-3d81-8141-bd3d-f63d878a7c74"}`.
+Notion: `planning: {provider: notion, team: "<page URL>"}` on a scratch page;
+Loopflow creates Tasks and Projects on it. (Earlier demo database:
+`3fff8f99-3d81-8141-bd3d-f63d878a7c74` under the Waves page.)
 
-Asana:
-
-The scratch Asana project is "LOO-520 Asana planning demo" (gid `1219678216343882`)
-in the Loopflow team.
+Asana: `team:` is the Loopflow team's gid; Loopflow creates the `asana-demo`
+project in it. (Earlier demo project: gid `1219678216343882`.)
 
 ```bash
 doppler run -- lf account connect asana        # browser consent
 mkdir -p /tmp/asana-demo/.lf && cd /tmp/asana-demo && git init -q
-printf 'planning:\n  provider: asana\n  project: "1219678216343882"\n' > .lf/config.yaml
+printf 'planning:\n  provider: asana\n  team: "<team-gid>"\n' > .lf/config.yaml
 lf task create --title "Plan in Asana" --notes "Created by lf"
 lf task list                                    # the Task, with its Asana link
 lf task complete <id>                           # Asana task shows completed
@@ -190,9 +198,27 @@ after 43a1f85ce3.
 
 ## Checks
 
+- 2026-10-20: `cargo test -p loopflow --lib -- planning asana notion`: 214 passed, 6 failed; 3 were load timing (pass alone), 3 expected the old "pending Linear sync" label (fixed). clippy clean.
+
 - `cargo test --lib -- asana notion planning_client provider_auth::tests` (LF_* unset): 96 passed.
   Live: Asana rich text stored exactly; Notion client create/body/edit/status/archive
   passed (links gain a `/` after the host once). clippy clean. Broader suites → gate. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.
+
+## Wave Projects in Asana and Notion (implemented 2026-10-20)
+
+- A Wave's Projects scope to the team: `planning_client::wave_scope` is the Linear
+  Initiative, or the repository team for Asana/Notion. Export and acceptance
+  reuse `accept_linear_project_in` with that scope as the one "initiative".
+- Created by `PlanningClient::create_project` from the export input (name,
+  summary). The accepted observation is `PlanningExport::mirrored_project`: the
+  receipt's baseline plus the provider revision, since these providers do not
+  hold status, KRs or targets.
+- Identity: Notion's `Loopflow ID` property; Asana projects take no `external`,
+  so the notes' last line is `Loopflow ID: <uuid>` (visible; coworkers removing it
+  orphans the mirror).
+- Tasks: Asana adds the Wave project beside the repository project
+  (`addProject`/`removeProject` on moves); Notion sets the `Project` relation.
+  Observations report `project_id` from the membership/relation.
 
 ## Decision 2026-10-20: every provider names a team
 
@@ -208,4 +234,5 @@ planning:
 - `linear.team` moves into `planning.team`, with no fallback. `lf repo connect` writes the team for every provider.
 - Asana: the team. Every Task lives in the team project named after the repository. A Task in a Wave Project is also added to that Project, since Asana lets a task belong to several projects. Wave Projects become Asana projects, and sections are dropped. Waves become Portfolios where the plan allows them.
 - Notion (Jack chose this option): a page that holds a Tasks database and a Projects database, linked by a `Project` relation, like Notion's Projects & Tasks template. Loopflow finds or creates both.
-- Remaining: rewrite the config and scope for all three, the Asana team model, and the Notion page model. Update docs/planning.md to match.
+- Implemented 2026-10-20 (config, Asana team model, Notion page model, docs).
+  Portfolios for Waves are not built.

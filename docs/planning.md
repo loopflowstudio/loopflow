@@ -64,27 +64,21 @@ machine that ran them.
 
 ## With a tracker
 
-Choose one tracker per repository. Repository configuration replaces your personal
-default as a whole, so a repository never splits its plan.
+Choose one tracker per repository and the team whose plan it joins. Repository
+configuration replaces your personal default as a whole, so a repository never
+splits its plan.
 
 ```yaml
 planning:
-  provider: linear
-linear:
-  team: <team-id>
+  provider: asana             # or linear, or notion
+  team: "<team-id-or-url>"
 ```
 
-```yaml
-planning:
-  provider: asana
-  project: "<project-gid>"            # the repository's Asana project
-```
-
-```yaml
-planning:
-  provider: notion
-  database: "<database-url-or-id>"    # the repository's Notion database
-```
+| Provider | `team` names | Tasks live in |
+|---|---|---|
+| `linear` | a Linear Team's ID | the Team |
+| `asana` | an Asana team's gid or URL | the team project named after the repository |
+| `notion` | a Notion page's URL or ID | the page's Tasks database |
 
 ```bash
 doppler run -- lf account connect linear    # or asana, or notion
@@ -117,9 +111,8 @@ Asana rich text or Notion blocks.
 meeting appear in `lf task list`.
 
 **Conflicts:** when the same field changes in both places before they sync, the
-change sent last wins. If your offline edit is delivered after a coworker's, yours
-replaces theirs, and theirs stays in `lf task status` and Desktop as the value it
-replaced.
+tracker's value wins. Your edit stays in `lf task status` and Desktop beside the
+value that replaced it, ready to apply again.
 
 **Offline:** commands save locally and sync on the next command or connected
 Session. `lf task sync <task>` retries one Task; a creation whose reply was lost
@@ -133,18 +126,25 @@ Projects to Linear Projects; see [Waves](waves.md).
 
 ### Asana
 
-Tasks live in one Asana project. Asana has no task numbers, so Loopflow writes the
-Task's identifier into the description's last line. A Wave's Projects appear as
-sections of the project. Asana tasks are only open or complete, so work in
-progress shows through the PR comment.
+Every Task lives in the team project named after the repository; Loopflow creates
+it the first time if the team has none. A Wave's Projects are Asana projects in the
+same team, and a Task in one belongs to both projects. Asana projects take no
+outside IDs, so a mirrored project's notes end with a `Loopflow ID:` line; leave it
+in place. Asana tasks are only open or complete, so work in progress shows through
+the PR comment.
 
 ### Notion
 
-Tasks are pages in one database; the description is the page body. Loopflow adds a
-`Loopflow ID` property to find its pages, and a `Status` property if the database
-has none. Status groups carry state: To-do, In progress, Complete, where a Complete
-option named Canceled cancels. A `Due` date and `Assignee` person mirror when the
-database has them. A Wave's Projects appear as a `Project` select.
+The team page holds a **Tasks** database and a **Projects** database, linked by a
+`Project` relation, like Notion's Projects & Tasks template. Loopflow uses the ones
+already on the page, or creates them. Each Task is a page of Tasks, and its
+description is the page body. A Wave's Projects are pages of Projects, and a Task's
+`Project` relation names its Project.
+
+Loopflow adds a `Loopflow ID` property to find its pages, plus `Status` and
+`Project` when Tasks lacks them. Status groups carry state: To-do, In progress,
+Complete, where a Complete option named Canceled cancels. A `Due` date and
+`Assignee` person mirror when Tasks has them.
 
 Enable **Read comments** and **Insert comments** for the Loopflow integration in
 Notion's integration settings; without them, edits still flow but comments do not.

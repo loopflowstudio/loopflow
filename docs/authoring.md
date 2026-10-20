@@ -358,13 +358,12 @@ see [Schedule ordinary commands](lf.md#schedule-ordinary-commands).
 Bind the repository to a Linear Team in `.lf/config.yaml`:
 
 ```yaml
-linear:
+planning:
+  provider: linear
   team: "stable-team-uuid"
 ```
 
-Every Wave uses the repository Team and binds only its Initiative. Select the
-synchronization transport with `planning.provider`; a Team binding selects Linear
-when that choice is omitted.
+Every Wave uses the repository Team and binds only its Initiative.
 
 Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
 Placement does not edit the goal, launch work or stop existing conversations.

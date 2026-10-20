@@ -10,7 +10,9 @@
 //!
 //! The repository's planning scope is an Asana team, like a Linear Team. Every
 //! Task lives in the team project named after the repository; Loopflow finds
-//! that project on first use, or creates it.
+//! that project on first use, or creates it. A Wave Project is its own Asana
+//! project in the team, and a Task in it belongs to both projects. Asana
+//! projects accept no caller ID, so their notes end with a `Loopflow ID:` line.
 
 mod rich_text;
 
@@ -30,7 +32,9 @@ const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
 const STORY_FIELDS: &str =
     "gid,created_at,html_text,resource_subtype,created_by.gid,created_by.name";
-const PROJECT_FIELDS: &str = "gid,name,permalink_url";
+const PROJECT_FIELDS: &str = "gid,name,html_notes,modified_at,permalink_url";
+/// The last line of a mirrored Project's notes, naming its Loopflow identity.
+const IDENTITY_LABEL: &str = "Loopflow ID:";
 /// Asana's largest page; a long-lived Task can outgrow one.
 const PAGE_LIMIT: &str = "100";
 
@@ -79,6 +83,18 @@ struct Task {
 struct Project {
     gid: String,
     name: String,
+    html_notes: Option<String>,
+    modified_at: Option<String>,
+}
+
+impl Project {
+    /// The Loopflow Project this Asana project mirrors, from its notes' last line.
+    fn identity(&self) -> Option<String> {
+        let notes = rich_text::to_markdown(self.html_notes.as_deref()?);
+        let line = notes.lines().rev().find(|line| !line.trim().is_empty())?;
+        let id = line.trim().strip_prefix(IDENTITY_LABEL)?.trim();
+        uuid::Uuid::parse_str(id).ok().map(|id| id.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -161,14 +177,109 @@ impl AsanaClient {
             .map(String::as_str)
     }
 
-    /// Create the exported task in the repository project. `input` is the saved
-    /// export receipt: `id`, `title`, `description`, `assigneeId`, `dueDate`, `stateId`.
+    async fn team_projects(&self) -> LinearResult<Vec<Project>> {
+        self.pages(&format!("/teams/{}/projects?archived=false", self.team))
+            .await
+    }
+
+    /// The team project mirroring Loopflow Project `id`.
+    async fn wave_project(&self, id: &str) -> LinearResult<Option<Project>> {
+        Ok(self
+            .team_projects()
+            .await?
+            .into_iter()
+            .find(|project| project.identity().as_deref() == Some(id)))
+    }
+
+    /// Create a Wave Project's Asana project in the team from its export input
+    /// (`id`, `name`, `description`), answering its revision.
+    pub(crate) async fn create_project(&self, input: &Value) -> LinearResult<Option<String>> {
+        let id = input["id"]
+            .as_str()
+            .ok_or_else(|| message("Asana Project export has no Loopflow identity"))?;
+        let summary = input["description"].as_str().unwrap_or_default().trim();
+        let footer = format!("{IDENTITY_LABEL} {id}");
+        let notes = if summary.is_empty() {
+            footer
+        } else {
+            format!("{summary}\n\n{footer}")
+        };
+        let project: Project = self
+            .send(
+                Method::POST,
+                &format!("/teams/{}/projects", self.team),
+                Some(json!({"name": input["name"], "html_notes": rich_text::to_html(&notes)})),
+            )
+            .await?;
+        Ok(project.modified_at)
+    }
+
+    /// The revision of the Asana project mirroring Loopflow Project `id`, if any.
+    pub(crate) async fn project_revision(&self, id: &str) -> LinearResult<Option<Option<String>>> {
+        Ok(self
+            .wave_project(id)
+            .await?
+            .map(|project| project.modified_at))
+    }
+
+    /// The Asana project gid for a Task's `projectId`, the Loopflow Project's identity.
+    async fn project_gid(&self, project: &Value) -> LinearResult<Option<String>> {
+        let Some(id) = project.as_str() else {
+            return Ok(None);
+        };
+        match self.wave_project(id).await? {
+            Some(project) => Ok(Some(project.gid)),
+            None => Err(message(format!(
+                "Asana team {} has no project for Loopflow Project {id}",
+                self.team
+            ))),
+        }
+    }
+
+    /// Move the task into the Wave Project `target`, leaving any other mirrored
+    /// Wave Project. The repository project and people's own projects stay.
+    async fn set_project(&self, task: &Task, target: Option<String>) -> LinearResult<()> {
+        let mirrored: Vec<String> = self
+            .team_projects()
+            .await?
+            .into_iter()
+            .filter(|project| project.identity().is_some())
+            .map(|project| project.gid)
+            .collect();
+        for member in task.memberships.iter().filter_map(|m| m.project.as_ref()) {
+            if mirrored.contains(&member.gid) && target.as_ref() != Some(&member.gid) {
+                let _: Value = self
+                    .send(
+                        Method::POST,
+                        &format!("/tasks/{}/removeProject", task.gid),
+                        Some(json!({"project": member.gid})),
+                    )
+                    .await?;
+            }
+        }
+        if let Some(target) = target {
+            let _: Value = self
+                .send(
+                    Method::POST,
+                    &format!("/tasks/{}/addProject", task.gid),
+                    Some(json!({"project": target})),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Create the exported task in the repository project, and in its Wave
+    /// Project's when it has one. `input` is the saved export receipt: `id`,
+    /// `title`, `description`, `assigneeId`, `dueDate`, `stateId`, `projectId`.
     pub(crate) async fn create_task(&self, input: &Value) -> LinearResult<PlanningResponse> {
         let id = input["id"]
             .as_str()
             .ok_or_else(|| message("Asana export has no Loopflow identity"))?;
         let mut data = task_fields(input)?;
-        data["projects"] = json!([self.project().await?]);
+        let mut projects = vec![self.project().await?.to_string()];
+        projects.extend(self.project_gid(&input["projectId"]).await?);
+        data["projects"] = json!(projects);
         data["external"] = json!({"gid": id});
         let task: Task = self.send(Method::POST, "/tasks", Some(data)).await?;
         self.response(id, task).await
@@ -192,9 +303,16 @@ impl AsanaClient {
         input: &Value,
     ) -> LinearResult<PlanningResponse> {
         let data = task_fields(input)?;
-        let task: Task = self
+        let mut task: Task = self
             .send(Method::PUT, &format!("/tasks/external:{id}"), Some(data))
             .await?;
+        if let Some(project) = input.get("projectId") {
+            let target = self.project_gid(project).await?;
+            self.set_project(&task, target).await?;
+            task = self
+                .send(Method::GET, &format!("/tasks/external:{id}"), None)
+                .await?;
+        }
         self.response(id, task).await
     }
 
@@ -340,13 +458,25 @@ impl AsanaClient {
         self.issue_unchecked(id, task).await
     }
 
-    /// A task in the repository's team project belongs to the team's plan.
+    /// A task in the repository's team project belongs to the team's plan; one
+    /// in a mirrored Wave Project too belongs to that Project.
     async fn issue_unchecked(&self, id: &str, task: Task) -> LinearResult<LinearIssue> {
-        let project = self.project().await?;
-        let in_scope = task
+        let repository = self.project().await?;
+        let members: Vec<&str> = task
             .memberships
             .iter()
-            .any(|m| m.project.as_ref().is_some_and(|p| p.gid == project));
+            .filter_map(|m| m.project.as_ref().map(|p| p.gid.as_str()))
+            .collect();
+        let in_scope = members.contains(&repository);
+        let project_id = if members.iter().any(|gid| *gid != repository) {
+            self.team_projects()
+                .await?
+                .into_iter()
+                .filter(|project| members.contains(&project.gid.as_str()))
+                .find_map(|project| project.identity())
+        } else {
+            None
+        };
         Ok(LinearIssue {
             revision: Some(task.modified_at),
             id: id.to_string(),
@@ -367,7 +497,7 @@ impl AsanaClient {
                 }
                 .into(),
             ),
-            project_id: None,
+            project_id,
             team_id: in_scope.then(|| self.team.clone()),
             assignee: task.assignee.map(|assignee| assignee.gid),
         })
@@ -557,9 +687,8 @@ fn task_fields(input: &Value) -> LinearResult<Value> {
                     .ok_or_else(|| message("Asana state must be named"))?;
                 data.insert("completed".into(), json!(completed(target)?));
             }
-            // Loopflow identity and scope are request fields, not task content.
-            "id" | "teamId" => {}
-            "projectId" if value.is_null() => {}
+            // Loopflow identity, scope and Project membership are not task fields.
+            "id" | "teamId" | "projectId" => {}
             other => {
                 return Err(message(format!(
                     "Asana does not mirror the planning field `{other}` yet"
@@ -585,7 +714,7 @@ mod tests {
             fields,
             json!({"name": "Ship", "html_notes": "<body>Notes</body>", "due_on": null, "completed": true})
         );
-        assert!(task_fields(&json!({"projectId": "section"})).is_err());
+        assert!(task_fields(&json!({"parentId": "task"})).is_err());
     }
 
     #[test]

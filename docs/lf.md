@@ -332,21 +332,8 @@ planning:
 
 ```yaml
 planning:
-  provider: linear
-linear:
-  team: <team-id>
-```
-
-```yaml
-planning:
-  provider: asana
-  project: "<project-gid>"    # the repository's Asana project
-```
-
-```yaml
-planning:
-  provider: notion
-  database: "<database-url-or-id>"   # the repository's Notion database
+  provider: linear              # or asana, or notion
+  team: "<team-id-or-url>"      # Linear Team, Asana team, or Notion page
 ```
 
 [Plan and share Tasks](planning.md) explains what each choice does for coworkers
@@ -354,8 +341,7 @@ and meetings, and what flows between Loopflow and the tracker.
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use
-`refs/loopflow/planning/shared/<name>`. Existing `linear.team` selects Linear
-when `planning` is omitted. Every machine uses the selected transport independently.
+`refs/loopflow/planning/shared/<name>`. Every machine uses the selected transport independently.
 Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
 repository are queued for publication, including Tasks created offline. Retry a
 specific Task with `lf task sync <task>`: it publishes the saved Project/Task

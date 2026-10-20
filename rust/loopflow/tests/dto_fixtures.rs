@@ -689,7 +689,7 @@ fn planning_sync_preserves_delivery_and_losing_values() {
         Some(serde_json::json!("Linear title"))
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
-    assert!(sync.lines()[3].contains("Linear: null"));
+    assert!(sync.lines()[3].contains("provider: null"));
 }
 
 #[test]

@@ -675,7 +675,7 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
     now = int(time.time())
     config_path = repo / ".lf/config.yaml"
     config = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
-    team = ((config or {}).get("linear") or {}).get("team") or wave
+    team = ((config or {}).get("planning") or {}).get("team") or wave
     plan = dict(
         id=project,
         slug="desktop-performance",

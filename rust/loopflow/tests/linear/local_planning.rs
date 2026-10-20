@@ -1697,7 +1697,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let saved = serde_json::json!({"project":store.project(&id).unwrap().unwrap(), "sync":store.project_planning_sync(&id).unwrap()});
@@ -1915,7 +1915,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let pending = store.pending_task_changes(&second).unwrap();
@@ -2672,7 +2672,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
             connected
         );
         let moved = store.task(&task.id).unwrap().unwrap();

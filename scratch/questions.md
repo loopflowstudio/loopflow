@@ -6,24 +6,22 @@
   that July grant), and its registered redirect was `urn:ietf:wg:oauth:2.0:oob`.
   Expect to add the loopback URL to its redirect URLs in the Asana developer
   console once. Not restoring code paste: one redirect for every planning provider.
-- **Asana scope is one repository project** (`planning: {provider: asana, project}`).
-  Assumed over a workspace or team because Asana tasks need a home, and a project
-  is where people already look.
-- **Loopflow Projects are not mirrored to Asana yet.** Project acceptance is built
-  on Linear Initiatives and Teams (`pm_projects`, `pm_wave_sync`, `attach_in` keyed
-  by caller IDs). The candidate mapping is Project ↔ Asana section of the
-  repository project, but sections carry no `external` ID. Until then, a Task in
-  a Wave Project waits with "Task export awaits its Project mapping", and
-  `planning_client::PlanningClient::linear` reports that Asana does not mirror
-  Projects. Wave-less Tasks mirror fully.
+- **Asana team project is named after the repository** (origin repo name, else
+  the main checkout directory). Several projects with that name in the team is an
+  error naming the fix, not a guess.
+- **Asana Project identity is a visible notes footer** (`Loopflow ID: <uuid>`).
+  Asana projects accept no `external` ID and custom fields are paid-only.
+- **Notion: one Tasks and one Projects database per team page**, found by title
+  (case-insensitive). Several repositories pointing at one page share them; no
+  per-repository property yet.
+- **Wave scope for Asana/Notion is the team** (all Waves share it as their
+  "initiative"); Projects are confirmed through the local Project, never by
+  scanning Waves.
 - **Comment identity in Asana is its visible text.** Stories carry no caller ID,
   so Loopflow strips its hidden `<!-- loopflow-… -->` markers before posting.
   Delivery and read-back match on that visible text, which means two identical
   Loopflow comments on one task collapse into one Asana comment.
 - **Canceled Tasks close the Asana task.** Asana only has open and completed.
-- **Asana tasks created in Asana are not acquired** into `lf task list` yet.
-  Linear's team-delta acquisition has no Asana counterpart. Cold lookup reports
-  this instead of guessing.
 - **Remote-machine credential transfer** (`machine_credentials.rs`) covers Linear
   only.
 - **Notion adapts the database's schema** by adding `Loopflow ID` (and `Status`

@@ -231,7 +231,11 @@ impl ContextDelivery {
         );
         Ok(serde_json::json!({
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
-            "PostToolUse": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
+            "PostToolUse": [{"hooks": [{"type":"command", "command": format!(
+                "[ -n \"${seen}\" ] || exit 0; [ \"${seen}\" -nt {latest} ] && exit 0; {command} tool",
+                seen = crate::steer::STEER_SEEN_ENV,
+                latest = quote(&crate::steer::latest_marker(&self.home)),
+            ), "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": format!("{command} tool"), "timeout":30}]}],
             "SessionStart": [
             {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
@@ -724,5 +728,45 @@ mod tests {
             .text
             .contains("Read &#36;native as reference, not a skill."));
         assert!(block.text.len() <= HOOK_CONTEXT_BYTES);
+    }
+
+    #[test]
+    fn tool_hook_starts_lf_only_after_a_newer_steer() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let repo = tempdir().unwrap();
+        let delivery = delivery(repo.path());
+        let ran = repo.path().join("ran");
+        let stub = repo.path().join("lf");
+        fs::write(&stub, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_HOME", &delivery.home);
+        std::env::set_var("LF_BIN", &stub);
+        let settings = delivery.hook_settings().unwrap();
+        let command = settings["PostToolUse"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        let seen = delivery.home.join("steers/seen/agent");
+        let starts_lf = |seen: Option<&Path>| {
+            let _ = fs::remove_file(&ran);
+            let mut hook = std::process::Command::new("/bin/sh");
+            hook.args(["-c", command])
+                .env_remove(crate::steer::STEER_SEEN_ENV);
+            if let Some(seen) = seen {
+                hook.env(crate::steer::STEER_SEEN_ENV, seen);
+            }
+            assert!(hook.status().unwrap().success());
+            ran.exists()
+        };
+        assert!(!starts_lf(None), "no steer adapter, nothing to deliver");
+        assert!(starts_lf(Some(&seen)), "the first boundary checks");
+        // The started hook marks its check before reading pending steers.
+        crate::steer::touch(&seen).unwrap();
+        assert!(
+            !starts_lf(Some(&seen)),
+            "nothing saved since the last check"
+        );
+        crate::steer::touch(&crate::steer::latest_marker(&delivery.home)).unwrap();
+        assert!(starts_lf(Some(&seen)), "a steer saved after the check");
     }
 }

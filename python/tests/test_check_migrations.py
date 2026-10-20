@@ -56,6 +56,9 @@ def repo(tmp_path: Path) -> Path:
     """A repo tagged v0.10.1 with one shipped migration, `0.10.001_initial.sql`."""
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/check_migrations.py").write_bytes(SCRIPT.read_bytes())
+    (tmp_path / "scripts/canonicalize_migrations.py").write_bytes(
+        (ROOT / "scripts/canonicalize_migrations.py").read_bytes()
+    )
     (tmp_path / MIGRATIONS).mkdir(parents=True)
     (tmp_path / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.1"\n')
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "0.10.1"\n')
@@ -372,3 +375,20 @@ def test_the_drafts_readme_is_ignored(repo: Path):
 
     result = check(repo)
     assert result.returncode == 0, result.stderr
+
+
+def test_runtime_sql_names_its_columns(repo: Path) -> None:
+    source = repo / "rust/loopflow/src/store/rows.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('const ROW: &str = "INSERT INTO waves VALUES (?1)";\n')
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "rows.rs uses positional INSERT or SELECT *" in result.stderr
+
+    source.write_text(
+        'const ROW: &str = "INSERT INTO waves (id) VALUES (?1)";\n'
+        '#[cfg(test)]\nmod tests {\n    const FIXTURE: &str = "SELECT * FROM waves";\n}\n'
+    )
+    assert check(repo).returncode == 0

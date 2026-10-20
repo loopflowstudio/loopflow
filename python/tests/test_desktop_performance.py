@@ -509,6 +509,19 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
 
 
 def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -> None:
+    builder = tmp_path / "lf-world"
+    builder.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "world = pathlib.Path(sys.argv[3])\n"
+        "project = world / 'claude/projects/repo'\n"
+        "project.mkdir(parents=True)\n"
+        "(world / 'repo').mkdir()\n"
+        "(project / 'native.jsonl').write_text('retained\\n')\n"
+        "homes = {name: str(world / name) for name in ('home', 'claude', 'codex')}\n"
+        "(world / 'env.json').write_text(json.dumps({'LF_HOME': homes['home'], "
+        "'CLAUDE_CONFIG_DIR': homes['claude'], 'CODEX_HOME': homes['codex']}))\n"
+    )
     cli = tmp_path / "lf"
     cli.write_text(
         f"#!{sys.executable}\n"
@@ -519,16 +532,19 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
         "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
         "(directory / f'lf-{os.getpid()}.jsonl').write_text("
         "json.dumps(start) + '\\n' + json.dumps(end))\n"
-        "answers = {('session', 'bind'): {'task_ids': ['owned-task']}, "
-        "('task', 'create'): {'id': 'owned-task', 'identifier': 'PERF-304'}}\n"
-        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), [{'id': 'retained-session'}])))\n"
+        "task = {'id': 'owned-task', 'identifier': 'PERF-304', 'worktree': '/checkout'}\n"
+        "answers = {('task', 'status'): {'task': task}}\n"
+        "session = {'id': 'retained-session', 'task_ids': ['owned-task']}\n"
+        "print(json.dumps(answers.get(tuple(sys.argv[1:3]), [session])))\n"
     )
-    cli.chmod(0o755)
+    for executable in (builder, cli):
+        executable.chmod(0o755)
     fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
+    assert (fixture["issue"], fixture["native_id"]) == ("PERF-304", "native")
     assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
     report = _report(tmp_path, _events())
-    assert report["fixture_setup_cli_volume"]["processes_started"] == 4
-    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 48
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 2
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 24
     assert report["cli_volume"]["status"] == "unmeasured"
     assert report["cli_volume"]["observed_totals"]["statements"] is None
 
@@ -562,7 +578,7 @@ time.sleep(60)
         lambda *_: [sys.executable, "-u", str(executable), "--test-bundle-path", str(executable)],
     )
     monkeypatch.setattr(
-        performance, "_prepare_native_fixture", lambda output, cli, repo: output / "fixture"
+        performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
     )
 
     with pytest.raises(KeyError, match="pid"):

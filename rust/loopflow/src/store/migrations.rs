@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use super::migration_catalog::MIGRATIONS;
 pub use super::migration_catalog::{Migration, MigrationId};
-use super::migration_schema::{product_schema, ProductSchemaObject};
+use super::migration_schema::{product_schema, ForeignKeyDefinition, ProductSchemaObject};
 use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
@@ -78,6 +78,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         },
         name: "context_pressure",
         sql: include_str!("migrations/0.11.009_context_pressure.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -88,6 +89,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         },
         name: "context_input_normalization",
         sql: include_str!("migrations/0.11.010_context_input_normalization.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -98,6 +100,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         },
         name: "profiles",
         sql: include_str!("migrations/0.11.011_profiles.sql"),
+        reader_floor: None,
     },
     Migration {
         id: MigrationId {
@@ -108,6 +111,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         },
         name: "provider_account_lifecycle",
         sql: include_str!("migrations/0.11.012_provider_account_lifecycle.sql"),
+        reader_floor: None,
     },
 ];
 
@@ -301,6 +305,35 @@ pub(crate) fn prior_known_version() -> String {
     MIGRATIONS[MIGRATIONS.len() - 2].version()
 }
 
+/// Stand in for a newer release: apply one more migration after this binary's
+/// head, as the build that knows it would, and return that release. This binary
+/// is then the older reader. An additive release keeps the current floor.
+#[cfg(test)]
+pub(crate) fn apply_newer_release(
+    conn: &rusqlite::Connection,
+    sql: &'static str,
+    additive: bool,
+) -> StoreResult<String> {
+    if !ledger_has_reader_floor(conn)? {
+        conn.execute_batch(&tests::current_draft_sql("reader_floor"))?;
+    }
+    let head = MIGRATIONS.last().expect("the shipped set is not empty");
+    let newer = Migration {
+        id: MigrationId {
+            major: head.id.major,
+            minor: head.id.minor + 1,
+            patch: Some(0),
+            ordinal: 1,
+        },
+        name: "release",
+        sql,
+        reader_floor: additive.then(|| &*Box::leak(reader_floor(head).into_boxed_str())),
+    };
+    let set: Vec<Migration> = MIGRATIONS.iter().copied().chain([newer]).collect();
+    apply_set(conn, &set, &mut Vec::new())?;
+    Ok(newer.id.release())
+}
+
 /// Whether the old reader — a binary whose head is the prior migration — still
 /// recognizes the store as exactly its own frontier (nothing pending). It is
 /// `false` if the store was advanced to the newer head, which is what makes the
@@ -330,9 +363,13 @@ pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult
             ));
         }
         let applied = applied_versions(conn)?;
-        pending_migrations(&applied, MIGRATIONS)?;
+        let newer = admitted_newer_floor(conn, &applied, MIGRATIONS, active_namespace())?;
         validate_applied_checksums(conn, MIGRATIONS)?;
-        validate_schema(conn, &MIGRATIONS[..applied.len()])
+        if newer.is_some() {
+            validate_schema_within(conn, MIGRATIONS)
+        } else {
+            validate_schema(conn, &MIGRATIONS[..applied.len()])
+        }
     })
 }
 
@@ -1040,6 +1077,12 @@ fn insert_applied_migration(
             [migration.version()],
         )?;
     }
+    if ledger_has_reader_floor(conn)? {
+        conn.execute(
+            "UPDATE schema_migrations SET reader_floor=?1 WHERE version=?2",
+            (reader_floor(migration), migration.version()),
+        )?;
+    }
     Ok(())
 }
 
@@ -1056,10 +1099,10 @@ fn validate_applied_checksums(conn: &rusqlite::Connection, set: &[Migration]) ->
     })?;
     for row in rows {
         let (version, checksum) = row?;
-        let migration = set
-            .iter()
-            .find(|migration| migration.version() == version)
-            .ok_or_else(incompatible)?;
+        let Some(migration) = set.iter().find(|migration| migration.version() == version) else {
+            // Callers check history first; only an admitted newer tail reaches here.
+            continue;
+        };
         if checksum != migration_checksum(migration) {
             return Err(StoreError::InvalidData(format!(
                 "database migration {version} checksum does not match this lf build"
@@ -1271,6 +1314,119 @@ fn pending_migrations<'a>(
     Ok(&set[applied.len()..])
 }
 
+// -- Reader floor -------------------------------------------------------------
+
+fn ledger_has_reader_floor(conn: &rusqlite::Connection) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('schema_migrations') WHERE name='reader_floor')",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+/// The oldest lf that can open a store once `migration` is applied. A release
+/// cut before reader floors existed counts as breaking: its floor is its release.
+fn reader_floor(migration: &Migration) -> String {
+    migration
+        .reader_floor
+        .map(str::to_string)
+        .unwrap_or_else(|| migration.id.release())
+}
+
+fn parse_release(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.split('.').map(str::parse);
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) => Some((major, minor, patch)),
+        _ => None,
+    }
+}
+
+fn highest_floor(floors: impl IntoIterator<Item = String>) -> Option<String> {
+    floors.into_iter().max_by_key(|floor| parse_release(floor))
+}
+
+/// The highest reader floor of migrations newer than `set` when this reader may
+/// still open the store, or `None` when the store holds no newer migration. The
+/// known part must be exactly `set`, as for every open; the newer tail is
+/// admitted only when no row raised the floor above `reader`.
+fn admitted_newer_floor(
+    conn: &rusqlite::Connection,
+    applied: &[String],
+    set: &[Migration],
+    reader: (u32, u32, u32),
+) -> StoreResult<Option<String>> {
+    let known: Vec<String> = set.iter().map(Migration::version).collect();
+    if applied.len() <= set.len() || applied[..set.len()] != known[..] {
+        pending_migrations(applied, set)?;
+        return Ok(None);
+    }
+    let recorded = ledger_has_reader_floor(conn)?;
+    let mut previous = set.last().map(|migration| migration.id);
+    let mut floors = Vec::new();
+    for version in &applied[set.len()..] {
+        let id = MigrationId::parse_version(version).ok_or_else(incompatible)?;
+        if previous.is_some_and(|previous| id <= previous) {
+            return Err(incompatible());
+        }
+        previous = Some(id);
+        let floor: Option<String> = if recorded {
+            conn.query_row(
+                "SELECT reader_floor FROM schema_migrations WHERE version=?1",
+                [version],
+                |row| row.get(0),
+            )?
+        } else {
+            None
+        };
+        let floor = floor.unwrap_or_else(|| id.release());
+        if parse_release(&floor).is_none() {
+            return Err(StoreError::InvalidData(format!(
+                "database migration {version} records unreadable reader floor {floor:?}"
+            )));
+        }
+        floors.push(floor);
+    }
+    let floor = highest_floor(floors).expect("a newer tail has at least one floor");
+    if parse_release(&floor).is_some_and(|floor| floor > reader) {
+        return Err(StoreError::InvalidData(format!(
+            "this store needs lf {floor} or newer (it has {}; latest known {}); install it with lf install",
+            applied.last().expect("a newer tail is not empty"),
+            known.last().map(String::as_str).unwrap_or("none"),
+        )));
+    }
+    Ok(Some(floor))
+}
+
+/// The reader floor of a store a newer release migrated, when it still admits
+/// this binary; `None` when the store is at or behind this binary's history.
+pub(crate) fn newer_store_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    admitted_newer_floor(
+        conn,
+        &applied_versions(conn)?,
+        MIGRATIONS,
+        active_namespace(),
+    )
+}
+
+/// The floor this binary's pending migrations raise the store to, or `None`
+/// when every lf that opens the store now still can after promotion.
+pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    raised_floor_over(conn, MIGRATIONS)
+}
+
+fn raised_floor_over(
+    conn: &rusqlite::Connection,
+    set: &[Migration],
+) -> StoreResult<Option<String>> {
+    let applied = applied_versions(conn)?;
+    let pending = pending_migrations(&applied, set)?;
+    let Some(current) = highest_floor(set[..applied.len()].iter().map(reader_floor)) else {
+        return Ok(None);
+    };
+    Ok(highest_floor(pending.iter().map(reader_floor))
+        .filter(|next| parse_release(next) > parse_release(&current)))
+}
+
 fn user_tables(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
     let mut statement = conn.prepare(
         "SELECT name FROM sqlite_master
@@ -1322,6 +1478,109 @@ fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResul
         return Err(incompatible());
     }
     Ok(())
+}
+
+/// A store a newer release migrated additively still holds every object `set`
+/// builds unchanged; its tables may have gained columns.
+fn validate_schema_within(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
+    let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
+    let actual = product_schema(conn)?;
+    if let Some(missing) = expected
+        .iter()
+        .find(|old| !actual.iter().any(|new| schema_object_within(old, new)))
+    {
+        return Err(StoreError::InvalidData(format!(
+            "a newer lf changed {} {}, which lf {} reads; install the newer release with lf install",
+            missing.object_type,
+            missing.name,
+            env!("CARGO_PKG_VERSION")
+        )));
+    }
+    Ok(())
+}
+
+fn schema_object_within(old: &ProductSchemaObject, new: &ProductSchemaObject) -> bool {
+    if old == new {
+        return true;
+    }
+    old.object_type == "table"
+        && new.object_type == "table"
+        && old.name == new.name
+        && old.foreign_keys.iter().all(|key| {
+            new.foreign_keys.iter().any(|other| {
+                ForeignKeyDefinition {
+                    id: key.id,
+                    ..other.clone()
+                } == *key
+            })
+        })
+        && table_within(&old.sql, &new.sql)
+}
+
+/// SQLite splices `ADD COLUMN` definitions in before table constraints, so the
+/// old definitions must all survive verbatim and only column definitions are new.
+fn table_within(old: &str, new: &str) -> bool {
+    let (Some((old_head, old_parts, old_tail)), Some((new_head, new_parts, new_tail))) =
+        (table_parts(old), table_parts(new))
+    else {
+        return false;
+    };
+    const CONSTRAINTS: [&str; 5] = ["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN"];
+    old_head == new_head
+        && old_tail == new_tail
+        && old_parts.iter().all(|part| new_parts.contains(part))
+        && new_parts
+            .iter()
+            .filter(|part| !old_parts.contains(part))
+            .all(|part| {
+                let keyword = part.split_whitespace().next().unwrap_or("");
+                !CONSTRAINTS
+                    .iter()
+                    .any(|constraint| keyword.eq_ignore_ascii_case(constraint))
+            })
+}
+
+/// A `CREATE TABLE` statement as its head, top-level definitions and suffix.
+fn table_parts(sql: &str) -> Option<(&str, Vec<&str>, &str)> {
+    let open = sql.find('(')?;
+    let mut parts = Vec::new();
+    let mut start = open + 1;
+    let mut depth = 0;
+    let mut quote = None;
+    let mut characters = sql[open..]
+        .char_indices()
+        .map(|(index, c)| (open + index, c))
+        .peekable();
+    while let Some((index, character)) = characters.next() {
+        if let Some(end) = quote {
+            if character == end {
+                if end != ']' && characters.peek().is_some_and(|(_, next)| *next == end) {
+                    characters.next();
+                } else {
+                    quote = None;
+                }
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '[' => quote = Some(']'),
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    parts.push(sql[start..index].trim());
+                    return Some((sql[..open].trim(), parts, sql[index + 1..].trim()));
+                }
+            }
+            ',' if depth == 1 => {
+                parts.push(sql[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Cache only the immutable reference derived from this build's ordered SQL.
@@ -1412,6 +1671,9 @@ pub fn latest_known_version() -> String {
 /// pending migration adds, so reusing the older schema would only fail later.
 pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
+    if admitted_newer_floor(conn, &applied, MIGRATIONS, active_namespace())?.is_some() {
+        return Ok(None);
+    }
     Ok(pending_migrations(&applied, MIGRATIONS)?
         .first()
         .map(Migration::version))
@@ -1472,14 +1734,15 @@ mod tests {
     use super::{_initialize_experiment_in, _read_snapshot, user_tables};
     use rusqlite::OptionalExtension;
 
+    use super::apply_newer_release;
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, initialize_experimental_sqlite,
         latest_applied_version_sqlite, latest_known_version, latest_version_sqlite,
         migration_checksum, migration_sql_for_test, pending_migrations, product_schema,
         validate_experimental_sqlite, validate_foreign_keys, validate_persisted_json,
-        validate_schema, validate_set, validate_sqlite, Migration, MigrationId,
-        DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_schema, validate_set, validate_sqlite, validate_sqlite_schema, Migration,
+        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
@@ -1508,6 +1771,7 @@ mod tests {
         },
         name: "add_note",
         sql: "ALTER TABLE waves ADD COLUMN note TEXT;",
+        reader_floor: None,
     };
     const FIRST_IN_NEXT_MINOR: Migration = Migration {
         id: MigrationId {
@@ -1518,10 +1782,59 @@ mod tests {
         },
         name: "add_colour",
         sql: "ALTER TABLE waves ADD COLUMN colour TEXT;",
+        reader_floor: None,
     };
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn a_newer_tail_must_leave_this_builds_schema_intact() {
+        let conn = open();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        apply_newer_release(&conn, "DROP INDEX idx_tasks_project;", true).unwrap();
+
+        let error = validate_sqlite_schema(&conn).unwrap_err().to_string();
+
+        assert!(
+            error.contains("a newer lf changed index idx_tasks_project"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn promotion_names_the_floor_its_pending_migrations_raise() {
+        let conn = open();
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        let head = MIGRATIONS.last().unwrap();
+        let candidate = |sql: &'static str, reader_floor: Option<&'static str>| {
+            let mut set = MIGRATIONS.to_vec();
+            set.push(Migration {
+                id: MigrationId {
+                    major: head.id.major,
+                    minor: head.id.minor + 1,
+                    patch: Some(0),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql,
+                reader_floor,
+            });
+            set
+        };
+        let kept = super::reader_floor(head);
+        let kept: &'static str = Box::leak(kept.into_boxed_str());
+
+        assert_eq!(
+            super::raised_floor_over(&conn, &candidate("SELECT 1;", Some(kept))).unwrap(),
+            None
+        );
+        let raised = candidate("SELECT 1;", None);
+        assert_eq!(
+            super::raised_floor_over(&conn, &raised).unwrap(),
+            Some(raised.last().unwrap().id.release())
+        );
     }
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
@@ -6333,6 +6646,7 @@ mod tests {
                 },
                 name: "release",
                 sql: "SELECT 1;",
+                reader_floor: None,
             },
             Migration {
                 id: MigrationId {
@@ -6343,6 +6657,7 @@ mod tests {
                 },
                 name: "release",
                 sql: "SELECT 2;",
+                reader_floor: None,
             },
             Migration {
                 id: MigrationId {
@@ -6353,6 +6668,7 @@ mod tests {
                 },
                 name: "release",
                 sql: "SELECT 3;",
+                reader_floor: None,
             },
         ];
         let applied = [releases[0].version()];

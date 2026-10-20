@@ -246,8 +246,11 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     assert_eq!(
         Connection::open(right.path().join("loopflow.db"))
             .unwrap()
-            .query_row("SELECT count(*) FROM task_ownership", [], |row| row
-                .get::<_, i64>(0))
+            .query_row(
+                "SELECT count(*) FROM task_ownership WHERE written_here=1",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
             .unwrap(),
         0,
         "cold planning acquisition must not claim the Task"
@@ -434,7 +437,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     for connection in [&conn, &worker_conn] {
         let comments: i64 = connection
             .query_row(
-                "SELECT count(*) FROM task_comments WHERE task_id=?1",
+                "SELECT count(*) FROM task_comments WHERE task_id=?1
+                 AND body NOT LIKE '%loopflow-ownership:%'",
                 [fixture.task.id.as_str()],
                 |row| row.get(0),
             )
@@ -447,7 +451,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let comments = |connection: &Connection| {
         connection
             .prepare(
-                "SELECT id,body,author,created_at FROM task_comments WHERE task_id=?1 ORDER BY id",
+                "SELECT id,body,author,created_at FROM task_comments WHERE task_id=?1
+                 AND body NOT LIKE '%loopflow-ownership:%' ORDER BY id",
             )
             .unwrap()
             .query_map([fixture.task.id.as_str()], |row| {

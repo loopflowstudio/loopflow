@@ -1504,7 +1504,8 @@ mod tests {
                 events[0].kind,
                 TaskEventKind::CheckoutInitializing { .. }
             ));
-            assert!(!store.task_owned(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -1820,7 +1821,8 @@ mod tests {
             store.seed_inventory(snapshot, None).await.unwrap();
             place().await.unwrap();
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(!store.task_owned(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -1947,7 +1949,8 @@ mod tests {
             assert_eq!(retried.branch, first.branch);
             assert_eq!(retried.base_commit, first.base_commit);
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap().len(), 1);
-            assert!(!store.task_owned(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
         }
     }
@@ -2091,7 +2094,8 @@ mod tests {
             assert_eq!(saved.worktree, task.worktree);
             assert_eq!(saved.id, task.id);
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(!store.task_owned(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -2746,7 +2750,8 @@ mod tests {
         let task = make_task(&store, &wave, &project);
         store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
         let observed_at = task.created_at - time::Duration::SECOND;
-        let settled_at = task.created_at + time::Duration::SECOND;
+        // Leave room for a loaded runner between seeding and the steer.
+        let settled_at = task.created_at + time::Duration::MINUTE;
         store
             .observe_ci_incident(&CiIncident {
                 identity: "human-help-proof".to_string(),

@@ -788,7 +788,6 @@ fn repository_commands_have_one_owner_and_derived_shorthand() {
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
     for (leaf, path) in [
-        ("release", vec!["repo", "release"]),
         ("tokens", vec!["repo", "tokens"]),
         ("ci", vec!["repo", "ci"]),
     ] {

@@ -414,7 +414,7 @@ The live Linear demo above is a demo/review step, not gate.
 - Live Linear demo on a throwaway Task (demo/review step).
 - File the follow-up Tasks named under Exclusions during gate.
 
-Check results: `cargo test -p loopflow --test integration task_ownership` 3/3 pass;
-`--lib ownership`, `standalone_task_exchange`, `configured_owning`,
-`ownership_log_records` pass; `dto_fixtures` 42/42 pass; `check_migrations.py`
-passes. Full lib suite and Swift: see the PR.
+Check results (2026-10-19): ownership integration 3/3, `dto_fixtures` 42/42,
+release/CLI integration 61/61, focused Swift 76/76, `check_migrations.py` pass;
+full integration otherwise green except `auth_tests::banked_resets…` (passes alone);
+the two `native_runner_*_foreground` lib tests hang without a terminal (deferred to CI).

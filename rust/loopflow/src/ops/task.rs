@@ -6048,6 +6048,12 @@ mod tests {
 
         next.branch = task.branch.clone();
         store.insert_task_pr(&next).await.unwrap();
+        // A new PR respects completion; only an explicit reopen uncompletes.
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+        store
+            .sqlite
+            .reopen_task(&task.id, Some("New delivery"))
+            .unwrap();
         store
             .sqlite
             .request_task_completion(&task.id, Some("New delivery"))

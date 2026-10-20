@@ -30,6 +30,18 @@ fn released() -> (tempfile::TempDir, Connection) {
     (home, conn)
 }
 
+/// Released stores open as experiments only after this build's drafts apply.
+fn apply_drafts(conn: &Connection) {
+    super::_migration_transaction(conn, |conn, _| {
+        for draft in crate::build_info::migration_draft_manifest() {
+            conn.execute_batch(draft.sql)?;
+            super::seed_peer_planning(conn, draft.sql)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+}
+
 fn conversion_sql() -> &'static str {
     super::MIGRATIONS
         .iter()
@@ -539,6 +551,7 @@ fn canonical_ids_metric_upgrade_retains_evidence_and_reimport() {
         )
         .unwrap();
     apply_sqlite(&conn).unwrap();
+    apply_drafts(&conn);
     assert_eq!(retained(), before);
     assert_eq!(
         conn.query_row(
@@ -974,6 +987,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
     conn.execute("UPDATE agent_sessions SET repo=?1,cwd=?1", [repo_path])
         .unwrap();
     apply_sqlite(&conn).unwrap();
+    apply_drafts(&conn);
     let binary = loopflow_test_support::lf_binary();
     let lf = |args: &[&str]| {
         let mut command = std::process::Command::new(binary);

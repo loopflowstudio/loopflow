@@ -266,7 +266,7 @@ impl super::SqliteStore {
                 ci.updated_at, ci.repaired_head_sha,
                 w.slug,
                 CASE WHEN ts.id IS NOT NULL THEN {task_state} END,
-                (SELECT min(o.at) FROM task_ownership o
+                (SELECT min(o.at) * 1000000000 FROM task_ownership o
                  WHERE o.task_id=ci.task_id AND o.kind IN ('claim','recorded')),
                 EXISTS (
                     SELECT 1 FROM task_events event

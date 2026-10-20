@@ -774,13 +774,12 @@ mod durable_store_tests {
         other.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
+        // A released Task is new work again; the newly placed checkout claims its Task.
+        store.release_task(&task_id).unwrap();
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
         store.seed_task(&new_task, &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
         assert!(!store.task_owned(&task_id).unwrap());
-        let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
-        input.cwd = new_task.worktree.as_ref().unwrap().clone();
-        store.create_session(input, None).unwrap();
         assert!(store.task_owned(&new_task.id).unwrap());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
         crate::store::sqlite::project_selection::write_project_binding(
@@ -815,7 +814,7 @@ mod durable_store_tests {
             .is_none());
         assert!(store.task_prs(&rejected.id).unwrap().is_empty());
         assert!(store.require_task_launch(&task_id).is_err());
-        // An established start remains eligible after its Project becomes history.
+        // An owned Task remains eligible after its Project becomes history.
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -836,6 +835,8 @@ mod durable_store_tests {
     fn configured_project_admission_requires_a_selected_active_project() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        // Owned Tasks are exempt; an unowned one must be in the selected active Project.
+        store.release_task(&task_id).unwrap();
         store
             .conn
             .lock()
@@ -1082,18 +1083,33 @@ mod durable_store_tests {
 
     #[test]
     fn chapter_evidence_marks_taskless_flows_started_in_their_checkout() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
-        // A Flow run from the checkout starts its Task without an explicit bind.
+        let (dir, store, existing) = store_with_task();
+        // A checkout recorded without an ownership entry, so only the Flow is evidence.
+        let (task, _) = unregistered_task(&store, &existing, dir.path().join("unclaimed"));
+        store.seed_unplaced_task(&task);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                rusqlite::params![
+                    task.id.as_str(),
+                    task.worktree.as_ref().unwrap().to_str().unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).unwrap().begun);
+        // A Flow run from the checkout begins its Task without an explicit bind.
         store.test_flow(
             "sync",
             &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("sync --plan", None)],
             None,
         );
-        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(store.task_owned(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        // A Flow is evidence of work, not a claim.
+        assert!(!store.task_owned(&task.id).unwrap());
     }
 
     fn unregistered_task(
@@ -1145,7 +1161,8 @@ mod durable_store_tests {
             vec![task.id.clone()]
         );
         assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
-        assert!(!store.task_owned(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
     }
 
     #[test]
@@ -1176,7 +1193,8 @@ mod durable_store_tests {
             vec![task.id.clone()]
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-        assert!(!store.task_owned(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
     }
 
     #[test]
@@ -1240,7 +1258,8 @@ mod durable_store_tests {
         let work = store.task_work(&task.id).unwrap();
         assert_eq!(work.sessions.len(), 1);
         assert_eq!(work.sessions[0].id, session.id.as_str());
-        assert!(!store.task_owned(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
         assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
 
@@ -1256,7 +1275,6 @@ mod durable_store_tests {
         assert_eq!(before.sessions.len(), 1);
         assert_eq!(before.sessions[0].id, session.id.as_str());
         assert_eq!(session.task_id, None);
-        assert!(!store.task_owned(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
 
         let successor = ProjectId::new();
@@ -1286,6 +1304,7 @@ mod durable_store_tests {
     fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.release_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
         let session = store.create_session(conversation, None).unwrap();
@@ -1302,7 +1321,8 @@ mod durable_store_tests {
             .bind_session(&session.id, session.captured, &task_id)
             .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_owned(&task_id).unwrap());
+        // Binding a session claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
     }
 
     #[test]
@@ -1334,6 +1354,7 @@ mod durable_store_tests {
     fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.release_task(&task_id).unwrap();
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
@@ -1348,13 +1369,15 @@ mod durable_store_tests {
         drop(exclusion);
         let created = store.create_session(conversation, None).unwrap();
         assert_eq!(created.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_owned(&task_id).unwrap());
+        // A session naming its Task claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
     }
 
     #[test]
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.release_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().to_path_buf();
         let session = store.create_session(conversation, None).unwrap();
@@ -1374,7 +1397,8 @@ mod durable_store_tests {
             .bind_session(&session.id, session.captured, &task_id)
             .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_owned(&task_id).unwrap());
+        // Binding a session claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, task.project_id);
         assert_eq!(retained.worktree, task.worktree);
@@ -1387,7 +1411,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn session_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
+    fn session_assignment_rejects_reassignment_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let mut conn = store.conn.lock().unwrap();
@@ -1411,7 +1435,6 @@ mod durable_store_tests {
             [other_wave.as_str()],
         )
         .unwrap();
-        let before = crate::store::rows::now_unix();
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
@@ -1436,19 +1459,14 @@ mod durable_store_tests {
         )
         .unwrap();
         tx.commit().unwrap();
-        let started = |conn: &rusqlite::Connection, id: &TaskId| -> Option<i64> {
+        let session_task = |conn: &rusqlite::Connection, id: &str| -> Option<String> {
             conn.query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
-                [id.as_str()],
+                "SELECT task_id FROM agent_sessions WHERE id=?1",
+                [id],
                 |row| row.get(0),
             )
             .unwrap()
         };
-        let assigned = started(&conn, &task_id).unwrap();
-        assert!((before..=crate::store::rows::now_unix()).contains(&assigned));
-        assert_ne!(assigned, reserved.created_at);
-        assert_eq!(started(&conn, &bound_task), None);
-        let before_bind = crate::store::rows::now_unix();
         conn.execute(
             "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound' WHERE id=?1",
             rusqlite::params![
@@ -1458,39 +1476,11 @@ mod durable_store_tests {
             ],
         )
         .unwrap();
-        let bound_at = started(&conn, &bound_task).unwrap();
-        assert!((before_bind..=crate::store::rows::now_unix()).contains(&bound_at));
-        assert_ne!(bound_at, orphan.created_at);
         conn.execute(
             "UPDATE agent_sessions SET task_id=?2,work_source='bound' WHERE id=?1",
             rusqlite::params![wave_only.id.as_str(), bound_task.as_str()],
         )
         .unwrap();
-        for created_at in [0, bound_at + 1000] {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .unwrap();
-            reserve_session_in(
-                &tx,
-                unpublished_conversation(Some(bound_task.clone()), None, created_at),
-                None,
-            )
-            .unwrap();
-            let later_bind =
-                reserve_session_in(&tx, unpublished_conversation(None, None, created_at), None)
-                    .unwrap();
-            tx.execute(
-                "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                rusqlite::params![
-                    later_bind.id.as_str(),
-                    bound_task.as_str(),
-                    task.wave_id.as_ref().unwrap().as_str()
-                ],
-            )
-            .unwrap();
-            tx.commit().unwrap();
-            assert_eq!(started(&conn, &bound_task), Some(bound_at));
-        }
         for (id, new_task, new_wave) in [
             (
                 &orphan.id,
@@ -1515,48 +1505,23 @@ mod durable_store_tests {
                     rusqlite::params![id.as_str(), new_task, new_wave]
                 )
                 .is_err());
-            assert_eq!(started(&conn, &losing_task), None);
-            assert_eq!(started(&conn, &bound_task), Some(bound_at));
+            assert_eq!(
+                session_task(&conn, orphan.id.as_str()).as_deref(),
+                Some(bound_task.as_str())
+            );
+            assert_eq!(session_task(&conn, conflicting.id.as_str()), None);
         }
-        for timestamp in [None, Some(bound_at - 1), Some(bound_at + 1)] {
-            assert!(conn
-                .execute(
-                    "UPDATE tasks SET started_at=?2 WHERE id=?1",
-                    rusqlite::params![bound_task.as_str(), timestamp]
-                )
-                .is_err());
-        }
-        assert!(conn
-            .execute(
-                "UPDATE tasks SET started_at=1 WHERE id=?1",
-                [losing_task.as_str()]
-            )
-            .is_err());
         assert!(conn
             .execute(
                 "DELETE FROM agent_sessions WHERE id=?1",
                 [reserved.id.as_str()]
             )
             .is_err());
-        // Failed enclosing writes roll back both the reservation and Started.
-        {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .unwrap();
-            reserve_session_in(
-                &tx,
-                unpublished_conversation(Some(losing_task.clone()), None, 5),
-                None,
-            )
-            .unwrap();
-            assert!(started(&tx, &losing_task).is_some());
-        }
-        assert_eq!(started(&conn, &losing_task), None);
+        // Assignment claims nothing.
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM tasks t WHERE
-            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=t.id)",
-                [],
+                "SELECT count(*) FROM task_ownership WHERE task_id IN (?1,?2)",
+                [bound_task.as_str(), losing_task.as_str()],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
@@ -1756,7 +1721,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn competing_session_assignments_start_only_the_winning_task() {
+    fn competing_session_assignments_bind_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
@@ -1799,16 +1764,14 @@ mod durable_store_tests {
         );
         let conn = store.conn.lock().unwrap();
         for (target, result) in results {
-            let (has_session, started): (bool, bool) = conn
+            let has_session: bool = conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1),started_at IS NOT NULL
-                 FROM tasks WHERE id=?1",
+                    "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)",
                     [target.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert_eq!(has_session, result.is_ok());
-            assert_eq!(started, result.is_ok());
             if let Err(error) = result {
                 assert!(error.to_string().contains("binding is permanent"));
             }

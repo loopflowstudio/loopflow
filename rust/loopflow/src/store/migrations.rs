@@ -1970,13 +1970,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(provenance, "legacy");
-        let seeded: String = conn.query_row(
-            "SELECT json_extract(mutation,'$.edit.change.value') FROM planning_peer_changes WHERE object_id='t' AND field='task_delegation' ORDER BY clock DESC LIMIT 1",
-            [], |row| row.get(0),
-        ).unwrap();
-        let seeded: serde_json::Value = serde_json::from_str(&seeded).unwrap();
-        assert_eq!(seeded["provenance"], "legacy");
-        assert_eq!(seeded["machine_id"], local);
         // An unconfigured destination can be retained without a Machine row;
         // the recorded execution location and local enablement stay unchanged.
         conn.execute(

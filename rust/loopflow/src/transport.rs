@@ -501,7 +501,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut detach = false;
     let mut client: Option<native::NativeClient> = None;
     let mut returning = None;
-    let mut hinting = None;
+    let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
     loop {
@@ -517,7 +517,6 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 input_hint: None,
             });
         }
-        let current_hint = viewers.iter().rev().find_map(|v| v.input_hint.clone());
         viewers.retain_mut(|viewer| {
             let result = (|| -> Result<()> {
                 for request in viewer.requests()? {
@@ -545,8 +544,8 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             viewer.ending = true;
                         }
                         Request::InputHint { key, hint } if key == control_key => {
-                            viewer.input_hint = Some(hint.clone());
-                            hinting = Some(Response::InputHint { hint });
+                            viewer.input_hint = Some(hint);
+                            hint_due = true;
                         }
                         Request::Attach {
                             control: wants_control,
@@ -565,6 +564,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             attached = true;
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
+                                hint_due = true;
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
                                 viewer.token = Some(token);
@@ -591,9 +591,6 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 viewer.queue(&Response::Return {
                                     detach: client.detach.clone(),
                                 })?;
-                            }
-                            if let Some(hint) = current_hint.as_ref().filter(|_| wants_control) {
-                                viewer.queue(&Response::InputHint { hint: hint.clone() })?;
                             }
                             if terminal && wants_control {
                                 // Resizing to the same dimensions sends no signal.
@@ -673,11 +670,16 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if let Some(response) = returning.take() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
-        if let Some(response) = hinting.take() {
-            viewers.retain_mut(|v| {
-                !(v.attached && v.token.is_some() && v.token == control)
-                    || v.queue(&response).is_ok()
-            });
+        // The controls reach the one controlling viewer when it attaches or
+        // when the execution registers them, whichever comes later.
+        if std::mem::take(&mut hint_due) {
+            let hint = viewers.iter().rev().find_map(|v| v.input_hint.clone());
+            if let Some(hint) = hint {
+                viewers.retain_mut(|v| {
+                    !(v.attached && v.token.is_some() && v.token == control)
+                        || v.queue(&Response::InputHint { hint: hint.clone() }).is_ok()
+                });
+            }
         }
         let detached = !viewers
             .iter()

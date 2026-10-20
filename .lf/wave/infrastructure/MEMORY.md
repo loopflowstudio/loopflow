@@ -82,12 +82,11 @@ LOO-516 (2026-10-18): Jack Heart requested durable private relay-failure evidenc
 not attribution of an unobserved cause. The working change retains bounded
 observed Session events with the original AgentProcess, operation and direction;
 unexpected renderer resets remain evidence even when disconnect handling returns
-success. Explicit client close stays quiet. Observations neither claim attachment
-nor settle turns; store failure must not end reconnect or reach the renderer.
-Keep observed-event identity independent of a native started turn: startup may
-fail before one exists. Real-Codex disposable startup faults and history reads
-prove retention, not the original installed reset's cause. Gate, CI and delivery
-remain open; Release's entry-point lesson applies.
+success; explicit client close stays quiet. Observations neither claim attachment
+nor settle turns, and store failure must not end reconnect or reach the renderer.
+Observed-event identity needs no native turn (startup may fail first). Real-Codex
+startup faults prove retention, not the installed reset's cause. Gate, CI and
+delivery remain open.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -97,19 +96,17 @@ tool/context/Flow and configured-account launch/tool/resume passed.
 [PR #1590](https://github.com/loopflowstudio/loopflow/pull/1590) records verification
 and remaining native acceptance.
 
-No parent IDs or replayable events; steer/queue share idle.
-Readmission can emit empty success; managed recovery injects synthetic guidance
-with unaccepted at-least-once semantics. Native stability proves neither
-attribution nor deduplication. Preserve frozen capture/Process/Work,
-independent steers, separate queued results and LOO-415's owner. Release's lesson:
-candidate proof cannot bypass supported installation. Gate, broader native
-acceptance and delivery remain open.
+No parent IDs or replayable events; steer/queue share idle. Readmission can
+emit empty success; managed recovery's synthetic guidance is unaccepted
+at-least-once. Native stability proves neither attribution nor deduplication.
+Preserve frozen capture/Process/Work, independent steers, separate queued
+results and LOO-415's owner. Candidate proof cannot bypass supported
+installation; gate, native acceptance and delivery remain open.
 
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
-#1545 merged; installation and measured savings remain unproved. Assertion
-boundaries, counts and acquisition evidence:
+#1545 merged; installation and measured savings remain unproved. Evidence:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
@@ -117,14 +114,10 @@ boundaries, counts and acquisition evidence:
 Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
 choices; omission preserves defaults. October 10 approval authorizes landing and
 completion after verified merge. No logins, credential reads or real-provider tests.
-Six fixture Sessions prove Claude across child overrides; replay/native history
-retain their provider. Conflicting resume explains starting anew.
-
-October 11 gate repaired isolation, replay pinning and pruning's NULL-worktree
-read. Override checks passed. Release-lock failure's cause remains unknown;
-homepage overflow at 1,440 px remains. CI owns nested Python sandbox tests.
-Remote/live/installed acceptance, landing and completion remain unproved.
-Exact evidence and earlier archives:
+Fixtures prove Claude across child overrides; replay/native history retain their
+provider; conflicting resume explains starting anew. Release-lock failure's cause
+and 1,440 px homepage overflow remain; CI owns nested Python sandbox tests.
+Remote/live/installed acceptance, landing and completion remain unproved. Evidence:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Global agent override.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
@@ -1077,7 +1070,7 @@ was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this h
 
 ## Earlier follow-ups
 
-Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
+Unselected work and Jack Heart's unresolved July 6 “up/down 5ths”:
 `7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
@@ -1141,24 +1134,21 @@ Miss overlap is implemented; hits use Xcode. Mixed trials, attribution limits
 and rejected alternatives: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
-Process groups left a compiler alive; scoped cancellation passed. Toolchain/SDK/deployment and
-source/target must match. Signature removal alone leaves Mach-O padding;
-identical re-signing of disposable copies proved bytes equal.
+Scoped cancellation (not process groups) stops the compiler. Toolchain/SDK/deployment
+and source/target must match; re-signing disposable copies, not signature removal,
+proves bytes equal.
 
-Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/network
-proof remains; Release's lesson separates local proof from delivery.
-Preserve copy/sign, development/validation-only authority and disposable
-OS accounts for installation. No paid runners, test removal, cache relaxation or
-retries.
+Hosted benefit, cleanup cost and full Swift/installation/network proof remain open.
+Preserve copy/sign, validation-only authority and disposable installation accounts.
+No paid runners, test removal, cache relaxation or retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
 Jack Heart requested landing #1505 on October 8, superseding review-only Flow feedback.
 Keep the Task open for outstanding cold-cache verification.
-Git retains the dated measurements and rejected patches. Provider-probe removal, absent-Wave
-resolution and directory reuse have matched evidence; capture-store reuse and
-ancestor-probe deferral did not and were removed. The last rejection meets
-the stopping condition, not exhaustion.
+Git retains measurements and rejected patches. Provider-probe removal, absent-Wave
+resolution and directory reuse matched evidence; capture-store reuse and
+ancestor-probe deferral did not and were removed (stopping condition, not exhaustion).
 Claude reconnect's native median worsens; the later handoff gain cannot repair it.
 
 Readiness requires unsubmitted text echoed by the raw-mode application. Codex
@@ -1167,9 +1157,8 @@ LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache
 control/native login; the report records the limitation and reset method. SVG readability awaits review. Neither gap is waived.
 Wall stacks include shutdown, not CPU accounting.
 
-Copied databases retain absolute provider-home paths. Strip routes before launch;
-connect only benchmark-created Sessions. Early excluded probes reached those
-paths without a write audit; isolation remains unproved. Fixtures prove no
-installed gain or managed-account continuity. The network-isolated CI smoke
-bounds launch work and preserves identity, context and history; nested-directory
-launch retains the repository root. Hosted success remains unproved.
+Copied databases retain absolute provider-home paths: strip routes before launch
+and connect only benchmark-created Sessions; early probes left isolation unproved.
+Fixtures prove no installed gain or managed-account continuity. The network-isolated
+CI smoke bounds launch work, preserving identity, context, history and the
+repository root from nested directories; hosted success remains unproved.

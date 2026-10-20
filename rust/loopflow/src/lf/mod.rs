@@ -532,7 +532,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DiscordCommand,
     },
-    /// Manage Wave identity, placement and planning
+    /// Manage Wave identity and planning
     Wave {
         #[command(subcommand)]
         cmd: WaveCommand,
@@ -1108,13 +1108,6 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Set the Machine for Wave schedules and newly created work
-    Place {
-        name: String,
-        machine_id: crate::durable::MachineId,
-        #[arg(long)]
-        json: bool,
-    },
     /// Rename or relocate an authored Wave and its provider mapping
     Rename {
         wave: String,
@@ -1273,22 +1266,30 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect or reserve the Task's permanent first execution owner
-    Admission {
+    /// Claim the Task for you on this Machine
+    Claim {
         issue: String,
-        /// Request first execution on this Machine; an existing owner wins
         #[arg(long)]
-        claim: Option<crate::durable::MachineId>,
-        /// Correlate a coordinator reply with this request
+        json: bool,
+    },
+    /// Hand the Task to another Machine; you stay its person
+    Handoff {
+        issue: String,
+        /// Registered Machine label or Machine id
+        machine: String,
         #[arg(long)]
-        request: Option<String>,
+        json: bool,
+    },
+    /// Release the Task; it is unowned again, with its history intact
+    Release {
+        issue: String,
         #[arg(long)]
         json: bool,
     },
     /// Read recorded execution location without preparing or transferring Work
     Location {
         issue: String,
-        /// Observe added Machines as well as this one; never reserve first start
+        /// Observe added Machines as well as this one
         #[arg(long)]
         peers: bool,
         #[arg(long, hide = true)]
@@ -1465,7 +1466,9 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
-            | Self::Admission { issue, .. }
+            | Self::Claim { issue, .. }
+            | Self::Handoff { issue, .. }
+            | Self::Release { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1506,7 +1509,9 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
-            | Self::Admission { issue, .. }
+            | Self::Claim { issue, .. }
+            | Self::Handoff { issue, .. }
+            | Self::Release { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1746,7 +1751,7 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate configured commands and Machine placement without installing jobs
+    /// Validate configured commands and the owning Machine without installing jobs
     Preflight {
         /// Only commands with this --wave selector
         #[arg(short = 'w', long)]
@@ -2373,6 +2378,8 @@ mod tests {
         }
         assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "serve", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "place", "product", "mini"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "admission", "LOO-1"]).is_err());
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
@@ -2380,13 +2387,7 @@ mod tests {
             vec!["lf", "repo", "refresh", "product"],
             vec!["lf", "repo", "refresh", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
-            vec![
-                "lf",
-                "wave",
-                "place",
-                "product",
-                "home_00000000000000000000000000000001",
-            ],
+            vec!["lf", "task", "handoff", "LOO-1", "mini"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],

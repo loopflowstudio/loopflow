@@ -160,10 +160,9 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
-    /// Durable evidence that work began: a started Session, a worker report or
-    /// finished Flow, or a published PR. `false` means none is recorded, not
-    /// proof that nothing ever ran; preparing a checkout never sets it.
-    pub started: bool,
+    /// Who owns the Task on which Machine, as this Machine reads the ownership
+    /// log; absent when the Task is unowned.
+    pub owner: Option<crate::durable::TaskOwner>,
 }
 
 /// A Task's derived operating condition. Sessions own review actions; this state
@@ -1079,7 +1078,7 @@ fn wave_checkout(wave: &Wave) -> Result<PathBuf> {
     )
 }
 
-/// Read planning and optional placement without allocating execution.
+/// Read planning and the configured owning Machine without allocating execution.
 async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let tasks = store
@@ -1091,19 +1090,17 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave, checkout: &Path) -> Res
         let state = store.task_state(&task.id).await?;
         active_tasks += u32::from(!state.is_terminal());
     }
-    let placement = store
-        .find_placement(&WorkRef::Wave(wave.id().clone()))
+    // Configured owning Machines only; an unconfigured Wave belongs to the reader.
+    let (machine_id, source) = store
+        .wave_owning_machine(wave.id())
         .await
-        .map_err(|error| anyhow!("failed to read Wave Machine placement: {error}"))?;
-    let machine = match placement {
-        Some(placement) => Some(
-            store
-                .machine_by_id(&placement.machine_id)
-                .await
-                .map_err(|error| anyhow!("failed to read Wave Machine: {error}"))?
-                .ok_or_else(|| anyhow!("Machine {} was not found", placement.machine_id))?,
-        ),
-        None => None,
+        .map_err(|error| anyhow!("failed to read Wave owning Machine: {error}"))?;
+    let machine = match source {
+        crate::durable::OwningMachineSource::ThisMachine => None,
+        _ => store
+            .machine_by_id(&machine_id)
+            .await
+            .map_err(|error| anyhow!("failed to read Wave Machine: {error}"))?,
     };
     let status = store
         .work_status(&WorkRef::Wave(wave.id().clone()))
@@ -1130,7 +1127,7 @@ fn snapshot_task_runtime(
     task: &Task,
     status: TaskState,
     completion_pending: Option<String>,
-    started: bool,
+    owner: Option<crate::durable::TaskOwner>,
 ) -> TaskRuntimeSnapshot {
     let config = crate::config::load_config_or_default(task.worktree.as_deref());
     let (provider, _) = crate::config::parse_agent(config.agent());
@@ -1145,7 +1142,7 @@ fn snapshot_task_runtime(
         completion_pending,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
-        started,
+        owner,
     }
 }
 
@@ -1287,11 +1284,8 @@ async fn snapshot_task_detail(
         crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
     let status = store.task_state(&task.id).await?;
     let pending = crate::ops::task::completion_pending(store, task)?;
-    let started = store.task_started(&task.id).await?
-        || pr
-            .as_ref()
-            .is_some_and(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
-    let runtime = snapshot_task_runtime(&execution, task, status, pending, started);
+    let owner = store.sqlite.task_ownership(&task.id)?.owner;
+    let runtime = snapshot_task_runtime(&execution, task, status, pending, owner);
     let machine_id = shared
         .checkouts
         .iter()
@@ -1574,7 +1568,7 @@ fn derive_task_condition(
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
-        (runtime.started && !runtime.status.is_terminal())
+        (runtime.owner.is_some() && !runtime.status.is_terminal())
             || action_evidence.is_some_and(|evidence| evidence.completion_refusal.is_some())
             || execution.is_some_and(|execution| {
                 execution.state != TaskExecutionState::Idle
@@ -2417,6 +2411,16 @@ fn truncate_start(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn owned() -> crate::durable::TaskOwner {
+        crate::durable::TaskOwner {
+            person: Some("Jack Heart".into()),
+            machine: crate::durable::MachineRef {
+                id: None,
+                label: None,
+            },
+        }
+    }
+
     use crate::test_linear_input::SeedLinear;
     use std::sync::Arc;
     use time::OffsetDateTime;
@@ -2437,7 +2441,7 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[tokio::test]
-    async fn task_reference_names_recorded_checkout_owner_after_delegation_changes() {
+    async fn task_reference_names_recorded_checkout_machine_and_its_renames() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -2484,8 +2488,6 @@ mod tests {
             rusqlite::params![task.id.as_str(), owner.as_str()],
         )
         .unwrap();
-        db.execute("INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at,provenance) VALUES(?1,?2,1,1,'explicit')",
-            rusqlite::params![wave.id().as_str(), assigned.as_str()]).unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let detail = super::snapshot_task_detail(&store, &task, false, &shared)
@@ -3201,7 +3203,7 @@ mod tests {
                 reason: "settled".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
                 provider: "codex".to_string(),
-                started: true,
+                owner: Some(owned()),
                 completion_pending: None,
             };
             derive_task_condition(
@@ -3284,7 +3286,7 @@ mod tests {
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
-            started: true,
+            owner: Some(owned()),
             completion_pending: None,
         };
         let next_move = NextMove {
@@ -3393,7 +3395,7 @@ mod tests {
                         reason: "terminal".into(),
                         updated_at: "2026-07-21T00:00:00Z".into(),
                         provider: "codex".into(),
-                        started: true,
+                        owner: Some(owned()),
                         completion_pending: None,
                     };
                     let terminal = derive_task_condition(

@@ -809,7 +809,7 @@ def main() -> None:
 
     if "LF_RELEASE_LOCK_FD" not in os.environ or not _release_fds():
         raise RuntimeError(
-            "publisher stages require the owning release lock; invoke lf release run"
+            "publisher stages require the owning release lock; invoke lf repo release run"
         )
     main_repo = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT))
     lock_dir = main_repo / ".lf" / "locks"

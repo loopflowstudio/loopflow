@@ -39,7 +39,7 @@ at once; `lf --machine` is how you ask a different one.
 ## See everything
 
 ```bash
-lf wave list                  # every registered Wave and its placement
+lf wave list                  # every registered Wave and its owning Machine
 lf wave status <wave>       # one wave's Project → Task hierarchy, execution and conditions
 lf wave show             # every open Task across this repository's Waves
 lf wave show --all       # every repository on this machine

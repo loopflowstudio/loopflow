@@ -57,7 +57,7 @@ struct WorkNavigationTests {
             var inventory = try #require(waves[0]["tasks"] as? [String: Any])
             var tasks = try #require(inventory["items"] as? [[String: Any]])
             var runtime = try #require(tasks[0]["runtime"] as? [String: Any])
-            runtime["started"] = started
+            runtime["owner"] = started ? ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any] : NSNull()
             runtime["status"] = status
             tasks[0]["runtime"] = runtime
             inventory["items"] = tasks

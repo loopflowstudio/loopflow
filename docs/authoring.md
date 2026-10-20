@@ -366,8 +366,16 @@ Every Wave uses the repository Team and binds only its Initiative. Select the
 synchronization transport with `planning.provider`; a Team binding selects Linear
 when that choice is omitted.
 
-Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
-Placement does not edit the goal, launch work or stop existing conversations.
+The owning Machine is committed configuration:
+
+```yaml
+machines:
+  default: home_…        # standalone Tasks and unlisted Waves
+  waves:
+    product: home_…      # child Waves inherit their parent's entry
+```
+
+It does not edit the goal, launch work or stop existing conversations.
 
 ### Writing KRs
 

@@ -962,8 +962,8 @@ canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task consumers: durable work reservation retains Started after
-failure. Use CI's materialized migration graph for trigger
+include Task consumers: durable work reservation retains its ownership claim
+after failure. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Experimental Machines hold
 this build's exact schema: use a fresh Machine after changing it. Preserve
 populated historical fixtures for published migration coverage. A Task's draft is
@@ -1100,8 +1100,8 @@ acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
 The mechanical Flow proof uses that disposable account without an installation
-selection. A claim followed by admission failure/release leaves Started absent;
-the real worker records operation history and Started together. It retains the
+selection. A work reservation that fails before allocation leaves the Task unowned;
+the real worker records operation history and its ownership claim together. It retains the
 captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
@@ -1465,15 +1465,15 @@ can expose an empty file between creation and the first write.
 
 ### Project readiness fixtures
 
-Task fixtures must create their Wave and Project, select the Project in SQLite,
-and retain Machine placement before creating work. YAML binding imports belong to
+Task fixtures must create their Wave and Project and select the Project in SQLite
+before creating work. YAML binding imports belong to
 explicit activation tests; passive status reads do not import them. Keep readiness
 fields in inline Swift responses as well as shared DTO fixtures.
 
 Changes to Project selection or planning admission require the full materialized
 Rust suite and headless Swift tests, including Task consumers and status readers.
 Run the installation harness for migration changes; its released-source proof
-must retain Wave placement before projecting accepted Projects.
+must retain Wave identity before projecting accepted Projects.
 
 ### Shared identity fixtures
 

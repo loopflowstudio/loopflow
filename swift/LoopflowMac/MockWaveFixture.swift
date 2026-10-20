@@ -346,7 +346,7 @@ enum MockWaveFixture {
                   "reason": "ready",
                   "updated_at": "2026-07-13T19:00:00Z",
                   "provider": "codex",
-                  "started": true
+                  "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
                 },
                 "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
                 "directive": {

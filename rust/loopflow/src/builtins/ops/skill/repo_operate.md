@@ -284,15 +284,18 @@ writer. Document transfer does not adopt a checkout; current preparation does
 not adopt an unbound existing branch/worktree. Report that gap before launching
 a competing implementation. No automatic scratch-transfer flag is available.
 
-## Placement and bounded contributions
+## Machines and bounded contributions
 
 Use shared readers: `lf wave list --json` for the repository, `lf wave status <wave> --json`
 for one Wave, and `lf wave show --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
-A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.
-Use `lf id`, then `lf --wave <wave> wave-operate` locally or
-`lf --machine <machine-id> --wave <wave> wave-operate` at its placement. `lf --machine` runs the target's `lf`;
+A Task is owned by a person on a Machine, or unowned. Committed `.lf/config.yaml`
+`machines:` names the owning Machine for unowned Work (the Wave, its parents, then
+`default`, then the reading Machine). Change one Task with `lf task claim`,
+`lf task handoff <issue> <machine>` or `lf task release`; they run on the Task's
+writer automatically. Use `lf id`, then `lf --wave <wave> wave-operate` locally or
+`lf --machine <machine-id> --wave <wave> wave-operate` on the Wave's owning Machine. `lf --machine` runs the target's `lf`;
 its SSH route may change without moving Work. Connect missing logins in the
 foreground with `lf machine connect`; work uses credentials resident on its Machine.
 
@@ -338,4 +341,4 @@ credentials resolve from environment first, then Doppler when configured. For
 a repository using Doppler, give `doppler run -- lf account connect <provider>` when those
 credentials are missing. Otherwise name the missing credential variables and
 follow the customer's secret manager. Never print values or run a secret getter
-bare. Do not change accounts or placement merely to make an inspection pass.
+bare. Do not change accounts or Task ownership merely to make an inspection pass.

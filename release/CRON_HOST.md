@@ -1,8 +1,8 @@
 # Maintained cron Machine
 
 Run the infrastructure Wave's declared telemetry and release jobs on the Machine
-that owns its durable placement. Placement is the authority; a hostname in a
-document is not.
+that `.lf/config.yaml` `machines:` names for it. That committed entry is the
+authority; a hostname in a document is not.
 
 ```bash
 lf machine id
@@ -67,11 +67,11 @@ daily schedules before it writes a plist. A declared `flow` must resolve to a
 flow; missing or malformed repository content cannot fall back to a same-named
 skill. Repository flows take precedence over reusable skills. Sync captures the
 non-secret host path, Machine id, Machine/store paths, authoritative checkout, installed binary, exact
-schedule, and log path. Scheduled execution repeats the placement check and
+schedule, and log path. Scheduled execution repeats the owning-Machine check and
 fails with a receipt instead of running after ownership moves.
 
 `lf cron preflight --wave infrastructure` performs the installed-binary,
-placement, checkout, catalog, and schedule checks without changing launchd;
+owning-Machine, checkout, catalog, and schedule checks without changing launchd;
 the bootstrap runs it before any credential probe.
 
 launchd uses host-local time and coalesces missed calendar firings after wake.

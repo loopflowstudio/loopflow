@@ -560,7 +560,7 @@ def test_direct_publisher_stage_cannot_bypass_the_owning_release_operation(
     monkeypatch.setattr(publish_release.sys, "argv", ["publish_release", stage, "--tag", "v1.2.3"])
     with (tmp_path / "checkout.lock").open("w") as lease:
         monkeypatch.setenv("LF_WORKTREE_LEASE_FD", str(lease.fileno()))
-        with pytest.raises(RuntimeError, match="invoke lf release run"):
+        with pytest.raises(RuntimeError, match="invoke lf repo release run"):
             publish_release.main()
 
 

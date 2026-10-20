@@ -525,7 +525,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 .iter()
                 .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
             assert!(runtime
-                .block_on(registered.store.task_started(&registered.task.id))
+                .block_on(registered.store.task_owned(&registered.task.id))
                 .unwrap());
         }
         // However the Task was named, the Flow left the same Processes.

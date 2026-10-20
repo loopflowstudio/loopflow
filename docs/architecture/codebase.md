@@ -47,7 +47,7 @@ subprocess edge to one concept.
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
-| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
+| shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave-operate` conversation |
 | Flow process | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one lf process holding the graph and cursor, starting each step as a child Process |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
@@ -77,7 +77,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf history`, `history show`, `usage` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf machine`, `lf --machine` | Machine identity, placement, command routing |
+| `lf machine`, `lf --machine` | Machine identity and command routing |
 | `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 

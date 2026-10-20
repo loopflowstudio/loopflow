@@ -3018,6 +3018,81 @@ mod tests {
     }
 
     #[test]
+    fn ownership_log_records_released_evidence_without_inventing_owners() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_ownership");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/ownership_log_released.sql"
+        ))
+        .unwrap();
+        super::_migration_transaction(&conn, |conn, _| {
+            conn.execute_batch(&current_draft_sql("task_ownership"))?;
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
+        type Entry = (String, String, Option<String>, Option<String>, i64);
+        let entries: Vec<Entry> = conn
+            .prepare(
+                "SELECT task_id,kind,person,machine_id,at FROM task_ownership ORDER BY task_id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let recorded = |task: &str, machine: Option<&str>, at| {
+            (
+                task.to_string(),
+                "recorded".to_string(),
+                None,
+                machine.map(str::to_string),
+                at,
+            )
+        };
+        assert_eq!(
+            entries,
+            vec![
+                recorded("task_admitted", Some("home_admitted"), 12),
+                recorded("task_checkout", Some("home_checkout"), 11),
+                recorded("task_started", None, 20),
+            ]
+        );
+        for table in ["task_admissions", "work_placements"] {
+            assert!(conn.prepare(&format!("SELECT * FROM {table}")).is_err());
+        }
+        let retired: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name IN ('started_at','admission_authority')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retired, 0);
+        let journal: Vec<String> = conn
+            .prepare("SELECT id FROM planning_peer_changes ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(journal, vec!["kept-1".to_string()]);
+        assert!(conn
+            .execute("UPDATE task_ownership SET person='Jack'", [])
+            .is_err());
+        assert!(conn.execute("DELETE FROM task_ownership", []).is_err());
+        conn.execute("UPDATE task_ownership SET ordered_at=ordered_at", [])
+            .unwrap_err();
+    }
+
+    #[test]
     fn optional_task_ancestry_preserves_released_work_and_current_defaults() {
         let conn = open();
         apply_before_current_draft(&conn, "optional_task_ancestry");

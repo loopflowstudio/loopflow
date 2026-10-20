@@ -69,7 +69,7 @@ pub fn assemble(
             ..
         }) = &binding
         {
-            let route = crate::ops::task_location::resolve(&store.sqlite, id).await?;
+            let route = crate::ops::task_location::resolve(&store.sqlite, id)?;
             anyhow::ensure!(
                 route.machine_id == store.local_machine().await?.id,
                 "Task input is on Machine {}; run the preview directly there",

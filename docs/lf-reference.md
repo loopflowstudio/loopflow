@@ -53,7 +53,7 @@ Open Loopflow or run its CLI
 | `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
+| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (claude, codex, opencode, pi; harness[:model]) Applies everywhere. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -1542,17 +1542,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `--sync` | Refresh planning from Linear before reading Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave place
-
-Set the Machine for Wave schedules and newly created work
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<machine_id>` | machine id |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf wave rename
 
 Rename or relocate an authored Wave and its provider mapping
@@ -1751,15 +1740,34 @@ Create a planning Task without allocating a checkout or starting work
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task admission
+## lf task claim
 
-Inspect or reserve the Task's permanent first execution owner
+Claim the Task for you on this Machine
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--claim` | Request first execution on this Machine; an existing owner wins |
-| `--request` | Correlate a coordinator reply with this request |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task handoff
+
+Hand the Task to another Machine; you stay its person
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<machine>` | Registered Machine label or Machine id |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task release
+
+Release the Task; it is unowned again, with its history intact
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1770,7 +1778,7 @@ Read recorded execution location without preparing or transferring Work
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--peers` | Observe added Machines as well as this one Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

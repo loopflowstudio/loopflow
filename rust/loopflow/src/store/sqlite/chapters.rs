@@ -27,24 +27,14 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A Task is started by its first Run, an unpublished reservation included.
-    pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
-            [task.as_str()],
-            |row| row.get(0),
-        )?)
-    }
-
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let begun: bool = conn.query_row(
             // Checkout membership is preservation evidence even when a
-            // conversation has no explicit Task binding or Started timestamp.
+            // conversation has no explicit Task binding or ownership entry.
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
+                "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})

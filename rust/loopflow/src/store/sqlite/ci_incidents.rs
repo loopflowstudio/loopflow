@@ -266,7 +266,8 @@ impl super::SqliteStore {
                 ci.updated_at, ci.repaired_head_sha,
                 w.slug,
                 CASE WHEN ts.id IS NOT NULL THEN {task_state} END,
-                ts.created_at,
+                (SELECT min(o.at) FROM task_ownership o
+                 WHERE o.task_id=ci.task_id AND o.kind IN ('claim','recorded')),
                 EXISTS (
                     SELECT 1 FROM task_events event
                     JOIN steers direction ON direction.id=json_extract(event.kind_json, '$.steer_id')

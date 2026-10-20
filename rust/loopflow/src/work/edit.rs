@@ -56,14 +56,6 @@ pub struct CommentContent {
     pub created_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Delegation {
-    pub machine_id: crate::durable::MachineId,
-    pub placed_at: i64,
-    pub provenance: crate::durable::PlacementProvenance,
-}
-
 macro_rules! work_values {
     ($(($variant:ident, $field:literal, $value:ty)),* $(,)?) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,10 +76,6 @@ macro_rules! work_values {
     }
 }
 work_values! {
-    (WaveDelegation, "wave_delegation", Option<Delegation>),
-    (ProjectDelegation, "project_delegation", Option<Delegation>),
-    (TaskDelegation, "task_delegation", Option<Delegation>),
-    (TaskAdmissionAuthority, "task_admission_authority", Option<crate::durable::TaskAdmissionAuthority>),
     (WaveName, "wave_name", String),
     (WaveParent, "wave_parent", Option<String>),
     (WaveProject, "wave_project", Option<String>),
@@ -163,15 +151,6 @@ impl WorkValue {
 
     pub(crate) fn validate(&self) -> StoreResult<()> {
         match self {
-            Self::WaveDelegation(Some(v))
-            | Self::ProjectDelegation(Some(v))
-            | Self::TaskDelegation(Some(v))
-                if v.provenance == crate::durable::PlacementProvenance::LocalDefault =>
-            {
-                return Err(StoreError::InvalidData(
-                    "a local default is not an authored delegation".into(),
-                ));
-            }
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
             }

@@ -1329,12 +1329,9 @@ mod tests {
             1
         );
         assert_eq!(
-            conn.query_row(
-                "SELECT count(*) FROM tasks WHERE started_at IS NOT NULL",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
+            conn.query_row("SELECT count(*) FROM task_ownership", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
             0
         );
     }

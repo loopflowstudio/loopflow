@@ -52,7 +52,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. }
+            cmd: TaskCommand::Location { .. }
         })
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
@@ -110,11 +110,18 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. })
         | Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. },
+            cmd: TaskCommand::Location { .. },
         }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
+        // Ownership is written only on the Task's writer.
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Claim { issue, .. }
+                | TaskCommand::Handoff { issue, .. }
+                | TaskCommand::Release { issue, .. },
+        }) => Some(issue.as_str()),
         _ => cli.task.as_deref(),
     }
 }
@@ -139,6 +146,21 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     let machine = route.machine_id.clone();
     let mut forwarded = args[1..].to_vec();
+    if matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Claim { .. }
+                | TaskCommand::Handoff { .. }
+                | TaskCommand::Release { .. }
+        })
+    ) {
+        // Ownership needs no checkout on the writer; name the exact Task in place.
+        if let Some(position) = forwarded.iter().rposition(|arg| arg == selector) {
+            forwarded[position] = route.task_id.to_string();
+        }
+        super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
+        return Ok(true);
+    }
     // Carry the observed exact target in addition to the positional selector.
     // Destination resolution rejects an alias that now names different Work.
     let mut found = false;
@@ -196,10 +218,7 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| {
-            tokio::runtime::Runtime::new()?
-                .block_on(crate::ops::task_location::resolve(store, &task))
-        })
+        .map(|task| crate::ops::task_location::resolve(store, &task))
         .transpose()
 }
 

@@ -32,11 +32,11 @@ mod sync;
 pub(crate) use sync::landed_at;
 pub mod task;
 pub mod task_actions;
-pub mod task_admission;
 pub mod task_execution;
 #[doc(hidden)]
 pub mod task_input;
 pub mod task_location;
+pub mod task_ownership;
 pub mod task_run;
 pub(crate) mod telemetry;
 pub mod trace;

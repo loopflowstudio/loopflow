@@ -94,7 +94,7 @@ one Skill run
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
 | Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Machines | Placement, SSH routing, installation | [Machines and processes](architecture/machines.md) |
+| Machines | Task ownership, SSH routing, installation | [Machines and processes](architecture/machines.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 
@@ -209,7 +209,7 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
-| Placement | Where a Work executes | `(WorkRef, MachineId)` |
+| Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; committed `machines:` names the owning Machine for unowned Work |
 
 An LfSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,
@@ -249,8 +249,9 @@ or change Flow membership. Done and landed Tasks remain valid targets. Earlier
 usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.
 
-`tasks.started_at` is set once when actual Task work is reserved or first bound.
-Recording an inspection command's Process does not start a Task. Chapter retirement
+Reserving actual Task work (`lf task run` or `lf task checkout` allocating a
+checkout) claims an unowned Task in its append-only ownership log. Recording an
+inspection command's Process does not claim a Task. Chapter retirement
 also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
@@ -329,7 +330,7 @@ the behavior.
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
 | Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
-| remote execution, placement, process control, promotion | [Machines and processes](architecture/machines.md) |
+| remote execution, Task ownership, process control, promotion | [Machines and processes](architecture/machines.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
 

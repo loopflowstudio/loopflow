@@ -1040,10 +1040,6 @@ mod tests {
             .sqlite
             .add_machine(&remote, "worker", "worker", "/repo")
             .unwrap();
-        store
-            .sqlite
-            .place_work(&crate::durable::WorkRef::Task(task.clone()), &remote)
-            .unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),
             limit: 1,

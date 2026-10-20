@@ -261,8 +261,16 @@ Bootstrap the remote identity once:
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave list --json
-lf wave place <wave-id> <machine-id>    # record origin-side planning state
 lf --machine mini --wave shipper wave-operate
+lf task handoff LOO-123 mini            # move one Task's ownership to mini
+```
+
+Name the Machine that owns a Wave's unowned work in `.lf/config.yaml`:
+
+```yaml
+machines:
+  waves:
+    shipper: home_…    # the id from lf machine list
 ```
 
 The target Machine proves its identity before running the command and keeps the

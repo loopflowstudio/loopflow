@@ -74,7 +74,7 @@ registration. Window receipts own Task/Session outcomes. Fixture shape is not na
 readiness proof.
 
 `task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
-selection and unavailable execution evidence. Explanation never grants admission.
+selection and unavailable execution evidence. Explanation never claims ownership.
 
 `session_connect_explanations.json` preserves connection intent, preparation versus
 takeover, shared legal actions and unavailable evidence without client acquisition.
@@ -90,6 +90,6 @@ append versus provider refresh, effects and explicit refused input.
 
 `task_locations.json` covers request-bound Machine observations, retained paths,
 pathless execution, local absence and unavailable peers. Negative readings grant
-no admission; execution locations never enter planning exchange.
+no ownership; execution locations never enter planning exchange.
 
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.

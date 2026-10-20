@@ -25,7 +25,6 @@ pub fn run(
             cli.command,
             Some(crate::lf::Commands::Task {
                 cmd: crate::lf::TaskCommand::Location { .. }
-                    | crate::lf::TaskCommand::Admission { claim: None, .. }
             })
         );
     // These operations use the addressed Machine's own records and accounts.
@@ -38,7 +37,9 @@ pub fn run(
                 | crate::lf::SessionCommand::Connect { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
-                | crate::lf::TaskCommand::Admission { .. }
+                | crate::lf::TaskCommand::Claim { .. }
+                | crate::lf::TaskCommand::Handoff { .. }
+                | crate::lf::TaskCommand::Release { .. }
                 | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }
@@ -74,7 +75,7 @@ pub fn run(
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
             return Err(anyhow!(
-                "Task executes on Machine {}, not {}; delegation does not move existing work",
+                "Task is owned on Machine {}, not {}; `lf task handoff` moves it",
                 route.machine_id,
                 target.id
             ));

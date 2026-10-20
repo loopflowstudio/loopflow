@@ -946,13 +946,13 @@ fn task_run_explain_reads_unstarted_work_without_preparing_it() {
     assert_eq!(report["resolution"]["task"]["value"], id);
     assert_eq!(
         report["resolution"]["execution_machine"]["source"],
-        "effective_delegation"
+        "owning_machine:this_machine"
     );
     assert!(report["unavailable"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|reason| reason.as_str().unwrap().contains("first-start")));
+        .any(|reason| reason.as_str().unwrap().contains("Future checkout")));
     let inherited: serde_json::Value = serde_json::from_str(&success(
         command(home.path(), repo.path(), &["--explain", "--json"])
             .env("LF_AS", format!("task:{id}"))
@@ -3325,43 +3325,6 @@ fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage
         .unwrap()
         .worktree
         .is_none());
-    // A historical shared Task has no trustworthy creating-Machine authority.
-    // Git membership alone still cannot authorize its first start.
-    db.execute(
-        "UPDATE tasks SET admission_authority=NULL WHERE id=?1",
-        [id],
-    )
-    .unwrap();
-    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
-    let before = fs::read(&path).unwrap();
-    let report: serde_json::Value = serde_json::from_str(&success(
-        command(
-            home.path(),
-            repo.path(),
-            &["task", "checkout", id, "--explain", "--json"],
-        )
-        .output()
-        .unwrap(),
-    ))
-    .unwrap();
-    assert!(report["action"].is_null());
-    assert!(
-        report["unavailable"]
-            .to_string()
-            .contains("first-start admission is unavailable"),
-        "{report}"
-    );
-    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
-    assert_eq!(fs::read(&path).unwrap(), before);
-    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
-    let refused = command(home.path(), repo.path(), &["task", "checkout", id])
-        .output()
-        .unwrap();
-    assert!(!refused.status.success());
-    assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("first-start admission is unavailable")
-    );
-    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
 }
 
 fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {

@@ -1245,291 +1245,264 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
     assert!(!repo.join(".lf/tmp").exists());
 }
 
-#[test]
-fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads() {
-    use loopflow::durable::{RepositoryId, TaskId};
-    use loopflow::planning_git::PlanningDestination;
-    use loopflow::store::sqlite::SqliteStore;
-    use loopflow::work::task::NewTask;
+/// Two Homes share one repository plan through Git planning; ownership entries
+/// travel as marked comments and every append runs on the Task's writer.
+struct SharedPlan {
+    repository: loopflow::durable::RepositoryId,
+    local: loopflow::store::sqlite::SqliteStore,
+    remote: loopflow::store::sqlite::SqliteStore,
+    local_path: std::path::PathBuf,
+    remote_path: std::path::PathBuf,
+    destination: loopflow::planning_git::PlanningDestination,
+    _repos: [loopflow_test_support::TestRepo; 2],
+}
 
-    let fixture = preview_machines();
-    let local_repo = loopflow_test_support::TestRepo::new();
-    let remote_repo = loopflow_test_support::TestRepo::new();
-    let local_path = local_repo.path().canonicalize().unwrap();
-    let remote_path = remote_repo.path().canonicalize().unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
-    let local = SqliteStore::new(&local_db).unwrap();
-    let remote = SqliteStore::new(&remote_db).unwrap();
-    let repository = RepositoryId::new();
-    local
-        .bind_repository(local_path.to_str().unwrap(), &repository)
-        .unwrap();
-    remote
-        .bind_repository(remote_path.to_str().unwrap(), &repository)
-        .unwrap();
-    let project = remote
-        .ensure_wave_project(remote_path.to_str().unwrap(), "location")
-        .unwrap();
-    let task = remote
-        .create_task(&NewTask {
-            repository_id: remote
-                .ensure_repository(remote_path.to_str().unwrap())
-                .unwrap(),
-            id: TaskId::new(),
-            project_id: Some(project.id),
-            title: "Retained elsewhere".into(),
-            description: String::new(),
-            due_date: None,
-        })
-        .unwrap();
-    let owner = remote.local_machine().unwrap().id;
-    // Execution is deliberately seeded, not imported or claimed by this proof.
-    support::record_flow(
-        &fixture.root.path().join("remote/store"),
-        &remote_path,
-        "prior",
-        "prior-step",
-        "succeeded",
-    );
-    let db = rusqlite::Connection::open(&remote_db).unwrap();
-    db.execute("UPDATE tasks SET worktree=?2,workspace_slug='retained',branch='main',base_commit=?3,checkout_machine_id=?4,started_at=1 WHERE id=?1",
-        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap(), remote_repo.head_sha(), owner.as_str()]).unwrap();
-    let destination =
-        PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/location")
-            .unwrap();
-    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-        store
-            .bind_peer_planning(path.to_str().unwrap(), &destination)
-            .unwrap();
-    }
-    local
-        .import_peer_planning(
-            local_path.to_str().unwrap(),
-            &destination.id(),
-            "first",
-            &remote
-                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
-    let caller = local.local_machine().unwrap().id;
-    assert_success(&fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "wave",
-        "place",
-        task.wave_id.as_ref().unwrap().as_str(),
-        caller.as_str(),
-    ]));
-    remote
-        .import_peer_planning(
-            remote_path.to_str().unwrap(),
-            &destination.id(),
-            "delegated-back",
-            &local
-                .export_peer_planning(local_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT machine_id FROM work_placements WHERE wave_id=?1",
-            [task.wave_id.as_ref().unwrap().as_str()],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        caller.as_str()
-    );
-    assert_eq!(
-        remote.task_execution_route(&task.id).unwrap().machine_id,
-        owner
-    );
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    let local_before = checkpoint_bytes(&local_db);
-    let remote_before = checkpoint_bytes(&remote_db);
-    let args = [
-        "--repository",
-        repository.as_str(),
-        "task",
-        "location",
-        task.id.as_str(),
-        "--peers",
-        "--json",
-    ];
-    let reading = fixture.json(&args);
-    assert_eq!(reading[0]["location"]["state"], "unrecorded");
-    assert_eq!(reading[1]["location"]["state"], "recorded");
-    assert_eq!(reading[1]["machine_id"], owner.as_str());
-    assert_eq!(
-        reading[1]["location"]["checkout"],
-        remote_path.to_str().unwrap()
-    );
-    assert_eq!(checkpoint_bytes(&local_db), local_before);
-    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
-    let explain = |command: &[&str]| {
-        let mut args = vec![
-            "--repository",
-            repository.as_str(),
-            "--task",
-            task.id.as_str(),
+impl SharedPlan {
+    fn new(fixture: &Machines) -> Self {
+        use loopflow::durable::RepositoryId;
+        use loopflow::planning_git::PlanningDestination;
+        use loopflow::store::sqlite::SqliteStore;
+        let repos = [
+            loopflow_test_support::TestRepo::new(),
+            loopflow_test_support::TestRepo::new(),
         ];
-        args.extend_from_slice(command);
-        args.extend(["--explain", "--json"]);
-        fixture.json(&args)
+        let local_path = repos[0].path().canonicalize().unwrap();
+        let remote_path = repos[1].path().canonicalize().unwrap();
+        let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
+        let remote =
+            SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+        let repository = RepositoryId::new();
+        local
+            .bind_repository(local_path.to_str().unwrap(), &repository)
+            .unwrap();
+        remote
+            .bind_repository(remote_path.to_str().unwrap(), &repository)
+            .unwrap();
+        let destination =
+            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
+                .unwrap();
+        for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
+            store
+                .bind_peer_planning(path.to_str().unwrap(), &destination)
+                .unwrap();
+        }
+        Self {
+            repository,
+            local,
+            remote,
+            local_path,
+            remote_path,
+            destination,
+            _repos: repos,
+        }
+    }
+
+    fn to_local(&self) {
+        let journal = self
+            .remote
+            .export_peer_planning(self.remote_path.to_str().unwrap(), &self.destination.id())
+            .unwrap();
+        self.local
+            .import_peer_planning(
+                self.local_path.to_str().unwrap(),
+                &self.destination.id(),
+                &uuid::Uuid::new_v4().to_string(),
+                &journal,
+            )
+            .unwrap();
+    }
+
+    fn to_remote(&self) {
+        let journal = self
+            .local
+            .export_peer_planning(self.local_path.to_str().unwrap(), &self.destination.id())
+            .unwrap();
+        self.remote
+            .import_peer_planning(
+                self.remote_path.to_str().unwrap(),
+                &self.destination.id(),
+                &uuid::Uuid::new_v4().to_string(),
+                &journal,
+            )
+            .unwrap();
+    }
+
+    fn task(&self) -> loopflow::durable::TaskId {
+        let project = self
+            .remote
+            .ensure_wave_project(self.remote_path.to_str().unwrap(), "owners")
+            .unwrap();
+        self.remote
+            .create_task(&loopflow::work::task::NewTask {
+                repository_id: self
+                    .remote
+                    .ensure_repository(self.remote_path.to_str().unwrap())
+                    .unwrap(),
+                id: loopflow::durable::TaskId::new(),
+                project_id: Some(project.id),
+                title: "Ownership demo".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap()
+            .id
+    }
+}
+
+#[test]
+fn task_ownership_follows_claim_handoff_and_release_through_the_writer() {
+    use loopflow::durable::{OwnershipKind, TaskExecutionSource};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    plan.to_local();
+    // The laptop follows the claim; it routes to the owner, never allocating here.
+    let route = plan.local.task_execution_route(&task).unwrap();
+    assert_eq!(
+        (route.machine_id.clone(), route.source),
+        (mini.clone(), TaskExecutionSource::Owner)
+    );
+    assert!(plan.local.claim_task(&task).is_err());
+
+    // Handoff from the laptop runs on mini, the writer, over `lf --machine`.
+    let handed = fixture.json(&[
+        "--repository",
+        plan.repository.as_str(),
+        "task",
+        "handoff",
+        task.as_str(),
+        laptop.as_str(),
+        "--json",
+    ]);
+    assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
+    let kinds = |store: &loopflow::store::sqlite::SqliteStore| {
+        store
+            .task_ownership(&task)
+            .unwrap()
+            .log
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>()
     };
-    // Every presentation uses the same observed owner and checkout provenance.
-    // Started history without a path is unavailable, not an unstarted Task or a
-    // reason to retain the previous checkout reading.
-    for checkout in [Some(remote_path.to_str().unwrap()), None] {
-        db.execute(
-            "UPDATE tasks SET worktree=?2 WHERE id=?1",
-            rusqlite::params![task.id.as_str(), checkout],
+    assert_eq!(
+        kinds(&plan.remote),
+        [OwnershipKind::Claim, OwnershipKind::Handoff]
+    );
+    plan.to_local();
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop
+    );
+
+    // The laptop now writes; release keeps the history and leaves it unowned.
+    let released = fixture.json(&[
+        "--repository",
+        plan.repository.as_str(),
+        "task",
+        "release",
+        task.as_str(),
+        "--json",
+    ]);
+    assert!(released["owner"].is_null());
+    plan.to_remote();
+    for store in [&plan.local, &plan.remote] {
+        let ownership = store.task_ownership(&task).unwrap();
+        assert!(ownership.owner.is_none());
+        assert_eq!(
+            kinds(store),
+            [
+                OwnershipKind::Claim,
+                OwnershipKind::Handoff,
+                OwnershipKind::Release
+            ]
+        );
+    }
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn task_ownership_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    // No owning Machine is configured, so each Machine may claim for itself.
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    plan.to_local();
+    let first = plan.remote.task_ownership(&task).unwrap();
+    assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
+    assert_eq!(
+        first.superseded_by.unwrap().machine.id,
+        Some(laptop.clone())
+    );
+    assert_eq!(
+        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let steers = plan.remote.task_steers(&task).unwrap();
+    assert!(steers
+        .iter()
+        .any(|steer| steer.text.starts_with("Also claimed later by")));
+    let second = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
+    assert!(second.superseded_by.is_none());
+    // Exchange settles: neither Machine re-claims a log that shows a later claim.
+    plan.to_remote();
+    plan.to_local();
+    assert_eq!(plan.remote.task_ownership(&task).unwrap().log.len(), 2);
+}
+
+#[test]
+fn task_ownership_owner_reclaims_after_a_stale_release_elsewhere() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    // A stale reading on mini treats the Task as its own and releases it there,
+    // delivering the release as mini would: a marked comment in the journal.
+    let entry = serde_json::json!({
+        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
+        "task_id": task.as_str(), "kind": "release", "person": "Kim",
+        "machine_id": mini.as_str(),
+        "at": time::OffsetDateTime::now_utc().unix_timestamp() + 5,
+    });
+    plan.remote
+        .append_task_comment(
+            &task,
+            &loopflow::work::task::comment::TaskComment {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: format!("Kim released this\n\n<!-- loopflow-ownership:{entry} -->"),
+                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: Some(
+                    (time::OffsetDateTime::now_utc() + time::Duration::seconds(5))
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap(),
+                ),
+            },
         )
         .unwrap();
-        let remote_before = checkpoint_bytes(&remote_db);
-        let run = explain(&["task", "run"]);
-        assert_eq!(
-            run["resolution"]["execution_machine"]["value"],
-            owner.as_str()
-        );
-        assert_eq!(
-            run["resolution"]["execution_machine"]["source"],
-            "peer_recorded_checkout"
-        );
-        match checkout {
-            Some(path) => assert_eq!(run["resolution"]["checkout"]["value"], path),
-            None => assert_eq!(run["resolution"]["checkout"]["state"], "unavailable"),
-        }
-        assert!(run["action"].is_null());
-        for command in [
-            vec!["task", "checkout"],
-            vec!["task", "workflow", "move", task.id.as_str(), "start"],
-            vec!["desktop", "open"],
-        ] {
-            let report = explain(&command);
-            for fact in ["execution_machine", "checkout"] {
-                assert_eq!(report["resolution"][fact], run["resolution"][fact]);
-            }
-            if command[0] == "desktop" {
-                if checkout.is_some() {
-                    let url = reqwest::Url::parse(report["url"].as_str().unwrap()).unwrap();
-                    let query = url
-                        .query_pairs()
-                        .collect::<std::collections::BTreeMap<_, _>>();
-                    assert_eq!(query["machine"], owner.as_str());
-                    assert_eq!(query["repository"], repository.as_str());
-                    assert_eq!(query["repo"], local_path.to_str().unwrap());
-                } else {
-                    assert!(report["url"].is_null());
-                    assert!(report["impediments"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|value| value
-                            .as_str()
-                            .unwrap()
-                            .contains("Recorded checkout unavailable")));
-                }
-            } else {
-                assert!(report["action"].is_null());
-            }
-        }
-        assert_eq!(checkpoint_bytes(&local_db), local_before);
-        assert_eq!(checkpoint_bytes(&remote_db), remote_before);
-    }
-    db.execute(
-        "UPDATE tasks SET worktree=?2 WHERE id=?1",
-        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap()],
-    )
-    .unwrap();
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-
-    let checkout = fixture.json(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--json",
-    ]);
-    assert_eq!(checkout["worktree"], remote_path.to_str().unwrap());
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-    let local_before = checkpoint_bytes(&local_db);
-    let remote_before = checkpoint_bytes(&remote_db);
-
-    // Replaying yesterday's successful reply cannot masquerade as a new reading.
-    let replay = fixture.root.path().join("replay.json");
-    fs::write(
-        &replay,
-        serde_json::to_vec(&vec![reading[1].clone()]).unwrap(),
-    )
-    .unwrap();
-    executable(
-        &fixture.root.path().join("bin/ssh"),
-        &format!("#!/bin/sh\ncat '{}'\n", replay.display()),
+    plan.to_local();
+    // The laptop's claim stays open locally and it claims again in the journal.
+    let ownership = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(
+        ownership.owner.unwrap().machine.id,
+        Some(plan.local.local_machine().unwrap().id)
     );
-    let stale = fixture.json(&args);
-    assert_eq!(stale[1]["location"]["state"], "unavailable");
-    assert!(stale[1]["location"]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("stale or mismatched"));
-    for command in [
-        vec!["task", "run"],
-        vec!["task", "checkout"],
-        vec!["desktop", "open"],
-    ] {
-        let report = explain(&command);
-        for fact in ["execution_machine", "checkout"] {
-            assert_eq!(report["resolution"][fact]["state"], "unavailable");
-        }
-        assert!(report["action"].is_null());
-        if command[0] == "desktop" {
-            // Opening Work remains available without a usable execution location.
-            assert!(report["url"].as_str().unwrap().starts_with("loopflow://"));
-        } else {
-            assert!(report["url"].is_null());
-        }
-    }
-
-    // A peer reply represents exactly one local observer, never a peer inventory.
-    for readings in [vec![], vec![reading[1].clone(); 2]] {
-        fs::write(&replay, serde_json::to_vec(&readings).unwrap()).unwrap();
-        let malformed = fixture.json(&args);
-        assert_eq!(malformed[1]["location"]["state"], "unavailable");
-        assert!(malformed[1]["location"]["reason"]
-            .as_str()
-            .unwrap()
-            .contains("one local execution-location reading"));
-    }
-
-    executable(
-        &fixture.root.path().join("bin/ssh"),
-        "#!/bin/sh\necho unreachable >&2\nexit 255\n",
+    assert_eq!(
+        ownership.log.last().unwrap().kind,
+        loopflow::durable::OwnershipKind::Claim
     );
-    let unreachable = fixture.json(&args);
-    assert_eq!(unreachable[1]["location"]["state"], "unavailable");
-    assert_eq!(checkpoint_bytes(&local_db), local_before);
-    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
-    // Actual preparation refuses before a local checkout or provider can appear.
-    let launch = fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--json",
-    ]);
-    assert!(!launch.status.success());
-    let error = String::from_utf8_lossy(&launch.stderr);
-    assert!(
-        error.contains("Machine command unavailable") && error.contains("unreachable"),
-        "{error}"
-    );
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
 }
 
 #[test]
@@ -1655,146 +1628,5 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
     assert!(changed);
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
-#[test]
-fn task_admission_crosses_machines_and_recovers_a_lost_reply_before_checkout() {
-    use loopflow::durable::TaskId;
-    use loopflow::planning_git::PlanningDestination;
-    use loopflow::store::sqlite::SqliteStore;
-    use loopflow::work::task::NewTask;
-
-    let fixture = preview_machines();
-    let local_repo = loopflow_test_support::TestRepo::new();
-    let remote_repo = loopflow_test_support::TestRepo::new();
-    let local_path = local_repo.path().canonicalize().unwrap();
-    let remote_path = remote_repo.path().canonicalize().unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
-    let local = SqliteStore::new(&local_db).unwrap();
-    let remote = SqliteStore::new(&remote_db).unwrap();
-    let repository = remote
-        .ensure_repository(remote_path.to_str().unwrap())
-        .unwrap();
-    local
-        .bind_repository(local_path.to_str().unwrap(), &repository)
-        .unwrap();
-    let project = remote
-        .ensure_wave_project(remote_path.to_str().unwrap(), "admission")
-        .unwrap();
-    let task = remote
-        .create_task(&NewTask {
-            repository_id: remote
-                .ensure_repository(remote_path.to_str().unwrap())
-                .unwrap(),
-            id: TaskId::new(),
-            project_id: Some(project.id),
-            title: "Admit once".into(),
-            description: String::new(),
-            due_date: None,
-        })
-        .unwrap();
-    let destination = PlanningDestination::new(
-        "/fixture/planning",
-        "refs/loopflow/planning/shared/admission",
-    )
-    .unwrap();
-    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-        store
-            .bind_peer_planning(path.to_str().unwrap(), &destination)
-            .unwrap();
-    }
-    local
-        .import_peer_planning(
-            local_path.to_str().unwrap(),
-            &destination.id(),
-            "first",
-            &remote
-                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
-    let owner = local.local_machine().unwrap().id;
-    let args = [
-        "--repository",
-        repository.as_str(),
-        "task",
-        "admission",
-        task.id.as_str(),
-        "--json",
-    ];
-    let before = [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)];
-    let reading = fixture.json(&args);
-    assert!(reading["owner"].is_null());
-    assert_eq!(
-        reading["authority"]["machine_id"],
-        remote.local_machine().unwrap().id.as_str()
-    );
-    assert_eq!(
-        [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)],
-        before
-    );
-
-    let ssh = fixture.root.path().join("bin/ssh");
-    let original = fs::read_to_string(&ssh).unwrap();
-    // Execute the real peer CLI, then lose its successful acknowledgement.
-    executable(
-        &ssh,
-        &(original.replace("exec env -i", "env -i") + "\nexit 42\n"),
-    );
-    let mut claim = args.to_vec();
-    claim.extend(["--claim", owner.as_str()]);
-    let lost = fixture.run(&claim);
-    assert!(!lost.status.success());
-    assert_eq!(
-        remote
-            .task_admission(&task.id, "receipt")
-            .unwrap()
-            .unwrap()
-            .owner,
-        Some(owner.clone())
-    );
-    assert!(local
-        .task_admission(&task.id, "local")
-        .unwrap()
-        .unwrap()
-        .owner
-        .is_none());
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    executable(&ssh, &original);
-    let retried = fixture.json(&claim);
-    assert_eq!(retried["owner"], owner.as_str());
-    assert_eq!(fixture.json(&args)["owner"], owner.as_str());
-    // The ordinary checkout operation consumes the same decision and records
-    // execution only on its admitted Machine.
-    let prepared = fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--name",
-        "admitted-work",
-        "--json",
-    ]);
-    assert_success(&prepared);
-    assert!(local
-        .task(&task.id)
-        .unwrap()
-        .unwrap()
-        .worktree
-        .unwrap()
-        .join(".git")
-        .exists());
-    assert!(remote.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert_eq!(
-        local
-            .task_admission(&task.id, "retained")
-            .unwrap()
-            .unwrap()
-            .owner,
-        Some(owner)
-    );
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

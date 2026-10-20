@@ -795,7 +795,7 @@ final class WorkModel {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
                     navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
-                    if task.runtime?.started == true, task.runtime?.status != .paused {
+                    if task.runtime?.owner != nil, task.runtime?.status != .paused {
                         navigation.retainWorkingTask(task.id, aliases: [task.runtime?.workId].compactMap { $0 })
                         cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repo)
                     }
@@ -1622,7 +1622,7 @@ final class WorkModel {
     private func retainWorkingTask(_ reference: WorkReference?) {
         guard let reference, reference.kind == .task else { return }
         let found = task(id: reference.id)?.task
-        let started = found?.runtime?.started ?? selectionPlans.value?.contains { plan in
+        let started = found?.runtime.map { $0.owner != nil } ?? selectionPlans.value?.contains { plan in
             plan.members.contains { $0.work.reference == reference }
         } ?? false
         guard started, found?.runtime?.status != .paused else { return }

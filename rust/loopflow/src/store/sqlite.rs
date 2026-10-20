@@ -47,7 +47,7 @@ mod repositories;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
-pub(crate) mod task_admission;
+pub(crate) mod task_ownership;
 
 mod steers;
 mod task_comments;

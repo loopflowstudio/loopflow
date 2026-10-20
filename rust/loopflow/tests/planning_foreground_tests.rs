@@ -158,7 +158,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
         "task_workflows",
         "task_workflow_moves",
         "task_prs",
-        "work_placements",
+        "task_ownership",
     ]
     .into_iter()
     .map(|table| {
@@ -246,11 +246,11 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     assert_eq!(
         Connection::open(right.path().join("loopflow.db"))
             .unwrap()
-            .query_row("SELECT count(*) FROM work_placements", [], |row| row
+            .query_row("SELECT count(*) FROM task_ownership", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
         0,
-        "cold planning acquisition must not allocate execution placement"
+        "cold planning acquisition must not claim the Task"
     );
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);
@@ -746,10 +746,8 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     .unwrap();
     let before = execution(&conn, &retained);
     let imported_before = execution(&conn, fixture.task.id.as_str());
-    let placements = || rows(&conn, "SELECT * FROM work_placements ORDER BY rowid", []);
-    let placements_before = placements();
-    let imported_work = loopflow::durable::WorkRef::Wave(fixture.task.wave_id.clone().unwrap());
-    assert!(worker.find_placement(&imported_work).unwrap().is_none());
+    let ownership = || rows(&conn, "SELECT * FROM task_ownership ORDER BY rowid", []);
+    let ownership_before = ownership();
     for _ in 0..2 {
         let detail: serde_json::Value = serde_json::from_str(&run(
             &target,
@@ -785,12 +783,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         assert!(run(&target, right.path(), &["wave", "status", wave_id]).contains("unplaced"));
         assert!(run(&target, right.path(), &["wave", "list"]).contains("unplaced"));
     }
-    assert!(worker.find_placement(&imported_work).unwrap().is_none());
-    assert!(worker
-        .find_placement(&loopflow::durable::WorkRef::Task(fixture.task.id.clone()))
-        .unwrap()
-        .is_none());
-    assert_eq!(placements(), placements_before);
+    assert_eq!(ownership(), ownership_before);
     assert_eq!(execution(&conn, fixture.task.id.as_str()), imported_before);
     assert_eq!(execution(&conn, &retained), before);
 }

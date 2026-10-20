@@ -203,7 +203,7 @@ struct WorkSelectionTests {
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
-        let task = try #require(roadmap.tasks.items.first { $0.runtime?.started != true })
+        let task = try #require(roadmap.tasks.items.first { $0.runtime?.owner == nil })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Navigation cannot execute") },
                               repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])

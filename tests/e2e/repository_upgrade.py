@@ -104,19 +104,13 @@ def main() -> None:
         assert after["task"]["id"] == task["id"]
         assert after["execution"]["worktree"] == str(checkout)
         invoke(entry, "session", "list", "--json", cwd=cwd)
-        navigation = json.loads(
-            invoke(
-                entry,
-                "--task",
-                task["id"],
-                "desktop",
-                "open",
-                "--explain",
-                "--json",
-                cwd=cwd,
-            )
-        )
-        assert urlparse(navigation["url"]).path == f"/{task['id']}"
+        link = json.loads(
+            invoke(entry, "--task", task["id"], "open", "--link", "--json", cwd=cwd)
+        )[0]["url"]
+        assert urlparse(link).path.startswith("/task/")
+        # The upgraded store resolves the Work address back to the same Work.
+        again = json.loads(invoke(entry, "open", link, "--link", "--json", cwd=cwd))
+        assert again[0]["url"] == link
     resumed = json.loads(invoke(entry, "connect", "--prepare", "--task", task["id"], "--json"))
     for field in ["id", "workspace", "work", "provider", "title", "cwd"]:
         assert resumed[field] == session[field]

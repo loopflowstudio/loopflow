@@ -192,6 +192,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
+    /// Resolve a public Work address through Rust's repository and Work owners.
+    /// Reads only: no checkout, Session or window is prepared.
+    public func workLink(_ url: URL) async throws -> WorkLink {
+        let links = try Self.decode([WorkLink].self, from: await run(["open", url.absoluteString, "--link", "--json"], nil))
+        guard let link = links.first, links.count == 1 else {
+            throw RegistryQueryError("The Work link did not resolve to one destination.")
+        }
+        return link
+    }
+
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
         var args = ["wave", "show", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }

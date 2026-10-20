@@ -189,13 +189,13 @@ struct WorkActivityView: View {
                 "checkmark",
                 ["ok", "completed", "succeeded"].contains(status.lowercased())
                     ? palette.success
-                    : palette.waiting
+                    : palette.warning
             )
         case .prStarted: ("arrow.triangle.branch", palette.textTertiary)
         case .prPublishRequested: ("arrow.up.right", palette.working)
         case .prMergeRequested: ("arrow.triangle.merge", palette.working)
         case .prMerged: ("checkmark.seal.fill", palette.success)
-        case .prAbandoned: ("xmark", palette.waiting)
+        case .prAbandoned: ("xmark", palette.warning)
         case .steerIssued: ("arrow.turn.down.right", palette.emphasisInk)
         }
     }
@@ -213,13 +213,13 @@ struct WorkActivityView: View {
     private func evidenceBanner(_ reason: String) -> some View {
         Label(reason, systemImage: "exclamationmark.triangle.fill")
             .font(Typography.caption(9))
-            .foregroundStyle(palette.waiting)
+            .foregroundStyle(palette.warning)
             .lineLimit(2)
             .textSelection(.enabled)
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.waiting.opacity(0.10))
+            .background(palette.warning.opacity(0.10))
     }
 
 }

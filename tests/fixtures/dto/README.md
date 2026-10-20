@@ -65,8 +65,11 @@ is LOO-298-shaped (384 steers over the goal budget); the other has no retained
 capture, so every source is `null` rather than zero. Rust round-trips it and
 Swift decodes it for the Task's Session history.
 
-`desktop_open_explanations.json` pins proposed opening URLs, impediments and unknown
-native state. Rust and Swift round-trip it; a proposal is not an opening receipt.
+`work_links.json` pins `lf open --link --json`: a readable label, the public Work
+address, its executable fallback, the resolved target (including a remote execution
+owner), the caller's conversation relation and the proposed route. Rust and Swift
+round-trip it; Desktop resolves incoming addresses through it. A link is not an
+opening receipt.
 
 `desktop_openings.json` distinguishes request acceptance, usable endpoints and failures;
 `desktop_inspection.json` requires top-level `openings` for failures before window

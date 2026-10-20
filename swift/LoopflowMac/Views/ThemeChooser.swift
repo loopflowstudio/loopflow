@@ -67,7 +67,8 @@ struct ThemeChooser: View {
                     Text("Selected Work").foregroundStyle(palette.workSelectedText)
                         .padding(6).workDestinationSelection(true)
                     Text("Working").foregroundStyle(palette.working)
-                    Text("Waiting").foregroundStyle(palette.waiting)
+                    Text("Available").foregroundStyle(palette.available)
+                    Text("Warning").foregroundStyle(palette.warning)
                     Text("Error").foregroundStyle(palette.failure)
                 }.padding(.vertical, 14)
                 VStack(alignment: .leading, spacing: 6) {

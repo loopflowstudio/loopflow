@@ -308,7 +308,7 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
-                    _ if session.attention.is_some() => "available",
+                    _ if session.availability.is_some() => "available",
                     SessionState::Unknown => "unknown",
                     SessionState::Active => "active",
                     SessionState::Closed => "closed",

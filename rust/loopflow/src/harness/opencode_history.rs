@@ -15,7 +15,7 @@ pub(super) struct History {
     requests: BTreeMap<String, Request>,
     baseline: BTreeSet<String>,
     interactive: bool,
-    attention: super::attention::Attention,
+    activity: super::activity_tracker::SessionActivityTracker,
 }
 
 #[derive(Debug, Default)]
@@ -58,11 +58,11 @@ impl History {
 
     pub(super) fn attend(&mut self, thread: &AgentSessionId, event: &Value) {
         if let Some((store, session, attachment)) = &self.owner {
-            self.attention.record(
+            self.activity.record(
                 store,
                 session,
                 attachment,
-                super::attention::opencode(event, thread.as_str()),
+                super::activity_tracker::opencode(event, thread.as_str()),
             );
         }
     }

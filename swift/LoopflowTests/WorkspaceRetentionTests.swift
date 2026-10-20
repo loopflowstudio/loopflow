@@ -26,17 +26,17 @@ struct WorkspaceRetentionTests {
         let model = WorkModel(query: query, repoPath: scene.path)
         model.bindWorkspaces(registry, repository: scene.id)
         let started = AsyncStream<Void>.makeStream(), release = AsyncStream<Void>.makeStream()
-        let delivered = AsyncStream<URL>.makeStream()
+        let delivered = AsyncStream<LinkedWork>.makeStream()
         defer {
             started.continuation.finish()
             release.continuation.finish()
             delivered.continuation.finish()
         }
         var opened: [RepositoryWorkspace] = []
-        var received: [URL] = []
+        var received: [LinkedWork] = []
         let window = UUID()
         defer { router.remove(window, repository: scene.id) }
-        let link = try #require(TaskLink(issue: "NEW", repo: path).url)
+        let link = LinkedWork.task(TaskLink(issue: "NEW", repo: path))
         let opening = Task {
             try await router.openRepository(path: path, link: link, query: RegistryQuery { _, _ in
                 started.continuation.yield(())
@@ -69,7 +69,7 @@ struct WorkspaceRetentionTests {
             #expect(outcome == "success")
             #expect(reopened == scene)
             for await _ in delivered.stream { break }
-            #expect(received == [TaskLink(issue: "NEW", repo: scene.path).url])
+            #expect(received == [.task(TaskLink(issue: "NEW", repo: scene.path))])
         case .failure(let error):
             #expect(outcome != "success")
             #expect(router.inspect().openings.first?.status == .failed)

@@ -258,7 +258,7 @@ pub struct SessionRecord {
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
-    pub attention: Option<SessionAttention>,
+    pub availability: Option<SessionAvailability>,
     pub program_status: Option<crate::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     pub agent_process_id: Option<crate::id::LfProcessId>,
@@ -288,7 +288,7 @@ pub struct SessionRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionAttention {
+pub enum SessionAvailability {
     Available,
 }
 
@@ -300,8 +300,8 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     }
 }
 
-fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    session.available.then_some(SessionAttention::Available)
+fn session_availability(session: &crate::session::SessionSummary) -> Option<SessionAvailability> {
+    session.available.then_some(SessionAvailability::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -489,7 +489,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
-        attention: session_attention(session),
+        availability: session_availability(session),
         program_status: session.program_status.clone(),
         agent_process_id: session.agent_process_id.clone(),
         task_primary: session.task_primary,
@@ -1006,7 +1006,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
     let mut reading = SessionRecord {
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
-        attention: session_attention(&metadata),
+        availability: session_availability(&metadata),
         program_status: metadata.program_status.clone(),
         agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
@@ -1634,9 +1634,12 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(session.state, super::SessionState::Unknown);
-        assert_eq!(session.attention, Some(super::SessionAttention::Available));
         assert_eq!(
-            serde_json::to_value(&session).unwrap()["attention"],
+            session.availability,
+            Some(super::SessionAvailability::Available)
+        );
+        assert_eq!(
+            serde_json::to_value(&session).unwrap()["availability"],
             "available"
         );
         assert!(matches!(
@@ -1751,7 +1754,7 @@ mod tests {
         let row = super::summary_surface(&summary);
         assert_eq!(row.state, super::SessionState::Unknown);
         assert_eq!(row.ready_summary, summary.ready_summary);
-        assert_eq!(row.attention, None);
+        assert_eq!(row.availability, None);
         summary.ready_summary = None;
         summary.completed_at = Some(1);
         assert_eq!(

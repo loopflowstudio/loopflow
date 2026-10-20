@@ -21,7 +21,6 @@ struct LoopflowApp: App {
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
     @State private var openingError: String?
-    @State private var taskChoices: [[TaskWindowChoice]] = []
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @State private var appearance: AppearanceStore
@@ -142,7 +141,7 @@ struct LoopflowApp: App {
 
         Window("Portfolio", id: "portfolio") {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
-                requestRepository(path, TaskLink(issue: id, repo: path).url)
+                requestRepository(path, .task(TaskLink(issue: id, repo: path)))
             })
                 .modifier(AppAppearance(appearance: appearance))
                 .onOpenURL { handleDeepLink($0) }
@@ -150,8 +149,7 @@ struct LoopflowApp: App {
         .defaultSize(width: 1080, height: 760)
 
         Window("Open Work", id: "open-work") {
-            WorkspaceOpeningFeedback(error: $openingError, choices: $taskChoices,
-                                     openRepository: requestRepository)
+            WorkspaceOpeningFeedback(error: $openingError)
                 .modifier(AppAppearance(appearance: appearance))
         }
         .defaultSize(width: 480, height: 240)
@@ -204,47 +202,27 @@ struct LoopflowApp: App {
         }
     }
 
+    /// Work addresses resolve only through Rust's shared owners (`lf open --link`).
+    /// An ambiguous or unknown address changes nothing and reports the qualified choices.
     @MainActor
     private func handleDeepLink(_ url: URL) {
         guard url.scheme == "loopflow" else { return }
         switch url.host {
-        case "task":
-            Task {
-                do {
-                    let link = try TaskLink(url: url)
-                    if let path = link.repo {
-                        try await openRepository(path, link: url)
-                        return
-                    }
-                    let query = SessionFixture.query ?? RegistryQueryLocal.shared
-                    let snapshot = try await query.taskDestination(issue: link.issue, repo: nil)
-                    let choices = snapshot.waves.flatMap { wave in
-                        wave.tasks.items.map { _ in TaskWindowChoice(path: wave.wave.repo, url: url) }
-                    }
-                    guard !snapshot.waves.contains(where: { $0.tasks.unavailableReason != nil }) else {
-                        throw RegistryQueryError("Task lookup is incomplete. Retry, or qualify the link with ?repo=/path/to/repository.")
-                    }
-                    if choices.count == 1, let choice = choices.first {
-                        try await openRepository(choice.path, link: choice.url)
-                    } else if choices.isEmpty {
-                        throw RegistryQueryError("Task \(link.issue) was not found. No workspace was changed.")
-                    } else {
-                        taskChoices.append(choices)
-                        openWindow(id: "open-work")
-                    }
-                } catch { reportOpeningError(error) }
-            }
-        case "open":
-            guard let repoPath = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems?.first(where: { $0.name == "repo" })?.value
-            else { return }
-            requestRepository(repoPath, nil)
-        case "portfolio":
+        case "portfolio" where url.path.isEmpty:
             openWindow(id: "portfolio")
-        case "sessions":
+        case "sessions" where url.path.isEmpty:
             NotificationCenter.default.post(name: .openSessions, object: nil)
         default:
-            break
+            taskLinks.receiveAddress { isLatest in
+                do {
+                    let query = SessionFixture.query ?? RegistryQueryLocal.shared
+                    let resolved = try await query.workLink(url)
+                    let link = LinkedWork(resolved)
+                    var path = resolved.target.repositoryPath
+                    if case .task(let task) = link, let repo = task.repo { path = repo }
+                    try await openRepository(path, link: link, address: resolved.url, raises: isLatest)
+                } catch { reportOpeningError(error) }
+            }
         }
     }
 
@@ -256,7 +234,7 @@ struct LoopflowApp: App {
     }
 
     @MainActor
-    private func requestRepository(_ path: String, _ link: URL?) {
+    private func requestRepository(_ path: String, _ link: LinkedWork?) {
         Task {
             do { try await openRepository(path, link: link) }
             catch { reportOpeningError(error) }
@@ -264,9 +242,11 @@ struct LoopflowApp: App {
     }
 
     @MainActor
-    private func openRepository(_ path: String, link: URL? = nil) async throws {
+    private func openRepository(_ path: String, link: LinkedWork? = nil, address: String? = nil,
+                                raises: @MainActor () -> Bool = { true }) async throws {
         let query = SessionFixture.query ?? RegistryQueryLocal.shared
-        let workspace = try await taskLinks.openRepository(path: path, link: link, query: query) { workspace in
+        let workspace = try await taskLinks.openRepository(path: path, link: link, address: address, query: query,
+                                                           raises: raises) { workspace in
             openWindow(id: "workspace", value: workspace)
         }
         try? saveLoopflowState(LoopflowState(selectedRepoPath: workspace.path))

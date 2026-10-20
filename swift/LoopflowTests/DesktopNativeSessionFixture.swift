@@ -222,11 +222,9 @@ struct DesktopNativeSessionTests {
         #expect(document.snapshot != nil)
         document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
         document.editor.setSelectedRange(NSRange(location: 2, length: 3))
-        var link = URLComponents()
-        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
-        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo), URLQueryItem(name: "session", value: fixture.sessionId)]
+        let link = TaskLink(issue: fixture.issue, repo: fixture.repo, session: fixture.sessionId)
         for _ in 0..<3 {
-            await model.openTaskLink(try #require(link.url))
+            await model.openTaskLink(link)
             #expect(model.selection?.id == fixture.taskId)
             #expect(model.sessions.value?.contains { $0.id == model.navigation.selectedSessionId && $0.taskIds.contains(fixture.taskId) } == true)
             store.reconcile(try await fixture.records())

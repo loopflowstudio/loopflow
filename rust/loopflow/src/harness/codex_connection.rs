@@ -1642,4 +1642,40 @@ mod tests {
             assert_eq!(diagnostics.len(), usize::from(!handshake));
         }
     }
+
+    #[tokio::test]
+    async fn relay_carries_provider_messages_beyond_sixteen_mebibytes() {
+        let home = tempfile::tempdir_in("/tmp").unwrap();
+        let endpoint = home.path().join("provider.sock");
+        let listener = UnixListener::bind(&endpoint).unwrap();
+        let catalog = json!({"id": 1, "result": {"plugins": "x".repeat(17 << 20)}}).to_string();
+        let reply = catalog.clone();
+        let provider = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            socket.next().await.unwrap().unwrap();
+            socket.send(Message::Text(reply.into())).await.unwrap();
+            let _ = socket.next().await;
+        });
+        let connection = attached_connection(home.path());
+        let (terminal, relay) = UnixStream::pair().unwrap();
+        let relay = tokio::spawn(async move { connection.serve(relay, &endpoint).await });
+        let mut terminal = super::connect_upstream(terminal).await.unwrap();
+        terminal
+            .send(Message::Text(
+                r#"{"id":1,"method":"plugin/list","params":{}}"#.into(),
+            ))
+            .await
+            .unwrap();
+        let received = terminal.next().await.unwrap().unwrap();
+        assert_eq!(received.into_text().unwrap().len(), catalog.len());
+        terminal.close(None).await.unwrap();
+        drop(terminal);
+        tokio::time::timeout(std::time::Duration::from_secs(5), relay)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        provider.await.unwrap();
+    }
 }

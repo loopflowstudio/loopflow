@@ -61,13 +61,16 @@ struct LocalWaveAgentLauncherTests {
             "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
             "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
             "CMUX_WORKSPACE_ID": "launching-workspace", "CMUX_SURFACE_ID": "launching-surface",
-            "CMUX_SOCKET_PATH": "/tmp/cmux.sock",
+            "CMUX_SOCKET_PATH": "/tmp/cmux.sock", "HERDR_ENV": "1", "HERDR_SOCKET_PATH": "/tmp/herdr.sock",
+            "HERDR_PANE_ID": "w1:p1",
         ]
         let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
 
         for (key, value) in kept where key != "PATH" { #expect(environment[key] == value) }
         #expect(environment["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
         for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
+        // `lf open` from a Desktop terminal opens in Desktop, not the launcher's host.
+        #expect(environment["LF_DESKTOP"] == "1")
     }
 
 

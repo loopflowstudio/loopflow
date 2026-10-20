@@ -25,7 +25,8 @@ public struct PaletteDefinition: Equatable, Sendable {
     public var shadow: ThemeRGB
     public var selectionFill: ThemePaint
     public var workingTone: ThemeTone
-    public var waitingTone: ThemeTone
+    public var warningTone: ThemeTone
+    public var availableTone: ThemeTone
     public var failureTone: ThemeTone
     public var successTone: ThemeTone
     public var stoppedTone: ThemeTone
@@ -76,12 +77,15 @@ public struct LoopflowPalette: Sendable {
     public var workSelectedSecondaryText: Color { definition.workSelectedSecondaryText.color }
     public var shadow: Color { definition.shadow.color }
     public var workingTone: ThemeTone { definition.workingTone }
-    public var waitingTone: ThemeTone { definition.waitingTone }
+    public var warningTone: ThemeTone { definition.warningTone }
+    public var availableTone: ThemeTone { definition.availableTone }
     public var failureTone: ThemeTone { definition.failureTone }
     public var successTone: ThemeTone { definition.successTone }
     public var stoppedTone: ThemeTone { definition.stoppedTone }
     public var working: Color { workingTone.ink }
-    public var waiting: Color { waitingTone.ink }
+    public var warning: Color { warningTone.ink }
+    /// A conversation available for you to work in; never a warning.
+    public var available: Color { availableTone.ink }
     public var failure: Color { failureTone.ink }
     public var success: Color { successTone.ink }
     public var selectionFill: Color { definition.selectionFill.color }
@@ -117,7 +121,7 @@ extension PaletteDefinition {
         let selectedSurfaces = surfaces.map { $0.mixed(with: selectionFill.rgb, amount: opacity) }
         for base in surfaces + selectedSurfaces {
             for ink in [text, textSecondary, textTertiary, emphasisInk, accentInk, workingTone.inkRGB,
-                        waitingTone.inkRGB, failureTone.inkRGB, successTone.inkRGB] {
+                        warningTone.inkRGB, availableTone.inkRGB, failureTone.inkRGB, successTone.inkRGB] {
                 check("text", ink, on: base)
             }
             // The neutral selection fill is bounded by selectionEdge (textSecondary).
@@ -128,7 +132,7 @@ extension PaletteDefinition {
         check("button text", accentText, on: accent)
         check("hover button text", accentText, on: accentHover)
         check("pressed button text", accentText, on: accentPressed)
-        for tone in [workingTone, waitingTone, failureTone, successTone, stoppedTone] {
+        for tone in [workingTone, warningTone, availableTone, failureTone, successTone, stoppedTone] {
             check("status text", tone.inkRGB, on: tone.fillRGB)
         }
         for paint in [selectionFill] where !(0...1).contains(paint.opacity) {

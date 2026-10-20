@@ -40,7 +40,7 @@ final class WorkLinkRouter {
         let registration: UUID
         var incarnation: UUID
         let focus: () -> Void
-        let receive: (URL) async -> Void
+        let receive: (LinkedWork) async -> Void
         let inspect: (String, UUID) -> DesktopWindowInspection
         let controlPane: (DesktopPaneCommand) throws -> String
         let readText: (DesktopTextRequest) throws -> DesktopTextReading
@@ -68,19 +68,34 @@ final class WorkLinkRouter {
     // scenes for display only. New link delivery still needs a fresh reading.
     private var openingScenes: [String: String] = [:]
     private var targets: [String: Target] = [:]
-    private var pending: [String: [URL]] = [:]
+    private var pending: [String: [LinkedWork]] = [:]
     private struct Delivery {
         let id: UUID
         let task: Task<Void, Never>
     }
     private var delivering: [String: Delivery] = [:]
+    private var arrivals = 0
+    private var opening: Task<Void, Never>?
+
+    /// External addresses open one at a time, in arrival order. Only the latest
+    /// arrival raises its window, so a batch delivered together changes focus
+    /// once, at its final item, however long each read takes.
+    func receiveAddress(_ open: @escaping @MainActor (_ isLatest: @escaping @MainActor () -> Bool) async -> Void) {
+        arrivals += 1
+        let arrival = arrivals
+        let previous = opening
+        opening = Task {
+            await previous?.value
+            await open { [weak self] in self?.arrivals == arrival }
+        }
+    }
 
     func register(_ incarnation: UUID, repository: String, openingRequests: Set<UUID> = [],
                   focus: @escaping () -> Void,
                   inspect: @escaping (String, UUID) -> DesktopWindowInspection,
                   controlPane: @escaping (DesktopPaneCommand) throws -> String,
                   readText: @escaping (DesktopTextRequest) throws -> DesktopTextReading,
-                  receive: @escaping (URL) async -> Void) {
+                  receive: @escaping (LinkedWork) async -> Void) {
         let previous = targets[repository]
         if previous?.registration != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
@@ -93,21 +108,21 @@ final class WorkLinkRouter {
 
     /// Known content can mount before lookup; new destinations and link delivery
     /// still require resolution. Late reads cannot overwrite newer requests.
-    func openRepository(path: String, link: URL?, query: RegistryQuery,
+    func openRepository(path: String, link: LinkedWork?, address: String? = nil, query: RegistryQuery,
+                        raises: @MainActor () -> Bool = { true },
                         openWindow: (RepositoryWorkspace) -> Void) async throws -> RepositoryWorkspace {
         let path = path.normalizedFilePath
-        var components = URLComponents()
-        components.scheme = "loopflow"
-        components.host = "open"
-        components.queryItems = [URLQueryItem(name: "repo", value: path)]
-        guard let url = link ?? components.url else { throw RegistryQueryError("Invalid repository opening path.") }
+        let receipt = link?.address ?? address ?? "loopflow://" + (URL(fileURLWithPath: path).lastPathComponent
+            .addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))) ?? "")
         try Task.checkCancellation()
         let id = UUID()
         repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
-            receipt: DesktopOpening(url: url.absoluteString, status: .opening, reason: nil))
+            receipt: DesktopOpening(url: receipt, status: .opening, reason: nil))
         let observed = workspaces
         let retained = openingScenes[path].flatMap { retainedWorkspace($0) }
-        if let retained, !deliver(nil, scene: retained.id) {
+        // A retained window comes forward now; resolution does not raise it again.
+        let raisedEarly = retained.map { deliver(nil, scene: $0.id, raise: raises()) } ?? false
+        if let retained, !raisedEarly {
             openWindow(retained)
         }
         do {
@@ -117,13 +132,10 @@ final class WorkLinkRouter {
             let workspace = retainScene(resolved, observed: observed)
             openingScenes[path] = workspace.id
             openingScenes[workspace.path] = workspace.id
-            var destination = link
-            if let link, link.host == "task" {
-                let target = try TaskLink(url: link)
-                destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff, machine: target.machine, repository: target.repository).url
-            }
+            let destination = link?.with(repo: workspace.path)
             repositoryOpenings[path]?.repository = workspace.id
-            if deliver(destination, scene: workspace.id) {
+            let raise = raises() && !(raisedEarly && retained?.id == workspace.id)
+            if deliver(destination, scene: workspace.id, raise: raise) {
                 finishRepositoryOpening(path, id: id, status: .usable)
             } else if retained?.id != workspace.id {
                 openWindow(workspace)
@@ -248,7 +260,7 @@ final class WorkLinkRouter {
             target.inspect(workspaces[scene]?.identity.id ?? scene, target.incarnation)
         }, openings: repositoryOpenings.sorted { $0.key < $1.key }.compactMap { _, request in
             // Task outcome ownership transfers to the receiving WorkModel.
-            if request.receipt.status == .usable, URL(string: request.receipt.url)?.host == "task" { return nil }
+            if request.receipt.status == .usable, URL(string: request.receipt.url)?.path.hasPrefix("/task/") == true { return nil }
             return request.receipt
         })
     }
@@ -285,14 +297,14 @@ final class WorkLinkRouter {
 
     /// False means the caller should request the identity-keyed SwiftUI window.
     @discardableResult
-    func deliver(_ url: URL?, repository: String) -> Bool {
-        deliver(url, scene: scene(for: repository) ?? repository)
+    func deliver(_ link: LinkedWork?, repository: String) -> Bool {
+        deliver(link, scene: scene(for: repository) ?? repository)
     }
 
-    private func deliver(_ url: URL?, scene: String) -> Bool {
-        if let url { pending[scene, default: []].append(url) }
+    private func deliver(_ link: LinkedWork?, scene: String, raise: Bool = true) -> Bool {
+        if let link { pending[scene, default: []].append(link) }
         guard let target = targets[scene] else { return false }
-        target.focus()
+        if raise { target.focus() }
         deliverPending(scene)
         return true
     }
@@ -313,8 +325,8 @@ final class WorkLinkRouter {
             }
             while !Task.isCancelled,
                   let receiver = targets[repository], receiver.registration == registration,
-                  let url = pending[repository]?.first {
-                await receiver.receive(url)
+                  let link = pending[repository]?.first {
+                await receiver.receive(link)
                 guard !Task.isCancelled, targets[repository]?.registration == registration else { return }
                 pending[repository]?.removeFirst()
                 if pending[repository]?.isEmpty == true { pending[repository] = nil }

@@ -611,8 +611,8 @@ enum FlowPalette {
         switch state {
         case .completed: .done
         case .running: .running
-        case .pendingHuman: .waiting
-        case .blocked, .stalled: .waiting
+        case .pendingHuman: .available
+        case .blocked, .stalled: .warning
         case .stopped, .unknown: .stopped
         case .pending: .neutral
         }

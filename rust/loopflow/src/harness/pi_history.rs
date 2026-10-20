@@ -1,7 +1,7 @@
 //! Pi evidence uses existing Session history; no provider-account inference.
 use serde_json::{json, Value};
 
-use super::attention::Signal;
+use super::activity_tracker::Signal;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::id::AgentSessionId;
 use crate::session::SessionEventKind;

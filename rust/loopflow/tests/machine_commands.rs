@@ -1405,35 +1405,34 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         for command in [
             vec!["task", "checkout"],
             vec!["task", "workflow", "move", task.id.as_str(), "start"],
-            vec!["desktop", "open"],
         ] {
             let report = explain(&command);
             for fact in ["execution_machine", "checkout"] {
                 assert_eq!(report["resolution"][fact], run["resolution"][fact]);
             }
-            if command[0] == "desktop" {
-                if checkout.is_some() {
-                    let url = reqwest::Url::parse(report["url"].as_str().unwrap()).unwrap();
-                    let query = url
-                        .query_pairs()
-                        .collect::<std::collections::BTreeMap<_, _>>();
-                    assert_eq!(query["machine"], owner.as_str());
-                    assert_eq!(query["repository"], repository.as_str());
-                    assert_eq!(query["repo"], local_path.to_str().unwrap());
-                } else {
-                    assert!(report["url"].is_null());
-                    assert!(report["impediments"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .any(|value| value
-                            .as_str()
-                            .unwrap()
-                            .contains("Recorded checkout unavailable")));
-                }
-            } else {
-                assert!(report["action"].is_null());
-            }
+            assert!(report["action"].is_null());
+        }
+        // A Work address names neither Machine nor checkout; opening reads the
+        // execution owner when it runs and refuses a checkout it cannot reach.
+        if checkout.is_some() {
+            let link = &explain(&["open"])["links"][0];
+            let url = reqwest::Url::parse(link["url"].as_str().unwrap()).unwrap();
+            assert!(url.path().starts_with("/task/"), "{url}");
+            assert_eq!(url.query(), None);
+        } else {
+            let refused = fixture.run(&[
+                "--repository",
+                repository.as_str(),
+                "--task",
+                task.id.as_str(),
+                "open",
+                "--explain",
+                "--json",
+            ]);
+            assert!(!refused.status.success());
+            assert!(
+                String::from_utf8_lossy(&refused.stderr).contains("Recorded checkout unavailable")
+            );
         }
         assert_eq!(checkpoint_bytes(&local_db), local_before);
         assert_eq!(checkpoint_bytes(&remote_db), remote_before);
@@ -1476,23 +1475,19 @@ fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads(
         .as_str()
         .unwrap()
         .contains("stale or mismatched"));
-    for command in [
-        vec!["task", "run"],
-        vec!["task", "checkout"],
-        vec!["desktop", "open"],
-    ] {
+    for command in [vec!["task", "run"], vec!["task", "checkout"]] {
         let report = explain(&command);
         for fact in ["execution_machine", "checkout"] {
             assert_eq!(report["resolution"][fact]["state"], "unavailable");
         }
         assert!(report["action"].is_null());
-        if command[0] == "desktop" {
-            // Opening Work remains available without a usable execution location.
-            assert!(report["url"].as_str().unwrap().starts_with("loopflow://"));
-        } else {
-            assert!(report["url"].is_null());
-        }
+        assert!(report["url"].is_null());
     }
+    // Opening Work remains available without a usable execution location.
+    assert!(explain(&["open"])["links"][0]["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("loopflow://"));
 
     // A peer reply represents exactly one local observer, never a peer inventory.
     for readings in [vec![], vec![reading[1].clone(); 2]] {

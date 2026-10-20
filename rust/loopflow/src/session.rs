@@ -323,17 +323,18 @@ pub(crate) fn conversation(
     agent: Option<&str>,
     skill: &str,
     title: String,
-) -> LfSession {
+) -> anyhow::Result<LfSession> {
+    let skill = crate::flow::load_skill(skill, cwd)?.name;
     let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
     let (provider, model) = crate::config::parse_agent(&agent);
-    LfSession {
+    Ok(LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string().into(),
         artifact_key: None,
         caller_artifact_key: None,
         input_published: false,
         cwd: cwd.to_path_buf(),
-        skill: Some(skill.into()),
+        skill: Some(skill),
         provider: Some(provider),
         model,
         node: None,
@@ -351,5 +352,5 @@ pub(crate) fn conversation(
         ready_summary: None,
         completed_at: None,
         created_at: crate::store::rows::now_unix(),
-    }
+    })
 }

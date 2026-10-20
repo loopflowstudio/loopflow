@@ -38,12 +38,8 @@ outcome (demo, review and merge on PR #1580). The scripting-API acceptance from 
 original brief (state readback oracle, exit statuses, scoped context) moves to
 LOO-519, coordinated with LOO-453 (readiness wait/events).
 
-October 19 implementation assumptions (agreed-UX pass): the jump bar's machine crumb
-reads “This Mac” and does not navigate (no machines destination exists); a Dashboard
-crumb keeps `/` before its Task because B puts › only after repository and Wave
-levels. `TaskWorkflowHeader` has no production caller on `main` either (only tests mount
-it); its deletion belongs to whoever owns that header, not this Task.
-
-October 19, Machine: Jack Heart rejected the `This Mac ›` crumb — work is grouped by
-Work, and Machine is set per Wave or per Task. He wants one place to view and set the
-Machine for the current Work. Direction and agent interpretation: agreed-ux.md §3.
+October 19 assumptions: a Dashboard crumb keeps `/` before its Task (B puts › only
+after repository and Wave). `TaskWorkflowHeader` has no production caller on `main`;
+its deletion belongs to that header's owner. Machine control choices beyond Jack
+Heart's direction (local “This Mac” label, no reachability, no control on repository
+or Dashboard views) are flagged in agreed-ux.md §3.

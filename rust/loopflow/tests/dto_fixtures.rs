@@ -1177,3 +1177,21 @@ fn desktop_state_retains_outer_and_inner_layouts() {
         reading
     );
 }
+
+#[test]
+fn work_machine_names_execution_source_and_placement_choices() {
+    use loopflow::durable::{TaskExecutionSource, WorkMachine};
+    let input = include_str!("../../../tests/fixtures/dto/work_machine.json");
+    let readings: Vec<WorkMachine> = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        readings[0].execution,
+        Some(TaskExecutionSource::EffectiveDelegation)
+    );
+    assert_eq!(readings[0].machines[0].id, readings[0].local_machine_id);
+    assert_eq!(readings[1].machine_id, None);
+    assert_eq!(readings[2].execution, None);
+    assert_eq!(
+        serde_json::to_value(&readings).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}

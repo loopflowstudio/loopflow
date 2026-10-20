@@ -5,12 +5,13 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Author, Machine, MachineId, Placement, PlacementProvenance, ProjectId,
-    SteerComment, TaskId, TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
-    WorkRef, WorkStatus,
+    SteerComment, TaskExecutionSource, TaskId, TaskState, ToolResponseId, ToolResponseReceipt,
+    ToolResponseWrite, WorkMachine, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
+use crate::work::edit::{Delegation, WorkEdit, WorkValue};
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 
@@ -162,33 +163,47 @@ impl SqliteStore {
             [machine_id.as_str()],
             |_| Ok(()),
         )?;
-        use crate::work::edit::{Delegation, WorkEdit, WorkValue};
-        let current = find_placement_in(&tx, work)?;
-        if !current.as_ref().is_some_and(|assignment| {
-            assignment.machine_id == *machine_id
-                && assignment.provenance == PlacementProvenance::Explicit
-        }) {
-            let assignment = Some(Delegation {
-                machine_id: machine_id.clone(),
-                placed_at: now_unix(),
-                provenance: PlacementProvenance::Explicit,
-            });
-            let change = match work {
-                WorkRef::Wave(_) => WorkValue::WaveDelegation(assignment),
-                WorkRef::Project(_) => WorkValue::ProjectDelegation(assignment),
-                WorkRef::Task(_) => WorkValue::TaskDelegation(assignment),
-            };
-            super::planning_write::local(
-                &tx,
-                &[WorkEdit {
-                    target: work.id().into(),
-                    change,
-                }],
-            )?;
-        }
+        write_delegation_in(&tx, work, Some(machine_id))?;
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
         Ok(placement)
+    }
+
+    /// Place an unstarted Task on a Machine, or clear its override (`None`) so it
+    /// inherits again. A started Task stays on its recorded Machine; moving it is
+    /// explicit takeover, which placement never performs.
+    pub(crate) fn place_task_machine(
+        &self,
+        task: &TaskId,
+        machine_id: Option<&MachineId>,
+    ) -> StoreResult<WorkMachine> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = WorkRef::Task(task.clone());
+        require_ready_work(&tx, &work)?;
+        let (_, _, execution) = super::repositories::task_execution_in(&tx, task)?;
+        if execution != TaskExecutionSource::EffectiveDelegation {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task} has started; it stays on its Machine and moving it is explicit takeover"
+            )));
+        }
+        if let Some(machine_id) = machine_id {
+            tx.query_row(
+                "SELECT 1 FROM machines WHERE id=?1",
+                [machine_id.as_str()],
+                |_| Ok(()),
+            )?;
+        }
+        write_delegation_in(&tx, &work, machine_id)?;
+        let machine = work_machine_in(&tx, &work)?;
+        tx.commit()?;
+        Ok(machine)
+    }
+
+    pub fn work_machine(&self, work: &WorkRef) -> StoreResult<WorkMachine> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        work_machine_in(&snapshot, work)
     }
 
     pub fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -547,6 +562,72 @@ pub(super) fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Pla
             }
         }
     }
+}
+
+/// Write or clear (`None`) Work's own Machine assignment. Reaffirming an
+/// explicit choice keeps its timestamp.
+fn write_delegation_in(
+    conn: &Connection,
+    work: &WorkRef,
+    machine_id: Option<&MachineId>,
+) -> StoreResult<()> {
+    let current = find_placement_in(conn, work)?;
+    let unchanged = match machine_id {
+        Some(machine_id) => current.as_ref().is_some_and(|assignment| {
+            assignment.machine_id == *machine_id
+                && assignment.provenance == PlacementProvenance::Explicit
+        }),
+        None => current.is_none(),
+    };
+    if unchanged {
+        return Ok(());
+    }
+    let assignment = machine_id.map(|machine_id| Delegation {
+        machine_id: machine_id.clone(),
+        placed_at: now_unix(),
+        provenance: PlacementProvenance::Explicit,
+    });
+    let change = match work {
+        WorkRef::Wave(_) => WorkValue::WaveDelegation(assignment),
+        WorkRef::Project(_) => WorkValue::ProjectDelegation(assignment),
+        WorkRef::Task(_) => WorkValue::TaskDelegation(assignment),
+    };
+    super::planning_write::local(
+        conn,
+        &[WorkEdit {
+            target: work.id().into(),
+            change,
+        }],
+    )?;
+    Ok(())
+}
+
+pub(super) fn work_machine_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkMachine> {
+    let placement = placement_in(conn, work)?;
+    let execution = match work {
+        WorkRef::Task(task) => Some(super::repositories::task_execution_in(conn, task)?),
+        _ => None,
+    };
+    let local = map_local_machine(conn)?;
+    let mut machines = vec![local.clone()];
+    let mut stmt = conn.prepare(
+        "SELECT id, route, created_at, observed_at, label, repo
+         FROM machines WHERE label IS NOT NULL AND route!='local' ORDER BY label",
+    )?;
+    for machine in stmt.query_map([], |row| Ok(map_machine_row(row)))? {
+        machines.push(machine??);
+    }
+    Ok(WorkMachine {
+        work: work.clone(),
+        machine_id: match &execution {
+            Some((_, machine_id, _)) => machine_id.clone(),
+            None => Some(placement.machine_id.clone()),
+        },
+        execution: execution.map(|(_, _, source)| source),
+        local_machine_id: local.id,
+        placement,
+        machines,
+    })
 }
 
 fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
@@ -1039,6 +1120,54 @@ mod durable_store_tests {
         assert_eq!(store.placement(&future_work).unwrap().machine_id, local);
         assert!(!store.task_started(&future.id).unwrap());
         assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
+    }
+
+    #[test]
+    fn unstarted_task_machine_overrides_and_inherits_while_started_task_stays() {
+        use crate::durable::{MachineId, TaskExecutionSource, WorkRef};
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
+        let local = store.local_machine().unwrap().id;
+        let remote = MachineId::new();
+        store
+            .add_machine(&remote, "worker", "worker", "/other/repo")
+            .unwrap();
+        store.place_work(&wave, &remote).unwrap();
+        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
+        store.seed_unplaced_task(&future);
+        let future_work = WorkRef::Task(future.id.clone());
+
+        let inherited = store.work_machine(&future_work).unwrap();
+        assert_eq!(inherited.machine_id, Some(remote.clone()));
+        assert_eq!(inherited.placement.source, wave);
+        assert_eq!(
+            inherited.execution,
+            Some(TaskExecutionSource::EffectiveDelegation)
+        );
+        assert_eq!(inherited.machines[0].id, local);
+        assert!(inherited
+            .machines
+            .iter()
+            .any(|machine| machine.id == remote));
+
+        let placed = store.place_task_machine(&future.id, Some(&local)).unwrap();
+        assert_eq!(placed.machine_id, Some(local.clone()));
+        assert_eq!(placed.placement.source, future_work);
+        let cleared = store.place_task_machine(&future.id, None).unwrap();
+        assert_eq!(cleared, inherited);
+
+        let started = WorkRef::Task(task_id.clone());
+        let before = store.work_machine(&started).unwrap();
+        assert_eq!(
+            before.execution,
+            Some(TaskExecutionSource::RecordedCheckout)
+        );
+        assert!(matches!(
+            store.place_task_machine(&task_id, Some(&local)),
+            Err(crate::store::StoreError::InvalidAuthority(_))
+        ));
+        assert_eq!(store.work_machine(&started).unwrap(), before);
     }
 
     #[test]

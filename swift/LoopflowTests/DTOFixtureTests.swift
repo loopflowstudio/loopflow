@@ -14,6 +14,17 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(TaskState.self, from: JSONEncoder().encode(state)) == state)
     }
 
+    @Test func workMachineNamesExecutionSourceAndChoices() throws {
+        let readings = try JSONDecoder().decode([WorkMachine].self, from: loadFixtureData("work_machine.json"))
+        #expect(readings[0].followsPlacement && !readings[0].placedHere)
+        #expect(readings[0].placement.source == .init(kind: "wave", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        #expect(readings[0].name(of: readings[0].localMachineID) == "This Mac")
+        #expect(readings[0].name(of: readings[0].machineID!) == "mini")
+        #expect(readings[1].machineID == nil && !readings[1].followsPlacement)
+        #expect(readings[2].execution == nil && readings[2].followsPlacement)
+        #expect(try JSONDecoder().decode([WorkMachine].self, from: JSONEncoder().encode(readings)) == readings)
+    }
+
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)

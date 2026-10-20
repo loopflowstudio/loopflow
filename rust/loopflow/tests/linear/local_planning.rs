@@ -2123,12 +2123,13 @@ fn place_wave_on_remote(
         .unwrap();
     let repo = store.get_wave(wave).unwrap().unwrap();
     let home = Path::new(db.path().unwrap()).parent().unwrap();
-    serde_json::from_value(lf(
+    serde_json::from_value::<loopflow::durable::WorkMachine>(lf(
         Path::new(repo.repo()),
         home,
         &["wave", "place", wave.as_str(), machine.as_str(), "--json"],
     ))
     .unwrap()
+    .placement
 }
 
 #[test]

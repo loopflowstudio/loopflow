@@ -1623,12 +1623,12 @@ Show one Wave's current plan, Task details, and execution evidence
 
 ## lf wave place
 
-Set the Machine for Wave schedules and newly created work
+Show or set the Machine for Wave schedules and newly created work
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<machine_id>` | machine id |
+| `<machine_id>` | Machine to place the Wave on; omit to show the current Machine |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1670,6 +1670,18 @@ List every Task in the selected repository
 | Argument | What it does |
 |---|---|
 | `--wave` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task place
+
+Show or set the Machine an unstarted Task will run on
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<machine_id>` | Machine to place the Task on; omit to show the current Machine |
+| `--inherit` | Clear the Task's own Machine so it inherits from its Wave again Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

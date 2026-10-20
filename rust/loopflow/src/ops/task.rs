@@ -3180,6 +3180,35 @@ pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
     })
 }
 
+/// Read where a Task executes; with `Some(change)`, first place an unstarted
+/// Task on a Machine (`Some(id)`) or clear its override to inherit (`None`).
+pub fn task_machine(
+    issue: &str,
+    change: Option<Option<&crate::durable::MachineId>>,
+) -> OpsResult<crate::durable::WorkMachine> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let Some(machine_id) = change else {
+            return store
+                .sqlite
+                .work_machine(&crate::durable::WorkRef::Task(task.id.clone()))
+                .map_err(task_error);
+        };
+        let placed = store
+            .sqlite
+            .place_task_machine(&task.id, machine_id)
+            .map_err(task_error)?;
+        let repo = repository_for_task(&store, &task)?;
+        super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
+        Ok(placed)
+    })
+}
+
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;

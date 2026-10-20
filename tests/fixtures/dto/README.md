@@ -108,3 +108,8 @@ members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
 base recovery. Shell identity is independent of its tool pane; saved intent never
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
+
+`work_machine.json` pins `lf task place --json` and `lf wave place --json`: the
+execution Machine, what fixes a Task there (placement, admission or its recorded
+checkout, which may predate Machine records), the placement unstarted work
+inherits, and the local-first Machine choices. Rust and Swift round-trip it.

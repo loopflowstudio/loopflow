@@ -1,7 +1,7 @@
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Machine, MachineId, Placement, SteerComment, TaskId, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    ToolResponseWrite, WorkMachine, WorkRef, WorkStatus,
 };
 use crate::steer::Steer;
 
@@ -81,6 +81,11 @@ impl Store {
             store.place_work(&work, &machine_id)
         })
         .await
+    }
+
+    pub async fn work_machine(&self, work: &WorkRef) -> StoreResult<WorkMachine> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.work_machine(&work)).await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {

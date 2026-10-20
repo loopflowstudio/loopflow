@@ -357,6 +357,23 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "move", issue] + destination, cwd)
     }
 
+    /// Where Work executes and why. `place` sets it first: a Machine ID, or
+    /// `.inherit` to clear a Task's own Machine. Started Tasks refuse placement.
+    public func workMachine(_ work: WorkMachineTarget, place: WorkMachinePlacement? = nil, cwd: String?) async throws -> WorkMachine {
+        var args: [String]
+        switch work {
+        case .task(let issue): args = ["task", "place", issue]
+        case .wave(let id): args = ["wave", "place", id]
+        }
+        switch place {
+        case .machine(let id): args.append(id)
+        case .inherit: args.append("--inherit")
+        case nil: break
+        }
+        args.append("--json")
+        return try Self.decode(WorkMachine.self, from: await run(args, cwd))
+    }
+
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
         _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
     }

@@ -1170,10 +1170,11 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Set the Machine for Wave schedules and newly created work
+    /// Show or set the Machine for Wave schedules and newly created work
     Place {
         name: String,
-        machine_id: crate::durable::MachineId,
+        /// Machine to place the Wave on; omit to show the current Machine
+        machine_id: Option<crate::durable::MachineId>,
         #[arg(long)]
         json: bool,
     },
@@ -1231,6 +1232,17 @@ pub enum TaskCommand {
         json: bool,
     },
 
+    /// Show or set the Machine an unstarted Task will run on
+    Place {
+        issue: String,
+        /// Machine to place the Task on; omit to show the current Machine
+        machine_id: Option<crate::durable::MachineId>,
+        /// Clear the Task's own Machine so it inherits from its Wave again
+        #[arg(long, conflicts_with = "machine_id")]
+        inherit: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Pause future Task execution without stopping live processes
     Pause { issue: String },
     /// Clear a Task pause without starting execution
@@ -1531,6 +1543,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Place { issue, .. }
             | Self::Pause { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }
@@ -1572,6 +1585,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Place { issue, .. }
             | Self::Pause { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }

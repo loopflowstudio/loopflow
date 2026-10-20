@@ -160,7 +160,8 @@ pub struct TaskExecutionRoute {
     pub source: TaskExecutionSource,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskExecutionSource {
     RecordedCheckout,
     Admission,
@@ -204,6 +205,25 @@ pub struct Placement {
     pub machine_id: MachineId,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
+}
+
+/// Where Work executes and why, with the Machines placement may choose.
+/// Wire type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkMachine {
+    pub work: WorkRef,
+    /// The execution Machine. Absent only for a Task that started before its
+    /// Machine was recorded.
+    pub machine_id: Option<MachineId>,
+    /// What fixes a Task's Machine; absent for Waves and Projects. Only
+    /// `effective_delegation` follows placement: a started or admitted Task
+    /// stays where it is, and moving it is explicit takeover.
+    pub execution: Option<TaskExecutionSource>,
+    /// The assignment unstarted and future work inherits.
+    pub placement: Placement,
+    pub local_machine_id: MachineId,
+    /// The local Machine, then saved Machines by label.
+    pub machines: Vec<Machine>,
 }
 
 /// How the source assignment was established; inheritance is `source != work`.

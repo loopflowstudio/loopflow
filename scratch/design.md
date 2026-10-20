@@ -161,7 +161,8 @@ reintroduce:
   `newShell(beside:focus:)`, pane-keyed `shellCommands`, `retainedShells`,
   `DesktopCommand::Split`/`DesktopPaneAction.split`, synthetic `PaneState` in inspection.
 - Duplicate `WorkArrangementTree.Axis` (use `SplitAxis`).
-- The repo-name chevron that opened Find Work (October 19; jump bar replaces it).
+- The repo-name chevron that opened Find Work, then the `This Mac ›` crumb and
+  `WorkJumpScope.repositories` (October 19; jump bar and Machine control replace them).
 
 Kept on purpose: Console working-slot predicates differ from Dashboard membership;
 exact-pane hide/focus/move commands and revisioned `arrange` are distinct scopes.
@@ -221,7 +222,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → resize B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 19, implement): `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkDestinationTests|DashboardWorkspaceTests' -Xswiftc -gnone` — 94 passed; adjacent navigation/Session/workspace suites — 49 passed. Broader suites stay gate-owned.
+Check (October 19, Machine control): `scripts/test_desktop.sh --filter 'WorkNavigationTests|DTOFixtureTests|WorkDestinationTests|DashboardWorkspaceTests'` — 144 passed; Rust delegation/placement lib tests, wave-place CLI, `machine_commands`, `cli_discovery`, `dto_fixtures` pass; clippy clean. Broader suites stay gate-owned.
 
 ## Handoff status
 

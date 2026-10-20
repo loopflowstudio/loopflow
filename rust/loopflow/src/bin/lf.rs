@@ -1011,6 +1011,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::waves::list_tasks(repo, wave.as_deref(), *json)
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
+        TaskCommand::Place {
+            issue,
+            machine_id,
+            inherit,
+            json,
+        } => {
+            let change = (machine_id.is_some() || *inherit).then_some(machine_id.as_ref());
+            let machine = loopflow::ops::task::task_machine(issue, change)?;
+            loopflow::lf::commands::placement::print_machine(&machine, *json)
+        }
         TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
             let paused = matches!(command, TaskCommand::Pause { .. });
             loopflow::ops::task::task_pause(issue, paused)?;

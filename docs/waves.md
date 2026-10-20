@@ -308,13 +308,17 @@ lf id
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave place <wave-id> <machine-id>
+lf task place LOO-12 <machine-id>      # an unstarted Task overrides its Wave
+lf task place LOO-12 --inherit         # follow the Wave again
+lf task place LOO-12 --json            # where it runs, and why
 lf --machine <machine-id> --wave shipper wave-operate
 lf --machine <machine-id> wave status shipper --json
 ```
 
 A Machine is a stable machine identity with a replaceable route. Placement records
 where Work belongs; it does not start a process or confer signal authority.
-New Project or Task Work inherits its parent's recorded Machine once. Readers
+Unstarted Tasks follow the nearest explicit placement; a Task's own placement
+wins. A started Task stays on the Machine it started on. Readers
 operate on the selected Machine; they never silently aggregate other Machines.
 
 ```bash

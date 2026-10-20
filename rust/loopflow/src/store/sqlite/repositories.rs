@@ -276,40 +276,21 @@ impl SqliteStore {
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let (repo, checkout, machine, started): (
-            String,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-        ) = tx.query_row(
-            "SELECT w.repo,t.worktree,t.checkout_machine_id,t.started_at
-             FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
+        let repo: String = tx.query_row(
+            "SELECT w.repo FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              WHERE t.id=?1",
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| row.get(0),
         )?;
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let (machine_id, source) = if checkout.as_deref().is_some_and(|path| !path.is_empty())
-            || started.is_some()
-        {
-            let machine = machine.ok_or_else(|| StoreError::InvalidData(format!(
+        let (checkout, machine_id, source) = task_execution_in(&tx, task)?;
+        let machine_id = machine_id.ok_or_else(|| {
+            StoreError::InvalidData(format!(
                 "Task {task} has unknown execution Machine; delegation cannot relocate existing work"
-            )))?;
-            (
-                MachineId::parse(&machine)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                TaskExecutionSource::RecordedCheckout,
-            )
-        } else if let Some(owner) = super::task_admission::owner_in(&tx, task)? {
-            (owner, TaskExecutionSource::Admission)
-        } else {
-            (
-                super::durable::placement_in(&tx, &WorkRef::Task(task.clone()))?.machine_id,
-                TaskExecutionSource::EffectiveDelegation,
-            )
-        };
+            ))
+        })?;
         Ok(TaskExecutionRoute {
             task_id: task.clone(),
             checkout,
@@ -419,6 +400,38 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Where a Task executes: its recorded checkout once started, otherwise its
+/// first-start admission, otherwise effective delegation. A started Task whose
+/// Machine was never recorded reads `None`.
+pub(super) fn task_execution_in(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<(Option<String>, Option<MachineId>, TaskExecutionSource)> {
+    let (checkout, machine, started): (Option<String>, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT worktree,checkout_machine_id,started_at FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    if checkout.as_deref().is_some_and(|path| !path.is_empty()) || started.is_some() {
+        let machine = machine
+            .map(|id| {
+                MachineId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?;
+        return Ok((checkout, machine, TaskExecutionSource::RecordedCheckout));
+    }
+    if let Some(owner) = super::task_admission::owner_in(conn, task)? {
+        return Ok((checkout, Some(owner), TaskExecutionSource::Admission));
+    }
+    let placement = super::durable::placement_in(conn, &WorkRef::Task(task.clone()))?;
+    Ok((
+        checkout,
+        Some(placement.machine_id),
+        TaskExecutionSource::EffectiveDelegation,
+    ))
 }
 
 #[cfg(test)]

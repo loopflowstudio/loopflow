@@ -208,8 +208,6 @@ struct WorkBreadcrumbs: View {
             Button { model.goForward() } label: { Image(systemName: "chevron.right") }
                 .frame(width: 24, height: 28).contentShape(Rectangle())
                 .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
-            Text("This Mac").foregroundStyle(.secondary).lineLimit(1).fixedSize()
-            WorkJumpSeparator(model: model, scope: .repositories, label: "Repositories")
             Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
                 model.select(nil)
                 model.navigation.content = .terminals
@@ -230,7 +228,120 @@ struct WorkBreadcrumbs: View {
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
             }
+            if let target = model.machineTarget {
+                WorkMachineControl(model: model, target: target).padding(.leading, 6)
+            }
         }
+    }
+}
+
+/// The execution Machine of the current Wave or Task and where it comes from.
+/// Reads and writes go through `lf wave place` / `lf task place`.
+struct WorkMachineControl: View {
+    let model: WorkModel
+    let target: WorkMachineTarget
+    @State private var reading: WorkMachine?
+    @State private var error: String?
+
+    var body: some View {
+        WorkMachineMenu(reading: reading, error: error, parent: model.breadcrumb?.wave?.roadmap.wave.displayName,
+                        waveName: waveName) { placement in
+            Task { await place(placement) }
+        }
+        .task(id: target) { await load() }
+    }
+
+    private var waveName: (String) -> String? {
+        { id in model.wave(id: id)?.wave.displayName }
+    }
+
+    private func load() async {
+        reading = nil
+        error = nil
+        do { reading = try await model.workMachine(target) } catch { self.error = error.localizedDescription }
+    }
+
+    private func place(_ placement: WorkMachinePlacement) async {
+        error = nil
+        do { reading = try await model.placeWork(target, placement) } catch { self.error = error.localizedDescription }
+    }
+}
+
+struct WorkMachineMenu: View {
+    let reading: WorkMachine?
+    let error: String?
+    /// The Task's Wave, which it inherits from once its own Machine is cleared.
+    let parent: String?
+    /// A Wave's display name by ID, for inherited placement.
+    let waveName: (String) -> String?
+    let place: (WorkMachinePlacement) -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Menu {
+            if let reading { choices(reading) }
+            if let error { Text(error) }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Text(title).lineLimit(1)
+                Text(origin).foregroundStyle(palette.textSecondary).lineLimit(1)
+            }
+            .font(Typography.caption())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Machine this Work runs on")
+        .accessibilityIdentifier("work-machine")
+    }
+
+    var title: String {
+        guard let reading else { return error == nil ? "Machine…" : "Machine unavailable" }
+        return reading.machineID.map(reading.name(of:)) ?? "Unrecorded Machine"
+    }
+
+    var origin: String {
+        guard let reading else { return "" }
+        switch reading.execution {
+        case .recordedCheckout: return "· started there"
+        case .admission: return "· starting there"
+        case .effectiveDelegation, nil: break
+        }
+        if reading.placement.provenance == .localDefault { return "· default" }
+        if reading.placedHere { return reading.work.kind == "task" ? "· set on this Task" : "· set on this Wave" }
+        return "· from " + sourceName(reading.placement.source)
+    }
+
+    private func sourceName(_ source: WorkMachine.Ref) -> String {
+        switch source.kind {
+        case "wave": waveName(source.id) ?? "its Wave"
+        case "project": "its Project"
+        default: "its Task"
+        }
+    }
+
+    @ViewBuilder private func choices(_ reading: WorkMachine) -> some View {
+        if reading.followsPlacement {
+            if reading.work.kind == "task" {
+                Button { place(.inherit) } label: {
+                    choice("Inherit from \(parent ?? "its Wave")", selected: !reading.placedHere)
+                }
+                .accessibilityIdentifier("work-machine-inherit")
+                Divider()
+            }
+            ForEach(reading.machines) { machine in
+                Button { place(.machine(machine.id)) } label: {
+                    choice(reading.name(of: machine.id), selected: reading.placedHere && reading.placement.machineID == machine.id)
+                }
+                .accessibilityIdentifier("work-machine-" + machine.id)
+            }
+        } else {
+            Text("Started on \(title); moving it is explicit takeover")
+        }
+    }
+
+    @ViewBuilder private func choice(_ name: String, selected: Bool) -> some View {
+        if selected { Label(name, systemImage: "checkmark") } else { Text(name) }
     }
 }
 
@@ -269,7 +380,7 @@ struct WorkJumpMenu: View {
         let rows = model.jumpRows(scope, filter: filter)
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased()).font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-            TextField(scope == .repositories ? "Filter repositories" : "Search \(title.lowercased())", text: $filter)
+            TextField("Search \(title.lowercased())", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = rows.first { choose(first.id) } }
                 .accessibilityIdentifier("work-jump-filter")
@@ -302,7 +413,6 @@ struct WorkJumpMenu: View {
 extension WorkJumpScope {
     fileprivate var identifier: String {
         switch self {
-        case .repositories: "repositories"
         case .repository: "repository"
         case .wave(let id): "wave-" + id
         }

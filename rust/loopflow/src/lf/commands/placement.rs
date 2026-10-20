@@ -1,4 +1,4 @@
-use crate::durable::WorkRef;
+use crate::durable::{MachineId, PlacementProvenance, TaskExecutionSource, WorkMachine, WorkRef};
 use crate::id::WaveId;
 use crate::lf::WaveCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
@@ -31,12 +31,11 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             WaveCommand::Place {
                 machine_id, json, ..
             } => {
-                require_wave_repository(&store, &wave_id, repo).await?;
-                print(
-                    &store.place_work(&work, machine_id).await?,
-                    *json,
-                    &format!("Wave {name}: placed on {machine_id}"),
-                )
+                if let Some(machine_id) = machine_id {
+                    require_wave_repository(&store, &wave_id, repo).await?;
+                    store.place_work(&work, machine_id).await?;
+                }
+                print_machine(&store.work_machine(&work).await?, *json)
             }
             WaveCommand::Rename {
                 repo: target,
@@ -76,6 +75,45 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             _ => unreachable!("Wave placement dispatcher"),
         }
     })
+}
+
+/// Print where Work executes: JSON, or one line naming the Machine and its source.
+pub fn print_machine(machine: &WorkMachine, json: bool) -> anyhow::Result<()> {
+    let name = |id: &MachineId| {
+        machine
+            .machines
+            .iter()
+            .find(|candidate| &candidate.id == id)
+            .and_then(|candidate| candidate.label.clone())
+            .unwrap_or_else(|| {
+                if *id == machine.local_machine_id {
+                    "this Machine".into()
+                } else {
+                    id.to_string()
+                }
+            })
+    };
+    let target = machine
+        .machine_id
+        .as_ref()
+        .map_or_else(|| "an unrecorded Machine".into(), name);
+    let placement = &machine.placement;
+    let why = match machine.execution {
+        Some(TaskExecutionSource::RecordedCheckout) => "started there".to_string(),
+        Some(TaskExecutionSource::Admission) => "admitted to start there".to_string(),
+        _ if placement.provenance == PlacementProvenance::LocalDefault => "default".to_string(),
+        _ if placement.source == machine.work => "set here".to_string(),
+        _ => format!("from {} {}", placement.source.kind(), placement.source.id()),
+    };
+    print(
+        machine,
+        json,
+        &format!(
+            "{} {}: {target} ({why})",
+            machine.work.kind(),
+            machine.work.id()
+        ),
+    )
 }
 
 fn print(value: &impl serde::Serialize, json: bool, summary: &str) -> anyhow::Result<()> {

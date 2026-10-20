@@ -109,7 +109,6 @@ extension WorkModel {
 
 /// What a breadcrumb's › lists: the level inside that crumb.
 enum WorkJumpScope: Hashable {
-    case repositories
     case repository
     case wave(String)
 }
@@ -121,14 +120,6 @@ extension WorkModel {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let rows: [WorkPaletteRow]
         switch scope {
-        case .repositories:
-            rows = paletteRows.compactMap { row in
-                switch row.id {
-                case .repository: .init(id: row.id, title: row.title, detail: "This window", key: row.key)
-                case .openRepository(let path): .init(id: row.id, title: row.title, detail: "New window · \(path)", key: row.key)
-                default: nil
-                }
-            }
         case .repository:
             let waves = visibleRoadmaps.map { WorkPaletteRow(id: .wave($0.wave.id), title: $0.wave.displayName, detail: "Wave", key: $0.wave.name) }
             let dashboards = dashboards.compactMap { plan in

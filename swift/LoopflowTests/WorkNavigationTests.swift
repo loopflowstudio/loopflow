@@ -114,11 +114,11 @@ struct WorkNavigationTests {
         await model.refresh()
         model.select(.task(id: "issue-review"))
         let crumbs = WorkBreadcrumbs(model: model)
-        for scope in ["repositories", "repository", "wave-wave-1"] {
+        for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
+        #expect(throws: (any Error).self) { try crumbs.inspect().find(text: "This Mac") }
         #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityLabel: "Navigate Tasks, Waves and repositories") }
-        #expect(model.jumpRows(.repositories, filter: "").map(\.id) == [.repository])
         #expect(model.jumpRows(.repository, filter: "").map(\.id) == [.wave("wave-1")])
         #expect(model.jumpRows(.repository, filter: "W2-131").map(\.id) == [.task("issue-review")])
         let wave = try #require(model.wave(id: "wave-1"))
@@ -128,6 +128,33 @@ struct WorkNavigationTests {
         model.jump(to: .wave("wave-1"), source: "test")
         #expect(model.selection == .wave(id: "wave-1"))
         #expect(model.navigation.palette == nil)
+    }
+
+    @Test("The Machine control names the current Work's Machine and its source; started Tasks offer no move")
+    func machineControl() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
+        #expect(model.machineTarget == .task(issue: "W2-131"))
+        model.select(.wave(id: "wave-1"))
+        #expect(model.machineTarget == .wave(id: "wave-1"))
+        model.select(nil)
+        #expect(model.machineTarget == nil)
+
+        let readings = try JSONDecoder().decode([WorkMachine].self, from: loadFixtureData("work_machine.json"))
+        var placed: [WorkMachinePlacement] = []
+        let inherited = WorkMachineMenu(reading: readings[0], error: nil, parent: "Product",
+                                        waveName: { $0 == readings[0].placement.source.id ? "Product" : nil }) { placed.append($0) }
+        #expect(inherited.title == "mini" && inherited.origin == "· from Product")
+        try inherited.inspect().find(viewWithAccessibilityIdentifier: "work-machine-" + readings[0].localMachineID).button().tap()
+        try inherited.inspect().find(viewWithAccessibilityIdentifier: "work-machine-inherit").button().tap()
+        #expect(placed == [.machine(readings[0].localMachineID), .inherit])
+
+        let started = WorkMachineMenu(reading: readings[1], error: nil, parent: nil, waveName: { _ in nil }) { placed.append($0) }
+        #expect(started.title == "Unrecorded Machine" && started.origin == "· started there")
+        #expect(throws: (any Error).self) { try started.inspect().find(viewWithAccessibilityIdentifier: "work-machine-inherit") }
+        _ = try started.inspect().find(text: "Started on Unrecorded Machine; moving it is explicit takeover")
     }
 
     @Test("An unstarted Task's Session slot offers Start; showing it starts nothing")

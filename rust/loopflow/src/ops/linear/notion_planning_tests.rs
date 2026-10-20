@@ -550,5 +550,90 @@ fn notion_comments_and_edits_by_people_become_task_direction() {
         assert!(steers
             .iter()
             .any(|steer| steer.text.contains("Take direction from Notion")));
+        let local = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(local.title, "Take direction from Notion");
+    });
+}
+
+#[test]
+fn notion_renames_and_completion_reach_the_task() {
+    with_notion(|runtime, fixture, repo, state| {
+        let saved =
+            crate::ops::task::task_create(repo, None, Some("Original".into()), None).unwrap();
+        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let page = mirrored(runtime, &state, &id)["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let refresh = || {
+            let task = runtime
+                .block_on(fixture.store.get_task(&saved.id))
+                .unwrap()
+                .unwrap();
+            runtime
+                .block_on(crate::ops::linear_observe::refresh_task_comments(
+                    &fixture.store,
+                    &task,
+                ))
+                .unwrap();
+            runtime
+                .block_on(fixture.store.get_task(&saved.id))
+                .unwrap()
+                .unwrap()
+        };
+        let edit_in_notion = |title: &str, status: &str| {
+            runtime.block_on(async {
+                let mut notion = state.lock().await;
+                let edited = notion.tick();
+                let page = notion.pages.get_mut(&page).unwrap();
+                page["properties"]["Name"]["title"] = json!([{"plain_text": title}]);
+                page["properties"]["Status"]["status"]["name"] = json!(status);
+                page["last_edited_time"] = json!(edited);
+            })
+        };
+
+        // A concurrent rename in Notion is adopted, as with Linear; the unsent
+        // local rename stays visible as the saved value beside it.
+        runtime.block_on(state.lock()).offline = true;
+        crate::ops::task::task_edit(
+            repo,
+            saved.id.as_str(),
+            None,
+            crate::work::task::TaskUpdate {
+                title: Some("Renamed locally".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        runtime.block_on(state.lock()).offline = false;
+        edit_in_notion("Renamed in Notion", "Not started");
+        assert_eq!(refresh().title, "Renamed in Notion");
+        let sync = fixture.store.sqlite.task_planning_sync(&saved.id).unwrap();
+        let title = sync
+            .changes
+            .iter()
+            .find(|change| change.field == "task_title")
+            .expect("the local rename is retained");
+        assert_eq!(
+            title.state,
+            crate::store::planning_sync::PlanningSyncState::AdoptedLinear
+        );
+        assert_eq!(title.local_value, json!("Renamed locally"));
+
+        // Once settled, Notion's next rename and completion reach the Task.
+        runtime.block_on(crate::ops::linear_observe::sync_repository(
+            &fixture.store,
+            repo.to_str().unwrap(),
+        ));
+        edit_in_notion("Renamed in Notion again", "Done");
+        let task = refresh();
+        assert_eq!(task.title, "Renamed in Notion again");
+        assert!(runtime
+            .block_on(fixture.store.task_state(&saved.id))
+            .unwrap()
+            .is_terminal());
     });
 }

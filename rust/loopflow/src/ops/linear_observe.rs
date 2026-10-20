@@ -56,6 +56,25 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     claim_local_comments(store, &task, &client, &mut observation)?;
+    // Linear's team feed accepts provider edits into Work. Asana and Notion have
+    // none, so this exact read is their acceptance: a renamed or completed task
+    // updates the Task, and an unsent local edit stays as a visible conflict.
+    if !matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+        if let Some((item, project)) = client
+            .issue_ownership(issue.as_str())
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?
+        {
+            super::planning_delivery::ingest_task(
+                store,
+                &repository,
+                &item,
+                project.as_ref(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+            )
+            .await?;
+        }
+    }
     store
         .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
         .await

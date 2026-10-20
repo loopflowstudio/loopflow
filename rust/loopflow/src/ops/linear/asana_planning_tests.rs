@@ -356,5 +356,10 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
         assert!(steers
             .iter()
             .any(|steer| steer.text.contains("Take direction from Asana")));
+        let local = runtime
+            .block_on(fixture.store.get_task(&saved.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(local.title, "Take direction from Asana");
     });
 }

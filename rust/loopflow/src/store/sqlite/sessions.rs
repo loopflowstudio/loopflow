@@ -452,6 +452,51 @@ impl SqliteStore {
             .transpose()
     }
 
+    /// Unfinished interactive Sessions whose execution owner never recorded an
+    /// exit, with that owner. Leaving or detaching records one; a restart,
+    /// crash or kill does not. Liveness is the caller's observation.
+    pub(crate) fn unexited_session_owners(
+        &self,
+    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT s.id, s.transport_lf_process_id FROM agent_sessions s
+             JOIN processes o ON o.id=s.transport_lf_process_id
+             WHERE s.interactive=1 AND s.completed_at IS NULL AND o.completed_at IS NULL
+             ORDER BY s.id",
+        )?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(session, owner)| {
+                Ok((
+                    session,
+                    crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Whether the Session's current AgentProcess last reported work in progress,
+    /// rather than waiting for a person, when it stopped.
+    pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_activity act
+                JOIN agent_sessions s ON s.id=act.session_id
+                WHERE act.session_id=?1 AND act.agent_process_id IS s.agent_process_id
+                AND NOT CASE WHEN act.program_status IS NOT NULL THEN
+                    EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                        WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
+                ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)",
+            [session],
+            |row| row.get(0),
+        )?)
+    }
+
     /// A Task's unfinished interactive conversations, each with its last opening.
     pub(crate) fn task_conversations(
         &self,

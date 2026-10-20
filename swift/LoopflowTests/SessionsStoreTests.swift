@@ -435,15 +435,19 @@ struct WorkspaceSessionLifecycleTests {
         #expect(await calls.count == 12)
     }
 
-    @Test("An ensured active primary consumes its attach-only command")
+    @Test("An ensured active primary attaches when shown")
     func ensuredActivePrimary() async throws {
-        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
-            throw RegistryQueryError("The ensured command needs no second preparation")
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
+            guard args.starts(with: ["session", "attach"]) else {
+                throw RegistryQueryError("A retained primary is never started")
+            }
+            return attachment(id: "primary")
         })
         store.reconcile(try records([session(id: "primary", state: "active")]))
-        let prepared = try #require(records([attachment(id: "primary")]).first)
-        store.adoptPreparation(prepared)
-        await store.select(prepared.id)
+        let ensured = try #require(records([session(id: "primary", state: "active").replacingOccurrences(
+            of: "[\"lf\", \"session\", \"connect\", \"primary\"]", with: "[]")]).first)
+        store.adoptPreparation(ensured)
+        await store.select(ensured.id)
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.sessions.first?.launchArguments == ["lf", "session", "attach", "primary", "--if-free"])
     }
@@ -467,13 +471,10 @@ struct WorkspaceSessionLifecycleTests {
         #expect(await calls.count == 1)
     }
 
-    @Test("Reconnect and Resume use distinct production buttons", arguments: [false, true])
-    func recoveryButtons(ended: Bool) async throws {
+    @Test("A pane with nothing running offers one Resume", arguments: [false, true])
+    func recoveryButton(ended: Bool) async throws {
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "attach"]) {
-                return attachment(id: "retained").replacingOccurrences(
-                    of: "\"unavailable_reason\":null", with: "\"unavailable_reason\":\"Execution ended\"")
-            }
+            if args.starts(with: ["session", "attach"]) { return "null" }
             return session(id: "retained", state: "closed")
         }
         let store = SessionsStore(repoPath: "/tmp/repo", query: query)
@@ -481,10 +482,12 @@ struct WorkspaceSessionLifecycleTests {
         store.adoptPreparation(try #require(store.sessions.first?.record))
         if ended {
             store.recordPaneLive("retained")
-            store.noteSurfaceClosed(.session("retained", machineId: fixtureMachineId), output: "Execution ended")
+            store.noteSurfaceClosed(.session("retained", machineId: fixtureMachineId), output: "Left “retained”.")
         } else {
             store.recordPaneFailure("retained", reason: "Owner unavailable")
         }
+        await store.select("retained")
+        #expect(store.sessions.first?.state == .pending)
         let workspace = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
             .workspace(for: WorkWorkspaceKey(repository: "repo", kind: .task, id: "task"), title: "Task", location: nil)
         workspace.multiplexer.load(sessionId: "retained")
@@ -492,16 +495,8 @@ struct WorkspaceSessionLifecycleTests {
             sessions: store, workspace: workspace, model: WorkModel(query: query, repoPath: "/tmp/repo"),
             onFocus: { _, _ in })
         let placeholder = view._sessionPlaceholder(try #require(store.sessions.first))
-        let reconnect = try placeholder.inspect().find(button: "Reconnect")
-        try reconnect.tap()
-        let attachmentDeadline = ContinuousClock.now + .seconds(3)
-        while store.sessions.first?.error != "Execution ended", ContinuousClock.now < attachmentDeadline {
-            await Task.yield()
-        }
-        #expect(store.sessions.first?.surface == nil)
-        #expect(store.sessions.first?.error == "Execution ended")
-        let recovery = view._sessionPlaceholder(try #require(store.sessions.first))
-        let resume = try recovery.inspect().find(button: "Resume conversation")
+        #expect(throws: (any Error).self) { try placeholder.inspect().find(button: "Reconnect") }
+        let resume = try placeholder.inspect().find(button: "Resume")
         #expect(!resume.isDisabled())
         try resume.tap()
         let resumeDeadline = ContinuousClock.now + .seconds(3)
@@ -538,12 +533,9 @@ private actor AttachmentReads {
 }
 
 private func attachment(id: String) -> String {
-    let actions = sessionActionFixtureJSON(state: "closed")
-    let reconnect = #"{"kind":"reconnect","label":"Reconnect","help":"Attach only","unavailable_reason":null},"#
-    return session(id: id, state: "closed").replacingOccurrences(
+    session(id: id, state: "closed").replacingOccurrences(
         of: "[\"lf\", \"session\", \"connect\", \"\(id)\"]",
         with: "[\"lf\", \"session\", \"attach\", \"\(id)\", \"--if-free\"]")
-        .replacingOccurrences(of: actions, with: "[" + reconnect + actions.dropFirst())
 }
 
 @MainActor

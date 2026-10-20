@@ -620,19 +620,28 @@ struct SessionItem: Identifiable, Equatable {
         return message
     }
 
-    mutating func adoptPreparation(_ record: SessionRecord, action: SessionActionKind) {
+    mutating func adoptPreparation(_ record: SessionRecord, intent: Preparation) {
         self.record = record
         // A prepared attachment can join a free viewer even while the provider
         // is active. Only an explicit move may displace an existing viewer.
-        if action == .reconnect, let attachment = record.action(.reconnect) {
-            state = attachment.unavailableReason.map(State.failed) ?? .prepared
-        } else if action != .moveHere, record.action(.moveHere) != nil {
+        if intent == .attach {
+            state = .prepared
+        } else if record.openArgv.isEmpty {
+            // Nothing to start: retained work attaches when shown.
+            state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
+        } else if intent != .moveHere, record.action(.moveHere) != nil {
             state = .elsewhere
         } else {
-            state = record.action(action == .moveHere ? .moveHere : .open)?
+            state = record.action(intent == .moveHere ? .moveHere : .open)?
                 .unavailableReason.map(State.failed) ?? .prepared
         }
     }
+}
+
+/// What a pane asked lf to prepare. Attaching never starts a provider; opening
+/// is `lf resume`, which attaches when it can and otherwise reopens history.
+enum Preparation {
+    case attach, open, moveHere
 }
 
 @MainActor
@@ -717,14 +726,14 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private func prepare(_ id: String, action: SessionActionKind) async {
+    private func prepare(_ id: String, intent: Preparation) async {
         guard let index = _index(id) else { return }
-        let replacing = action == .moveHere
+        let replacing = intent == .moveHere
         if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed, .ended:
             sessions[index].state = .opening
-        case .elsewhere where action != .open:
+        case .elsewhere where intent != .open:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
@@ -738,16 +747,21 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
-            let stage = action == .reconnect ? "attach_prepare" : "connect_prepare"
+            let stage = intent == .attach ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface = try await action == .reconnect
+            let surface: SessionRecord? = try await intent == .attach
                 ? executionQuery.prepareSessionAttachment(id: id, cwd: repoPath)
                 : executionQuery.prepareSession(id: id, takeover: replacing, cwd: repoPath)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
-                sessions[latest].adoptPreparation(surface, action: action)
+                if let surface {
+                    sessions[latest].adoptPreparation(surface, intent: intent)
+                } else {
+                    sessions[latest].state = sessions[latest].record.action(.moveHere) != nil
+                        ? .elsewhere : .pending
+                }
             }
         } catch {
             guard let latest = _index(id) else { return }
@@ -759,7 +773,7 @@ final class SessionsStore {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
         case .pending, .failed, .ended, .elsewhere:
-            sessions[index].adoptPreparation(record, action: record.action(.reconnect) == nil ? .open : .reconnect)
+            sessions[index].adoptPreparation(record, intent: .open)
         case .opening, .prepared, .live:
             break
         }
@@ -775,15 +789,15 @@ final class SessionsStore {
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         }
-        await prepare(id, action: .reconnect)
+        await prepare(id, intent: .attach)
     }
 
     func resume(_ id: String) async {
-        await prepare(id, action: .open)
+        await prepare(id, intent: .open)
     }
 
     func moveHere(_ id: String) async {
-        await prepare(id, action: .moveHere)
+        await prepare(id, intent: .moveHere)
     }
 
     @discardableResult

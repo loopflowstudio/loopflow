@@ -126,9 +126,6 @@ struct WorkDestinationTests {
         let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
             sessions: store, workspace: workspace, model: model, onFocus: { _, _ in })
             ._sessionPlaceholder(try #require(store.sessions.first))
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-retry-\(record.id)")
-        }
         let move = try view.inspect().find(viewWithAccessibilityIdentifier: "session-move-here-\(record.id)").button()
         #expect(!move.isDisabled())
         #expect(throws: Never.self) {
@@ -1905,7 +1902,9 @@ private actor ExternalConversationOwner {
             takeoverPrepared = true
             return prepared
         }
-        guard args.contains("--try") || args.contains("--if-free") || args.contains("ensure") else {
+        // A client outside any lf owner leaves nothing to attach to.
+        if args.contains("--if-free") { return "null" }
+        guard args.contains("--try") || args.contains("ensure") else {
             throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
         }
         return active

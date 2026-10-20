@@ -25,6 +25,7 @@ use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod primary;
+pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 
@@ -193,7 +194,6 @@ pub enum SessionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionActionKind {
-    Reconnect,
     Open,
     MoveHere,
 }
@@ -711,10 +711,7 @@ pub(crate) async fn open(
         if session.interactive {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
-                    && store
-                        .sqlite
-                        .process(&owner)?
-                        .is_some_and(|p| p.completed_at.is_none())
+                    && owner_running(&store.sqlite, &owner)?
                 {
                     crate::transport::attach(&owner, false, true)?;
                     return surface(store, session).await;
@@ -929,27 +926,20 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 }
 
 /// Read an existing execution without preparing input or resuming provider history.
+/// None when nothing is running to attach to; only an explicit resume reopens history.
 pub(crate) async fn prepare_attachment(
     store: &SharedStore,
     session: &LfSession,
     observe: bool,
     if_free: bool,
-) -> Result<SessionRecord> {
+) -> Result<Option<SessionRecord>> {
     crate::data_clone::require_writable_session(&session.id)?;
-    let unavailable_reason = match store.sqlite.session_transport(&session.id)? {
-        None => Some(
-            "Session has no retained execution; resume explicitly to open saved history".into(),
-        ),
-        Some(owner)
-            if store
-                .sqlite
-                .process(&owner)?
-                .is_some_and(|process| process.completed_at.is_some()) =>
-        {
-            Some("Session execution ended; resume explicitly to open saved history".into())
-        }
-        Some(_) => None,
+    let Some(owner) = store.sqlite.session_transport(&session.id)? else {
+        return Ok(None);
     };
+    if !owner_running(&store.sqlite, &owner)? {
+        return Ok(None);
+    }
     let mut record = surface(store, session).await?;
     record.open_argv = human_session_argv(&session.id, "attach")?;
     if observe {
@@ -958,16 +948,17 @@ pub(crate) async fn prepare_attachment(
     if if_free {
         record.open_argv.push("--if-free".into());
     }
-    record.actions.insert(
-        0,
-        SessionAction {
-            kind: SessionActionKind::Reconnect,
-            label: "Reconnect".into(),
-            help: "Attach to retained execution without restarting or replaying input".into(),
-            unavailable_reason,
-        },
-    );
-    Ok(record)
+    Ok(Some(record))
+}
+
+/// An execution owner runs until it records its exit or the OS shows it gone,
+/// as after a restart. Unknown evidence is not exit.
+pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
+    Ok(store
+        .process(owner)?
+        .is_some_and(|process| process.completed_at.is_none())
+        && crate::journal::process_evidence(store, owner)
+            != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
 /// A Session as its row and its current input describe it.
@@ -1839,17 +1830,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn reconnect_action_fixture_preserves_attach_only_intent() {
-        let value: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/session_reconnect_action.json"
-        ))
-        .unwrap();
-        let action: super::SessionAction = serde_json::from_value(value.clone()).unwrap();
-        assert_eq!(action.kind, super::SessionActionKind::Reconnect);
-        assert_eq!(serde_json::to_value(action).unwrap(), value);
     }
 
     #[test]

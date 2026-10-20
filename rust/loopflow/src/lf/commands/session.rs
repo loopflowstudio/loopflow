@@ -46,6 +46,12 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 if *json {
                     println!("{}", serde_json::to_string_pretty(&record)?);
                 } else {
+                    let record = record.with_context(|| {
+                        format!(
+                            "Nothing is running to attach to; `lf resume {}` reopens its history",
+                            session.id
+                        )
+                    })?;
                     println!(
                         "{}",
                         shlex::try_join(record.open_argv.iter().map(String::as_str))?
@@ -192,10 +198,25 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             .await
         }
         SessionCommand::Connect {
+            all: true,
+            connection,
+            ..
+        } => {
+            let store = open_shared_store().await?;
+            let resumed = crate::ops::human_session::restore::resume_all(&store).await?;
+            if connection.json || cli.json {
+                println!("{}", serde_json::to_string_pretty(&resumed)?);
+            } else {
+                println!("{}", crate::ops::human_session::restore::render(&resumed));
+            }
+            Ok(())
+        }
+        SessionCommand::Connect {
             id,
             connection,
             takeover,
             try_open,
+            all: false,
         } => {
             connect(
                 cli,

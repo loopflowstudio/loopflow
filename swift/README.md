@@ -73,8 +73,8 @@ links wait for resolution before delivery. Unknown repositories need an initial 
 Selecting a retained Session reuses its surface. When a surface needs reconnecting,
 Desktop attaches to the recorded execution without starting a provider, replaying
 input or taking control from another viewer. A failed connection stays visible.
-**Reconnect** retries attachment; **Resume conversation** explicitly opens saved
-provider history. Repository, Wave and Task conversation entry share metadata-only
+**Resume** does what `lf resume` does: it attaches to a running conversation, or
+otherwise reopens its saved provider history. Repository, Wave and Task conversation entry share metadata-only
 preparation; only a newly admitted conversation offers its first launch.
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn

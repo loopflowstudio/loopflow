@@ -7,12 +7,6 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test func reconnectActionPreservesAttachOnlyIntent() throws {
-        let action = try JSONDecoder().decode(SessionAction.self, from: loadFixtureData("session_reconnect_action.json"))
-        #expect(action.kind == .reconnect)
-        #expect(try JSONDecoder().decode(SessionAction.self, from: JSONEncoder().encode(action)) == action)
-    }
-
     @Test func pausedTaskStateIsUnfinished() throws {
         let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_paused.json"))
         #expect(state == .paused)

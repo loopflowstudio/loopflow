@@ -370,17 +370,7 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
             .unwrap();
         let attachment =
             fixture.json(&["session", "attach", id, "--if-free", "--prepare", "--json"]);
-        assert_eq!(attachment["id"], id);
-        assert!(attachment["actions"][0]["unavailable_reason"]
-            .as_str()
-            .unwrap()
-            .contains("no retained execution"));
-        assert_eq!(attachment["actions"][0]["kind"], "reconnect");
-        assert!(attachment["actions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|action| action["kind"] == "open" && action["unavailable_reason"].is_null()));
+        assert!(attachment.is_null(), "nothing is running to attach to");
         let refused = fixture.run(&["session", "attach", id, "--if-free"]);
         assert!(!refused.status.success());
         assert!(fixture.launches().is_empty());

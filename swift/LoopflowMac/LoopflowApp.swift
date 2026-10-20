@@ -38,6 +38,10 @@ struct LoopflowApp: App {
         // by Wave launchers can find git and agent CLIs that live in
         // Homebrew or ~/.local/bin.
         enrichProcessPathForGUILaunch()
+        // A reboot leaves interrupted Sessions behind; bring them all back unasked.
+        if AppTestMode.current() == nil, SessionFixture.query == nil {
+            Task.detached(priority: .utility) { try? await RegistryQueryLocal.shared.resumeInterrupted() }
+        }
         // Ghostty borrows the process environment when appearance initializes it.
         // Finish environment changes before publishing the initial theme.
         _appearance = State(initialValue: AppearanceStore.shared)

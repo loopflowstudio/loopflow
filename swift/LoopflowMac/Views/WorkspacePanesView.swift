@@ -627,13 +627,13 @@ struct SessionPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Session viewer disconnected").foregroundStyle(theme.palette.text)
+                Text("No longer open here").foregroundStyle(theme.palette.text)
                 ScrollView {
                     Text(output).font(.system(.body, design: .monospaced))
                         .foregroundStyle(theme.palette.text).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                openButton(item, retrying: true)
+                openButton(item)
             }.padding()
         case .failed(let message):
             ContentUnavailableView {
@@ -643,7 +643,7 @@ struct SessionPaneView: View {
                 Text(message)
                     .foregroundStyle(theme.palette.textSecondary)
             } actions: {
-                openButton(item, retrying: true)
+                openButton(item)
             }
         case .pending where workspace.openingConversation:
             ProgressView("Opening conversation…")
@@ -657,21 +657,17 @@ struct SessionPaneView: View {
                 Text("This Session has no live terminal in this pane yet.")
                     .foregroundStyle(theme.palette.textSecondary)
             } actions: {
-                openButton(item, retrying: false)
+                openButton(item)
             }
         }
     }
 
+    /// The one way back, as `lf resume`: Resume attaches to a running
+    /// conversation or reopens its saved history; Move here takes it over.
     @ViewBuilder
-    private func openButton(_ item: SessionItem, retrying: Bool) -> some View {
-        if retrying {
-            Button("Reconnect") {
-                Task { @MainActor in await sessions.select(item.id) }
-            }
-            .help("Attach to the existing execution without restarting it")
-        }
+    private func openButton(_ item: SessionItem) -> some View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            Button(action.kind == .open ? "Resume conversation" : action.label) {
+            Button(action.kind == .open ? "Resume" : action.label) {
                 sessions.beginPaneLoad(item.id)
                 Task { @MainActor in
                     if action.kind == .moveHere { await sessions.moveHere(item.id) }
@@ -682,8 +678,8 @@ struct SessionPaneView: View {
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
             .disabled(action.kind == .moveHere && action.unavailableReason != nil)
-            .help(action.kind == .open ? "Explicitly start a client on this conversation’s saved history" : action.unavailableReason ?? action.help)
-            .accessibilityIdentifier(retrying ? "session-retry-\(item.id)" : "session-open-here-\(item.id)")
+            .help(action.kind == .open ? "Attach to the running conversation, or reopen its saved history" : action.unavailableReason ?? action.help)
+            .accessibilityIdentifier("session-open-here-\(item.id)")
         }
     }
 

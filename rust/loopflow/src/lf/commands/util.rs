@@ -936,7 +936,7 @@ fn native_return(
         );
     let command = format!("lf resume {session}");
     crate::transport::native_client(
-        format!("Left {name}. Continue with: {command}"),
+        format!("Left {name}. Continue with: {command}  (Ctrl+] steps away without stopping)"),
         format!("Detached from {name}; it keeps running. Return with: {command}"),
     )
 }

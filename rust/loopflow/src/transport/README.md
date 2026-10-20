@@ -15,10 +15,16 @@ settlement with the detached owner. Observing takes no input claim; a controllin
 attachment revokes the previous viewer's input token. `--if-free` refuses when
 another viewer controls input. Desktop uses it for restoration; it never displaces
 a viewer just because a pane becomes visible. `session attach --prepare --json`
-returns an attach-only command without opening a socket or starting a provider.
-Repository, Wave and Task ensure prepare metadata without launching execution;
-existing executions return this same attach-only command. Ended execution needs
-explicit resume.
+returns an attach-only command without opening a socket or starting a provider,
+or `null` when nothing is running to attach to. Repository, Wave and Task ensure
+prepare metadata without launching execution; existing executions return no
+command and attach when shown. Ended execution needs explicit resume.
+
+`lf resume --all` is the one automatic restart: it resumes Sessions whose owner
+never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
+Leaving through the provider or detaching records an exit, so those never qualify.
+Each resumes through ordinary `lf resume` in a new owner with no viewer; its
+interrupted turn is flagged, not replayed.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

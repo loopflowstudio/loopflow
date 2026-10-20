@@ -233,7 +233,15 @@ Sessions, Flows and Task shells survive closing their terminal. Reattach to a
 Session with `lf session attach SESSION`;
 `--observe` leaves input control unchanged. `lf resume` opens the retained native
 terminal, or explicitly transitions a structured Run to native UI without replaying
-its input. [Transport details and restoration limits](rust/loopflow/src/transport/README.md).
+its input. Ctrl+] steps away without stopping it.
+
+```bash
+lf resume --all     # after a reboot or crash: reopen every interrupted conversation
+```
+
+It skips anything running or left on purpose and reports each Session, flagging a
+turn the restart cut off. Desktop runs it at launch.
+[Transport details and restoration limits](rust/loopflow/src/transport/README.md).
 
 Codex terminal Sessions receive context and the first message through the provider
 protocol. Claude loads context from a system instructions file and the first

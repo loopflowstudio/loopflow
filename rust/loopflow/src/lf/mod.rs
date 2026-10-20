@@ -996,6 +996,10 @@ pub enum SessionCommand {
         /// Ask the provider to resume even when another client is active
         #[arg(long = "try", conflicts_with = "takeover")]
         try_open: bool,
+        /// Resume every conversation a restart or crash interrupted; never one
+        /// someone left. Terminals attach when they open them.
+        #[arg(long, conflicts_with_all = ["id", "takeover", "try_open", "fresh", "message", "prepare"])]
+        all: bool,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {

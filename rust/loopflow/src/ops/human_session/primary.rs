@@ -274,7 +274,10 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
             .flatten()
             .is_some()
     {
-        return super::prepare_attachment(store, &session, false, true).await;
+        // Retained work is attached when shown, never started from here.
+        let mut record = surface(store, &session).await?;
+        record.open_argv.clear();
+        return Ok(record);
     }
     let session = admit_workspace(store, session).await?;
     let session = if session.captured.is_none() || session.input_published {

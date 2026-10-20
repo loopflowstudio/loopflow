@@ -634,6 +634,181 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert_eq!(provider_id, attachment.0);
 }
 
+/// A restart kills every owner and provider without recording an exit. `lf resume
+/// --all` reopens exactly those conversations from saved history, once; one the
+/// person left stays stopped.
+#[test]
+fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
+    let fixture = Fixture::new();
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let launches = |count: usize| -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let text =
+                std::fs::read_to_string(fixture.home.path().join("launches")).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= count {
+                return lines;
+            }
+            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let mut owners = Vec::new();
+    for input in ["first", "second", "left"] {
+        let output = fixture
+            .command(&[
+                "transport",
+                "start",
+                "--terminal",
+                "--",
+                env!("CARGO_BIN_EXE_lf"),
+                "--interactive",
+                "--agent",
+                "claude",
+                ":",
+                input,
+            ])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        owners.push(String::from_utf8(output.stdout).unwrap().trim().to_owned());
+        launches(owners.len());
+    }
+    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let session_of = |line: &str| -> String {
+        let capture = line.split(':').nth(1).unwrap();
+        sql.query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [capture],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let started = launches(3);
+    let sessions: Vec<String> = started.iter().map(|line| session_of(line)).collect();
+    // The person leaves the third conversation through the provider's own exit.
+    let mut viewer = fixture.viewer(&owners[2], true);
+    viewer.input("exit\n");
+    viewer.finish();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while sql
+        .query_row(
+            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+            [&owners[2]],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "left owner never recorded its exit"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A restart: every remaining owner and provider dies without a word.
+    for (owner, line) in owners.iter().zip(&started).take(2) {
+        let receipt: Value = serde_json::from_slice(
+            &std::fs::read(
+                fixture
+                    .home
+                    .path()
+                    .join(format!("runtime/exec-processes/{owner}.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let provider: i64 = line.split(':').next().unwrap().parse().unwrap();
+        let parent = Command::new("ps")
+            .args(["-o", "ppid=", "-p", &provider.to_string()])
+            .output()
+            .unwrap();
+        let inner: i64 = String::from_utf8(parent.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let pids = [receipt["pid"].as_i64().unwrap(), inner, provider];
+        // Freeze first so no survivor observes another's death and records an exit.
+        for signal in [libc::SIGSTOP, libc::SIGKILL] {
+            for pid in pids {
+                // SAFETY: test-owned PIDs read from this fixture's receipts and launches.
+                unsafe { libc::kill(pid as libc::pid_t, signal) };
+            }
+        }
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let resume_all = || -> Value {
+        let output = fixture
+            .command(&["resume", "--all", "--json"])
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let resumed = resume_all();
+    let ids: Vec<&str> = resumed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids.iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        sessions[..2]
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        "{resumed}"
+    );
+    assert!(
+        resumed
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["outcome"]["kind"] == "resumed"),
+        "{resumed}"
+    );
+    let reopened = launches(5);
+    assert_eq!(reopened.len(), 5, "{reopened:?}");
+    for line in &reopened[3..] {
+        let (_, resumed) = line
+            .split_once(" --resume ")
+            .unwrap_or_else(|| panic!("reopened without history: {line}"));
+        assert!(!resumed.contains(' '), "input replayed: {line}");
+    }
+    // Rerunning finds nothing to do and starts no provider.
+    assert_eq!(resume_all(), json!([]));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(launches(5).len(), 5);
+}
+
 #[test]
 fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
     let fixture = Fixture::new();

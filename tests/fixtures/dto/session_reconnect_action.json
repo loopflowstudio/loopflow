@@ -1,6 +1,0 @@
-{
-  "kind": "reconnect",
-  "label": "Reconnect",
-  "help": "Attach to retained execution without restarting or replaying input",
-  "unavailable_reason": null
-}

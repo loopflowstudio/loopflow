@@ -410,8 +410,23 @@ Shape (accepted where marked; the rest proposed):
   never one someone left.
 - Desktop resumes interrupted Sessions machine-wide, including ones started from
   a terminal (Jack accepted); panes attach when opened.
-- Unknown: how process reconciliation records an owner that vanished with the
-  machine versus one that exited; *interrupted* depends on telling them apart.
+- Resolved: *interrupted* = an unfinished interactive Session whose transport
+  owner LfProcess never recorded completion and is Dead by OS evidence (receipt
+  PID gone, or began before boot). The minute reaper settles the AgentProcess but
+  never the owner, so the distinction survives it. `/exit` and detach complete
+  the owner. `lf resume` also no longer attaches to a dead, unsettled owner.
+
+Built October 19 (local, unpushed): one Resume (Reconnect kind, fixture and
+button removed; attach preparation returns `null` when nothing runs), Ctrl+]
+hint, `lf resume --all` (`ops/human_session/restore.rs`), Desktop runs it at
+launch. Proof: `transport_tests::resume_all_restores_interrupted_sessions_and_leaves_left_ones`
+(SIGSTOP+SIGKILL owner, inner lf and provider; two reopen with `--resume`, no
+replay; the `/exit` one stays stopped; rerun is a no-op).
+
+Left: Desktop does not show the cut-off flag (CLI/JSON only); Desktop needs a
+released lf with `--all` (older installs fail it silently); the real-reboot proof
+below is still unrun; Codex/OpenCode/Pi resume through the same path but only
+the Claude stand-in is tested.
 
 Next proof: reboot (or kill every owner) with three running Sessions, one mid-turn;
 launching Desktop (and separately the CLI command) restores all three without

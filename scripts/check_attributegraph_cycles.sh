@@ -41,14 +41,20 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-BIN="$REPO/swift/.build/debug/LoopflowMac"
-if [ ! -x "$BIN" ]; then
-  echo "Building LoopflowMac…"
-  ( cd "$REPO/swift" && swift build --product LoopflowMac >/dev/null )
-fi
+# The Xcode build bundles this checkout's lf at Contents/MacOS/lf, which the
+# app requires (it never falls back to PATH). Same derived data as the
+# screenshot pipeline; it leaves an installed Loopflow Dev.app alone.
+APP="$REPO/swift/.build/xcode-derived-data/Build/Products/Debug/Loopflow.app"
+BIN="$APP/Contents/MacOS/Loopflow"
+echo "Building Loopflow.app…"
+( cd "$REPO/swift" && xcodegen generate >/dev/null && xcodebuild build \
+    -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' \
+    -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution \
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual \
+    CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= >/dev/null )
 
 LOG="$(mktemp -t lf_attributegraph.XXXXXX.log)"
-/usr/bin/log stream --style compact --process LoopflowMac >"$LOG" 2>&1 &
+/usr/bin/log stream --style compact --process Loopflow >"$LOG" 2>&1 &
 LOG_PID=$!
 sleep 1.5
 

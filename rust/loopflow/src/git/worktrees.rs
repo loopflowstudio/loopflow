@@ -439,7 +439,7 @@ pub(crate) enum RemoteFailure {
 impl std::fmt::Display for RemoteFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Auth { detail } => write!(f, "authentication failed (gh exit 4): {detail}"),
+            Self::Auth { detail } => write!(f, "authentication failed: {detail}"),
             Self::RateLimited { detail } => write!(f, "rate limited: {detail}"),
             Self::TimedOut => write!(f, "timed out after {}s", REMOTE_LIMIT.as_secs()),
             Self::Unavailable { detail } => write!(f, "unavailable: {detail}"),
@@ -2265,7 +2265,9 @@ mod tests {
         };
 
         assert!(run("echo 'To get started, run: gh auth login' >&2; exit 4")
-            .starts_with("authentication failed (gh exit 4): To get started"));
+            .starts_with("authentication failed: To get started"));
+        assert!(run("echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1")
+            .starts_with("authentication failed: gh: Bad credentials"));
         assert!(run(r#"echo '{"errors":[{"type":"RATE_LIMITED"}]}'; echo 'gh: API rate limit exceeded' >&2; exit 1"#)
             .starts_with("rate limited"));
         assert_eq!(

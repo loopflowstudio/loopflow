@@ -31,7 +31,7 @@ Running it without `--dry-run` prints the same lines with `deleted` in place of
 `would delete`. Afterwards `git ls-remote --heads origin | wc -l` drops from 53 to
 about 42, and a second run deletes nothing. Run with a revoked token
 (`GH_TOKEN=bad lf wt prune --branches`), it deletes nothing, writes
-`GitHub authentication failed (gh exit 4): …; nothing deleted` to stderr and exits 1.
+`GitHub authentication failed: …; nothing deleted` to stderr and exits 1.
 
 A dev build hands off to the installed lf unless `LF_HOME` names a private home.
 Demo it from a build with `LF_HOME=$(mktemp -d)`; Task protections still come
@@ -113,7 +113,7 @@ branch whose head moved past its evidence is retained with the reason `head move
 ### Failure behavior (fail closed, loudly)
 
 - If GitHub PR facts are unavailable for any reason, nothing is deleted. The command
-  prints a classified one-line reason (`authentication failed (gh exit 4): …`,
+  prints a classified one-line reason (`authentication failed: …`,
   `rate limited: <detail>`, `timed out after Ns`, or `unavailable: <detail>`) and
   exits 1. Without those facts it cannot rule out an open PR.
 - If the GraphQL budget is below 200 remaining before the run, nothing is deleted. The
@@ -228,3 +228,5 @@ One PR, built in this order:
   Expected: all pass. A fourth case covers the low-budget skip.
 
 Checks: realign 2026-10-20: real-repo dry run (`LF_HOME=$(mktemp -d) target/debug/lf wt prune --branches --dry-run`) exit 0, 11 remote / 120 local, retentions as listed in Done when; compress pass: clippy clean, `--lib branch_prune git::worktrees` 29 pass, `wt_prune_branches` 4/4 pass; gate owns the full matrix. The real (non-dry) run and second-run idempotence remain for demo.
+
+Gate 2026-10-20: auth failures now read `authentication failed: <gh stderr>` (a 401 "Bad credentials" exits 1, not 4, so the old `(gh exit 4)` label was wrong for the revoked-token demo); `cargo fmt --check` + `cargo clippy --all-targets -D warnings` pass; `--lib git::worktrees ops::branch_prune ops::wt ops::land ops::release store::sqlite` 247 pass; `--test integration wt_prune_branches land wt_` 47 pass. Full matrix deferred to CI.

@@ -218,7 +218,7 @@ fn unauthenticated_github_deletes_nothing_and_fails() {
     assert_eq!(run.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        stderr.contains("GitHub authentication failed (gh exit 4)"),
+        stderr.contains("GitHub authentication failed: "),
         "{stderr}"
     );
     assert!(stderr.contains("nothing deleted"), "{stderr}");

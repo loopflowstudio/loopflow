@@ -1,7 +1,7 @@
 //! `lf disk`: Loopflow's footprint on this Machine, and reclaiming it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::disk::{format_bytes, Category, HomeUsage, RotationReport};
 use crate::git::build_cleanup::{prune_builds, BuildCleanupPolicy, ROOTS};
 use crate::git::worktrees::{list_porcelain, main_repo_root};
-use crate::store::sqlite::read_task_worktree_ownership;
+use crate::store::sqlite::{read_task_worktree_ownership, TaskWorktreeOwnership};
 
 #[derive(Debug, Subcommand)]
 pub enum DiskCommand {
@@ -95,31 +95,31 @@ pub fn run(json: bool, command: Option<&DiskCommand>) -> Result<()> {
 // ---------------------------------------------------------------------------
 // Footprint
 
-/// Each Task repository's main checkout, plus the repository at the cwd.
-fn repositories() -> BTreeSet<PathBuf> {
-    let mut repositories = BTreeSet::new();
-    for registry in crate::lf::commands::ops::build_cleanup_registries() {
-        for owner in read_task_worktree_ownership(&registry).unwrap_or_default() {
-            if let Ok(main) = main_repo_root(&owner.path) {
-                repositories.insert(main);
-            }
-        }
-    }
-    if let Ok(current) = std::env::current_dir() {
-        if let Ok(main) = main_repo_root(&current) {
-            repositories.insert(main);
-        }
-    }
-    repositories
-}
-
-fn worktree_usage(repositories: &BTreeSet<PathBuf>) -> Vec<WorktreeUsage> {
+/// Every Task worktree a registry records, first registry winning.
+fn task_worktrees() -> BTreeMap<PathBuf, TaskWorktreeOwnership> {
     let mut owners = BTreeMap::new();
     for registry in crate::lf::commands::ops::build_cleanup_registries() {
         for owner in read_task_worktree_ownership(&registry).unwrap_or_default() {
             owners.entry(owner.path.clone()).or_insert(owner);
         }
     }
+    owners
+}
+
+/// Each Task repository's main checkout, plus the repository at the cwd.
+fn repositories(owners: &BTreeMap<PathBuf, TaskWorktreeOwnership>) -> BTreeSet<PathBuf> {
+    let current = std::env::current_dir().ok();
+    owners
+        .keys()
+        .chain(current.as_ref())
+        .filter_map(|path| main_repo_root(path).ok())
+        .collect()
+}
+
+fn worktree_usage(
+    repositories: &BTreeSet<PathBuf>,
+    owners: &BTreeMap<PathBuf, TaskWorktreeOwnership>,
+) -> Vec<WorktreeUsage> {
     let worktrees: Vec<(PathBuf, PathBuf)> = repositories
         .iter()
         .flat_map(|repo| {
@@ -164,7 +164,8 @@ fn worktree_usage(repositories: &BTreeSet<PathBuf>) -> Vec<WorktreeUsage> {
 fn footprint(json: bool) -> Result<()> {
     let home = crate::store::lf_home_dir();
     let home = crate::disk::measure_home(&home, crate::disk::budget_bytes()?)?;
-    let mut worktrees = worktree_usage(&repositories());
+    let owners = task_worktrees();
+    let mut worktrees = worktree_usage(&repositories(&owners), &owners);
     worktrees.sort_by_key(|worktree| std::cmp::Reverse(worktree.checkout_bytes));
     let total_bytes = home.bytes + worktrees.iter().map(|w| w.checkout_bytes).sum::<u64>();
     let footprint = Footprint {
@@ -242,7 +243,7 @@ fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
     let current = crate::lf::commands::util::find_repo_root().ok();
     let registries = crate::lf::commands::ops::build_cleanup_registries();
 
-    for repo in repositories() {
+    for repo in repositories(&task_worktrees()) {
         let current = current.clone().unwrap_or_else(|| repo.clone());
         // Measure before removal; a removed checkout cannot be measured.
         let worktrees = (|| -> Result<Vec<WorktreeRemoval>> {
@@ -348,29 +349,44 @@ fn clean(dry_run: bool, json: bool, keep_days: u64) -> Result<()> {
     }
 }
 
-fn render_clean(report: &CleanReport) -> String {
-    let verb = if report.dry_run {
+fn verb(dry_run: bool) -> &'static str {
+    if dry_run {
         "would remove"
     } else {
         "removed"
-    };
+    }
+}
+
+/// One removal, in the same shape `logs/disk.log` records it.
+fn removal_line(dry_run: bool, kind: &str, bytes: u64, path: &Path, reason: &str) -> String {
+    format!(
+        "{} {kind} {} {} ({reason})\n",
+        verb(dry_run),
+        format_bytes(bytes),
+        path.display()
+    )
+}
+
+fn render_clean(report: &CleanReport) -> String {
     let mut out = String::new();
     for (kind, removals) in [
         ("worktree", &report.worktrees),
         ("build", &report.build_output),
     ] {
         for removal in removals {
-            out.push_str(&format!(
-                "{verb} {kind} {} {} ({})\n",
-                format_bytes(removal.bytes),
-                removal.path.display(),
-                removal.reason
+            out.push_str(&removal_line(
+                report.dry_run,
+                kind,
+                removal.bytes,
+                &removal.path,
+                &removal.reason,
             ));
         }
     }
     if report.process_receipts > 0 {
         out.push_str(&format!(
-            "{verb} {} dead process receipts\n",
+            "{} {} dead process receipts\n",
+            verb(report.dry_run),
             report.process_receipts
         ));
     }
@@ -393,19 +409,14 @@ fn render_clean(report: &CleanReport) -> String {
 }
 
 fn render_rotation(report: &RotationReport) -> String {
-    let verb = if report.dry_run {
-        "would remove"
-    } else {
-        "removed"
-    };
     let mut out = String::new();
     for removal in &report.removed {
-        out.push_str(&format!(
-            "{verb} {} {} {} ({})\n",
+        out.push_str(&removal_line(
+            report.dry_run,
             removal.category.as_str(),
-            format_bytes(removal.bytes),
-            removal.path.display(),
-            removal.reason
+            removal.bytes,
+            &removal.path,
+            &removal.reason,
         ));
     }
     for error in &report.errors {

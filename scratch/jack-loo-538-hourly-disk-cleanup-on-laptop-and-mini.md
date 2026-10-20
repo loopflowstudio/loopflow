@@ -40,5 +40,5 @@ per-process primitives `lf disk clean` composes.
 - Install the launchd agent on the laptop and mini-heart after landing (the plist
   points at the main checkout's script).
 
-Check: `cargo test --lib disk::` 4 pass; clippy clean; dry runs on an APFS clone of
+Check (after compress): `cargo test -p loopflow --lib disk::` 4 pass; clippy clean; dry runs on an APFS clone of
 Jack's ~/.lf: footprint 107.8G (55s), clean would free 13.1G, rotation floor 28.5G.

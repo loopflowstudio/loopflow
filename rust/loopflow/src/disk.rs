@@ -208,17 +208,13 @@ fn is_sidecar(name: &str) -> bool {
     name.ends_with("-wal") || name.ends_with("-shm")
 }
 
-fn categorize(home: &Path, name: &str) -> Category {
-    let database = crate::store::default_db_path();
-    let database_name = database
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("loopflow.db");
+/// `database` is the selected store's file name when it lives directly in Home.
+fn categorize(database: Option<&str>, name: &str) -> Category {
     let base = name
         .strip_suffix("-wal")
         .or_else(|| name.strip_suffix("-shm"))
         .unwrap_or(name);
-    if database.parent() == Some(home) && base == database_name {
+    if database == Some(base) {
         return Category::Database;
     }
     if backup_database(name).is_some() {
@@ -238,10 +234,14 @@ fn categorize(home: &Path, name: &str) -> Category {
 pub fn measure_home(home: &Path, budget_bytes: u64) -> Result<HomeUsage> {
     let mut totals: BTreeMap<Category, u64> = BTreeMap::new();
     let mut seen = HashSet::new();
+    let store = crate::store::default_db_path();
+    let database = (store.parent() == Some(home))
+        .then(|| store.file_name().and_then(|name| name.to_str()))
+        .flatten();
     for entry in fs::read_dir(home).with_context(|| format!("read {}", home.display()))? {
         let entry = entry?;
         let name = entry.file_name();
-        let category = categorize(home, &name.to_string_lossy());
+        let category = categorize(database, &name.to_string_lossy());
         *totals.entry(category).or_default() += allocated(&entry.path(), &mut seen);
     }
     let categories: Vec<_> = totals
@@ -491,13 +491,18 @@ pub fn rotate_home(
     };
     let before = measure_home(home, budget_bytes)?;
     let excess = before.bytes.saturating_sub(budget_bytes);
-    let expired = older_than.map(|age| SystemTime::now() - age);
+    let expiry = older_than.map(|age| {
+        (
+            SystemTime::now() - age,
+            format!("older than {} days", age.as_secs() / 86400),
+        )
+    });
     let (removed, errors) = rotate(home, dry_run, |unit, freed| {
-        if expired.is_some_and(|expired| unit.modified < expired) {
-            Some(format!(
-                "older than {} days",
-                older_than.expect("expiry has an age").as_secs() / 86400
-            ))
+        if let Some((_, reason)) = expiry
+            .as_ref()
+            .filter(|(expired, _)| unit.modified < *expired)
+        {
+            Some(reason.clone())
         } else if freed < excess {
             Some(format!(
                 "Home over its {} budget",

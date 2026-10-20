@@ -2130,8 +2130,8 @@ mod frontier_tests {
     use crate::durable::{WorkRef, WorkStatus};
     use crate::id::WaveId;
     use crate::store::migrations::{
-        apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
-        prior_known_version,
+        apply_all_but_head, apply_newer_release, latest_applied_version_sqlite,
+        latest_known_version, prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use crate::work::wave::Wave;
@@ -2248,6 +2248,60 @@ mod frontier_tests {
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), before);
         open(&path, Published, &shared.home, Forbidden).unwrap();
+    }
+
+    /// A newer release that only adds leaves this lf reading and writing the
+    /// shared store; one that breaks names the release that locked it out.
+    #[test]
+    fn an_older_lf_keeps_working_on_a_store_a_newer_release_extended() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, Published, &shared.home, Authorized).unwrap();
+        seed_current_wave(&path);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_newer_release(
+            &conn,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;
+             CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
+            true,
+        )
+        .unwrap();
+        let newer = frontier(&path);
+
+        let store = open(&path, Published, &shared.home, Forbidden)
+            .expect("an additive newer release leaves the store readable");
+        let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        assert_eq!(
+            store
+                .get_wave(wave.id())
+                .unwrap()
+                .map(|wave| wave.name().to_string()),
+            Some("From older lf".to_string())
+        );
+        assert_eq!(current_wave(&path), "Current");
+        assert_eq!(frontier(&path), newer);
+        open(&path, Published, &shared.home, Authorized)
+            .expect_err("promotion never accepts history it does not know");
+
+        let broken = SharedMachine::new();
+        let path = broken.shared_db();
+        open(&path, Published, &broken.home, Authorized).unwrap();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let release = apply_newer_release(
+            &conn,
+            "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
+            false,
+        )
+        .unwrap();
+        let refusal = open(&path, Published, &broken.home, Forbidden)
+            .expect_err("a breaking newer release locks this lf out")
+            .to_string();
+        assert!(
+            refusal.contains(&format!("this store needs lf {release} or newer (it has "))
+                && refusal.ends_with("install it with lf install"),
+            "{refusal}"
+        );
     }
 
     #[test]

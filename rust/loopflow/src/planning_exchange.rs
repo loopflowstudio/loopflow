@@ -8,7 +8,6 @@ use crate::work::edit::WorkEdit;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PlanningMutation {
     pub edit: WorkEdit,
     /// Hybrid logical milliseconds, advanced beyond every observed mutation.
@@ -25,7 +24,6 @@ pub struct PlanningSnapshot {
 impl<'de> Deserialize<'de> for PlanningSnapshot {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct Document {
             changes: BTreeMap<String, PlanningMutation>,
         }

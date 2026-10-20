@@ -668,7 +668,7 @@ fn observe_order(
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.*,m.wave_id FROM pm_projects p
+    SELECT p.repo,p.provider,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM pm_projects p
     JOIN pm_wave_projects m ON m.project_id=p.id
     LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo

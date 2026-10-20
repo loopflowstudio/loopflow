@@ -177,7 +177,8 @@ struct WorkNavigationTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            if args.contains("--prepare") { await gate.wait() }
+            // Gate the conversation's preparation; showing it then attaches at once.
+            if args.contains("--prepare"), !args.contains("attach") { await gate.wait() }
             return json
         })
         let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }

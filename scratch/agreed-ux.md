@@ -1,7 +1,7 @@
 # Agreed UX changes — October 18–20
 
-Jack Heart agreed these in demo review; §1–4 are implemented, §5 in part. PR #1580 is
-for review only — no merge, no completion.
+Jack Heart agreed these in demo review; §1–4 are implemented, §5 in part. PR #1580
+publication is for demo review; merge and completion are separate.
 
 ## 1. Unstarted Task tiles offer Start (October 18)
 

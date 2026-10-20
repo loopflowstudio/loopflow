@@ -376,3 +376,44 @@ request path; neither stream can bypass the bound.
 Admission constructs named Session fields in each scope instead of a positional
 seven-value tuple. The finite-query worker uses cancellable suspension between
 nonblocking drains so stalled requests do not occupy executor threads while idle.
+
+## Concept review — October 18, 2026
+
+Accepted (Jack Heart):
+- **One way back.** Desktop offers one **Resume**, behaving exactly like
+  `lf resume`: attach to a running, free execution; otherwise reopen saved
+  history with the same provider. **Move here** remains for a conversation held
+  in another window. Automatic remount (selection, relaunch) stays attach-only
+  and shows no button. Remove `SessionActionKind::Reconnect`, its DTO fixture and
+  the second pane button; plain wording replaces "Session viewer disconnected".
+- **Teach detach where leaving happens.** The leave line becomes
+  `Left “…”. Continue with: lf resume <id>  (Ctrl+] steps away without stopping)`.
+  `/exit` must stop Claude, OpenCode and Pi because their TUI is the agent; the
+  distinction is real, only undiscoverable. README and `lf-reference` already
+  document Ctrl+] for `lf session attach`.
+- **Reboot restores itself** (Jack hit it today: every pane needed a manual
+  resume). Desktop resumes every interrupted Session on launch without asking;
+  the CLI gets a resume-everything command. This revises "automatic restoration
+  is attach-only" for one case only: an execution provably gone with the
+  machine. Viewer or creator loss still never restarts a provider.
+
+Shape (accepted where marked; the rest proposed):
+- *Interrupted* is derived, not stored: a Session whose last execution ended
+  without anyone leaving or detaching (machine restart, crash, kill). History is
+  intact; a turn running at the moment is lost and not replayed.
+- Each resume uses the ordinary explicit resume path. Running Sessions are
+  skipped, failures reported per Session, rerunning is safe. Owners start
+  without viewers; panes attach when shown. Sessions whose last turn was cut off
+  are flagged so the person knows to ask again.
+- CLI: `lf resume --all` (Jack accepted): the same verb as `lf resume <id>`,
+  scoped by help text to every conversation interrupted by a restart or crash;
+  never one someone left.
+- Desktop resumes interrupted Sessions machine-wide, including ones started from
+  a terminal (Jack accepted); panes attach when opened.
+- Unknown: how process reconciliation records an owner that vanished with the
+  machine versus one that exited; *interrupted* depends on telling them apart.
+
+Next proof: reboot (or kill every owner) with three running Sessions, one mid-turn;
+launching Desktop (and separately the CLI command) restores all three without
+duplicate providers, replayed input or lost history, and flags the cut-off turn.
+A Session someone left with `/exit` stays stopped.

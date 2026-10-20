@@ -1391,6 +1391,73 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
 }
 
 #[test]
+fn bare_machine_use_in_a_moved_tasks_worktree_hands_it_off_on_the_owner() {
+    use loopflow::durable::OwnershipKind;
+    use loopflow::work::task::{TaskPr, TaskPrId};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let now = time::OffsetDateTime::now_utc();
+    plan.local
+        .place_task(
+            &task,
+            &plan.local_path,
+            "ownership-demo",
+            &TaskPr {
+                id: TaskPrId::new(),
+                task_id: task.clone(),
+                sequence: 1,
+                slug: "ownership-demo".into(),
+                branch: "jack/ownership-demo".into(),
+                base_commit: "deadbeef".into(),
+                parent_pr_id: None,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .unwrap();
+    plan.local.handoff_task(&task, &mini).unwrap();
+    plan.to_remote();
+
+    // The worktree stays here, but mini writes the Task: the bare form goes there.
+    let output = fixture
+        .command(&["machine", "use", laptop.as_str(), "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let handed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
+    let kinds = plan
+        .remote
+        .task_ownership(&task)
+        .unwrap()
+        .log
+        .iter()
+        .map(|entry| entry.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        [
+            OwnershipKind::Claim,
+            OwnershipKind::Handoff,
+            OwnershipKind::Handoff
+        ]
+    );
+}
+
+#[test]
 fn task_ownership_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);

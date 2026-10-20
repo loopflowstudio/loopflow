@@ -116,7 +116,6 @@ should say `lf machine use` instead of the Machine-local `lf wave machine`.
     connects (no `--wave`/`--repo`) routing to the default Machine, and `lf open`
     reading remote primaries. Explicit `--wave`, `--task`, and `--repo`/`--repository`
     connects route.
-19. **Bare `lf machine use` in a handed-off Task's worktree does not forward.** An
-    explicit `--task` routes to the Task's writer like `lf task claim`; the implicit
-    worktree Task runs locally and refuses with "run the command there" when this
-    Machine is no longer its writer.
+19. **Decided by Jack Heart (2026-10-20): bare `lf machine use` in a moved Task's
+    worktree forwards to the Task's writer**, exactly as `--task` does
+    (`work_route::worktree_handoff_task`); it never refuses.

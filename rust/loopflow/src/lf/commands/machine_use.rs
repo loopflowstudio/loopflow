@@ -1,10 +1,11 @@
 //! `lf machine use`: run work on one of your Machines. A Task moves by
 //! handoff; a Wave or repository default is personal, stored on this Machine
 //! and copied to your other Machines.
-use crate::durable::{DefaultScope, MachineId, OwningMachineSource, RepositoryId};
+use crate::durable::{DefaultScope, MachineId, RepositoryId};
 use crate::id::WaveId;
 use crate::lf::MachineCommand;
 use crate::ops::task_ownership::{change, render, resolve_machine, OwnershipChange};
+use crate::repository::CanonicalRepo;
 use crate::session::PrimaryScope;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
@@ -60,52 +61,54 @@ pub fn run(repo: &Path, command: &MachineCommand) -> anyhow::Result<()> {
         return Ok(());
     }
     let target = resolve_machine(&store.sqlite, machine)?;
-    let repository = repository_id(&store.sqlite, repo)?;
-    let (default_scope, primary, label) = match &scope {
+    let canonical = CanonicalRepo::discover(repo)?;
+    let repository = repository_id(&store.sqlite, &canonical)?;
+    let (default_scope, primary, wave_name) = match scope {
         Scope::Wave { id, name } => (
             DefaultScope::Wave(id.clone()),
-            PrimaryScope::Wave(id.clone()),
-            format!("Wave {name}"),
+            PrimaryScope::Wave(id),
+            Some(name),
         ),
         Scope::Repository => (
             DefaultScope::Repository(repository.clone()),
-            PrimaryScope::Repository(crate::repository::CanonicalRepo::discover(repo)?),
-            "This repository".to_string(),
+            PrimaryScope::Repository(canonical),
+            None,
         ),
         Scope::Task(_) => unreachable!("Task scope hands off above"),
     };
     store.sqlite.set_machine_default(&default_scope, &target)?;
     runtime.block_on(move_primary_session(
-        &store, repo, &scope, &primary, &target,
+        &store,
+        repo,
+        wave_name.as_deref(),
+        &primary,
+        &target,
     ))?;
-    let (resolved, source) = match &scope {
-        Scope::Wave { id, .. } => store.sqlite.wave_owning_machine(id)?,
-        _ => store.sqlite.repository_owning_machine(&repository)?,
-    };
     if *json {
         println!(
             "{}",
-            serde_json::json!({ "scope": default_scope, "machine_id": resolved })
+            serde_json::json!({ "scope": default_scope, "machine_id": target })
         );
     } else {
+        let label = match &wave_name {
+            Some(name) => format!("Wave {name}"),
+            None => "This repository".to_string(),
+        };
         println!(
             "{label}: your new Tasks and its Session run on {}",
-            describe(&store.sqlite, &resolved, &source)?
+            describe(&store.sqlite, &target)?
         );
     }
     if !here {
-        let mut args = vec![
+        let args = [
             "--repository".to_string(),
             repository.to_string(),
             "machine".into(),
             "use".into(),
             target.to_string(),
+            wave_name.unwrap_or_else(|| "--repo".into()),
+            "--here".into(),
         ];
-        match &scope {
-            Scope::Wave { name, .. } => args.push(name.clone()),
-            _ => args.push("--repo".into()),
-        }
-        args.push("--here".into());
         runtime.block_on(copy_to_my_machines(&store.sqlite, &args))?;
     }
     Ok(())
@@ -153,18 +156,14 @@ async fn select_scope(
     })
 }
 
-fn repository_id(store: &SqliteStore, repo: &Path) -> anyhow::Result<RepositoryId> {
+fn repository_id(store: &SqliteStore, repo: &CanonicalRepo) -> anyhow::Result<RepositoryId> {
     store
-        .repository_id(&crate::repository::CanonicalRepo::discover(repo)?.to_string())?
+        .repository_id(&repo.to_string())?
         .ok_or_else(|| anyhow!("repository identity unavailable; run `lf repo identity`"))
 }
 
-fn describe(
-    store: &SqliteStore,
-    machine: &MachineId,
-    source: &OwningMachineSource,
-) -> anyhow::Result<String> {
-    if matches!(source, OwningMachineSource::ThisMachine) || *machine == store.local_machine()?.id {
+fn describe(store: &SqliteStore, machine: &MachineId) -> anyhow::Result<String> {
+    if *machine == store.local_machine()?.id {
         return Ok(format!(
             "{} (this Machine)",
             crate::store::sqlite::task_ownership::local_label()
@@ -181,15 +180,11 @@ fn describe(
 async fn move_primary_session(
     store: &SharedStore,
     repo: &Path,
-    scope: &Scope,
+    wave: Option<&str>,
     primary: &PrimaryScope,
     target: &MachineId,
 ) -> anyhow::Result<()> {
     if *target == store.sqlite.local_machine()?.id {
-        let wave = match scope {
-            Scope::Wave { name, .. } => Some(name.as_str()),
-            _ => None,
-        };
         crate::ops::human_session::primary::ensure(store, repo, wave, false).await?;
     } else if let Some(session) = store.sqlite.complete_primary_session(primary)? {
         eprintln!(

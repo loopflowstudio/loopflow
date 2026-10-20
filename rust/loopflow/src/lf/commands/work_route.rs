@@ -128,10 +128,44 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     }
 }
 
+/// Bare `lf machine use` in a Task's worktree hands that Task off, so it routes
+/// to the Task's writer exactly as `--task` does.
+fn worktree_handoff_task(cli: &Cli) -> Result<Option<String>> {
+    let Some(Commands::Machine {
+        cmd:
+            MachineCommand::Use {
+                wave: None,
+                task: None,
+                repo: false,
+                ..
+            },
+    }) = &cli.command
+    else {
+        return Ok(None);
+    };
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    let cwd = std::env::current_dir()?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    Ok(store
+        .task_checkouts()?
+        .into_iter()
+        .find(|checkout| {
+            let worktree = checkout
+                .worktree
+                .canonicalize()
+                .unwrap_or_else(|_| checkout.worktree.clone());
+            cwd.starts_with(worktree)
+        })
+        .map(|checkout| checkout.task_id.to_string()))
+}
+
 /// Return whether dispatch completed remotely. No Workflow or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
-    let Some(selector) = launch_task(cli) else {
+    let worktree_task = worktree_handoff_task(cli)?;
+    let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
         return dispatch_primary_session(cli, args);
     };
     let Some(store) = read_registry()? else {
@@ -157,8 +191,9 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.
-        if let Some(position) = forwarded.iter().rposition(|arg| arg == selector) {
-            forwarded[position] = route.task_id.to_string();
+        match forwarded.iter().rposition(|arg| arg == selector) {
+            Some(position) => forwarded[position] = route.task_id.to_string(),
+            None => forwarded.extend(["--task".into(), route.task_id.to_string()]),
         }
         super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
         return Ok(true);

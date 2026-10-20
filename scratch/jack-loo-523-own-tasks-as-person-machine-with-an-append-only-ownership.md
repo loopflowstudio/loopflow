@@ -103,7 +103,7 @@ choice. Nothing about Machines is committed.
 lf machine use mini infrastructure   # this Wave's default
 lf machine use mini --repo           # this repository's default
 lf machine use mini --task LOO-523   # hand off one Task
-lf machine use mini                  # the worktree's Task, else its Wave, else the repository
+lf machine use mini                  # the worktree's Task (routed to its writer), else its Wave, else the repository
 lf machine list                      # each Machine with the defaults naming it
 ```
 
@@ -460,4 +460,5 @@ The live Linear demo above is a demo/review step, not gate.
 Realign (2026-10-20): `observe_task_location` read the dropped `tasks.started_at`
 (every reading fell to Unavailable); it now reads ownership. The main merge left
 `world/mod.rs` calling the old three-argument `record_flow_process`; fixed.
+Check results (2026-10-20, compress): `--test integration machine_commands` 28/28; fmt + clippy clean.
 Check results (2026-10-20, implement): lib `machine_defaults ownership task_location` + CLI/skill/ssh/migrations pass; integration `machine_commands ownership dto_fixtures` 74/74; fmt + clippy clean; `native_runner_*_foreground` hang without a terminal (CI).

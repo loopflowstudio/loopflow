@@ -142,6 +142,15 @@ lf wt prune                            # remove those worktrees and their branch
 ```
 
 ```bash
+lf wt prune --branches --dry-run       # finished branches on origin and locally, with reasons
+lf wt prune --branches                 # delete them; exit 1 on GitHub auth, rate limit or failed delete
+```
+
+A branch goes only with evidence at its exact head: a merged or closed PR, a
+finished Task already in the default branch, or a release candidate whose tag
+exists. An open PR, a worktree, or an unfinished Task always keeps it.
+
+```bash
 lf wt timing                           # count, median, p95 and failures per lf version
 lf wt timing --json
 ```

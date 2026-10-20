@@ -71,7 +71,7 @@ pub(crate) async fn resume_all(store: &SharedStore) -> Result<Vec<ResumedSession
             },
         };
         resumed.push(ResumedSession {
-            id: session.id.clone(),
+            id: session.id.as_str().to_owned(),
             title: session.title.clone(),
             outcome,
             turn_cut_off,
@@ -91,7 +91,7 @@ async fn start(store: &SharedStore, session: &crate::session::LfSession) -> Resu
         std::env::current_exe()?.to_string_lossy().into_owned(),
         "session".into(),
         "connect".into(),
-        session.id.clone(),
+        session.id.as_str().to_owned(),
     ];
     let owner = crate::transport::start(&argv, true, &session.cwd, &|_| {})
         .context("start its execution owner")?;

@@ -1311,7 +1311,7 @@ pub(crate) fn resolve_manifest(
     let session = store.session(&artifact).map_err(std::io::Error::other)?;
     let artifact = session
         .filter(|session| session.id.as_str() == crate::id::canonical_session(&artifact))
-        .map(|session| session.artifact_key)
+        .and_then(|session| session.artifact_key)
         .unwrap_or(artifact);
     let dir = record_dir(lf_home, &artifact).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid capture key")
@@ -1906,7 +1906,7 @@ impl CaptureHandle {
             )));
         }
         let expected = store.session_attachment(session)?;
-        next.artifact_key = new_artifact_key();
+        next.artifact_key = Some(new_artifact_key());
         next.input_published = false;
         // The row records the agent this input actually launches.
         next.provider = Some(spec.harness.clone());
@@ -1921,7 +1921,9 @@ impl CaptureHandle {
         let result = Self::begin_reserved_at(
             &home,
             spec,
-            next.artifact_key.clone(),
+            next.input_key()
+                .map_err(|e| record_error(std::io::Error::other(e)))?
+                .clone(),
             next.caller_artifact_key.clone(),
             Some(process),
             context,
@@ -2461,7 +2463,7 @@ impl SessionCapture {
                 captured: None,
                 caller_artifact_key: manifest.caller_artifact_key.clone(),
                 id: format!("session_{}", Uuid::new_v4().simple()).into(),
-                artifact_key: manifest.artifact_key.clone(),
+                artifact_key: Some(manifest.artifact_key.clone()),
                 input_published: false,
                 cwd: manifest.cwd.clone(),
                 skill: manifest.skill.clone(),

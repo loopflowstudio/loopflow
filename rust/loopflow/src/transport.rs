@@ -1,6 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
+mod native;
 mod output;
 mod terminal;
 
@@ -24,6 +25,7 @@ use crate::id::LfProcessId;
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
+const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
@@ -32,6 +34,37 @@ static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 struct Handoff {
     owner: LfProcessId,
     key: String,
+    parent: u32,
+}
+
+impl Handoff {
+    /// Read and remove the environment handoff; only a direct child adopts it.
+    fn take() -> Option<Self> {
+        let parent = std::env::var(PARENT_ENV)
+            .ok()
+            .and_then(|p| p.parse::<u32>().ok());
+        let owner = std::env::var(OWNER_ENV)
+            .ok()
+            .and_then(|id| LfProcessId::parse(&id).ok());
+        let key = std::env::var(CONTROL_ENV).ok();
+        std::env::remove_var(CONTROL_ENV);
+        std::env::remove_var(PARENT_ENV);
+        std::env::remove_var(OWNER_ENV);
+        // SAFETY: getppid has no preconditions.
+        let parent = parent.filter(|p| *p == unsafe { libc::getppid() } as u32)?;
+        Some(Self {
+            owner: owner?,
+            key: key?,
+            parent,
+        })
+    }
+
+    fn pass(&self, command: &mut Command, parent: u32) {
+        command
+            .env(OWNER_ENV, self.owner.as_str())
+            .env(PARENT_ENV, parent.to_string())
+            .env(CONTROL_ENV, &self.key);
+    }
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -63,6 +96,7 @@ pub enum TransportCommand {
 enum Request {
     Attach {
         control: bool,
+        replace: bool,
         rows: u16,
         cols: u16,
     },
@@ -87,6 +121,17 @@ enum Request {
         state: crate::program_status::State,
         progress: Option<u8>,
     },
+    /// The direct child's native client began. `exit` replaces the client's own
+    /// exit text; a detaching viewer prints `detach`.
+    NativeStarted {
+        key: String,
+        exit: String,
+        detach: String,
+    },
+    /// The native client exited; acknowledged once its exit line is delivered.
+    NativeEnded {
+        key: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -105,29 +150,20 @@ enum Response {
         code: u8,
     },
     Detached,
+    Busy,
+    /// How a viewer that detaches can return.
+    Return {
+        detach: String,
+    },
+    NativeEnded,
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
 /// not inherit the right to run inside this execution's owner.
 pub fn initialize() {
-    let parent = std::env::var(PARENT_ENV)
-        .ok()
-        .and_then(|p| p.parse::<u32>().ok());
-    // SAFETY: getppid has no preconditions.
-    let direct = parent == Some(unsafe { libc::getppid() } as u32);
-    if direct {
-        if let (Some(owner), Ok(key)) = (
-            std::env::var(OWNER_ENV)
-                .ok()
-                .and_then(|id| LfProcessId::parse(&id).ok()),
-            std::env::var("LF_TRANSPORT_CONTROL"),
-        ) {
-            let _ = HANDOFF.set(Handoff { owner, key });
-        }
+    if let Some(handoff) = Handoff::take() {
+        let _ = HANDOFF.set(handoff);
     }
-    std::env::remove_var("LF_TRANSPORT_CONTROL");
-    std::env::remove_var(PARENT_ENV);
-    std::env::remove_var(OWNER_ENV);
 }
 
 pub(crate) fn current() -> Option<&'static LfProcessId> {
@@ -145,7 +181,7 @@ pub fn run(command: &TransportCommand) -> Result<()> {
         }
         TransportCommand::Serve { terminal, argv } => serve(argv, *terminal),
         TransportCommand::Attach { process, observe } => {
-            attach(&LfProcessId::parse(process)?, *observe)
+            attach(&LfProcessId::parse(process)?, *observe, true)
         }
     }
 }
@@ -174,7 +210,7 @@ pub fn delegate_current() -> Result<bool> {
             &std::env::current_dir()?,
             &|_| {},
         )?;
-        attach(&owner, false)?;
+        attach(&owner, false, true)?;
         Ok(true)
     }
 }
@@ -333,6 +369,7 @@ struct Viewer {
     output: VecDeque<u8>,
     token: Option<String>,
     attached: bool,
+    ending: bool,
 }
 
 impl Viewer {
@@ -388,7 +425,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     listener.set_nonblocking(true)?;
     let control_key = uuid::Uuid::new_v4().to_string();
     let mut command = Command::new(&argv[0]);
-    command.env("LF_TRANSPORT_CONTROL", &control_key);
+    command.env(CONTROL_ENV, &control_key);
     command
         .args(&argv[1..])
         .env(OWNER_ENV, id.as_str())
@@ -452,6 +489,8 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut output = output::Output::new(terminal);
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
+    let mut client: Option<native::NativeClient> = None;
+    let mut returning = None;
     let mut announced = false;
     let mut attached = false;
     loop {
@@ -463,6 +502,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 output: VecDeque::new(),
                 token: None,
                 attached: false,
+                ending: false,
             });
         }
         viewers.retain_mut(|viewer| {
@@ -480,11 +520,31 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::DetachViewers { key } if key == control_key => {
                             detach = true;
                         }
+                        Request::NativeStarted { key, exit, detach }
+                            if key == control_key && terminal =>
+                        {
+                            returning = Some(Response::Return {
+                                detach: detach.clone(),
+                            });
+                            client = Some(native::NativeClient::new(exit, detach));
+                        }
+                        Request::NativeEnded { key } if key == control_key => {
+                            viewer.ending = true;
+                        }
                         Request::Attach {
                             control: wants_control,
+                            replace,
                             rows,
                             cols,
                         } => {
+                            if wants_control
+                                && !replace
+                                && control.is_some()
+                                && viewer.token != control
+                            {
+                                viewer.queue(&Response::Busy)?;
+                                continue;
+                            }
                             attached = true;
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
@@ -510,6 +570,11 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             }
                             viewer.attached = true;
                             output.attach(viewer)?;
+                            if let Some(client) = &client {
+                                viewer.queue(&Response::Return {
+                                    detach: client.detach.clone(),
+                                })?;
+                            }
                             if terminal && wants_control {
                                 // Resizing to the same dimensions sends no signal.
                                 // Ask the actual foreground program to repaint too.
@@ -584,9 +649,15 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
             viewers.clear();
             detach = false;
         }
+        if let Some(response) = returning.take() {
+            viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
+        }
         let detached = !viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == control);
+        if detached {
+            control = None;
+        }
         if let Some(response) = output.take_reports() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
@@ -620,24 +691,68 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => return Err(e.into()),
                 };
-                let replies = output.process(*stream, &bytes[..n], detached);
-                if pending_input.len() + replies.len() <= LIMIT {
-                    pending_input.extend(replies);
-                }
-                let response = Response::Output {
-                    stream: *stream,
-                    bytes: bytes[..n].to_vec(),
+                let ready = match client.as_mut().filter(|_| terminal) {
+                    Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
+                    None => bytes[..n].to_vec(),
                 };
-                viewers.retain_mut(|viewer| {
-                    !viewer.attached
-                        || viewer
-                            .queue(&response)
-                            .and_then(|_| Ok(viewer.flush()?))
-                            .is_ok()
-                });
+                deliver(
+                    &mut output,
+                    &mut viewers,
+                    &mut pending_input,
+                    *stream,
+                    &ready,
+                    detached,
+                );
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
+        if let Some(held) = client.as_mut().map(native::NativeClient::expire) {
+            deliver(
+                &mut output,
+                &mut viewers,
+                &mut pending_input,
+                1,
+                &held,
+                detached,
+            );
+        }
+        // The client has exited and its parent waits for acknowledgement, so
+        // everything it printed is already readable.
+        if viewers.iter().any(|viewer| viewer.ending) {
+            if let Some(mut ended) = client.take() {
+                for (stream, reader) in &mut readers {
+                    let mut bytes = [0; 16384];
+                    for _ in 0..LIMIT / bytes.len() {
+                        let Ok(n @ 1..) = reader.read(&mut bytes) else {
+                            break;
+                        };
+                        let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
+                        deliver(
+                            &mut output,
+                            &mut viewers,
+                            &mut pending_input,
+                            *stream,
+                            &ready,
+                            detached,
+                        );
+                    }
+                }
+                let exit = ended.finish();
+                deliver(
+                    &mut output,
+                    &mut viewers,
+                    &mut pending_input,
+                    1,
+                    &exit,
+                    detached,
+                );
+            }
+            for viewer in viewers.iter_mut().filter(|viewer| viewer.ending) {
+                viewer.ending = false;
+                let _ = viewer.queue(&Response::NativeEnded);
+                let _ = viewer.flush();
+            }
+        }
         if exit.is_none() {
             if let Some(status) = child.try_wait()? {
                 use std::os::unix::process::ExitStatusExt;
@@ -646,6 +761,17 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     .unwrap_or_else(|| 128 + status.signal().unwrap_or(1))
                     as u8;
                 exit = Some((code, Instant::now()));
+                // A launch that died before reporting its client's end.
+                if let Some(held) = client.take().map(native::NativeClient::release) {
+                    deliver(
+                        &mut output,
+                        &mut viewers,
+                        &mut pending_input,
+                        1,
+                        &held,
+                        detached,
+                    );
+                }
             }
         }
         if let Some((code, at)) = exit {
@@ -672,6 +798,34 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+}
+
+fn deliver(
+    output: &mut output::Output,
+    viewers: &mut Vec<Viewer>,
+    pending_input: &mut VecDeque<u8>,
+    stream: u8,
+    bytes: &[u8],
+    detached: bool,
+) {
+    if bytes.is_empty() {
+        return;
+    }
+    let replies = output.process(stream, bytes, detached);
+    if pending_input.len() + replies.len() <= LIMIT {
+        pending_input.extend(replies);
+    }
+    let response = Response::Output {
+        stream,
+        bytes: bytes.to_vec(),
+    };
+    viewers.retain_mut(|viewer| {
+        !viewer.attached
+            || viewer
+                .queue(&response)
+                .and_then(|_| Ok(viewer.flush()?))
+                .is_ok()
+    });
 }
 
 fn size() -> (u16, u16) {
@@ -748,7 +902,7 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     Ok(())
 }
 
-pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
+pub fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;
@@ -759,12 +913,14 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
         &mut socket,
         &Request::Attach {
             control: !observe,
+            replace,
             rows,
             cols,
         },
     )?;
     let mut terminal = None;
     let mut token = None;
+    let mut returning = None;
     let mut buffer = Vec::new();
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
@@ -843,6 +999,9 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
                         }
                     }
                     Response::Detached => return Ok(()),
+                    Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
+                    Response::Return { detach } => returning = Some(detach),
+                    Response::NativeEnded => {}
                 }
             }
         }
@@ -864,6 +1023,12 @@ pub fn attach(id: &LfProcessId, observe: bool) -> Result<()> {
             } else if terminal.is_some()
                 && (bytes[..n].contains(&0x1d) || (observe && bytes[..n].contains(&0x03)))
             {
+                // Restore the terminal before saying how to return.
+                drop(terminal.take());
+                if let Some(detach) = &returning {
+                    // An inline client can leave the cursor mid-line.
+                    eprintln!("\n{detach}");
+                }
                 return Ok(());
             } else if let Some(token) = &token {
                 send(
@@ -906,14 +1071,75 @@ pub(crate) fn detach_viewers() -> Result<()> {
     )
 }
 
+/// A native client running under this execution's owner. Its own exit text is
+/// replaced by `exit` when it ends; dropping the guard reports that end.
+#[derive(Debug)]
+pub(crate) struct NativeClient {
+    socket: UnixStream,
+    key: String,
+}
+
+pub(crate) fn native_client(exit: String, detach: String) -> Option<NativeClient> {
+    let handoff = HANDOFF.get()?;
+    let started = (|| -> Result<UnixStream> {
+        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+        send(
+            &mut socket,
+            &Request::NativeStarted {
+                key: handoff.key.clone(),
+                exit,
+                detach,
+            },
+        )?;
+        Ok(socket)
+    })();
+    match started {
+        Ok(socket) => Some(NativeClient {
+            socket,
+            key: handoff.key.clone(),
+        }),
+        Err(error) => {
+            tracing::debug!(%error, "native client exit text unavailable");
+            None
+        }
+    }
+}
+
+impl Drop for NativeClient {
+    fn drop(&mut self) {
+        let ended = (|| -> Result<()> {
+            send(
+                &mut self.socket,
+                &Request::NativeEnded {
+                    key: self.key.clone(),
+                },
+            )?;
+            // Hold further output until the owner has replaced the exit text.
+            self.socket.set_read_timeout(Some(Duration::from_secs(2)))?;
+            let mut reply = [0; 64];
+            let _ = self.socket.read(&mut reply)?;
+            Ok(())
+        })();
+        if let Err(error) = ended {
+            tracing::debug!(%error, "native client end was not acknowledged");
+        }
+    }
+}
+
 /// A Flow and its steps share one terminal owner. This is an explicit execution
 /// handoff, not authority inferred from process ancestry.
 pub(crate) fn configure_child(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {
-        command
-            .env(OWNER_ENV, handoff.owner.as_str())
-            .env(PARENT_ENV, std::process::id().to_string())
-            .env("LF_TRANSPORT_CONTROL", &handoff.key);
+        handoff.pass(command, std::process::id());
+    }
+}
+
+/// An exec keeps this PID and its parent, so the replacing lf binary is still
+/// the direct child the handoff names.
+pub(crate) fn carry_across_exec(command: &mut Command) {
+    if let Some(handoff) = HANDOFF.get() {
+        handoff.pass(command, handoff.parent);
     }
 }
 
@@ -963,4 +1189,56 @@ pub fn report_exit(code: u8) {
         false,
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+    use std::process::Command;
+
+    use super::{carry_across_exec, Handoff, CONTROL_ENV, OWNER_ENV, PARENT_ENV};
+    use crate::id::LfProcessId;
+
+    fn env<'a>(command: &'a Command, key: &str) -> Option<&'a OsStr> {
+        command
+            .get_envs()
+            .find(|(name, _)| *name == key)
+            .and_then(|(_, value)| value)
+    }
+
+    #[test]
+    fn exec_keeps_the_handoff_with_its_original_parent() {
+        let _env = crate::journal::test_env_lock();
+        let owner = LfProcessId::new();
+        // SAFETY: getppid has no preconditions.
+        let parent = unsafe { libc::getppid() } as u32;
+        std::env::set_var(OWNER_ENV, owner.as_str());
+        std::env::set_var(PARENT_ENV, parent.to_string());
+        std::env::set_var(CONTROL_ENV, "key");
+        let handoff = Handoff::take().expect("direct child adopts the handoff");
+        assert!(std::env::var_os(CONTROL_ENV).is_none());
+
+        let mut exec = Command::new("lf");
+        handoff.pass(&mut exec, handoff.parent);
+        assert_eq!(env(&exec, OWNER_ENV), Some(OsStr::new(owner.as_str())));
+        assert_eq!(
+            env(&exec, PARENT_ENV),
+            Some(OsStr::new(&parent.to_string()))
+        );
+        assert_eq!(env(&exec, CONTROL_ENV), Some(OsStr::new("key")));
+    }
+
+    #[test]
+    fn a_non_child_neither_adopts_nor_carries_a_handoff() {
+        let _env = crate::journal::test_env_lock();
+        std::env::set_var(OWNER_ENV, LfProcessId::new().as_str());
+        std::env::set_var(PARENT_ENV, "0");
+        std::env::set_var(CONTROL_ENV, "key");
+        assert!(Handoff::take().is_none());
+        assert!(std::env::var_os(CONTROL_ENV).is_none());
+
+        let mut exec = Command::new("lf");
+        carry_across_exec(&mut exec);
+        assert_eq!(exec.get_envs().count(), 0);
+    }
 }

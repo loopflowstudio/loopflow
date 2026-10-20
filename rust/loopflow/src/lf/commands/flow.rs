@@ -565,9 +565,13 @@ impl RunningFlow<'_> {
         label: &str,
         step: Option<&crate::id::LfProcessId>,
     ) -> Result<(String, Option<String>)> {
-        let (session, input) = self
-            .captured(step)?
-            .with_context(|| format!("{label} captured no Session input"))?;
+        let step = step.with_context(|| format!("{label} registered no step Process"))?;
+        let (session, input) = self.captured(Some(step))?.with_context(|| {
+            format!(
+                "{label} step Process {} captured no Session input",
+                step.as_str()
+            )
+        })?;
         let answer = self.store.sqlite.input_final_answer(&input)?;
         Ok((session, answer))
     }

@@ -17,7 +17,7 @@ pub enum ContextFact {
 }
 
 impl ContextFact {
-    fn bound(value: impl ToString, source: &str) -> Self {
+    pub(crate) fn bound(value: impl ToString, source: &str) -> Self {
         Self::Bound {
             value: value.to_string(),
             source: source.into(),

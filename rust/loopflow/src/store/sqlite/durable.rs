@@ -638,7 +638,7 @@ mod durable_store_tests {
         LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string().into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             caller_artifact_key: None,
             input_published: false,
             cwd: "/repo".into(),
@@ -905,7 +905,7 @@ mod durable_store_tests {
         crate::session::LfSession {
             captured: None,
             id: uuid::Uuid::new_v4().to_string().into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             caller_artifact_key: None,
             input_published: false,
             cwd: "/repo".into(),
@@ -1333,7 +1333,7 @@ mod durable_store_tests {
         input.cwd = dir.path().join("elsewhere");
         let session = store.create_session(input, None).unwrap();
         let mut next = session.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
@@ -1553,7 +1553,7 @@ mod durable_store_tests {
                 work_source: None,
                 bound_at: None,
                 id: id.to_string().into(),
-                artifact_key: crate::session_record::new_artifact_key(),
+                artifact_key: Some(crate::session_record::new_artifact_key()),
                 input_published: true,
                 cwd: "/repo".into(),
                 skill: None,
@@ -1578,7 +1578,7 @@ mod durable_store_tests {
                 first.captured,
                 crate::session::LfSession {
                     caller_artifact_key: None,
-                    artifact_key: crate::session_record::new_artifact_key(),
+                    artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..first.clone()
                 },
             )
@@ -1683,7 +1683,7 @@ mod durable_store_tests {
                 replacement.captured,
                 crate::session::LfSession {
                     caller_artifact_key: None,
-                    artifact_key: crate::session_record::new_artifact_key(),
+                    artifact_key: Some(crate::session_record::new_artifact_key()),
                     ..bound.clone()
                 },
             )
@@ -1693,7 +1693,7 @@ mod durable_store_tests {
         assert!(store
             .session_inputs("orphan")
             .unwrap()
-            .contains(&first.artifact_key));
+            .contains(first.input_key().unwrap()));
         let history = store.session_history("orphan", 0, 0).unwrap();
         assert_eq!(&history[..events.len()], events);
         assert_eq!(history.len(), events.len() + 1);

@@ -207,7 +207,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 public enum RoadmapSection: String, Decodable, Sendable, Hashable {
     case now
     case waiting
-    case available
+    case notStarted = "not_started"
     case later
 }
 

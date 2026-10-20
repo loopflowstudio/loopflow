@@ -67,13 +67,19 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func desktopOpenExplanationsPreserveProposalsAndImpediments() throws {
-        let data = try loadFixtureData("desktop_open_explanations.json")
-        let reports = try JSONDecoder().decode([DesktopOpenExplanation].self, from: data)
-        #expect(reports[0].url?.contains("diff=true") == true)
-        #expect(reports[1].url == nil)
-        #expect(!reports[1].impediments.isEmpty)
-        #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    @Test func workLinksCarryReadableLabelsRoutesAndConversationRelation() throws {
+        let data = try loadFixtureData("work_links.json")
+        let links = try JSONDecoder().decode([WorkLink].self, from: data)
+        #expect(links[0].conversation == .otherConversation)
+        #expect(links[0].target.executionMachine != nil)
+        #expect(links[1].target.kind == .wave)
+        #expect(links[1].route.hosts == [.terminal])
+        #expect(try JSONDecoder().decode([WorkLink].self, from: JSONEncoder().encode(links)) == links)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "fallback_argv")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([WorkLink].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test func taskPlanningExplanationsPreserveIntentAndEffects() throws {
@@ -660,7 +666,7 @@ struct DTOFixtureTests {
         #expect(product.unavailableTasks[0].status == .ready)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
-        #expect(tasks.map(\.section) == [.now, .waiting, .available, .later])
+        #expect(tasks.map(\.section) == [.now, .waiting, .notStarted, .later])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(tasks[0].reference.workspace?.machineLabel == "build-server")
@@ -851,7 +857,7 @@ struct DTOFixtureTests {
         )
 
         #expect(session.state == .unknown)
-        #expect(session.attention == .available)
+        #expect(session.availability == .available)
         #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open])

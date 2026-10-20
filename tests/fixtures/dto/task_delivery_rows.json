@@ -1276,7 +1276,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1345,7 +1345,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "available",
+    "section": "not_started",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"

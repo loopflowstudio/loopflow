@@ -18,10 +18,10 @@ struct WaveTaskInventory: View {
                     WaveOverview(model: model, roadmap: wave)
                     ForEach(wave.unavailableTasks, id: \.taskId) { planningNotice($0) }
                     if let error = model.roadmap.errorMessage {
-                        Text("Refresh failed · \(error)").foregroundStyle(palette.waiting)
+                        Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
                     }
                     switch wave.tasks {
-                    case .unavailable(let reason): Text(reason).foregroundStyle(palette.waiting)
+                    case .unavailable(let reason): Text(reason).foregroundStyle(palette.warning)
                     case .available(let tasks, let truncated):
                         ForEach([true, false], id: \.self) { owned in
                             let group = tasks.filter { ($0.runtime?.owner != nil) == owned }
@@ -40,7 +40,7 @@ struct WaveTaskInventory: View {
                                 }.buttonStyle(.plain).accessibilityIdentifier("wave-task-\(task.id)")
                             }
                         }
-                        if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.waiting) }
+                        if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
                     }
                     WaveMetricPortfolioView(portfolio: wave.metricPortfolio)
                 } else { Text("Wave planning unavailable") }
@@ -52,9 +52,9 @@ struct WaveTaskInventory: View {
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(palette.waiting)
+                    .foregroundStyle(palette.warning)
                 Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkTone.waiting.text(in: palette))
+                    .foregroundStyle(WorkTone.warning.text(in: palette))
                 Spacer(minLength: Spacing.sm)
                 Button(open ? "Hide details" : "Details") {
                     if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
@@ -82,7 +82,7 @@ struct WaveTaskInventory: View {
         .font(Typography.body(12.5))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(WorkTone.waiting.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .background(WorkTone.warning.fill(in: palette).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("wave-notice-\(task.taskId)")
     }
 
@@ -106,7 +106,7 @@ struct WaveOverview: View {
                 .font(Typography.body()).textSelection(.enabled)
                 .accessibilityIdentifier("wave-objective")
             if let error = roadmap.projects.unavailableReason {
-                Text("Project unavailable · \(error)").foregroundStyle(palette.waiting)
+                Text("Project unavailable · \(error)").foregroundStyle(palette.warning)
             } else if let project = roadmap.currentProject {
                 Text("\(project.name) · \(project.status.rawValue.capitalized)")
                     .font(Typography.caption()).foregroundStyle(palette.textSecondary)
@@ -319,7 +319,7 @@ struct WorkSurfaceView: View {
                     .accessibilityIdentifier("task-debug")
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
-                ForEach((sessions ?? []).filter { $0.attention == .available }) { session in
+                ForEach((sessions ?? []).filter { $0.availability == .available }) { session in
                     Button { onOpenSession(session) } label: {
                         Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
                     }
@@ -374,7 +374,7 @@ struct WorkSurfaceView: View {
     private func evidenceBanner(title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.waiting)
+                .foregroundStyle(palette.warning)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
                     .font(Typography.strong(11))
@@ -388,7 +388,7 @@ struct WorkSurfaceView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.sm)
-        .background(palette.waiting.opacity(0.12))
+        .background(palette.warning.opacity(0.12))
     }
 
     // MARK: - Controls
@@ -437,7 +437,7 @@ struct TaskDirectiveEditor: View {
             if let saveError {
                 Text(saveError)
                     .font(Typography.body(12))
-                    .foregroundStyle(palette.waiting)
+                    .foregroundStyle(palette.warning)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-directive-error")
             }
@@ -488,7 +488,7 @@ struct WorkflowEditor: View {
             TextEditor(text: $content).font(.system(.body, design: .monospaced))
                 .disabled(!ready || saving)
                 .accessibilityIdentifier("workflow-content")
-            if let error { Text(error).foregroundStyle(palette.waiting) }
+            if let error { Text(error).foregroundStyle(palette.warning) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()

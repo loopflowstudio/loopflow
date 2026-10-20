@@ -42,7 +42,7 @@ WHERE t.started_at IS NOT NULL
    OR coalesce(t.worktree, '') != ''
    OR a.task_id IS NOT NULL;
 
-DROP TRIGGER task_first_conversation_insert;
+DROP TRIGGER task_first_input;
 DROP TRIGGER task_first_conversation_bind;
 DROP TRIGGER task_first_agent_turn;
 DROP TRIGGER validate_task_started_insert;

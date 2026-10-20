@@ -548,25 +548,11 @@ fn help_preserves_location_without_promoting_query_filters() {
 }
 
 #[test]
-fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
-    use loopflow::lf::DesktopCommand;
-
-    let cli = Cli::try_parse_from(["lf", "desktop", "open"]).unwrap();
-    assert!(matches!(
-        cli.command,
-        Some(Commands::Desktop {
-            cmd: DesktopCommand::Open {
-                session: None,
-                diff: false,
-                json: false
-            }
-        })
-    ));
+fn open_is_one_root_command_and_keeps_pr_open_explicit() {
     let composed = Cli::try_parse_from([
         "lf",
         "--task",
         "LOO-427",
-        "desktop",
         "open",
         "--session",
         "session-exact",
@@ -575,25 +561,18 @@ fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
     ])
     .unwrap();
     assert!(
-        matches!(composed.command, Some(Commands::Desktop { cmd: DesktopCommand::Open { session: Some(ref id), diff: true, json: true } }) if id == "session-exact")
+        matches!(&composed.command, Some(Commands::Open(args)) if args.session.as_deref() == Some("session-exact") && args.diff && args.json)
     );
-    assert!(Cli::command().find_subcommand("open").is_none());
+    assert!(Cli::command()
+        .find_subcommand("desktop")
+        .unwrap()
+        .find_subcommand("open")
+        .is_none());
     let saved: loopflow::flow::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
-    assert_eq!(saved.argv(), ["lf", "desktop", "open"]);
-    assert_eq!(saved.clone().current(), saved);
-
-    let repo = fixture();
-    let home = tempfile::tempdir().unwrap();
-    let output = run(repo.path(), home.path(), &["open"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    let error = String::from_utf8(output.stderr).unwrap();
-    for owner in ["desktop", "pr"] {
-        assert!(error.contains(&format!("lf {owner} open")), "{error}");
-    }
-    assert!(!error.contains("lf session open"));
-    assert!(!home.path().join(".lf").exists());
+    assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
+    assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
+        .is_err_and(|error| { error.kind() == clap::error::ErrorKind::DisplayHelp }));
 }
 
 #[test]
@@ -845,17 +824,18 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
-    for path in ["self install", "self doctor", "config user", "desktop open"] {
+    for path in ["self install", "self doctor", "config user", "open"] {
         assert!(help.contains(path), "{help}");
     }
     assert!(!help.contains("screenshot"));
     assert!(!help.contains("machine desktop"));
-    success(run(
-        repo.path(),
-        home.path(),
-        &["desktop", "open", "--help"],
-    ));
-    // Desktop opening must not change the explicit PR operation.
+    success(run(repo.path(), home.path(), &["help", "open"]));
+    assert!(
+        !run(repo.path(), home.path(), &["desktop", "open", "--help"])
+            .status
+            .success()
+    );
+    // Work opening must not change the explicit PR operation.
     success(run(repo.path(), home.path(), &["pr", "open", "--help"]));
     assert!(!home.path().join(".lf").exists());
 }

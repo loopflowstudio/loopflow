@@ -111,6 +111,19 @@ def _rpc_frames(buffer: bytearray) -> list[dict]:
     return messages
 
 
+def _startup_phase(phase: str, rpc: dict) -> bool:
+    result = rpc.get("result")
+    return (
+        phase == "before-thread"
+        and "result" in rpc
+        or phase == "after-thread"
+        and isinstance(result, dict)
+        and "thread" in result
+        or phase == "first-turn"
+        and rpc.get("method") == "turn/started"
+    )
+
+
 def _transport_proxy(arguments: list[str]) -> int:
     """Drop only the disposable renderer's socket, retaining its live PTY."""
     if "--remote" not in arguments:
@@ -152,25 +165,15 @@ def _transport_proxy(arguments: list[str]) -> int:
                         if not data:
                             closed = True
                             break
-                        (upstream if source is client else client).sendall(data)
                         phase = os.environ.get("FIXTURE_RELAY_FAILURE")
                         if phase and source is upstream and not Path("transport-dropped").exists():
                             frames.extend(data)
-                            for rpc in _rpc_frames(frames):
-                                matched = (
-                                    phase == "before-thread"
-                                    and "result" in rpc
-                                    or phase == "after-thread"
-                                    and (
-                                        rpc.get("method") == "thread/started"
-                                        or "thread" in rpc.get("result", {})
-                                    )
-                                    or phase == "first-turn"
-                                    and rpc.get("method") == "turn/started"
-                                )
-                                if matched:
-                                    Path("drop-transport").touch()
-                                    break
+                            if any(_startup_phase(phase, rpc) for rpc in _rpc_frames(frames)):
+                                # Withhold the matched frame: after-thread leaves a
+                                # created thread whose ID the renderer never receives.
+                                Path("drop-transport").touch()
+                                break
+                        (upstream if source is client else client).sendall(data)
                     if closed:
                         break
 
@@ -252,6 +255,7 @@ def _terminal(
     follow_up: bool = False,
     transport_failure: bool = False,
     startup_failure: str | None = None,
+    outcomes: tuple[bytes, ...] = (),
 ) -> int:
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
@@ -273,13 +277,13 @@ def _terminal(
     waiting_for_diagnostic = False
     waiting_for_transport = False
     transport_edit_at = None
-    expected = b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE"
+    outcomes = outcomes or (b"FOLLOWUP_DONE" if follow_up else b"FIXTURE_DONE",)
     startup_verified = False
     try:
         while time.monotonic() < deadline:
             if startup_failure and not startup_verified and (cwd / "transport-dropped").exists():
                 startup_verified = _verify_startup_diagnostic(args[0], env, cwd)
-                if startup_verified:
+                if startup_verified and startup_failure != "after-thread":
                     return 0
             if waiting_for_diagnostic:
                 assert b"cmux title update failed" not in output, (
@@ -346,13 +350,25 @@ def _terminal(
                             )
                         waiting_for_diagnostic = True
                     pending_follow_up = False
-                if not exiting and expected in output:
+                if (
+                    not exiting
+                    and startup_failure == "after-thread"
+                    and b"Reconnect failed" in output
+                ):
+                    # Codex refuses to retry a thread whose ID it never received and
+                    # ignores /exit from that state; Ctrl+C leaves for lf resume.
+                    os.write(master, b"\x03")
+                    exiting = True
+                if not exiting and any(outcome in output for outcome in outcomes):
                     exit_at = time.monotonic() + 1
                     exiting = True
             if child.poll() is not None:
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
-        assert expected in output, "terminal never displayed the completed turn"
+        if startup_failure != "after-thread":
+            assert any(outcome in output for outcome in outcomes), (
+                "terminal never displayed the completed turn"
+            )
         if startup_failure:
             assert startup_verified, "startup reset never reached retained diagnostics"
         if follow_up and transport_failure:
@@ -385,6 +401,37 @@ def _terminal(
             _cleanup_startup_provider(env)
             assert b"client_to_relay" not in output
             assert b"codex_relay" not in output
+
+
+def _resume_unacknowledged_thread(root: Path, lf: Path, env: dict[str, str], native: Path) -> None:
+    """The printed lf resume continues the created thread without repeating its input.
+
+    Leaving stops Codex, so a turn already running when the renderer lost the thread
+    ID ends interrupted, and its input is lost if Codex had not yet persisted it. Input
+    not yet sent is submitted on resume.
+    """
+    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
+        (session,) = database.execute("SELECT id FROM agent_sessions").fetchone()
+    assert f"lf resume {session}".encode() in (root / "launch.txt").read_bytes()
+    env = {key: value for key, value in env.items() if key != "FIXTURE_RELAY_FAILURE"}
+    resumed = _terminal(
+        [str(lf), "resume", session],
+        env,
+        root,
+        root / "resume.txt",
+        outcomes=(b"FIXTURE_DONE", b"Conversation interrupted"),
+    )
+    assert resumed == 0
+    with sqlite3.connect(root / "lf" / "loopflow.db") as database:
+        assert database.execute("SELECT count(*) FROM agent_sessions").fetchone() == (1,)
+    (rollout,) = native.glob("sessions/*/*/*/rollout-*.jsonl")
+    inputs = [
+        line
+        for line in rollout.read_text().splitlines()
+        if '"role":"user"' in line.replace(" ", "") and "NATIVE_SKILL_STARTUP" in line
+    ]
+    assert len(inputs) <= 1, inputs
+    print("after-thread: lf resume continued the created thread without replay", flush=True)
 
 
 def _case(
@@ -533,6 +580,8 @@ trust_level="trusted"
             f"{startup_failure}: retained private operation diagnostic in Session history",
             flush=True,
         )
+        if startup_failure == "after-thread":
+            _resume_unacknowledged_thread(root, lf, env, native)
         return
     assert status == 0, (status, root / "launch.txt")
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
@@ -582,7 +631,10 @@ trust_level="trusted"
     (root / "model-requests.json").write_text(
         json.dumps([json.loads(request) for request in Model.requests])
     )
-    assert native_id.encode() in (root / "resume.txt").read_bytes()
+    # Leaving prints lf's way back, never Codex's private socket commands.
+    left = (root / "resume.txt").read_bytes()
+    assert f"lf resume {session_id}".encode() in left
+    assert b"codex --remote" not in left
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
         answers = database.execute(
             "SELECT json_extract(payload,'$.text') FROM session_events "

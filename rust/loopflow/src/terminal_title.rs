@@ -12,7 +12,7 @@ use crate::process::SessionAttachment;
 use crate::session::LfSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};
 
-fn display_title(name: &str, task: Option<&str>) -> String {
+fn display_title(name: &str, task: Option<&str>, standing: Option<&str>) -> String {
     let clean: String = name.chars().filter(|ch| !ch.is_control()).collect();
     let Some(task) = task else { return clean };
     let purpose = clean
@@ -28,7 +28,44 @@ fn display_title(name: &str, task: Option<&str>) -> String {
     } else {
         &purpose
     };
-    format!("{task} {purpose}")
+    match standing {
+        Some(standing) => format!("{task} {purpose} · {standing}"),
+        None => format!("{task} {purpose}"),
+    }
+}
+
+/// Where a Task stands, for destination names: `Available` when its
+/// conversation is, then the Workflow node where a person takes part, such as
+/// `Available · Design`. Both come from their shared readers; nothing new is judged.
+pub(crate) fn standing(
+    store: &SqliteStore,
+    task: &crate::durable::TaskId,
+    conversation: Option<&str>,
+) -> StoreResult<Option<String>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let available = match conversation {
+        Some(id) => store
+            .session_summary(id, now)?
+            .is_some_and(|summary| summary.available),
+        None => false,
+    };
+    let workflow = store.workflow(task)?;
+    let node = workflow
+        .as_ref()
+        .and_then(|workflow| workflow.person_node());
+    let mut parts = Vec::new();
+    if available {
+        parts.push("Available".to_string());
+    }
+    if let Some(node) = node {
+        let mut letters = node.chars();
+        parts.extend(
+            letters
+                .next()
+                .map(|first| first.to_uppercase().chain(letters).collect::<String>()),
+        );
+    }
+    Ok((!parts.is_empty()).then(|| parts.join(" · ")))
 }
 
 #[derive(Debug)]
@@ -37,6 +74,7 @@ pub(crate) struct TerminalTitle {
     session: String,
     attachment: Option<SessionAttachment>,
     name: String,
+    provider_name: String,
     cmux: Option<(String, String)>,
     checked: Instant,
 }
@@ -62,7 +100,8 @@ impl TerminalTitle {
         // Called before adding any subcommand, positional input or `--` boundary.
         match harness {
             "claude" => {
-                command.args(["--name", &title.name]);
+                // The provider keeps its name; where the Task stands changes.
+                command.args(["--name", &title.provider_name]);
                 command.env("CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "1");
             }
             "codex" => {
@@ -84,9 +123,11 @@ impl TerminalTitle {
         let Some(session) = store.session_for_artifact(input)? else {
             return Ok(None);
         };
+        let name = session_title(&store, &session)?;
         Ok(Some(Self {
             attachment: store.session_attachment(&session.id)?,
-            name: session_title(&store, &session)?,
+            provider_name: name.provider,
+            name: name.terminal,
             store,
             session: session.id.to_string(),
             cmux: std::env::var("CMUX_WORKSPACE_ID")
@@ -123,7 +164,7 @@ impl TerminalTitle {
         }
         self.store
             .session(&self.session)?
-            .map(|session| session_title(&self.store, &session))
+            .map(|session| session_title(&self.store, &session).map(|name| name.terminal))
             .transpose()
     }
 
@@ -156,17 +197,30 @@ impl TerminalTitle {
     }
 }
 
-fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<String> {
+struct SessionTitle {
+    /// The Session's own name, Task first.
+    provider: String,
+    /// That name and where its Task stands now.
+    terminal: String,
+}
+
+fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<SessionTitle> {
     let task = session
         .task_id
         .as_ref()
         .map(|id| store.task(id))
         .transpose()?
         .flatten();
-    Ok(display_title(
-        &session.title,
-        task.as_ref().map(|task| task.identifier.as_str()),
-    ))
+    let standing = task
+        .as_ref()
+        .map(|task| standing(store, &task.id, Some(&session.id)))
+        .transpose()?
+        .flatten();
+    let identifier = task.as_ref().map(|task| task.identifier.as_str());
+    Ok(SessionTitle {
+        provider: display_title(&session.title, identifier, None),
+        terminal: display_title(&session.title, identifier, standing.as_deref()),
+    })
 }
 
 fn rename_cmux(args: &[&str]) -> std::io::Result<()> {
@@ -215,7 +269,8 @@ mod tests {
             store,
             session: session.id.to_string(),
             attachment: Some(attachment.clone()),
-            name: session.title,
+            name: session.title.clone(),
+            provider_name: session.title,
             cmux: None,
             checked: std::time::Instant::now(),
         };
@@ -237,23 +292,31 @@ mod tests {
 
     #[test]
     fn task_first_and_short_purpose_without_duplicate_identifier() {
-        assert_eq!(display_title("demo", Some("LOO-412")), "LOO-412 demo");
+        assert_eq!(display_title("demo", Some("LOO-412"), None), "LOO-412 demo");
         assert_eq!(
-            display_title("LOO-412 plan store migration details", Some("LOO-412")),
+            display_title(
+                "LOO-412 plan store migration details",
+                Some("LOO-412"),
+                None
+            ),
             "LOO-412 plan store migration"
         );
         assert_eq!(
-            display_title("LOO-4120 demo", Some("LOO-412")),
+            display_title("LOO-4120 demo", Some("LOO-412"), None),
             "LOO-412 LOO-4120 demo"
+        );
+        assert_eq!(
+            display_title("Release notes", Some("LOO-412"), Some("Available · Design")),
+            "LOO-412 Release notes · Available · Design"
         );
     }
 
     #[test]
     fn taskless_name_is_preserved_without_terminal_controls() {
         assert_eq!(
-            display_title("Hérdr and machine work", None),
+            display_title("Hérdr and machine work", None, Some("Available")),
             "Hérdr and machine work"
         );
-        assert_eq!(display_title("demo\x1b\x07\u{009c}", None), "demo");
+        assert_eq!(display_title("demo\x1b\x07\u{009c}", None, None), "demo");
     }
 }

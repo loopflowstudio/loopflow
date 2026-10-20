@@ -2,10 +2,10 @@
 
 Read this when work is running and you want to know where it stands.
 
-Working with one AI agent is a conversation. Working with several means
-keeping track: what is moving, what is stuck, what is waiting on you, and
-what it cost. Conducting is how you see all of that and step in without
-stopping everything else.
+Working with one AI agent is a conversation. Working with several is the
+same work in more places: what is moving, what is stuck, which conversations
+are available to continue, and what it cost. Conducting is how you see all of
+that and step in where you choose, without stopping everything else.
 
 ## In the Mac app
 
@@ -82,7 +82,7 @@ filters inventory; it cannot opt a new Session out of Task membership.
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
 differ: the agent's process can finish after the `lf` process that started it dies, and a finished Flow
-leaves its Task at a workflow node, waiting on you.
+leaves its Task at a workflow node, available for you to review there.
 
 `lf history show` retains exact Session/input selectors; `lf replay` resolves captured requests.
 Their current fields and reader limitations are recorded in

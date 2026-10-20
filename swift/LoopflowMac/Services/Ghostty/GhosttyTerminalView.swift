@@ -179,10 +179,9 @@ final class GhosttyTerminalMount: NSView {
     }
 }
 
-/// Retains live terminal views for one window's Sessions workspace so pane
-/// churn and Sessions↔Work navigation never free a surface. Each window owns
-/// its own pool: an NSView can only live in one view hierarchy, so sharing a
-/// pool across windows would silently steal terminals between them.
+/// Retains live terminal views for one repository across navigation and window
+/// closure. Its current window mounts the views; different repositories have
+/// separate pools because an NSView can only live in one view hierarchy.
 @MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]

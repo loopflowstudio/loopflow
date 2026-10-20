@@ -877,6 +877,26 @@ fn reserved_session_does_not_claim_task_in_status_and_roadmap() {
                     rusqlite::params![uuid::Uuid::new_v4().simple().to_string().as_str(), PERSISTED_TASK_ID],
                 )
                 .unwrap();
+            // Admission alone does not start a Task; reserving its first input does.
+            let session: String = connection
+                .query_row(
+                    "SELECT id FROM agent_sessions WHERE task_id=?1",
+                    [PERSISTED_TASK_ID],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,1,'{}')",
+                    rusqlite::params![session, uuid::Uuid::new_v4().simple().to_string()],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
+                    rusqlite::params![session, connection.last_insert_rowid()],
+                )
+                .unwrap();
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");

@@ -78,7 +78,9 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
     std::env::set_var("LF_BIN", &failing);
     assert_eq!(super::resolve_lf_binary().unwrap(), gate);
     let repo = loopflow_test_support::TestRepo::new();
-    repo.create_file(".lf/flows/entry-proof.yaml", "- cmd: sync --plan\n");
+    // The step is an execution command, so it re-enters through the gate.
+    repo.create_file(".lf/flows/entry-proof.yaml", "- cmd: flow inner --batch\n");
+    repo.create_file(".lf/flows/inner.yaml", "- cmd: sync --plan\n");
     let delivery = crate::context_block::ContextDelivery {
         repository: None,
         repo: repo.path().to_path_buf(),
@@ -199,6 +201,23 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
         child_command.contains(replacement.to_str().unwrap()),
         "{child_command}"
     );
+    let steps: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM flow_process_steps s JOIN processes p ON p.id=s.lf_process_id WHERE p.exit_code=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(steps, 2);
+    // The gate's exec keeps the Flow's handoff: the step runs inside its owner.
+    let redelegated: i64 = connection
+        .query_row(
+            r#"SELECT count(*) FROM flow_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"transport","serve"%'"#,
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(redelegated, 0);
     let attributed: i64 = connection
         .query_row(
             "SELECT count(*) FROM processes WHERE caller_session_id=?1 AND via_agent=1",

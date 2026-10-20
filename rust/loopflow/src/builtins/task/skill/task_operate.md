@@ -14,8 +14,8 @@ automatically. `lf task resume <issue>` clears the hold without starting executi
 
 Finish with one disposition and its evidence: **moving** (a live Flow process was
 observed and left alone), **acted** (you continued, recovered or delivered it
-and reread status), **waiting on a person** (the named review, decision or
-merge click and its Session or PR), **waiting on a dependency or capacity**,
+and reread status), **available** (the review, demo, choice or merge click the
+person can take up, with its conversation link or PR), **dependency or capacity**,
 **paused** (an explicit hold or instruction), or **unknown** (the missing read
 or liveness evidence; never a reason to start a second Flow process). “Ready” or
 “needs reconciliation” is not a disposition.
@@ -105,19 +105,21 @@ or liveness evidence; never a reason to start a second Flow process). “Ready�
    alone. Never run the successful edge again. A newer reopening supersedes the
    old request; standing at end alone does not authorize another completion.
 
-6. **Report the outcome or blocker.** For completed work, state the
-   observed outcome. For blocked work, name what prevents progress and the exact
-   decision or action needed. Identify the blocking Session from fresh Task
-   and Flow records, including the pending review when that is the blocker, and
-   supply a copyable command to open it in Loopflow Desktop:
+6. **Report the outcome and what is available.** For completed work, state the
+   observed outcome. Otherwise lead with the work and the interaction available
+   now (design review, demo, a concrete choice), then real dependencies (checks
+   running, sign-in required) and failures with their effect. Never portray the
+   person as a blocker or as owing the agent attention.
 
-   ```sh
-   open 'loopflow://task/<issue>?repo=<percent-encoded-repository>&session=<percent-encoded-session-id>'
-   ```
-
-   Encode query values and quote the URL for the shell. This opens the existing
-   conversation; it does not create one or complete its review. If no Session
-   exists for the blocker, return the Task-only link and state that it opens Task
-   details and no blocking Session is available.
-   Do not invent an ID, substitute an unrelated Session, or claim Desktop opened
-   merely because a command was returned. No extra report file is needed.
+   Name the Task with one readable link from
+   `lf open --task <issue> --link --format markdown`, such as
+   `[LOO-489 · Enable the multitask navigation experience](loopflow://loopflow/task/LOO-489)`,
+   with disposition and any PR link beside it; keep provider issue links separate.
+   Where links may not activate, add the `lf open '<url>'` it prints.
+   `lf open --task <issue> --link --json` reports `conversation`. When it is
+   `current_conversation`, this conversation is the destination: present the
+   question or demo here and accept the answer here. For `other_conversation`,
+   give the link; when the person asked to open it or a handoff selects that
+   conversation for them, run `lf open '<url>'` and report its receipt. For
+   `unknown`, give the link and name the missing caller identity. Printing a
+   link opens nothing; never invent a Session or claim an opening it did not report.

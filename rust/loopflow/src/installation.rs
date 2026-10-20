@@ -755,6 +755,14 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Become another lf binary with this invocation's arguments and execution handoff.
+fn reexec(path: &Path) -> Command {
+    let mut command = Command::new(path);
+    command.args(std::env::args_os().skip(1));
+    crate::transport::carry_across_exec(&mut command);
+    command
+}
+
 /// Use the installed CLI for the main Machine; private Homes keep their caller.
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::custom_home_selected() {
@@ -782,10 +790,8 @@ pub fn dispatch_default_cli() -> Result<()> {
         return Ok(());
     }
     let main_home = account_home()?.join(".lf");
-    let mut command = Command::new(&destination);
-    command
-        .args(std::env::args_os().skip(1))
-        .env("LF_HOME", &main_home);
+    let mut command = reexec(&destination);
+    command.env("LF_HOME", &main_home);
     #[cfg(unix)]
     {
         Err(command.exec()).context("run installed lf")
@@ -855,8 +861,7 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
             role
         ));
     }
-    let mut command = Command::new(&artifact.path);
-    command.args(std::env::args_os().skip(1));
+    let mut command = reexec(&artifact.path);
     #[cfg(unix)]
     {
         Err(command.exec()).with_context(|| {

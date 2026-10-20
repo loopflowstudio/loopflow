@@ -907,9 +907,10 @@ fn prepare_task(
                         "Task {issue:?} not found in selected Git planning"
                     )));
                 }
-                crate::config::PlanningConfig::Asana { .. } => {
+                remote => {
                     return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; Asana tasks are not acquired yet"
+                        "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                        remote.remote_name().unwrap_or("provider")
                     )));
                 }
             },
@@ -4465,10 +4466,11 @@ pub(crate) async fn resolve_saved_task(
                         "Task {issue:?} not found in selected Git planning"
                     )))
                 }
-                crate::config::PlanningConfig::Asana { .. } => {
+                remote => {
                     return Err(task_error(format!(
-                        "Task {issue:?} not found in Loopflow planning; Asana tasks are not acquired yet"
-                    )))
+                    "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
+                    remote.remote_name().unwrap_or("provider")
+                )))
                 }
             }
         }

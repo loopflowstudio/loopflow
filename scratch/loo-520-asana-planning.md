@@ -1,8 +1,10 @@
-# LOO-520: Asana as a planning provider
+# LOO-520: Asana and Notion as planning providers
 
-Status: implemented for Tasks and verified against live Asana (2026-10-19); Projects
-and Notion remain. Jack Heart asked for autonomous work through implementation to
-a demo, without a design review.
+Status: Tasks implemented for Asana and Notion, each verified against the live
+provider (2026-10-19); Projects remain. Jack Heart asked for autonomous work through
+implementation to a demo, without a design review, then asked (2026-10-19) to put
+Notion on this Task too, built on today's Work ↔ planning model rather than the old
+`PmProvider` data model.
 
 ## Outcome
 
@@ -21,9 +23,9 @@ stays the default remote provider; Git stays the default transport.
 
 ## Shape
 
-- `PlanningConfig` is the one selection seam: `Git | Linear | Asana { project }`.
-  `ops::planning_client` resolves it into one `PlanningClient` enum
-  (`Linear(LinearClient) | Asana(AsanaClient)`), mirroring `HarnessKind`.
+- `PlanningConfig` is the one selection seam: `Git | Linear | Asana { project } |
+  Notion { database }`. `ops::planning_client` resolves it into one `PlanningClient`
+  enum (`Linear | Asana | Notion`), mirroring `HarnessKind`.
   Linear-only operations reach their client through `PlanningClient::linear()`.
 - Local Work stays authoritative. Export, field, state and comment receipts are
   shared; only the transport differs. Asana returns the same observations
@@ -52,6 +54,25 @@ stays the default remote provider; Git stays the default transport.
   secret from Doppler (`ASANA_CLIENT_ID`, `ASANA_CLIENT_SECRET`). Asana keeps one
   long-lived refresh grant and needs the secret to refresh.
 
+## Notion
+
+- Scope: the repository database (`database:` takes the ID or its URL;
+  `notion::database_id` normalizes both). A Task is a page; the description is
+  the page body as blocks (`notion::blocks`, line-faithful like `asana::rich_text`).
+- Identity: Notion takes no caller IDs, so the export UUID goes in a `Loopflow ID`
+  rich-text property and every request finds the page by an exact filter query.
+- The database adapts on first use: Loopflow adds `Loopflow ID`, and `Status`
+  when no state property exists. State reads Notion's status groups (To-do,
+  In progress → `started`, Complete; a Complete option named Cancel… → `canceled`),
+  or a `Done` checkbox. `Due` (date) and `Assignee` (people) mirror when present.
+- Comments ↔ Notion comments, claimed by visible text like Asana
+  (`PlanningClient::claimed_comment`). Without comment capabilities, observation
+  continues on title/description and delivery says which capability to enable.
+- Delete archives the page. Revision = `last_edited_time` (minute resolution).
+- OAuth: `PmOAuthSpec` gained per-provider authorize params, redirect port and
+  HTTP Basic + JSON token requests; Notion uses its registered port 19223
+  (`NOTION_CLIENT_ID`/`NOTION_CLIENT_SECRET` in Doppler).
+
 ## Linear-only (unchanged)
 
 Team claims, Initiatives/Waves, team delta acquisition, reteam, attachments,
@@ -59,15 +80,23 @@ follow-up relations, project content documents, chapter sweeps.
 
 ## Remaining
 
+- Notion live comments: the Loopflow integration lacks Read/Insert comments
+  capabilities (live 403); Jack enables them in Notion's integration settings.
+
 - Projects: Loopflow Project ↔ Asana mirror (section or project). Until then a
   Task in a Project awaits its Project mapping in an Asana repository.
 - Inbound acquisition of tasks created in Asana (team delta equivalent).
-- Notion provider: follow-up Task; the seam holds (see questions.md). Start from
-  `1c925c0c18` and `63b39a6cd2^:rust/loopflow/src/lfd/pm/notion.rs` + `notion_blocks.rs`.
 - Rename shared observation types off the `Linear` prefix; wire field `linear_id`
   → provider-neutral (touches Swift DTO mirrors).
 
 ## Demo (for Jack)
+
+Notion: scratch database "LOO-520 Notion planning demo"
+(`3fff8f99-3d81-8141-bd3d-f63d878a7c74`) under the Waves page. Same steps as below
+with `lf account connect notion` and
+`planning: {provider: notion, database: "3fff8f99-3d81-8141-bd3d-f63d878a7c74"}`.
+
+Asana:
 
 The scratch Asana project is "LOO-520 Asana planning demo" (gid `1219678216343882`)
 in the Loopflow team.
@@ -97,6 +126,11 @@ lf task comment <id> "From lf"                  # appears as an Asana comment
   redirect `urn:ietf:wg:oauth:2.0:oob` with `complete_oauth_code_paste`. The same
   Doppler client ID still refreshes the July grant, so the app is the old one and
   OOB is its registered redirect; the loopback URL likely needs adding (questions.md).
+- Notion (`1c925c0c18`, `63b39a6cd2^:…/notion.rs`, `notion_blocks.rs`): blocks
+  conversion ported line-faithfully (its paragraph joining was lossy, like Asana's);
+  pagination, status/checkbox completion, Basic-auth OAuth on port 19223 reused.
+  Its Waves bootstrap, priority select and "In Progress" claim were Wave/claim
+  machinery, left out. Its data model (`PmItem`, `PmProvider`) is not used.
 - `fffbada8c9` cut the `PmProvider` trait + `PmProviderKind`: an open trait whose
   main second implementations were in-memory test mocks, removed when Asana became
   the sole provider. `PlanningClient` is a closed enum over concrete clients with
@@ -110,4 +144,6 @@ after 43a1f85ce3.
 
 ## Checks
 
-- `cargo test --lib asana` (LF_* unset): 13 passed; live probe of rich-text storage: exact. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.
+- `cargo test --lib -- asana notion planning_client provider_auth::tests` (LF_* unset): 96 passed.
+  Live: Asana rich text stored exactly; Notion client create/body/edit/status/archive
+  passed (links gain a `/` after the host once). clippy clean. Broader suites → gate. `cargo clippy --all-targets -D warnings`: clean. Broader suites → gate.

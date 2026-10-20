@@ -54,15 +54,15 @@ const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
-const PM_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
-const PM_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
 const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
     provider: Provider::Linear,
     authorize_url: "https://linear.app/oauth/authorize",
     token_url: "https://api.linear.app/oauth/token",
     client_id_env: "LINEAR_CLIENT_ID",
     client_secret_env: "LINEAR_CLIENT_SECRET",
-    scope: "read,write",
+    authorize_params: &[("scope", "read,write")],
+    redirect_port: 19222,
+    basic_auth: false,
     rotates_refresh_token: true,
     refresh_requires_secret: false,
 };
@@ -72,7 +72,22 @@ const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
     token_url: "https://app.asana.com/-/oauth_token",
     client_id_env: "ASANA_CLIENT_ID",
     client_secret_env: "ASANA_CLIENT_SECRET",
-    scope: "default",
+    authorize_params: &[("scope", "default")],
+    redirect_port: 19222,
+    basic_auth: false,
+    rotates_refresh_token: false,
+    refresh_requires_secret: true,
+};
+/// The Notion integration's registered redirect is port 19223 (1c925c0c18).
+const NOTION_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Notion,
+    authorize_url: "https://api.notion.com/v1/oauth/authorize",
+    token_url: "https://api.notion.com/v1/oauth/token",
+    client_id_env: "NOTION_CLIENT_ID",
+    client_secret_env: "NOTION_CLIENT_SECRET",
+    authorize_params: &[("owner", "user")],
+    redirect_port: 19223,
+    basic_auth: true,
     rotates_refresh_token: false,
     refresh_requires_secret: true,
 };
@@ -102,6 +117,7 @@ pub enum Provider {
     OpenCodeZen,
     Linear,
     Asana,
+    Notion,
     Doppler,
 }
 
@@ -114,11 +130,12 @@ impl Provider {
             Self::OpenCodeZen => "opencodezen",
             Self::Linear => "linear",
             Self::Asana => "asana",
+            Self::Notion => "notion",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 7] {
+    pub fn all() -> [Self; 8] {
         [
             Self::GitHub,
             Self::Claude,
@@ -126,6 +143,7 @@ impl Provider {
             Self::OpenCodeZen,
             Self::Linear,
             Self::Asana,
+            Self::Notion,
             Self::Doppler,
         ]
     }
@@ -138,6 +156,7 @@ impl Provider {
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Linear => "Linear",
             Self::Asana => "Asana",
+            Self::Notion => "Notion",
             Self::Doppler => "Doppler",
         }
     }
@@ -147,7 +166,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Asana | Self::Doppler => None,
+            Self::GitHub | Self::Linear | Self::Asana | Self::Notion | Self::Doppler => None,
         }
     }
 
@@ -161,6 +180,9 @@ impl Provider {
                 Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
             }
             Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
+            Self::Notion => {
+                Some("Notion requires OAuth. Run 'lf account connect notion' to connect.")
+            }
             _ => None,
         }
     }
@@ -169,7 +191,7 @@ impl Provider {
     pub fn supports_automatic_refresh(self) -> bool {
         matches!(
             self,
-            Self::GitHub | Self::Codex | Self::Linear | Self::Asana
+            Self::GitHub | Self::Codex | Self::Linear | Self::Asana | Self::Notion
         )
     }
 }
@@ -192,6 +214,7 @@ impl FromStr for Provider {
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "linear" | "lin" => Ok(Self::Linear),
             "asana" => Ok(Self::Asana),
+            "notion" => Ok(Self::Notion),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -590,8 +613,8 @@ struct OAuthErrorResponse {
 
 // ── Planning provider OAuth ─────────────────────────────────────────
 
-/// One planning provider's OAuth application. Both providers use the same
-/// loopback consent; their refresh grants differ.
+/// One planning provider's OAuth application. Every provider uses loopback
+/// consent; their registered ports, client authentication and refresh grants differ.
 #[derive(Debug)]
 pub(crate) struct PmOAuthSpec {
     provider: Provider,
@@ -599,7 +622,12 @@ pub(crate) struct PmOAuthSpec {
     token_url: &'static str,
     client_id_env: &'static str,
     client_secret_env: &'static str,
-    scope: &'static str,
+    /// Provider-specific authorization parameters: scope, or Notion's `owner`.
+    authorize_params: &'static [(&'static str, &'static str)],
+    /// The loopback port registered as the application's redirect.
+    redirect_port: u16,
+    /// Notion takes client credentials as HTTP Basic and a JSON body.
+    basic_auth: bool,
     /// Linear rotates refresh grants; Asana keeps one long-lived grant.
     rotates_refresh_token: bool,
     /// PKCE public clients refresh by client ID alone; Asana requires its secret.
@@ -610,11 +638,45 @@ fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
     match provider {
         Provider::Linear => Some(&LINEAR_OAUTH),
         Provider::Asana => Some(&ASANA_OAUTH),
+        Provider::Notion => Some(&NOTION_OAUTH),
         _ => None,
     }
 }
 
-/// Planning OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
+impl PmOAuthSpec {
+    fn redirect_uri(&self) -> String {
+        format!("http://localhost:{}/oauth/callback", self.redirect_port)
+    }
+
+    /// A token request: form fields with the client credentials, or for Basic
+    /// authentication the same grant as JSON.
+    fn token_request(
+        &self,
+        url: &str,
+        client_id: &str,
+        client_secret: Option<&str>,
+        grant: &[(&str, &str)],
+    ) -> reqwest::RequestBuilder {
+        let client = reqwest::Client::new().post(url);
+        if self.basic_auth {
+            let body: serde_json::Map<String, serde_json::Value> = grant
+                .iter()
+                .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
+                .collect();
+            return client.basic_auth(client_id, client_secret).json(&body);
+        }
+        let mut form = vec![("client_id", client_id)];
+        if let Some(secret) = client_secret {
+            form.push(("client_secret", secret));
+        }
+        form.extend_from_slice(grant);
+        client
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(serde_urlencoded::to_string(form).expect("token form fields are strings"))
+    }
+}
+
+/// Planning OAuth uses a loopback redirect (`http://localhost:<port>/oauth/callback`):
 /// consent is a single click and the code arrives on a short-lived local listener.
 /// Once the provider returns a refresh token, `refresh_pm_oauth_token` renews headlessly.
 #[derive(Debug, Clone)]
@@ -670,10 +732,12 @@ impl PmOAuthBroker {
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", PM_OAUTH_REDIRECT_URI);
+            pairs.append_pair("redirect_uri", &app.spec.redirect_uri());
             pairs.append_pair("response_type", "code");
             pairs.append_pair("state", state);
-            pairs.append_pair("scope", app.spec.scope);
+            for (key, value) in app.spec.authorize_params {
+                pairs.append_pair(key, value);
+            }
             pairs.append_pair("code_challenge", &code_challenge);
             pairs.append_pair("code_challenge_method", "S256");
             pairs.append_pair("prompt", "consent");
@@ -686,22 +750,20 @@ impl PmOAuthBroker {
         code_verifier: &str,
         code: &str,
     ) -> Result<ProviderToken, AuthError> {
-        let body = serde_urlencoded::to_string([
-            ("grant_type", "authorization_code"),
-            ("client_id", app.client_id.as_str()),
-            ("client_secret", app.client_secret.as_str()),
-            ("redirect_uri", PM_OAUTH_REDIRECT_URI),
-            ("code", code),
-            ("code_verifier", code_verifier),
-        ])
-        .map_err(|err| AuthError::OAuthRequest {
-            provider: app.spec.provider,
-            message: format!("failed to encode token request: {err}"),
-        })?;
-        let response = reqwest::Client::new()
-            .post(app.spec.token_url)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
+        let redirect_uri = app.spec.redirect_uri();
+        let response = app
+            .spec
+            .token_request(
+                app.spec.token_url,
+                &app.client_id,
+                Some(&app.client_secret),
+                &[
+                    ("grant_type", "authorization_code"),
+                    ("redirect_uri", &redirect_uri),
+                    ("code", code),
+                    ("code_verifier", code_verifier),
+                ],
+            )
             .send()
             .await
             .map_err(|err| AuthError::OAuthRequest {
@@ -772,7 +834,8 @@ impl AuthBroker for PmOAuthBroker {
         let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-        let listener = oauth_callback_listener(provider, PM_OAUTH_CALLBACK_ADDR)?;
+        let listener =
+            oauth_callback_listener(provider, &format!("127.0.0.1:{}", self.spec.redirect_port))?;
         let completed_token = self.completed_token.clone();
         let monitor = tokio::spawn(monitor_oauth_callback(
             provider,
@@ -1252,10 +1315,11 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
     [
         Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
         Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+        Arc::new(PmOAuthBroker::new(Provider::Notion)) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -3197,7 +3261,7 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear | Provider::Asana => {
+        Provider::Linear | Provider::Asana | Provider::Notion => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
@@ -3259,7 +3323,7 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Linear | Provider::Asana | Provider::Doppler => {
+        Provider::Linear | Provider::Asana | Provider::Notion | Provider::Doppler => {
             Err(TokenRefreshError::MissingToken { provider })
         }
     }
@@ -3372,26 +3436,6 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
-fn encode_pm_refresh_request(
-    provider: Provider,
-    client_id: &str,
-    client_secret: Option<&str>,
-    refresh_token: &str,
-) -> Result<String, AuthError> {
-    let mut params = vec![
-        ("grant_type", "refresh_token"),
-        ("client_id", client_id),
-        ("refresh_token", refresh_token),
-    ];
-    if let Some(client_secret) = client_secret {
-        params.push(("client_secret", client_secret));
-    }
-    serde_urlencoded::to_string(params).map_err(|err| AuthError::OAuthRequest {
-        provider,
-        message: format!("failed to encode refresh request: {err}"),
-    })
-}
-
 /// Exchange a planning provider's refresh grant without retaining provider error bodies.
 ///
 /// # Errors
@@ -3412,22 +3456,21 @@ pub async fn refresh_pm_oauth_token(
             (id, Some(secret))
         }
     };
-    let body = encode_pm_refresh_request(
-        provider,
-        &client_id,
-        client_secret.as_deref(),
-        refresh_token,
-    )
-    .map_err(|_| PmRefreshError::ClientConfigurationUnavailable)?;
     let url = spec.token_url.to_string();
     #[cfg(test)]
     let url = PM_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
+    let request = spec.token_request(
+        &url,
+        &client_id,
+        client_secret.as_deref(),
+        &[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ],
+    );
 
     let attempt = async {
-        let response = reqwest::Client::new()
-            .post(url)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
+        let response = request
             .send()
             .await
             .map_err(|_| PmRefreshError::Unavailable { status: None })?;
@@ -4951,7 +4994,7 @@ attributes:
         );
         assert_eq!(
             query.get("redirect_uri").map(|value| value.as_ref()),
-            Some(PM_OAUTH_REDIRECT_URI)
+            Some(LINEAR_OAUTH.redirect_uri().as_str())
         );
         assert_eq!(
             query.get("scope").map(|value| value.as_ref()),
@@ -4983,7 +5026,7 @@ attributes:
 
     #[test]
     fn planning_brokers_registered_in_default_brokers() {
-        for provider in [Provider::Linear, Provider::Asana] {
+        for provider in [Provider::Linear, Provider::Asana, Provider::Notion] {
             assert!(
                 default_brokers(None)
                     .iter()
@@ -5117,13 +5160,29 @@ attributes:
         assert!(pm_oauth(Provider::GitHub).is_none());
     }
 
+    fn token_request_body(request: reqwest::RequestBuilder) -> (reqwest::Request, Vec<u8>) {
+        let request = request.build().expect("token request builds");
+        let body = request
+            .body()
+            .and_then(reqwest::Body::as_bytes)
+            .expect("token request has a body")
+            .to_vec();
+        (request, body)
+    }
+
     #[test]
     fn pkce_refresh_request_uses_client_id_without_secret() {
-        let body =
-            encode_pm_refresh_request(Provider::Linear, "linear-client", None, "refresh-token")
-                .expect("encode refresh request");
+        let (_, body) = token_request_body(LINEAR_OAUTH.token_request(
+            LINEAR_OAUTH.token_url,
+            "linear-client",
+            None,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", "refresh-token"),
+            ],
+        ));
         let params: HashMap<String, String> =
-            serde_urlencoded::from_str(&body).expect("decode refresh request");
+            serde_urlencoded::from_bytes(&body).expect("decode refresh request");
 
         assert_eq!(
             params.get("grant_type").map(String::as_str),
@@ -5138,6 +5197,27 @@ attributes:
             Some("refresh-token")
         );
         assert!(!params.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn notion_token_requests_use_basic_auth_and_json() {
+        let (request, body) = token_request_body(NOTION_OAUTH.token_request(
+            NOTION_OAUTH.token_url,
+            "notion-client",
+            Some("notion-secret"),
+            &[("grant_type", "authorization_code"), ("code", "abc")],
+        ));
+        let authorization = request.headers()["authorization"].to_str().unwrap();
+        assert!(authorization.starts_with("Basic "));
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"grant_type": "authorization_code", "code": "abc"})
+        );
+        assert_eq!(
+            NOTION_OAUTH.redirect_uri(),
+            "http://localhost:19223/oauth/callback"
+        );
     }
 
     #[test]

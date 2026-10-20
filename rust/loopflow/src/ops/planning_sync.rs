@@ -63,7 +63,8 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
             crate::config::PlanningConfig::Linear {}
-            | crate::config::PlanningConfig::Asana { .. } => {
+            | crate::config::PlanningConfig::Asana { .. }
+            | crate::config::PlanningConfig::Notion { .. } => {
                 // Export attempts have individual deadlines. A shared deadline
                 // lets older pending work starve the Task that was just saved.
                 super::planning_export::sync_repository_exports(store, repo).await?;

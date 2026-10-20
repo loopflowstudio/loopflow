@@ -320,8 +320,8 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to your Git ref on `origin`. Select a shared ref, Linear or
-Asana in `.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+Planning defaults to your Git ref on `origin`. Select a shared ref, Linear,
+Asana or Notion in `.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
 
 ```yaml
 planning:
@@ -343,10 +343,21 @@ planning:
   project: "<project-gid>"    # the repository's Asana project
 ```
 
-Asana mirrors each Task as a task in the repository project: title, notes,
-completion and comments write back, and people's Asana comments and edits arrive
-as Task steers. Connect with `doppler run -- lf account connect asana`. Asana does
-not mirror Projects yet; a Task in a Wave Project stays local until it does.
+```yaml
+planning:
+  provider: notion
+  database: "<database-url-or-id>"   # the repository's Notion database
+```
+
+Asana mirrors each Task as a task in the repository project; Notion mirrors it as
+a page in the repository database, with the description as the page body. Title,
+description, status and comments write back as rich text, and people's comments
+and edits arrive as Task steers. Notion adds a `Loopflow ID` property to the
+database, uses its Status groups (or a Done checkbox) for state, and mirrors
+`Due` and `Assignee` when the database has them. Its integration needs the
+comment capabilities. Connect with `doppler run -- lf account connect asana` or
+`notion`. Neither mirrors Projects yet; a Task in a Wave Project stays local
+until it does.
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use

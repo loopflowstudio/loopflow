@@ -55,9 +55,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .observe_issue(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    if matches!(client, super::planning_client::PlanningClient::Asana(_)) {
-        claim_local_comments(store, &task, &mut observation)?;
-    }
+    claim_local_comments(store, &task, &client, &mut observation)?;
     store
         .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
         .await
@@ -65,13 +63,18 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     Ok(())
 }
 
-/// Asana stories carry no caller identity. A story showing a Loopflow comment's
-/// visible text is that comment: delivery settles and nothing echoes back.
+/// Asana and Notion comments carry no caller identity. A comment showing a
+/// Loopflow comment's visible text is that comment: delivery settles and nothing
+/// echoes back.
 fn claim_local_comments(
     store: &SharedStore,
     task: &Task,
+    client: &super::planning_client::PlanningClient,
     observation: &mut crate::linear::LinearIssueObservation,
 ) -> OpsResult<()> {
+    if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+        return Ok(());
+    }
     let local = store
         .sqlite
         .task_comments(&task.id)
@@ -80,7 +83,7 @@ fn claim_local_comments(
     for comment in &mut observation.comments {
         if let Some(saved) = local.iter().find(|saved| {
             uuid::Uuid::parse_str(&saved.id).is_ok()
-                && crate::asana::comment_markdown(&saved.body) == comment.body
+                && client.claimed_comment(&saved.body).as_deref() == Some(comment.body.as_str())
         }) {
             comment.id = saved.id.clone();
             comment.body = saved.body.clone();

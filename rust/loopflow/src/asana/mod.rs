@@ -15,8 +15,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::linear::{
-    LinearComment, LinearError, LinearIssue, LinearIssueObservation, LinearResult, OrderedIssue,
-    PlanningResponse,
+    local_identifier, LinearComment, LinearError, LinearIssue, LinearIssueObservation,
+    LinearResult, OrderedIssue, PlanningResponse,
 };
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
@@ -159,10 +159,9 @@ impl AsanaClient {
         Ok(())
     }
 
-    /// Post `body` once. Asana stories carry no caller identity, so a Loopflow
+    /// Post `text` once. Asana stories carry no caller identity, so a Loopflow
     /// comment is its visible text on the task: an existing match is the delivery.
-    pub(crate) async fn sync_comment(&self, issue: &str, body: &str) -> LinearResult<()> {
-        let text = comment_markdown(body);
+    pub(crate) async fn sync_comment(&self, issue: &str, text: &str) -> LinearResult<()> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{issue}"), None)
             .await?;
@@ -178,7 +177,7 @@ impl AsanaClient {
             .send(
                 Method::POST,
                 &format!("/tasks/external:{issue}/stories"),
-                Some(json!({"html_text": rich_text::to_html(&text)})),
+                Some(json!({"html_text": rich_text::to_html(text)})),
             )
             .await?;
         Ok(())
@@ -261,7 +260,7 @@ impl AsanaClient {
         LinearIssue {
             revision: Some(task.modified_at),
             id: id.to_string(),
-            identifier: identifier(id),
+            identifier: local_identifier(id),
             branch_name: None,
             url: task.permalink_url,
             name: task.name,
@@ -381,32 +380,10 @@ fn message(text: impl Into<String>) -> LinearError {
     LinearError::Message(text.into())
 }
 
-/// A Loopflow comment as Asana shows and returns it: the visible text, without
-/// hidden `<!-- loopflow-… -->` markers, in the markdown its rich text reads back
-/// as. Delivery and read-back claim a story by this text.
-pub(crate) fn comment_markdown(body: &str) -> String {
-    rich_text::to_markdown(&rich_text::to_html(&comment_text(body)))
-}
-
-fn comment_text(body: &str) -> String {
-    let mut text = String::new();
-    let mut rest = body;
-    while let Some(start) = rest.find("<!-- loopflow-") {
-        text.push_str(&rest[..start]);
-        rest = match rest[start..].find("-->") {
-            Some(end) => &rest[start + end + 3..],
-            None => "",
-        };
-    }
-    text.push_str(rest);
-    text.trim().to_string()
-}
-
-/// Asana has no short identifiers; the Task keeps its local `lf-` identifier.
-fn identifier(id: &str) -> String {
-    uuid::Uuid::parse_str(id)
-        .map(|uuid| format!("lf-{}", uuid.simple()))
-        .unwrap_or_else(|_| id.to_string())
+/// A Loopflow comment's visible text as Asana returns it: the markdown its rich
+/// text reads back as.
+pub(crate) fn comment_markdown(text: &str) -> String {
+    rich_text::to_markdown(&rich_text::to_html(text))
 }
 
 fn completed(target: &str) -> LinearResult<bool> {
@@ -473,26 +450,5 @@ mod tests {
             json!({"name": "Ship", "html_notes": "<body>Notes</body>", "due_on": null, "completed": true})
         );
         assert!(task_fields(&json!({"projectId": "section"})).is_err());
-    }
-
-    #[test]
-    fn comment_text_hides_loopflow_markers() {
-        assert_eq!(
-            comment_text(
-                "Ship it\n\n<!-- loopflow-requester:\"Jack\" -->\n\n<!-- loopflow-steer:1 -->"
-            ),
-            "Ship it"
-        );
-        assert_eq!(comment_text("<!-- other --> kept"), "<!-- other --> kept");
-    }
-
-    #[test]
-    fn identifier_matches_the_local_task_identifier() {
-        let task = crate::durable::TaskId::new();
-        let uuid = uuid::Uuid::parse_str(task.as_str().trim_start_matches("task_")).unwrap();
-        assert_eq!(
-            identifier(&uuid.to_string()),
-            format!("lf-{}", task.as_str().trim_start_matches("task_"))
-        );
     }
 }

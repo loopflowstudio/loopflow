@@ -320,6 +320,14 @@ pub(crate) struct LinearIssue {
     pub assignee: Option<String>,
 }
 
+/// Asana and Notion have no short identifiers; their Tasks keep the local
+/// `lf-` identifier Loopflow assigned.
+pub(crate) fn local_identifier(id: &str) -> String {
+    uuid::Uuid::parse_str(id)
+        .map(|uuid| format!("lf-{}", uuid.simple()))
+        .unwrap_or_else(|_| id.to_string())
+}
+
 impl LinearIssue {
     /// Linear calls the item complete, not canceled or duplicate.
     pub fn is_complete(&self) -> bool {

@@ -435,6 +435,9 @@ pub(super) mod test_fixture;
 mod asana_planning_tests;
 
 #[cfg(test)]
+mod notion_planning_tests;
+
+#[cfg(test)]
 pub(crate) mod task_planning_tests;
 
 #[cfg(test)]

@@ -226,6 +226,11 @@ pub enum PlanningConfig {
     Asana {
         project: String,
     },
+    /// Tasks mirror into one Notion database, the repository's planning scope.
+    /// Accepts the database ID or its Notion URL.
+    Notion {
+        database: String,
+    },
 }
 
 fn default_planning_remote() -> String {
@@ -239,6 +244,7 @@ impl PlanningConfig {
             Self::Git { .. } => None,
             Self::Linear {} => Some("Linear"),
             Self::Asana { .. } => Some("Asana"),
+            Self::Notion { .. } => Some("Notion"),
         }
     }
 }

@@ -26,11 +26,14 @@
   this instead of guessing.
 - **Remote-machine credential transfer** (`machine_credentials.rs`) covers Linear
   only.
-- **Notion** (follow-up Task): starting point `1c925c0c18` and
-  `63b39a6cd2^:rust/loopflow/src/lfd/pm/notion.rs` / `notion_blocks.rs` (markdown ↔
-  blocks, the analogue of `asana::rich_text`). It fits the same `PlanningClient` variant. Tasks map
-  to database rows, the Loopflow UUID goes in a row property queried by an exact
-  filter, and comments use the Comments API.
+- **Notion adapts the database's schema** by adding `Loopflow ID` (and `Status`
+  when absent) rather than refusing a database without them. `Due`/`Assignee`
+  are only used when present; a Task with a due date or assignee in a database
+  without them fails export with a message naming the property.
+- **Notion revision has minute resolution.** Two edits in one minute share a
+  revision; content comparison still sees the change.
+- **Notion API version 2022-06-28.** Newer versions query data sources instead of
+  databases; staying put keeps the database ID as the scope.
 - **Naming debt.** Shared observation types (`LinearIssue`, `LinearComment`,
   `LinearError`), `Task.linear_id` and the wire field `linear_id` now carry Asana
   values too. Renaming the wire field touches the Swift DTO mirrors and fixtures.

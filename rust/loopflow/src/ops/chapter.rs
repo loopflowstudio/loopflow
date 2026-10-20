@@ -88,13 +88,12 @@ pub fn new_chapter(
     let rotation = tokio::runtime::Runtime::new()
         .map_err(error)?
         .block_on(rotate(repo, &plan, wave, dry_run))?;
-    if !dry_run
-        && matches!(
-            crate::config::load_config_or_default(Some(repo)).planning_transport(),
-            crate::config::PlanningConfig::Linear {}
-        )
+    if let Some(provider) = crate::config::load_config_or_default(Some(repo))
+        .planning_transport()
+        .remote_name()
+        .filter(|_| !dry_run)
     {
-        eprintln!("Saved locally; pending Linear sync.");
+        eprintln!("Saved locally; pending {provider} sync.");
     }
     Ok(rotation)
 }

@@ -320,8 +320,8 @@ or treating missing local evidence as completion.
 
 ## Choose planning synchronization
 
-Planning defaults to your Git ref on `origin`. Select a shared ref or Linear in
-`.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
+Planning defaults to your Git ref on `origin`. Select a shared ref, Linear or
+Asana in `.lf/config.yaml`, or set a personal default in `~/.lf/config.yaml`:
 
 ```yaml
 planning:
@@ -336,6 +336,17 @@ planning:
 linear:
   team: <team-id>
 ```
+
+```yaml
+planning:
+  provider: asana
+  project: "<project-gid>"    # the repository's Asana project
+```
+
+Asana mirrors each Task as a task in the repository project: title, notes,
+completion and comments write back, and people's Asana comments and edits arrive
+as Task steers. Connect with `doppler run -- lf account connect asana`. Asana does
+not mirror Projects yet; a Task in a Wave Project stays local until it does.
 
 Repository `planning` replaces the personal selection as a whole. Omit `shared`
 for `refs/loopflow/planning/users/<user-key>`; shared names use

@@ -11,19 +11,25 @@ use tokio::sync::Barrier;
 
 use super::test_fixture::{now, token, Fixture, PlanningEnvironment};
 use super::{
-    linear_refresh_lock, refresh_wave, resolve_linear_token, LinearTestContext, LINEAR_TEST_CONTEXT,
+    planning_refresh_lock, refresh_wave, resolve_planning_token, LinearTestContext,
+    LINEAR_TEST_CONTEXT,
 };
 use crate::linear::test_server::{self, json_response, QueuedResponse};
 use crate::linear::LinearProjectId;
 use crate::ops::error::OpsResult;
-use crate::provider_auth::{LinearRefreshError, LINEAR_REFRESH_CONFIG, LINEAR_REFRESH_URL};
+use crate::provider_auth::{PmRefreshError, Provider, PM_REFRESH_CONFIG, PM_REFRESH_URL};
 use crate::store::{open_ephemeral_store, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
 impl Fixture {
     async fn resolve(&self, url: &str) -> OpsResult<String> {
-        scoped(self.context(""), url, resolve_linear_token()).await
+        scoped(
+            self.context(""),
+            url,
+            resolve_planning_token(Provider::Linear),
+        )
+        .await
     }
 
     async fn assert_token(&self, expected: &ProviderToken) {
@@ -60,7 +66,7 @@ fn failure_message<T>(result: OpsResult<T>) -> String {
 
 async fn scoped<T>(context: LinearTestContext, url: &str, future: impl Future<Output = T>) -> T {
     LINEAR_TEST_CONTEXT
-        .scope(context, LINEAR_REFRESH_URL.scope(url.to_string(), future))
+        .scope(context, PM_REFRESH_URL.scope(url.to_string(), future))
         .await
 }
 
@@ -365,15 +371,21 @@ async fn linear_oauth_concurrent_alias_readers_share_one_rotation() {
     let (url, requests) = test_server::spawn(vec![response]).await;
     let first_ctx = fixture.context("");
     let first_url = url.clone();
-    let first =
-        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_linear_token()).await });
+    let first = tokio::spawn(async move {
+        scoped(
+            first_ctx,
+            &first_url,
+            resolve_planning_token(Provider::Linear),
+        )
+        .await
+    });
     entered.wait().await;
     let second_ctx = LinearTestContext {
         path: alias,
         store: other,
         graphql_url: String::new(),
     };
-    let second = scoped(second_ctx, &url, resolve_linear_token());
+    let second = scoped(second_ctx, &url, resolve_planning_token(Provider::Linear));
     let (second, _) = tokio::join!(second, release.wait());
     assert!(first.await.unwrap().unwrap() == "A2");
     assert!(second.unwrap() == "A2");
@@ -392,7 +404,9 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
         let (response, entered, release) = gated(response);
         let (url, requests) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
+        let resolver = tokio::spawn(async move {
+            scoped(ctx, &url, resolve_planning_token(Provider::Linear)).await
+        });
         entered.wait().await;
         let winner = token("interactive", "interactive-refresh", now() + 86400);
         if delete {
@@ -448,9 +462,13 @@ async fn linear_oauth_recovers_after_rolled_back_rotation() {
 async fn linear_oauth_cancelled_lock_waiter_never_exchanges() {
     let fixture = Fixture::new().await;
     let original = fixture.seed(now() - 1).await;
-    let lock = linear_refresh_lock(&fixture.database, Instant::now() + Duration::from_secs(5))
-        .await
-        .unwrap();
+    let lock = planning_refresh_lock(
+        Provider::Linear,
+        &fixture.database,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .await
+    .unwrap();
     let (url, requests) = test_server::spawn(vec![rotated()]).await;
     let future = fixture.resolve(&url);
     assert!(tokio::time::timeout(Duration::from_millis(50), future)
@@ -475,11 +493,11 @@ async fn linear_oauth_missing_credential_and_legacy_guidance() {
         .await
         .unwrap();
     for (reason, reconnect) in [
-        (LinearRefreshError::ClientConfigurationUnavailable, true),
-        (LinearRefreshError::ConfigurationLookupFailed, false),
+        (PmRefreshError::ClientConfigurationUnavailable, true),
+        (PmRefreshError::ConfigurationLookupFailed, false),
     ] {
         let error = failure_message(
-            LINEAR_REFRESH_CONFIG
+            PM_REFRESH_CONFIG
                 .scope(Err(reason), fixture.resolve(&url))
                 .await,
         );
@@ -501,7 +519,9 @@ async fn linear_oauth_failed_refresh_checks_expiry_at_return() {
         let (response, entered, release) = gated(rejected("unknown"));
         let (url, _) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
+        let resolver = tokio::spawn(async move {
+            scoped(ctx, &url, resolve_planning_token(Provider::Linear)).await
+        });
         entered.wait().await;
         if expires_during_request {
             let remaining = (expires as i128 * 1_000_000_000
@@ -559,9 +579,13 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     assert_eq!(requests.lock().await.len(), 1);
     // Keep SQLite blocked until the cancelled persistence closure settles;
     // releasing it first races the closure's own deadline and can permit a commit.
-    let guard = linear_refresh_lock(&fixture.database, Instant::now() + Duration::from_secs(2))
-        .await
-        .unwrap();
+    let guard = planning_refresh_lock(
+        Provider::Linear,
+        &fixture.database,
+        Instant::now() + Duration::from_secs(2),
+    )
+    .await
+    .unwrap();
     conn.execute_batch("ROLLBACK").unwrap();
     fixture.assert_token(&original).await;
     assert_eq!(fixture.wave_refresh_at(&wave), previous);
@@ -640,7 +664,10 @@ async fn linear_oauth_stalled_first_attempt_leaves_time_for_one_replay() {
     let (url, requests) = test_server::spawn(vec![response, rotated()]).await;
     let ctx = fixture.context("");
     let start = Instant::now();
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
+    let resolver =
+        tokio::spawn(
+            async move { scoped(ctx, &url, resolve_planning_token(Provider::Linear)).await },
+        );
     entered.wait().await;
     let value = resolver.await.unwrap().unwrap();
     assert!(value == "A2");
@@ -655,7 +682,10 @@ async fn linear_oauth_stale_rejection_does_not_condemn_expired_winner() {
     let (response, entered, release) = gated(rejected("invalid_grant"));
     let (url, _) = test_server::spawn(vec![response]).await;
     let ctx = fixture.context("");
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_linear_token()).await });
+    let resolver =
+        tokio::spawn(
+            async move { scoped(ctx, &url, resolve_planning_token(Provider::Linear)).await },
+        );
     entered.wait().await;
     let winner = token("newer-access", "newer-refresh", now() - 1);
     fixture.store.upsert_provider_token(&winner).await.unwrap();

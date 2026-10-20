@@ -222,10 +222,25 @@ pub enum PlanningConfig {
         shared: Option<String>,
     },
     Linear {},
+    /// Tasks mirror into one Asana project, the repository's planning scope.
+    Asana {
+        project: String,
+    },
 }
 
 fn default_planning_remote() -> String {
     "origin".into()
+}
+
+impl PlanningConfig {
+    /// The remote planning provider's product name; Git planning has none.
+    pub fn remote_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Git { .. } => None,
+            Self::Linear {} => Some("Linear"),
+            Self::Asana { .. } => Some("Asana"),
+        }
+    }
 }
 
 impl Default for PlanningConfig {

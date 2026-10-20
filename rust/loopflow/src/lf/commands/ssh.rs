@@ -263,7 +263,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
             .flatten(),
     };
     if let Some(repo) = repo {
-        if crate::ops::linear_observe::connected(&repo.to_string_lossy()) {
+        if crate::ops::planning_client::connected(&repo.to_string_lossy()) {
             if let Some(task) = store.get_task_by_issue(selector).await? {
                 if let Err(error) = crate::ops::planning_export::sync_export(
                     &store,

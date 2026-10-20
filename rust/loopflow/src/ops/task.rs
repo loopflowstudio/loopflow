@@ -907,6 +907,11 @@ fn prepare_task(
                         "Task {issue:?} not found in selected Git planning"
                     )));
                 }
+                crate::config::PlanningConfig::Asana { .. } => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in Loopflow planning; Asana tasks are not acquired yet"
+                    )));
+                }
             },
         };
         let destination = store
@@ -3081,7 +3086,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             }
         }
         let inspection =
-            if task.is_none() && super::linear_observe::connected(&repo.to_string_lossy()) {
+            if task.is_none() && super::planning_client::is_linear(&repo.to_string_lossy()) {
                 let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
                 let read = super::linear::inspect_task_planning_async(
                     repo,
@@ -3208,9 +3213,11 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.as_path();
-        if !super::linear_observe::connected(&repo.to_string_lossy()) {
-            return Err(task_error("Task repository does not use Linear"));
-        }
+        let Some((_, provider)) = super::planning_client::configured(repo) else {
+            return Err(task_error(
+                "Task repository has no remote planning provider",
+            ));
+        };
         if task.linear_id.is_none() {
             if let Some(project) = &task.project_id {
                 super::planning_export::sync_export(
@@ -3237,7 +3244,9 @@ pub fn task_sync(issue: &str, retry_creation: bool, retry_updates: bool) -> OpsR
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
         if task.linear_id.is_none() {
-            return Err(task_error("Task publication to Linear remains pending"));
+            return Err(task_error(format!(
+                "Task publication to {provider} remains pending"
+            )));
         }
         // State and field writes share Linear's issue revision. Finish the
         // state attempt first so our own field acknowledgement cannot make its
@@ -4454,6 +4463,11 @@ pub(crate) async fn resolve_saved_task(
                 crate::config::PlanningConfig::Git { .. } => {
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
+                    )))
+                }
+                crate::config::PlanningConfig::Asana { .. } => {
+                    return Err(task_error(format!(
+                        "Task {issue:?} not found in Loopflow planning; Asana tasks are not acquired yet"
                     )))
                 }
             }

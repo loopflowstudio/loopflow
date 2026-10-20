@@ -54,13 +54,28 @@ const SOCKET_AUTH_MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const OPENCODE_AUTH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const OPENCODE_AUTH_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const OPENCODE_AUTH_URL: &str = "https://opencode.ai/auth";
-const LINEAR_OAUTH_AUTHORIZE_URL: &str = "https://linear.app/oauth/authorize";
-const LINEAR_OAUTH_TOKEN_URL: &str = "https://api.linear.app/oauth/token";
-const LINEAR_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
-const LINEAR_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
-const LINEAR_CLIENT_ID_ENV: &str = "LINEAR_CLIENT_ID";
-const LINEAR_CLIENT_SECRET_ENV: &str = "LINEAR_CLIENT_SECRET";
-const LINEAR_OAUTH_DEFAULT_SCOPE: &str = "read,write";
+const PM_OAUTH_REDIRECT_URI: &str = "http://localhost:19222/oauth/callback";
+const PM_OAUTH_CALLBACK_ADDR: &str = "127.0.0.1:19222";
+const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Linear,
+    authorize_url: "https://linear.app/oauth/authorize",
+    token_url: "https://api.linear.app/oauth/token",
+    client_id_env: "LINEAR_CLIENT_ID",
+    client_secret_env: "LINEAR_CLIENT_SECRET",
+    scope: "read,write",
+    rotates_refresh_token: true,
+    refresh_requires_secret: false,
+};
+const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
+    provider: Provider::Asana,
+    authorize_url: "https://app.asana.com/-/oauth_authorize",
+    token_url: "https://app.asana.com/-/oauth_token",
+    client_id_env: "ASANA_CLIENT_ID",
+    client_secret_env: "ASANA_CLIENT_SECRET",
+    scope: "default",
+    rotates_refresh_token: false,
+    refresh_requires_secret: true,
+};
 #[cfg(target_os = "macos")]
 const CLAUDE_KEYCHAIN_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "macos")]
@@ -86,6 +101,7 @@ pub enum Provider {
     Codex,
     OpenCodeZen,
     Linear,
+    Asana,
     Doppler,
 }
 
@@ -97,17 +113,19 @@ impl Provider {
             Self::Codex => "codex",
             Self::OpenCodeZen => "opencodezen",
             Self::Linear => "linear",
+            Self::Asana => "asana",
             Self::Doppler => "doppler",
         }
     }
 
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::GitHub,
             Self::Claude,
             Self::Codex,
             Self::OpenCodeZen,
             Self::Linear,
+            Self::Asana,
             Self::Doppler,
         ]
     }
@@ -119,6 +137,7 @@ impl Provider {
             Self::Codex => "Codex",
             Self::OpenCodeZen => "OpenCode Zen",
             Self::Linear => "Linear",
+            Self::Asana => "Asana",
             Self::Doppler => "Doppler",
         }
     }
@@ -128,7 +147,7 @@ impl Provider {
             Self::Claude => Some("ANTHROPIC_API_KEY"),
             Self::Codex => Some("OPENAI_API_KEY"),
             Self::OpenCodeZen => Some("OPENCODE_API_KEY"),
-            Self::GitHub | Self::Linear | Self::Doppler => None,
+            Self::GitHub | Self::Linear | Self::Asana | Self::Doppler => None,
         }
     }
 
@@ -141,13 +160,17 @@ impl Provider {
             Self::Linear => {
                 Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
             }
+            Self::Asana => Some("Asana requires OAuth. Run 'lf account connect asana' to connect."),
             _ => None,
         }
     }
 
     /// Whether this provider can refresh without user interaction.
     pub fn supports_automatic_refresh(self) -> bool {
-        matches!(self, Self::GitHub | Self::Codex | Self::Linear)
+        matches!(
+            self,
+            Self::GitHub | Self::Codex | Self::Linear | Self::Asana
+        )
     }
 }
 
@@ -168,6 +191,7 @@ impl FromStr for Provider {
             "codex" => Ok(Self::Codex),
             "opencodezen" | "opencode" | "zen" | "oc" => Ok(Self::OpenCodeZen),
             "linear" | "lin" => Ok(Self::Linear),
+            "asana" => Ok(Self::Asana),
             "doppler" => Ok(Self::Doppler),
             _ => Err(ParseProviderError {
                 input: value.trim().to_string(),
@@ -446,10 +470,10 @@ pub enum AuthError {
     CredentialSocket { provider: Provider, message: String },
 }
 
-/// Only closed categories and HTTP status codes may escape a Linear refresh.
+/// Only closed categories and HTTP status codes may escape a planning refresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[non_exhaustive]
-pub enum LinearRefreshError {
+pub enum PmRefreshError {
     #[error("stored credential has no refresh token")]
     MissingRefreshGrant,
     #[error("OAuth client configuration is unavailable")]
@@ -468,7 +492,7 @@ pub enum LinearRefreshError {
     InvalidResponse,
 }
 
-impl LinearRefreshError {
+impl PmRefreshError {
     pub(crate) fn retryable_now(self) -> bool {
         matches!(self, Self::Unavailable { .. } | Self::InvalidResponse)
     }
@@ -486,8 +510,8 @@ impl LinearRefreshError {
 
 #[cfg(test)]
 tokio::task_local! {
-    pub(crate) static LINEAR_REFRESH_URL: String;
-    pub(crate) static LINEAR_REFRESH_CONFIG: Result<(String, String), LinearRefreshError>;
+    pub(crate) static PM_REFRESH_URL: String;
+    pub(crate) static PM_REFRESH_CONFIG: Result<(String, String), PmRefreshError>;
 }
 
 #[derive(Debug, Error)]
@@ -507,7 +531,7 @@ pub enum TokenRefreshError {
     #[error("{provider} OAuth refresh failed: {reason}")]
     OAuth {
         provider: Provider,
-        reason: LinearRefreshError,
+        reason: PmRefreshError,
     },
 }
 
@@ -564,65 +588,92 @@ struct OAuthErrorResponse {
     error_description: Option<String>,
 }
 
-// ── Linear OAuth ────────────────────────────────────────────────────
+// ── Planning provider OAuth ─────────────────────────────────────────
 
-/// Linear OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
+/// One planning provider's OAuth application. Both providers use the same
+/// loopback consent; their refresh grants differ.
+#[derive(Debug)]
+pub(crate) struct PmOAuthSpec {
+    provider: Provider,
+    authorize_url: &'static str,
+    token_url: &'static str,
+    client_id_env: &'static str,
+    client_secret_env: &'static str,
+    scope: &'static str,
+    /// Linear rotates refresh grants; Asana keeps one long-lived grant.
+    rotates_refresh_token: bool,
+    /// PKCE public clients refresh by client ID alone; Asana requires its secret.
+    refresh_requires_secret: bool,
+}
+
+fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
+    match provider {
+        Provider::Linear => Some(&LINEAR_OAUTH),
+        Provider::Asana => Some(&ASANA_OAUTH),
+        _ => None,
+    }
+}
+
+/// Planning OAuth uses a loopback redirect (`http://localhost:19222/oauth/callback`):
 /// consent is a single click and the code arrives on a short-lived local listener.
-/// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
-/// with the stored PKCE client ID.
+/// Once the provider returns a refresh token, `refresh_pm_oauth_token` renews headlessly.
 #[derive(Debug, Clone)]
-pub(crate) struct LinearOAuthBroker {
+pub(crate) struct PmOAuthBroker {
+    spec: &'static PmOAuthSpec,
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
 }
 
 #[derive(Debug, Clone)]
-struct LinearOAuthApp {
+struct PmOAuthApp {
+    spec: &'static PmOAuthSpec,
     client_id: String,
     client_secret: String,
-    scope: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct LinearOAuthTokenResponse {
+struct PmOAuthTokenResponse {
     access_token: String,
     refresh_token: Option<String>,
     expires_in: Option<i64>,
 }
 
-impl LinearOAuthBroker {
-    pub(crate) fn new() -> Self {
+impl PmOAuthBroker {
+    /// # Panics
+    /// Panics when `provider` is not a planning provider.
+    pub(crate) fn new(provider: Provider) -> Self {
         Self {
+            spec: pm_oauth(provider).expect("planning providers have an OAuth application"),
             completed_token: Arc::new(Mutex::new(None)),
         }
     }
 
-    async fn oauth_app() -> Result<LinearOAuthApp, AuthError> {
+    async fn oauth_app(&self) -> Result<PmOAuthApp, AuthError> {
         let (client_id, client_secret) = oauth_client_credentials(
-            Provider::Linear,
-            LINEAR_CLIENT_ID_ENV,
-            LINEAR_CLIENT_SECRET_ENV,
+            self.spec.provider,
+            self.spec.client_id_env,
+            self.spec.client_secret_env,
         )
         .await?;
 
-        Ok(LinearOAuthApp {
+        Ok(PmOAuthApp {
+            spec: self.spec,
             client_id,
             client_secret,
-            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
         })
     }
 
-    fn build_authorization_url(app: &LinearOAuthApp, code_verifier: &str, state: &str) -> String {
+    fn build_authorization_url(app: &PmOAuthApp, code_verifier: &str, state: &str) -> String {
         let code_challenge =
             BASE64_URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-        let mut url = Url::parse(LINEAR_OAUTH_AUTHORIZE_URL)
-            .expect("linear oauth authorize URL should parse");
+        let mut url =
+            Url::parse(app.spec.authorize_url).expect("planning OAuth authorize URL should parse");
         {
             let mut pairs = url.query_pairs_mut();
             pairs.append_pair("client_id", &app.client_id);
-            pairs.append_pair("redirect_uri", LINEAR_OAUTH_REDIRECT_URI);
+            pairs.append_pair("redirect_uri", PM_OAUTH_REDIRECT_URI);
             pairs.append_pair("response_type", "code");
             pairs.append_pair("state", state);
-            pairs.append_pair("scope", &app.scope);
+            pairs.append_pair("scope", app.spec.scope);
             pairs.append_pair("code_challenge", &code_challenge);
             pairs.append_pair("code_challenge_method", "S256");
             pairs.append_pair("prompt", "consent");
@@ -631,7 +682,7 @@ impl LinearOAuthBroker {
     }
 
     async fn exchange_code(
-        app: &LinearOAuthApp,
+        app: &PmOAuthApp,
         code_verifier: &str,
         code: &str,
     ) -> Result<ProviderToken, AuthError> {
@@ -639,22 +690,22 @@ impl LinearOAuthBroker {
             ("grant_type", "authorization_code"),
             ("client_id", app.client_id.as_str()),
             ("client_secret", app.client_secret.as_str()),
-            ("redirect_uri", LINEAR_OAUTH_REDIRECT_URI),
+            ("redirect_uri", PM_OAUTH_REDIRECT_URI),
             ("code", code),
             ("code_verifier", code_verifier),
         ])
         .map_err(|err| AuthError::OAuthRequest {
-            provider: Provider::Linear,
+            provider: app.spec.provider,
             message: format!("failed to encode token request: {err}"),
         })?;
         let response = reqwest::Client::new()
-            .post(LINEAR_OAUTH_TOKEN_URL)
+            .post(app.spec.token_url)
             .header("content-type", "application/x-www-form-urlencoded")
             .body(body)
             .send()
             .await
             .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: err.to_string(),
             })?;
 
@@ -664,7 +715,7 @@ impl LinearOAuthBroker {
                 .bytes()
                 .await
                 .map_err(|err| AuthError::OAuthRequest {
-                    provider: Provider::Linear,
+                    provider: app.spec.provider,
                     message: err.to_string(),
                 })?;
             let message = oauth_error_message(body.as_ref())
@@ -673,21 +724,21 @@ impl LinearOAuthBroker {
                 || status == reqwest::StatusCode::UNAUTHORIZED
             {
                 return Err(AuthError::CodeExchangeRejected {
-                    provider: Provider::Linear,
+                    provider: app.spec.provider,
                     message,
                 });
             }
             return Err(AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: format!("HTTP {status}: {message}"),
             });
         }
 
         let payload = response
-            .json::<LinearOAuthTokenResponse>()
+            .json::<PmOAuthTokenResponse>()
             .await
             .map_err(|err| AuthError::OAuthRequest {
-                provider: Provider::Linear,
+                provider: app.spec.provider,
                 message: format!("failed to decode token response: {err}"),
             })?;
 
@@ -697,7 +748,7 @@ impl LinearOAuthBroker {
             .map(|seconds| now_unix() + seconds);
 
         Ok(ProviderToken {
-            provider: Provider::Linear.as_str().to_string(),
+            provider: app.spec.provider.as_str().to_string(),
             access_token: payload.access_token,
             refresh_token: payload.refresh_token,
             oauth_client_id: Some(app.client_id.clone()),
@@ -710,34 +761,35 @@ impl LinearOAuthBroker {
 }
 
 #[async_trait]
-impl AuthBroker for LinearOAuthBroker {
+impl AuthBroker for PmOAuthBroker {
     fn provider(&self) -> Provider {
-        Provider::Linear
+        self.spec.provider
     }
 
     async fn start_auth(&self) -> Result<AuthFlowHandle, AuthError> {
-        let app = Self::oauth_app().await?;
+        let provider = self.spec.provider;
+        let app = self.oauth_app().await?;
         let code_verifier = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let state = Uuid::new_v4().to_string();
         let verification_uri = Self::build_authorization_url(&app, &code_verifier, &state);
-        let listener = oauth_callback_listener(Provider::Linear, LINEAR_OAUTH_CALLBACK_ADDR)?;
+        let listener = oauth_callback_listener(provider, PM_OAUTH_CALLBACK_ADDR)?;
         let completed_token = self.completed_token.clone();
         let monitor = tokio::spawn(monitor_oauth_callback(
-            Provider::Linear,
+            provider,
             listener,
             Duration::from_secs(15 * 60),
-            "linear OAuth timed out",
+            "planning OAuth timed out",
             completed_token,
             move |code| {
                 let app = app.clone();
                 let code_verifier = code_verifier.clone();
-                async move { LinearOAuthBroker::exchange_code(&app, &code_verifier, &code).await }
+                async move { PmOAuthBroker::exchange_code(&app, &code_verifier, &code).await }
             },
         ));
 
         let response = AuthFlowResponse {
             completion: AuthCompletion::Browser { manual_uri: None },
-            provider: Provider::Linear,
+            provider,
             verification_uri_complete: Some(verification_uri.clone()),
             verification_uri,
             user_code: None,
@@ -1200,8 +1252,11 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 1] {
-    [Arc::new(LinearOAuthBroker::new()) as Arc<dyn AuthBroker>]
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
+    [
+        Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
+        Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
+    ]
 }
 
 fn socket_auth_flow_handle(
@@ -3142,14 +3197,14 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear => {
+        Provider::Linear | Provider::Asana => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
                 .filter(|token| !token.trim().is_empty())
                 .ok_or(TokenRefreshError::OAuth {
                     provider,
-                    reason: LinearRefreshError::MissingRefreshGrant,
+                    reason: PmRefreshError::MissingRefreshGrant,
                 })?;
             refresh_pm_oauth_token(
                 provider,
@@ -3204,14 +3259,9 @@ async fn refresh_provider_token_with_runner(
                 provider: Provider::OpenCodeZen,
             })
         }
-        Provider::Linear | Provider::Doppler => Err(TokenRefreshError::MissingToken { provider }),
-    }
-}
-
-fn pm_oauth_endpoint(provider: Provider) -> Option<&'static str> {
-    match provider {
-        Provider::Linear => Some(LINEAR_OAUTH_TOKEN_URL),
-        _ => None,
+        Provider::Linear | Provider::Asana | Provider::Doppler => {
+            Err(TokenRefreshError::MissingToken { provider })
+        }
     }
 }
 
@@ -3342,7 +3392,7 @@ fn encode_pm_refresh_request(
     })
 }
 
-/// Exchange a Linear refresh grant without retaining provider error bodies.
+/// Exchange a planning provider's refresh grant without retaining provider error bodies.
 ///
 /// # Errors
 /// Returns a sanitized protocol or configuration category. The caller owns retry
@@ -3351,13 +3401,14 @@ pub async fn refresh_pm_oauth_token(
     provider: Provider,
     refresh_token: &str,
     stored_client_id: Option<&str>,
-) -> Result<ProviderToken, LinearRefreshError> {
-    let endpoint =
-        pm_oauth_endpoint(provider).ok_or(LinearRefreshError::ClientConfigurationUnavailable)?;
+) -> Result<ProviderToken, PmRefreshError> {
+    let spec = pm_oauth(provider).ok_or(PmRefreshError::ClientConfigurationUnavailable)?;
     let (client_id, client_secret) = match stored_client_id {
-        Some(id) if !id.trim().is_empty() => (id.trim().to_string(), None),
+        Some(id) if !id.trim().is_empty() && !spec.refresh_requires_secret => {
+            (id.trim().to_string(), None)
+        }
         _ => {
-            let (id, secret) = linear_refresh_client_config().await?;
+            let (id, secret) = pm_refresh_client_config(spec).await?;
             (id, Some(secret))
         }
     };
@@ -3367,10 +3418,10 @@ pub async fn refresh_pm_oauth_token(
         client_secret.as_deref(),
         refresh_token,
     )
-    .map_err(|_| LinearRefreshError::ClientConfigurationUnavailable)?;
-    let url = endpoint.to_string();
+    .map_err(|_| PmRefreshError::ClientConfigurationUnavailable)?;
+    let url = spec.token_url.to_string();
     #[cfg(test)]
-    let url = LINEAR_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
+    let url = PM_REFRESH_URL.try_with(Clone::clone).unwrap_or(url);
 
     let attempt = async {
         let response = reqwest::Client::new()
@@ -3379,10 +3430,10 @@ pub async fn refresh_pm_oauth_token(
             .body(body)
             .send()
             .await
-            .map_err(|_| LinearRefreshError::Unavailable { status: None })?;
+            .map_err(|_| PmRefreshError::Unavailable { status: None })?;
         let status = response.status();
         if status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error() {
-            return Err(LinearRefreshError::Unavailable {
+            return Err(PmRefreshError::Unavailable {
                 status: Some(status.as_u16()),
             });
         }
@@ -3395,9 +3446,9 @@ pub async fn refresh_pm_oauth_token(
                     .and_then(|body| body.get("error"))
                     .and_then(|v| v.as_str())
                 {
-                    Some("invalid_grant") => LinearRefreshError::InvalidGrant,
-                    Some("invalid_client") => LinearRefreshError::InvalidClient,
-                    _ => LinearRefreshError::Rejected {
+                    Some("invalid_grant") => PmRefreshError::InvalidGrant,
+                    Some("invalid_client") => PmRefreshError::InvalidClient,
+                    _ => PmRefreshError::Rejected {
                         status: status.as_u16(),
                     },
                 },
@@ -3406,19 +3457,23 @@ pub async fn refresh_pm_oauth_token(
         let payload = response
             .json::<OAuthRefreshResponse>()
             .await
-            .map_err(|_| LinearRefreshError::InvalidResponse)?;
-        let refresh = payload
+            .map_err(|_| PmRefreshError::InvalidResponse)?;
+        let refresh = match payload
             .refresh_token
             .filter(|value| !value.trim().is_empty())
-            .ok_or(LinearRefreshError::InvalidResponse)?;
+        {
+            Some(refresh) => refresh,
+            None if !spec.rotates_refresh_token => refresh_token.to_string(),
+            None => return Err(PmRefreshError::InvalidResponse),
+        };
         let now = now_unix();
         let expires_at = payload
             .expires_in
             .filter(|seconds| *seconds > 0)
             .and_then(|seconds| now.checked_add(seconds))
-            .ok_or(LinearRefreshError::InvalidResponse)?;
+            .ok_or(PmRefreshError::InvalidResponse)?;
         if payload.access_token.trim().is_empty() {
-            return Err(LinearRefreshError::InvalidResponse);
+            return Err(PmRefreshError::InvalidResponse);
         }
         Ok(ProviderToken {
             provider: provider.as_str().to_string(),
@@ -3433,21 +3488,21 @@ pub async fn refresh_pm_oauth_token(
     };
     tokio::time::timeout(Duration::from_secs(2), attempt)
         .await
-        .unwrap_or(Err(LinearRefreshError::Unavailable { status: None }))
+        .unwrap_or(Err(PmRefreshError::Unavailable { status: None }))
 }
 
-async fn linear_refresh_client_config() -> Result<(String, String), LinearRefreshError> {
+async fn pm_refresh_client_config(spec: &PmOAuthSpec) -> Result<(String, String), PmRefreshError> {
     #[cfg(test)]
-    if let Ok(config) = LINEAR_REFRESH_CONFIG.try_with(Clone::clone) {
+    if let Ok(config) = PM_REFRESH_CONFIG.try_with(Clone::clone) {
         return config;
     }
     Ok((
-        linear_refresh_secret(LINEAR_CLIENT_ID_ENV).await?,
-        linear_refresh_secret(LINEAR_CLIENT_SECRET_ENV).await?,
+        pm_refresh_secret(spec.client_id_env).await?,
+        pm_refresh_secret(spec.client_secret_env).await?,
     ))
 }
 
-async fn linear_refresh_secret(name: &'static str) -> Result<String, LinearRefreshError> {
+async fn pm_refresh_secret(name: &'static str) -> Result<String, PmRefreshError> {
     if let Some(value) = read_nonempty_env(name) {
         return Ok(value);
     }
@@ -3456,19 +3511,19 @@ async fn linear_refresh_secret(name: &'static str) -> Result<String, LinearRefre
         .kill_on_drop(true)
         .output()
         .await;
-    linear_refresh_secret_output(output)
+    pm_refresh_secret_output(output)
 }
 
-fn linear_refresh_secret_output(
+fn pm_refresh_secret_output(
     output: std::io::Result<std::process::Output>,
-) -> Result<String, LinearRefreshError> {
-    let output = output.map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
+) -> Result<String, PmRefreshError> {
+    let output = output.map_err(|_| PmRefreshError::ConfigurationLookupFailed)?;
     if !output.status.success() {
-        return Err(LinearRefreshError::ConfigurationLookupFailed);
+        return Err(PmRefreshError::ConfigurationLookupFailed);
     }
     let value = std::str::from_utf8(&output.stdout)
-        .map_err(|_| LinearRefreshError::ConfigurationLookupFailed)?;
-    read_nonempty_value(value).ok_or(LinearRefreshError::ClientConfigurationUnavailable)
+        .map_err(|_| PmRefreshError::ConfigurationLookupFailed)?;
+    read_nonempty_value(value).ok_or(PmRefreshError::ClientConfigurationUnavailable)
 }
 
 async fn refresh_github_token(
@@ -4876,19 +4931,19 @@ attributes:
 
     #[test]
     fn linear_oauth_authorization_url_uses_loopback_redirect_and_pkce() {
-        let app = LinearOAuthApp {
+        let app = PmOAuthApp {
+            spec: &LINEAR_OAUTH,
             client_id: "client-123".to_string(),
             client_secret: "secret-456".to_string(),
-            scope: LINEAR_OAUTH_DEFAULT_SCOPE.to_string(),
         };
 
-        let url = LinearOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
+        let url = PmOAuthBroker::build_authorization_url(&app, "verifier-123", "state-abc");
         let parsed = Url::parse(&url).expect("linear oauth url should parse");
         let query = parsed.query_pairs().collect::<HashMap<_, _>>();
 
         assert_eq!(
             parsed.as_str().split('?').next(),
-            Some(LINEAR_OAUTH_AUTHORIZE_URL)
+            Some(LINEAR_OAUTH.authorize_url)
         );
         assert_eq!(
             query.get("client_id").map(|value| value.as_ref()),
@@ -4896,7 +4951,7 @@ attributes:
         );
         assert_eq!(
             query.get("redirect_uri").map(|value| value.as_ref()),
-            Some(LINEAR_OAUTH_REDIRECT_URI)
+            Some(PM_OAUTH_REDIRECT_URI)
         );
         assert_eq!(
             query.get("scope").map(|value| value.as_ref()),
@@ -4922,19 +4977,31 @@ attributes:
             Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
-        assert!(pm_oauth_endpoint(Provider::Linear).is_some());
+        assert!(pm_oauth(Provider::Linear).is_some());
         assert!(Provider::Linear.supports_automatic_refresh());
     }
 
     #[test]
-    fn linear_broker_registered_in_default_brokers() {
-        let has_linear = default_brokers(None)
-            .iter()
-            .any(|broker| broker.provider() == Provider::Linear);
-        assert!(
-            has_linear,
-            "`lf account connect linear` needs a registered broker"
+    fn planning_brokers_registered_in_default_brokers() {
+        for provider in [Provider::Linear, Provider::Asana] {
+            assert!(
+                default_brokers(None)
+                    .iter()
+                    .any(|broker| broker.provider() == provider),
+                "`lf account connect {provider}` needs a registered broker"
+            );
+        }
+    }
+
+    #[test]
+    fn asana_provider_parses_and_refreshes_through_its_oauth_app() {
+        assert_eq!("asana".parse::<Provider>(), Ok(Provider::Asana));
+        assert_eq!(Provider::Asana.as_str(), "asana");
+        assert_eq!(
+            pm_oauth(Provider::Asana).map(|spec| spec.token_url),
+            Some("https://app.asana.com/-/oauth_token")
         );
+        assert!(Provider::Asana.supports_automatic_refresh());
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -5044,10 +5111,10 @@ attributes:
     #[test]
     fn pm_oauth_endpoint_maps_only_pm_providers() {
         assert_eq!(
-            pm_oauth_endpoint(Provider::Linear),
-            Some(LINEAR_OAUTH_TOKEN_URL)
+            pm_oauth(Provider::Linear).map(|spec| spec.token_url),
+            Some(LINEAR_OAUTH.token_url)
         );
-        assert!(pm_oauth_endpoint(Provider::GitHub).is_none());
+        assert!(pm_oauth(Provider::GitHub).is_none());
     }
 
     #[test]
@@ -5409,20 +5476,20 @@ esac
 
 #[cfg(test)]
 mod linear_oauth_config_tests {
-    use super::{linear_refresh_secret_output, LinearRefreshError};
+    use super::{pm_refresh_secret_output, PmRefreshError};
     use std::os::unix::process::ExitStatusExt;
 
     #[test]
     fn linear_oauth_config_lookup_does_not_treat_command_failure_as_missing() {
         for (status, stdout, expected) in [
-            (0, "", LinearRefreshError::ClientConfigurationUnavailable),
+            (0, "", PmRefreshError::ClientConfigurationUnavailable),
             (
                 1,
                 "synthetic-secret-output",
-                LinearRefreshError::ConfigurationLookupFailed,
+                PmRefreshError::ConfigurationLookupFailed,
             ),
         ] {
-            let error = linear_refresh_secret_output(Ok(std::process::Output {
+            let error = pm_refresh_secret_output(Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(status << 8),
                 stdout: stdout.as_bytes().to_vec(),
                 stderr: b"synthetic-secret-stderr".to_vec(),
@@ -5432,13 +5499,12 @@ mod linear_oauth_config_tests {
             assert!(!error.to_string().contains("synthetic-secret"));
         }
         assert_eq!(
-            linear_refresh_secret_output(Err(std::io::ErrorKind::NotFound.into())).unwrap_err(),
-            LinearRefreshError::ConfigurationLookupFailed
+            pm_refresh_secret_output(Err(std::io::ErrorKind::NotFound.into())).unwrap_err(),
+            PmRefreshError::ConfigurationLookupFailed
         );
         assert_eq!(
-            linear_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into()))
-                .unwrap_err(),
-            LinearRefreshError::ConfigurationLookupFailed
+            pm_refresh_secret_output(Err(std::io::ErrorKind::PermissionDenied.into())).unwrap_err(),
+            PmRefreshError::ConfigurationLookupFailed
         );
     }
 }

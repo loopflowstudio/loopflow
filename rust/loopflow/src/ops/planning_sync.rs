@@ -62,7 +62,8 @@ pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
             .unwrap_or_default();
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
-            crate::config::PlanningConfig::Linear {} => {
+            crate::config::PlanningConfig::Linear {}
+            | crate::config::PlanningConfig::Asana { .. } => {
                 // Export attempts have individual deadlines. A shared deadline
                 // lets older pending work starve the Task that was just saved.
                 super::planning_export::sync_repository_exports(store, repo).await?;
@@ -317,7 +318,7 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
     let repo = crate::repository::CanonicalRepo::discover(directory)
         .map_err(message)?
         .to_string();
-    if !super::linear_observe::connected(&repo) {
+    if !super::planning_client::connected(&repo) {
         return Ok(());
     }
     tokio::runtime::Builder::new_current_thread()
@@ -362,8 +363,8 @@ impl PlanningSync {
         watching: bool,
         open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
     ) -> OpsResult<Self> {
-        let linear = super::linear_observe::connected(&repo);
-        if linear && !watching {
+        let remote = super::planning_client::connected(&repo);
+        if remote && !watching {
             return Ok(Self {
                 stop: None,
                 thread: None,
@@ -401,13 +402,13 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = super::linear_observe::watch_repository(&store, &repo), if linear => {},
+                        _ = super::linear_observe::watch_repository(&store, &repo), if remote => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }), if !linear => {},
+                        }), if !remote => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }), if !linear => {},
+                        }), if !remote => {},
                     }
                 };
                 #[cfg(test)]

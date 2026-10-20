@@ -1,5 +1,6 @@
 pub mod agent;
 mod agent_input_timing;
+pub mod asana;
 pub mod build_info;
 pub mod builtins;
 pub mod chat;

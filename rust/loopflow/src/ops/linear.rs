@@ -193,7 +193,7 @@ fn wave_has_linear_initiative(repo: &Path, wave: &str) -> bool {
 }
 
 async fn build_client(team: Option<String>) -> OpsResult<LinearClient> {
-    let token = resolve_linear_token().await?;
+    let token = resolve_planning_token(Provider::Linear).await?;
     #[cfg(test)]
     if let Ok(url) = LINEAR_TEST_CONTEXT.try_with(|ctx| ctx.graphql_url.clone()) {
         return Ok(LinearClient::with_base_url(token, team, url));
@@ -251,64 +251,74 @@ pub(crate) async fn resolve_context(
     Ok((repository, initiative))
 }
 
-/// Linear authenticates via OAuth: the access token and refresh grant live in
-/// store, and Linear access refreshes the grant before the access token expires.
-async fn resolve_linear_token() -> OpsResult<String> {
+/// Planning providers authenticate via OAuth: the access token and refresh grant
+/// live in store, and access refreshes the grant before the access token expires.
+pub(super) async fn resolve_planning_token(provider: Provider) -> OpsResult<String> {
     let deadline = Instant::now() + LINEAR_REFRESH_TIMEOUT;
     tokio::time::timeout(LINEAR_REFRESH_TIMEOUT, async {
         let config = super::planning_sync::storage_config_from_env()?;
         let store = super::planning_sync::open_planning_store(&config).await?;
         let StorageConfig::Sqlite { path } = config;
-        resolve_linear_token_from_store(&store, &path, deadline).await
+        resolve_planning_token_from_store(provider, &store, &path, deadline).await
     })
     .await
-    .map_err(|_| credential_deadline())?
+    .map_err(|_| credential_deadline(provider))?
 }
 
-fn missing_linear_credential() -> OpsError {
-    OpsError::Message(
-        "No Linear credential found. Run `doppler run -- lf account connect linear`.".into(),
-    )
-}
-
-fn credential_retry(reason: &str) -> OpsError {
+fn missing_credential(provider: Provider) -> OpsError {
     OpsError::Message(format!(
-        "{reason}. Retry the Linear operation; no credential was cleared."
+        "No {} credential found. Run `doppler run -- lf account connect {provider}`.",
+        provider.display_name()
     ))
 }
 
-fn credential_deadline() -> OpsError {
-    credential_retry("Linear credential resolution deadline elapsed; a pending write may still settle, so the next call must re-read the credential")
+fn credential_retry(provider: Provider, reason: &str) -> OpsError {
+    OpsError::Message(format!(
+        "{reason}. Retry the {} operation; no credential was cleared.",
+        provider.display_name()
+    ))
 }
 
-fn usable_token(token: ProviderToken) -> OpsResult<String> {
+fn credential_deadline(provider: Provider) -> OpsError {
+    credential_retry(provider, &format!("{} credential resolution deadline elapsed; a pending write may still settle, so the next call must re-read the credential", provider.display_name()))
+}
+
+fn usable_token(provider: Provider, token: ProviderToken) -> OpsResult<String> {
     if token.access_token.trim().is_empty()
         || token
             .expires_at
             .is_some_and(|expiry| expiry <= time::OffsetDateTime::now_utc().unix_timestamp())
     {
         return Err(credential_retry(
-            "Current Linear credential is unusable or expired",
+            provider,
+            &format!(
+                "Current {} credential is unusable or expired",
+                provider.display_name()
+            ),
         ));
     }
     Ok(token.access_token)
 }
 
-async fn linear_refresh_lock(database: &Path, deadline: Instant) -> OpsResult<std::fs::File> {
+async fn planning_refresh_lock(
+    provider: Provider,
+    database: &Path,
+    deadline: Instant,
+) -> OpsResult<std::fs::File> {
     let database = std::fs::canonicalize(database)
-        .map_err(|_| credential_retry("Could not resolve the Linear credential store path"))?;
+        .map_err(|_| credential_retry(provider, "Could not resolve the credential store path"))?;
     let mut path = database.into_os_string();
-    path.push(".linear-refresh.lock");
+    path.push(format!(".{provider}-refresh.lock"));
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(path)
-        .map_err(|_| credential_retry("Could not open the Linear refresh lock"))?;
+        .map_err(|_| credential_retry(provider, "Could not open the refresh lock"))?;
     loop {
         if Instant::now() >= deadline {
-            return Err(credential_deadline());
+            return Err(credential_deadline(provider));
         }
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(file),
@@ -317,78 +327,87 @@ async fn linear_refresh_lock(database: &Path, deadline: Instant) -> OpsResult<st
             }
             Err(_) => {
                 return Err(credential_retry(
-                    "Could not acquire the Linear refresh lock",
+                    provider,
+                    "Could not acquire the refresh lock",
                 ))
             }
         }
     }
 }
 
-async fn resolve_linear_token_from_store(
+async fn resolve_planning_token_from_store(
+    provider: Provider,
     store: &Store,
     database: &Path,
     deadline: Instant,
 ) -> OpsResult<String> {
     let read = || async {
         store
-            .get_provider_token("linear")
+            .get_provider_token(provider.as_str())
             .await
-            .map_err(|_| credential_retry("Could not read the Linear credential"))
+            .map_err(|_| credential_retry(provider, "Could not read the credential"))
     };
-    let initial = read().await?.ok_or_else(missing_linear_credential)?;
+    let initial = read().await?.ok_or_else(|| missing_credential(provider))?;
     if !provider_token_refresh_due(&initial, time::OffsetDateTime::now_utc().unix_timestamp()) {
-        return usable_token(initial);
+        return usable_token(provider, initial);
     }
-    let lock = linear_refresh_lock(database, deadline).await?;
-    let current = read().await?.ok_or_else(missing_linear_credential)?;
+    let lock = planning_refresh_lock(provider, database, deadline).await?;
+    let current = read().await?.ok_or_else(|| missing_credential(provider))?;
     if !provider_token_refresh_due(&current, time::OffsetDateTime::now_utc().unix_timestamp()) {
-        return usable_token(current);
+        return usable_token(provider, current);
     }
     for attempt in 0..2 {
-        match refresh_stored_provider_token(Provider::Linear, &current).await {
+        match refresh_stored_provider_token(provider, &current).await {
             Ok(refreshed) => {
                 // Persistence owns the file descriptor even if this future is cancelled.
                 let replacement = store
                     .replace_provider_token(&current, &refreshed, lock, deadline)
                     .await;
                 return match replacement {
-                    Ok(ProviderTokenReplacement::Replaced) => usable_token(refreshed),
-                    Ok(ProviderTokenReplacement::Changed(winner)) => usable_token(winner),
-                    Ok(ProviderTokenReplacement::Missing) => Err(missing_linear_credential()),
+                    Ok(ProviderTokenReplacement::Replaced) => usable_token(provider, refreshed),
+                    Ok(ProviderTokenReplacement::Changed(winner)) => usable_token(provider, winner),
+                    Ok(ProviderTokenReplacement::Missing) => Err(missing_credential(provider)),
                     Err(_) => {
                         // A failed write (including an uncertain commit) cannot authorize
                         // an unpersisted response. Re-read before considering fallback.
                         if let Some(latest) = read().await? {
-                            if let Ok(access) = usable_token(latest) {
-                                tracing::warn!("Linear refresh persistence failed; using the current stored token");
+                            if let Ok(access) = usable_token(provider, latest) {
+                                tracing::warn!(%provider, "refresh persistence failed; using the current stored token");
                                 return Ok(access);
                             }
                         }
-                        Err(credential_retry("Could not persist the refreshed Linear credential; re-read it on the next call"))
+                        Err(credential_retry(provider, "Could not persist the refreshed credential; re-read it on the next call"))
                     }
                 };
             }
             Err(error) => {
                 let latest = read().await?;
                 if latest.as_ref() != Some(&current) {
-                    return usable_token(latest.ok_or_else(missing_linear_credential)?);
+                    return usable_token(
+                        provider,
+                        latest.ok_or_else(|| missing_credential(provider))?,
+                    );
                 }
                 let TokenRefreshError::OAuth { reason, .. } = error else {
-                    return Err(credential_retry("Linear credential refresh failed"));
+                    return Err(credential_retry(provider, "Credential refresh failed"));
                 };
                 if attempt == 0 && reason.retryable_now() {
                     continue;
                 }
-                if let Ok(access) = usable_token(current.clone()) {
-                    tracing::warn!(error = %reason, "proactive Linear refresh failed; using the still-valid token");
+                if let Ok(access) = usable_token(provider, current.clone()) {
+                    tracing::warn!(error = %reason, %provider, "proactive planning refresh failed; using the still-valid token");
                     return Ok(access);
                 }
                 return Err(if reason.requires_reconnect() {
-                    OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf account connect linear` to reconnect."))
+                    OpsError::Message(format!("{} refresh failed: {reason}. Run `doppler run -- lf account connect {provider}` to reconnect.", provider.display_name()))
                 } else {
-                    credential_retry(&format!(
-                        "Linear refresh failed: {reason}; prior credential preserved"
-                    ))
+                    credential_retry(
+                        provider,
+                        &format!(
+                            "{} refresh failed: {reason}; prior credential preserved",
+                            provider.display_name()
+                        ),
+                    )
                 });
             }
         }
@@ -411,6 +430,9 @@ tokio::task_local! {
 
 #[cfg(test)]
 pub(super) mod test_fixture;
+
+#[cfg(test)]
+mod asana_planning_tests;
 
 #[cfg(test)]
 pub(crate) mod task_planning_tests;

@@ -800,7 +800,7 @@ impl SqliteStore {
             last_title != observation.title || last_description != observation.description;
         if content_steer_applied {
             let text = format!(
-                "The linked Linear task was edited; use this current definition.\n\n\
+                "The linked planning task was edited; use this current definition.\n\n\
                  Title: {}\n\n{}",
                 observation.title, observation.description,
             );
@@ -1392,7 +1392,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
     COALESCE((SELECT json_object('state','pending','operation',
         CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
-        'error',COALESCE(d.error,'Saved locally; pending Linear synchronization'))
+        'error',COALESCE(d.error,'Saved locally; pending planning synchronization'))
         FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),

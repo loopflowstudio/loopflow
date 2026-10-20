@@ -283,6 +283,7 @@ Auth connects your providers locally:
 lf account connect github    # connect GitHub
 lf account connect claude    # connect Claude
 lf account connect linear    # connect Linear with OAuth
+lf account connect asana     # or plan in Asana
 lf account    # refresh managed identity and usage
 ```
 

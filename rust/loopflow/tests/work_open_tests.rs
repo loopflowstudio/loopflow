@@ -430,7 +430,7 @@ fn live_conversation(
         .create_session(
             loopflow::session::LfSession {
                 captured: None,
-                id: id.clone(),
+                id: id.clone().into(),
                 artifact_key: input,
                 caller_artifact_key: None,
                 input_published: false,

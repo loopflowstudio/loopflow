@@ -330,7 +330,7 @@ fn scheme_handler() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{herdr_manifest, install_xdg, receiver_argv, write_applet, Receiver};
+    use super::{herdr_manifest, install_xdg, receiver_argv, Receiver};
     use std::path::Path;
 
     #[test]
@@ -399,6 +399,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn applet_declares_the_scheme_and_quotes_the_url() {
+        use super::write_applet;
+
         let root = tempfile::tempdir().unwrap();
         let applet = root.path().join("Loopflow Links.app");
         write_applet(&applet, Path::new("/Users/jack/.local/bin/lf")).unwrap();

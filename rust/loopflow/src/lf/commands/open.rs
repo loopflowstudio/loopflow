@@ -270,7 +270,7 @@ impl Resolved {
             );
         };
         match self.conversation() {
-            Some(id) if id == caller.session_id => {
+            Some(id) if caller.session_id == id => {
                 (ConversationRelation::CurrentConversation, None)
             }
             Some(_) => (ConversationRelation::OtherConversation, None),
@@ -481,7 +481,7 @@ fn describe(
             store
                 .sqlite
                 .primary_session(&scope)?
-                .map(|session| session.id)
+                .map(|session| session.id.into())
         }
         None => None,
     };
@@ -715,7 +715,7 @@ fn available_target(
         }
         _ => {}
     }
-    let exact = (!primary).then(|| record.id.clone());
+    let exact = (!primary).then(|| record.id.to_string());
     let mut resolved = describe(
         Some(store),
         &context,

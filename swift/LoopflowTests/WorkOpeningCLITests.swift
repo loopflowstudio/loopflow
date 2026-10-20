@@ -45,8 +45,9 @@ struct WorkOpeningCLITests {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let repo = try fixture.repository(parent: "work", name: "beta", planningRemote: true)
-        let created = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Arrives through CLI", "--json"], cwd: repo)
-        let identifier = try #require(created["identifier"] as? String)
+        struct Created: Decodable, Sendable { let identifier: String }
+        let identifier = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Arrives through CLI", "--json"],
+                                                cwd: repo, as: Created.self).identifier
 
         let router = WorkLinkRouter()
         var windows: [RepositoryWorkspace] = []
@@ -115,9 +116,9 @@ struct WorkOpeningCLITests {
             return repo
         }
 
-        func json(_ args: [String], cwd: URL) async throws -> [String: Any] {
+        func json<T: Decodable & Sendable>(_ args: [String], cwd: URL, as type: T.Type) async throws -> T {
             let output = try await Self.run(binary, args, cwd: cwd, home: home)
-            return try #require(JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
+            return try JSONDecoder().decode(type, from: Data(output.utf8))
         }
 
         private static func run(_ binary: String, _ args: [String], cwd: URL, home: URL) async throws -> String {

@@ -100,7 +100,7 @@ pub(crate) async fn ensure_task(
             task_id: Some(task.id.clone()),
             wave_id: task.wave_id.clone(),
             work_source: Some(WorkSource::Declared),
-            ..conversation(cwd, task.agent.as_deref(), "task-session", task.title)
+            ..conversation(cwd, task.agent.as_deref(), "task/session", task.title)
         };
         store
             .ensure_primary_session(
@@ -239,7 +239,7 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> Result<LfSession> {
         ..conversation(
             &binding.cwd,
             binding.agent.as_deref(),
-            "wave-session",
+            "wave/session",
             binding.wave_name.clone().expect("Wave primary has a Wave"),
         )
     })
@@ -253,7 +253,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
         .unwrap_or_else(|| repo.to_string());
     Ok(LfSession {
         repo: Some(repo.to_string()),
-        ..conversation(repo.as_path(), None, "repo-session", title)
+        ..conversation(repo.as_path(), None, "repo/session", title)
     })
 }
 

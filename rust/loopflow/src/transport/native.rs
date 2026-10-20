@@ -72,7 +72,15 @@ impl NativeClient {
     }
 
     /// The client exited: keep its terminal restoration, replace its text.
+    /// The replaced text goes to the owner's log, so a provider's last error
+    /// is never lost.
     pub fn finish(self) -> Vec<u8> {
+        if self.held.iter().any(|byte| !byte.is_ascii_whitespace()) {
+            eprintln!(
+                "native client exit output (replaced on screen):\n{}",
+                String::from_utf8_lossy(&self.held)
+            );
+        }
         let mut bytes = controls(&self.held);
         bytes.extend_from_slice(format!("\r\n{}\r\n", self.exit).as_bytes());
         bytes

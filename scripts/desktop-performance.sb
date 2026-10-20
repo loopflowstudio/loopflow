@@ -6,6 +6,8 @@
 (deny network*)
 (allow network* (local unix-socket (subpath (param "HOME")))
                 (remote unix-socket (subpath (param "HOME"))))
+(allow network* (local unix-socket (subpath (param "TRANSPORT")))
+                (remote unix-socket (subpath (param "TRANSPORT"))))
 (deny signal)
 ; Ghostty closes its owned PTY process groups. Other sandboxes and the host
 ; remain outside this authority, including the runner that launched this one.
@@ -20,7 +22,9 @@
     (subpath (param "REPO")) (subpath (param "CODE"))
     (literal (param "CLI")) (literal (param "HELPER")))
 (deny file-write*)
-(allow file-write* (subpath (param "HOME")) (subpath (param "RECEIPTS"))
+; Session transport sockets live in the fixture home's own /tmp directory.
+(allow file-read-data (subpath (param "TRANSPORT")))
+(allow file-write* (subpath (param "HOME")) (subpath (param "RECEIPTS")) (subpath (param "TRANSPORT"))
     (literal "/dev/null") (literal "/dev/ptmx") (regex #"^/dev/(ttys|pty)"))
 ; Shells inherit these restrictions. Copied providers and scheduling tools
 ; cannot execute, even if a copied record or shell startup file names them.

@@ -43,7 +43,9 @@ update them in place rather than creating a report per pass. Test skills
 standalone, midstream, and on repeated use.
 
 Use `concept-review` to reconsider the product with someone present, on request
-or in the ongoing Wave conversation. Realign reconciles the plan, code, and identified Wave memory.
+or in the ongoing Wave conversation. In `pursue` it runs headless after the
+implement loop: it records clarifications for implement and leaves genuine
+product choices unresolved for loop-or-next to block on. Realign reconciles the plan, code, and identified Wave memory.
 Draft the affected usage docs and skill guidance first, then follow the simpler
 interaction through types, APIs, and infrastructure. Product clarity is valuable
 even without deleting code.
@@ -217,8 +219,10 @@ give one occurrence an `id` and loop to that. `step:` replaces the default
 One pass runs implement, compress, refresh (sync → realign), and loop-or-next.
 The work and updated plan supply evidence; loop-or-next chooses Advance or Iterate through the
 [decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to the target
-with direction; Advance leaves the loop and publishes. This is `pursue`: one
-implementation loop with no human review or outer return edge.
+with direction. This is `pursue`: Advance leaves the implementation loop for
+`concept-review`, whose own loop-or-next iterates to implement when the review
+changed the design, blocks on an open product choice, and otherwise publishes.
+No step waits for a person.
 
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or

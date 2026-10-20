@@ -1296,7 +1296,13 @@ mod tests {
                 .collect()
         };
         let pursue = compile_flow(&load_flow("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
-        assert_eq!(edges(&pursue), [("loop-or-next".to_string(), 4)]);
+        assert_eq!(
+            edges(&pursue),
+            [
+                ("loop-or-next".to_string(), 4),
+                ("loop-or-next".to_string(), 6)
+            ]
+        );
 
         // A unique skill name is enough; repeated skills need one occurrence name.
         let named = compile(

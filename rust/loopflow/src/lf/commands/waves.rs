@@ -371,7 +371,7 @@ pub enum RoadmapSection {
     /// Someone else must move: a Session, User, CI, or supervising Work.
     Waiting,
     /// Filed, not started, not complete — ready for someone to pick up.
-    Available,
+    NotStarted,
     /// Done or dormant: terminal Work and completed plan rows.
     Later,
 }
@@ -1025,7 +1025,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
         {
             RoadmapSection::Later
         } else {
-            RoadmapSection::Available
+            RoadmapSection::NotStarted
         };
     };
     // Linear completing a Task that never left `start` withdraws it from what
@@ -2327,7 +2327,7 @@ fn section_label(section: RoadmapSection) -> &'static str {
     match section {
         RoadmapSection::Now => "NOW",
         RoadmapSection::Waiting => "WAITING",
-        RoadmapSection::Available => "AVAILABLE",
+        RoadmapSection::NotStarted => "NOT STARTED",
         RoadmapSection::Later => "LATER",
     }
 }
@@ -2368,7 +2368,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         for section in [
             RoadmapSection::Now,
             RoadmapSection::Waiting,
-            RoadmapSection::Available,
+            RoadmapSection::NotStarted,
             RoadmapSection::Later,
         ] {
             let in_section: Vec<&RoadmapRow> =

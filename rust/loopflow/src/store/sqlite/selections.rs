@@ -291,7 +291,7 @@ fn plan_in(
                 location: Some(location),
             }) = &content.face
             {
-                match crate::ops::human_session::human_open_argv(session_id) {
+                match crate::ops::human_session::human_session_argv(session_id, "connect") {
                     Ok(mut argv) => {
                         // Keep the existing connect command and data-selection fences.
                         let at = argv.len() - 3;

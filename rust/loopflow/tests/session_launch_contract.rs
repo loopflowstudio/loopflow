@@ -1091,6 +1091,9 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     assert!(!fixture.home.path().join("received.json").exists());
     fs::create_dir_all(saved.cwd.join(".lf")).unwrap();
     fs::write(saved.cwd.join(".lf/config.yaml"), "agent: claude:haiku\nyolo: true\nchrome: true\npaste: false\ndiff: false\ndiff_files: false\n").unwrap();
+    // Preparation captures no input; the first launch does and later ones reuse it.
+    assert!(saved.artifact_key.is_none());
+    let mut launched = None;
     for argv in [
         vec!["session", "connect", "--wave", wave_id],
         vec!["connect", "--wave", wave_id, "--json"],
@@ -1114,10 +1117,9 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         );
         bypass(&received, "claude", true);
         pair(&received, "--model", "haiku");
-        assert_eq!(
-            store.session(id).unwrap().unwrap().artifact_key,
-            saved.artifact_key
-        );
+        let key = store.session(id).unwrap().unwrap().artifact_key;
+        assert!(key.is_some());
+        assert_eq!(&key, launched.get_or_insert_with(|| key.clone()));
     }
     let previous = fixture.received();
     let native = args(&previous)

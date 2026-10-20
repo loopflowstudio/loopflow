@@ -27,7 +27,7 @@ use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::{client_async, tungstenite::Message};
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
@@ -1115,7 +1115,7 @@ impl CodexHarness {
         })
         .await
         .map_err(|_| anyhow!("Codex app-server did not open its socket within 15s"))??;
-        let (socket, _) = client_async("ws://localhost", socket).await?;
+        let socket = super::codex_connection::connect_upstream(socket).await?;
         let (mut writer, mut reader) = socket.split();
         let stderr = child.as_mut().and_then(|child| child.stderr.take());
 

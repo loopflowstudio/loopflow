@@ -200,7 +200,7 @@ DOCS_AREAS = (
             DocPage(
                 "Conducting",
                 "conducting",
-                "See what got done, what needs you, and how to step in",
+                "See what got done, what you can pick up, and how to step in",
             ),
         ),
     ),
@@ -1192,7 +1192,7 @@ def get():
                         Div(
                             H2("Mac app"),
                             P(
-                                "Start here. The app shows your goals, your tasks, and what needs you, "
+                                "Start here. The app shows your goals, your tasks, and the conversations available to you, "
                                 "and it includes the command line tool.",
                                 cls="install-desc",
                             ),

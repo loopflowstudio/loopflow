@@ -2,6 +2,7 @@
 
 use crate::id::AgentSessionId;
 use std::fs::File;
+use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
@@ -26,7 +27,7 @@ macro_rules! session_step {
 }
 pub(super) const SESSION_FLOW: &str = session_flow!();
 
-const SESSION_SELECT: &str = concat!("SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
+const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
@@ -41,7 +42,10 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .transpose()
                 .map_err(invalid)?,
             id: row.get(0)?,
-            artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
+            artifact_key: row
+                .get::<_, Option<String>>(1)?
+                .map(|key| crate::session_record::parse_artifact_key(&key))
+                .transpose()
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
@@ -313,7 +317,10 @@ fn read_summary(
             task_primary: row.get(29)?,
             captured: row.get(16)?,
             id: row.get(0)?,
-            artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
+            artifact_key: row
+                .get::<_, Option<String>>(1)?
+                .map(|key| crate::session_record::parse_artifact_key(&key))
+                .transpose()
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
@@ -392,6 +399,44 @@ pub(super) fn session_summaries_in(
     rows.map(|row| row?).collect()
 }
 
+fn ensure_primary_session_in(
+    conn: &Connection,
+    scope: &PrimaryScope,
+    replacing: Option<&str>,
+    session: LfSession,
+    caller_process: Option<&crate::id::LfProcessId>,
+) -> StoreResult<LfSession> {
+    let current = primary_session_in(conn, scope)?;
+    match current {
+        Some(current) if Some(current.id.as_str()) == replacing => {
+            conn.execute(
+                "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
+                params![current.id, crate::store::rows::now_unix()],
+            )?;
+        }
+        Some(current) => return Ok(current),
+        None => {}
+    }
+    let session = reserve_session_in(conn, session, caller_process)?;
+    // A Task's primary stays an ordinary member conversation; its Task
+    // names it. A repository's or Wave's is marked on its own row.
+    match scope {
+        PrimaryScope::Repository(_) => conn.execute(
+            "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
+            [&session.id],
+        )?,
+        PrimaryScope::Wave(_) => conn.execute(
+            "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
+            [&session.id],
+        )?,
+        PrimaryScope::Task(task) => conn.execute(
+            "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+            params![task.as_str(), session.id],
+        )?,
+    };
+    Ok(session)
+}
+
 impl SqliteStore {
     pub(crate) fn bind_session_transport(
         &self,
@@ -428,6 +473,51 @@ impl SqliteStore {
             .flatten();
         id.map(|id| crate::id::LfProcessId::parse(&id).map_err(invalid))
             .transpose()
+    }
+
+    /// Unfinished interactive Sessions whose execution owner never recorded an
+    /// exit, with that owner. Leaving or detaching records one; a restart,
+    /// crash or kill does not. Liveness is the caller's observation.
+    pub(crate) fn unexited_session_owners(
+        &self,
+    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT s.id, s.transport_lf_process_id FROM agent_sessions s
+             JOIN processes o ON o.id=s.transport_lf_process_id
+             WHERE s.interactive=1 AND s.completed_at IS NULL AND o.completed_at IS NULL
+             ORDER BY s.id",
+        )?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(session, owner)| {
+                Ok((
+                    session,
+                    crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Whether the Session's current AgentProcess last reported work in progress,
+    /// rather than waiting for a person, when it stopped.
+    pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_activity act
+                JOIN agent_sessions s ON s.id=act.session_id
+                WHERE act.session_id=?1 AND act.agent_process_id IS s.agent_process_id
+                AND NOT CASE WHEN act.program_status IS NOT NULL THEN
+                    EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                        WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
+                ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)",
+            [session],
+            |row| row.get(0),
+        )?)
     }
 
     /// A Task's unfinished interactive conversations, each with its last opening.
@@ -638,7 +728,7 @@ impl SqliteStore {
         let selected = self.resolve_history_input(selector)?;
         let input = self
             .session(&selected)?
-            .map(|session| session.artifact_key.to_string())
+            .and_then(|session| session.artifact_key)
             .unwrap_or(selected);
         self.conversation_inputs(None, None, None, None, (0, false, None), Some(&input))?
             .0
@@ -959,34 +1049,7 @@ impl SqliteStore {
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = primary_session_in(&tx, scope)?;
-        match current {
-            Some(current) if Some(current.id.as_str()) == replacing => {
-                tx.execute(
-                    "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
-                    params![current.id, crate::store::rows::now_unix()],
-                )?;
-            }
-            Some(current) => return Ok(current),
-            None => {}
-        }
-        let session = reserve_session_in(&tx, session, caller_process)?;
-        // A Task's primary stays an ordinary member conversation; its Task
-        // names it. A repository's or Wave's is marked on its own row.
-        match scope {
-            PrimaryScope::Repository(_) => tx.execute(
-                "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
-                [&session.id],
-            )?,
-            PrimaryScope::Wave(_) => tx.execute(
-                "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
-                [&session.id],
-            )?,
-            PrimaryScope::Task(task) => tx.execute(
-                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
-                params![task.as_str(), session.id],
-            )?,
-        };
+        let session = ensure_primary_session_in(&tx, scope, replacing, session, caller_process)?;
         tx.commit()?;
         Ok(session)
     }
@@ -995,11 +1058,11 @@ impl SqliteStore {
     pub(crate) fn move_primary_workspace(
         &self,
         session: &LfSession,
-        cwd: &std::path::Path,
+        cwd: &Path,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
-            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND primary_scope IS NOT NULL AND completed_at IS NULL AND task_id IS NULL",
+            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM tasks WHERE primary_session_id=agent_sessions.id))",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -1039,7 +1102,7 @@ impl SqliteStore {
             ))),
             Some((Some(kind), _, Some(repo))) if kind == "repository" => {
                 Ok(Some(PrimaryScope::Repository(
-                    crate::repository::CanonicalRepo::discover(std::path::Path::new(&repo))
+                    crate::repository::CanonicalRepo::discover(Path::new(&repo))
                         .map_err(invalid)?,
                 )))
             }
@@ -1373,7 +1436,7 @@ pub(super) fn retain_history_in(
 
 /// Resolve ancestry and captured location on the conversation's admission transaction.
 pub(super) fn reserve_session_in(
-    conn: &Transaction<'_>,
+    conn: &Connection,
     mut session: LfSession,
     caller: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
@@ -1470,11 +1533,12 @@ fn capture_in(
     observed_at: i64,
     process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<i64> {
+    let key = session.input_key().map_err(invalid)?;
     let saved: Option<(i64, String, Option<String>)> = conn
         .query_row(
             "SELECT seq,session_id,json_extract(payload,'$.caller_key') FROM session_events
          WHERE kind='captured' AND receipt_key=?1",
-            [&session.artifact_key],
+            [key],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
@@ -1536,7 +1600,11 @@ fn insert_session_in(
             session.model
         ],
     )?;
-    session.captured = Some(capture_in(conn, session, session.created_at, process)?);
+    session.captured = session
+        .artifact_key
+        .as_ref()
+        .map(|_| capture_in(conn, session, session.created_at, process))
+        .transpose()?;
     conn.execute(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
         params![session.id, session.captured],
@@ -1612,7 +1680,7 @@ impl SqliteStore {
             LfSession {
                 captured: None,
                 id: id.into(),
-                artifact_key: artifact.into(),
+                artifact_key: Some(artifact.into()),
                 caller_artifact_key: None,
                 input_published: true,
                 cwd: "/fixture".into(),
@@ -1673,7 +1741,7 @@ mod metadata_tests {
         let exclusion = store.lock_checkout(&session.cwd).unwrap();
         let mut next = session.clone();
         next.cwd = home.path().join("destination");
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         assert!(store
             .replace_session_input(session.captured, next.clone())
             .is_err());
@@ -1736,7 +1804,7 @@ mod metadata_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let first = store.test_session("retired", &crate::session_record::new_artifact_key());
         let mut next = first.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         store
             .conn
@@ -1776,7 +1844,7 @@ mod metadata_tests {
         );
         assert_eq!(history.first().unwrap().seq, first.captured.unwrap());
         let mut next = first.clone();
-        next.artifact_key = crate::session_record::new_artifact_key();
+        next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         let next = store.replace_session_input(first.captured, next).unwrap();
         assert_ne!(next.captured, first.captured);

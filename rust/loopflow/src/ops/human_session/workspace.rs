@@ -122,6 +122,19 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
     let home = store.local_machine().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
+        if session.task_primary {
+            if let Some(WorkRef::Task(id)) = &session.work {
+                if !resolver
+                    .checkouts
+                    .iter()
+                    .any(|checkout| &checkout.task_id == id)
+                {
+                    session.workspace = None;
+                    session.task_ids = vec![id.clone()];
+                    continue;
+                }
+            }
+        }
         if session.primary_scope.is_some() {
             let cwd = Path::new(&session.cwd);
             session.workspace = Some(SessionWorkspace {

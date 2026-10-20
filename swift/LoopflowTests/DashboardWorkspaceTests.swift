@@ -108,7 +108,7 @@ struct DashboardWorkspaceTests {
         model.navigation.palette = .search
         let encoded = try #require(expression.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed))
         let link = try #require(URL(string: "loopflow://open?repo=/repo&view=\(encoded)"))
-        await model.receiveWorkLink(link)
+        await model.receiveWorkLink(.view(expression: expression, address: link.absoluteString))
         let state = model.inspectDesktop(repository: plan.repository, window: UUID(), workspaces: registry)
         #expect(state.selectionKind == "dashboard")
         #expect(state.selectionId == (saved ? "picked" : nil))

@@ -544,7 +544,7 @@ struct DesktopHeadlessTests {
             var value = base
             value["id"] = id
             value["state"] = state
-            value["attention"] = available ? "available" : NSNull()
+            value["availability"] = available ? "available" : NSNull()
             value["task_primary"] = primary
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         }

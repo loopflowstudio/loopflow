@@ -130,6 +130,14 @@ impl Workflow {
         }
     }
 
+    /// The authored node where a person takes part now, such as `design` or `demo`.
+    pub(crate) fn person_node(&self) -> Option<&str> {
+        match &self.position {
+            WorkflowPosition::Node { node } if self.definition.node(node).is_some() => Some(node),
+            _ => None,
+        }
+    }
+
     /// Whether the Task can be put at `node`.
     pub(crate) fn names_node(&self, node: &str) -> bool {
         node == START || node == END || self.definition.node(node).is_some()

@@ -91,7 +91,7 @@ struct ConsoleWorkspaceTests {
         var value = try #require((JSONSerialization.jsonObject(with: data) as? [[String: Any]])?.first)
         value["state"] = "active"
         value["program_status"] = NSNull()
-        value["attention"] = available ? "available" : NSNull()
+        value["availability"] = available ? "available" : NSNull()
         value["agent_process_id"] = process ?? NSNull() as Any
         value["preview"] = age.map { ["provider_thread": "thread", "provider_turn": "turn", "source": "codex",
             "observed_at": 1000 - $0, "text": "Current output"] as [String: Any] } ?? NSNull() as Any

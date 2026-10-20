@@ -38,6 +38,8 @@ struct ThemeLibrary {
 
     static func load(_ paths: ThemePaths) -> Self {
         var library = Self()
+        do { _ = try ThemeFile.migrateRetiredRoles(in: paths.themes) }
+        catch { library.problems.append("\(paths.themes.path): \(error.localizedDescription)") }
         library.yours = read(paths.themes, problems: &library.problems)
         if let ghostty = paths.ghostty { library.ghostty = read(ghostty, problems: &library.problems) }
         return library

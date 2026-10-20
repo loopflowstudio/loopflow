@@ -211,7 +211,7 @@ final class WorkCache: @unchecked Sendable {
             page["entries"] = entries.map { entry in
                 var entry = entry
                 entry["state"] = SessionState.unknown.rawValue
-                entry["attention"] = NSNull()
+                entry["availability"] = NSNull()
                 entry["program_status"] = NSNull()
                 entry["actions"] = (entry["actions"] as? [[String: Any]] ?? []).filter {
                     $0["kind"] as? String == SessionActionKind.open.rawValue

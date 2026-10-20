@@ -49,7 +49,7 @@ struct ThemeWorkflowTests {
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first)
         var wire = try #require(fixture["task_primary"] as? [String: Any])
-        wire["attention"] = "available"
+        wire["availability"] = "available"
         // Retain a provider conversation without executing the capture's historical argv.
         wire["open_argv"] = ["must-not-launch"]
         let recordData = try JSONSerialization.data(withJSONObject: wire)

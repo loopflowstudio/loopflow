@@ -29,7 +29,10 @@ pub(super) async fn human_input_times<'a>(
             Some("claude") => Provider::Claude,
             _ => continue,
         };
-        let Some(reference) = store.sqlite.input_provider_session(&session.artifact_key)? else {
+        let Some(key) = session.artifact_key.as_deref() else {
+            continue;
+        };
+        let Some(reference) = store.sqlite.input_provider_session(key)? else {
             continue;
         };
         let Some(home) = conversation_home(&store.sqlite, provider, &reference)? else {
@@ -238,7 +241,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
         .create_session(LfSession {
             captured: None,
             id: format!("session_{}", uuid::Uuid::new_v4().simple()).into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             caller_artifact_key: None,
             input_published: false,
             cwd,
@@ -267,7 +270,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
         &session,
         crate::session_record::SessionFlowMembership::Independent,
     )?;
-    let dir = local_capture_dir(&session.artifact_key)
+    let dir = local_capture_dir(session.input_key()?)
         .ok_or_else(|| anyhow!("Session {} has an invalid capture reference", session.id))?;
     crate::session_record::write_provider_session(&dir, &id.into(), conversation.account.clone())?;
     if let Some(account) = &conversation.account {
@@ -410,7 +413,7 @@ mod tests {
             .test_session("recorded", &crate::session_record::new_artifact_key());
         session.provider = Some("codex".into());
         store.sqlite.retain_session_observation(&session, &crate::session::SessionObservation {
-            artifact_key: session.artifact_key.clone(), source: "provider-session:fixture".into(),
+            artifact_key: session.input_key().unwrap().clone(), source: "provider-session:fixture".into(),
             observed_at: 999, task_id: None, wave_id: None,
             payload: serde_json::json!({"source":"provider-session:fixture", "evidence":{
                 "schema_version":1, "provider_session_id":ID, "account_id":account.account_id,
@@ -548,7 +551,7 @@ mod tests {
                 .retain_session_observation(
                     session,
                     &crate::session::SessionObservation {
-                        artifact_key: session.artifact_key.clone(),
+                        artifact_key: session.input_key().unwrap().clone(),
                         source: source.into(),
                         observed_at: 1,
                         task_id: None,

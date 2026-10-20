@@ -67,6 +67,23 @@ drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
 relaunch; ordinary launch still opens the repository, without acquiring a Session.
 
+Closing a repository window keeps its panes, selected Work and file drafts until
+Desktop quits. Reopening a known repository shows retained content immediately,
+even while repository resolution waits or fails. Errors remain visible; new Task
+links wait for resolution before delivery. Unknown repositories need an initial lookup.
+
+Selecting a retained Session reuses its surface. When a surface needs reconnecting,
+Desktop attaches to the recorded execution without starting a provider, replaying
+input or taking control from another viewer. A failed connection stays visible.
+**Resume** does what `lf resume` does: it attaches to a running conversation, or
+otherwise reopens its saved provider history. At launch Desktop runs
+`lf resume --all`, so conversations a reboot or crash interrupted come back
+unasked. Repository, Wave and Task conversation entry share metadata-only
+preparation; only a newly admitted conversation offers its first launch.
+Finite CLI requests time out after 30 seconds. Canceling preparation ends only
+that request; running Sessions continue. If a change times out, refresh to learn
+its result before retrying.
+
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
@@ -397,16 +414,17 @@ name. Review the named Task, then choose
 **Bind permanently**. Opening the picker leaves the conversation and terminal intact.
 
 ```sh
-open 'loopflow://task/LOO-303'
-open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow'
-open 'loopflow://task/LOO-303?repo=%2Fsrc%2Floopflow&session=SESSION_ID'
+lf open loopflow://loopflow/task/LOO-303
+lf open loopflow://loopflow/task/LOO-303 --session SESSION_ID
+open 'loopflow://loopflow/task/LOO-303'
 ```
 
-Task links and palette Task entries open retained workspaces, including Tasks
-outside the current chapter, without starting a Task Flow. A repository-qualified
-link opens its exact match even when another Wave's planning is unavailable.
-Ambiguous links offer repository-qualified choices; failed reads keep the current
-workspace visible. Only its repository window receives a link.
+Work links and palette Task entries open retained workspaces, including Tasks
+outside the current chapter, without starting a Task Flow. An incoming address
+resolves through `lf open --link --json`; the app never repeats repository
+selection. A Task address opens its primary conversation. An ambiguous or
+unknown address changes nothing and reports the qualified links; failed reads
+keep the current workspace visible. Only its repository window receives a link.
 Open Repo, Task links and the repository menu reuse one window per plan identity,
 including while it opens. Different repositories keep separate queued destinations;
 closing one needs no replacement window. A restored location that now selects another
@@ -759,7 +777,7 @@ supplies `flow_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
-lf --task LOO-427 desktop open --diff --json
+lf open loopflow://loopflow/task/LOO-427 --diff --json
 lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
@@ -788,7 +806,7 @@ incarnation only when a native surface exists. It is separate from the pane's
 content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 
-`desktop open` delivers the resolved Task/Session link to this same repository
+`lf open` delivers the resolved Task/Session to this same repository
 window. After explicit `repo identity --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane

@@ -1,3 +1,4 @@
+pub(crate) use primary::admit_workspace;
 mod connection;
 pub(crate) use connection::explain_connect;
 pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
@@ -24,6 +25,7 @@ use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
 pub(crate) mod primary;
+pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
 pub(crate) mod provider_conversation;
 
@@ -256,7 +258,7 @@ pub struct SessionRecord {
     pub primary_scope: Option<String>,
     /// Available for a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
-    pub attention: Option<SessionAttention>,
+    pub availability: Option<SessionAvailability>,
     pub program_status: Option<crate::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     pub agent_process_id: Option<crate::id::LfProcessId>,
@@ -286,7 +288,7 @@ pub struct SessionRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionAttention {
+pub enum SessionAvailability {
     Available,
 }
 
@@ -298,8 +300,8 @@ fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     }
 }
 
-fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    session.available.then_some(SessionAttention::Available)
+fn session_availability(session: &crate::session::SessionSummary) -> Option<SessionAvailability> {
+    session.available.then_some(SessionAvailability::Available)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -361,7 +363,7 @@ pub(crate) fn publish_prepared_input(
             work: None,
         },
         session.caller_artifact_key.clone(),
-        session.artifact_key.clone(),
+        session.input_key()?.clone(),
     )?;
     store.publish_capture(&session.id, session.captured)?;
     store
@@ -473,7 +475,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let state = session_state(session);
     let mut actions = session_actions(state);
-    let open_argv = match human_open_argv(&session.id) {
+    let open_argv = match human_session_argv(&session.id, "connect") {
         Ok(argv) => argv,
         Err(error) => {
             let reason = format!("Session connection unavailable: {error}");
@@ -487,7 +489,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         preview: session.preview.clone(),
         primary_scope: session.primary_scope.clone(),
-        attention: session_attention(session),
+        availability: session_availability(session),
         program_status: session.program_status.clone(),
         agent_process_id: session.agent_process_id.clone(),
         task_primary: session.task_primary,
@@ -542,7 +544,7 @@ struct NativeSession<'a> {
 impl<'a> NativeSession<'a> {
     fn of(session: &'a LfSession) -> Result<Self> {
         Ok(Self {
-            dir: local_capture_dir(&session.artifact_key).ok_or_else(|| {
+            dir: local_capture_dir(session.input_key()?).ok_or_else(|| {
                 anyhow!("Session {} has an invalid capture reference", session.id)
             })?,
             provider: session
@@ -568,8 +570,10 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await?);
+    // The launch runs inside this execution's terminal owner, not a nested one.
+    crate::transport::configure_child(command.as_std_mut());
     let _output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
-    let mut child = spawn_session_process(&mut command, &session.artifact_key).await?;
+    let mut child = spawn_session_process(&mut command, session.input_key()?).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
     let status = child.wait().await.context("wait for session agent")?;
@@ -668,11 +672,11 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
-    if store
-        .sqlite
-        .input_provider_session(&session.artifact_key)?
-        .is_some()
-    {
+    let provider_session = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?,
+        None => None,
+    };
+    if provider_session.is_some() {
         if let Some(provider) = session.provider.as_deref() {
             if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
                 provider,
@@ -708,12 +712,9 @@ pub(crate) async fn open(
         if session.interactive {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
-                    && store
-                        .sqlite
-                        .process(&owner)?
-                        .is_some_and(|p| p.completed_at.is_none())
+                    && owner_running(&store.sqlite, &owner)?
                 {
-                    crate::transport::attach(&owner, false)?;
+                    crate::transport::attach(&owner, false, true)?;
                     return surface(store, session).await;
                 }
             }
@@ -722,8 +723,13 @@ pub(crate) async fn open(
             return surface(store, session).await;
         }
     }
+    if session.captured.is_none() {
+        if resume {
+            open_waiting(store, &session.id).await?;
+        }
+        return surface(store, session).await;
+    }
     let native = NativeSession::of(session)?;
-    let provider_session = store.sqlite.input_provider_session(&session.artifact_key)?;
     if resume {
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
         transition_headless_to_native(store, session, provider_session.as_ref()).await?;
@@ -741,7 +747,7 @@ pub(crate) async fn open(
     let mut result = surface(store, session).await?;
     if resume {
         mode.require_action(result.state)?;
-        crate::lf::commands::util::resume_session(&session.artifact_key, &provider_session)?;
+        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     } else {
         match mode {
             OpenMode::Takeover => result.open_argv.push("--takeover".to_string()),
@@ -842,14 +848,19 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
+    let session = if session.captured.is_none() {
+        append_input(store, session).await?
+    } else {
+        session
+    };
     let token = session_token(&session);
-    if resume_native_session(store, &session.artifact_key, &token, &mut launch_lock)? {
+    if resume_native_session(store, session.input_key()?, &token, &mut launch_lock)? {
         return Ok(());
     }
     crate::agent_input_timing::record("fresh_launch_selected", id);
     // A consumed launch without native history gets another attempt under
     // the same Session; its title and feedback never leave the row.
-    let session = if capture_is_prepared(&session.artifact_key)? {
+    let session = if capture_is_prepared(session.input_key()?)? {
         session
     } else {
         if session.input_published {
@@ -897,7 +908,7 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
 async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
-    next.artifact_key = crate::session_record::new_artifact_key();
+    next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;
     let next = store.replace_session_input(replaced, next).await?;
     publish_prepared_input(
@@ -913,6 +924,42 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session input"),
     }
+}
+
+/// Read an existing execution without preparing input or resuming provider history.
+/// None when nothing is running to attach to; only an explicit resume reopens history.
+pub(crate) async fn prepare_attachment(
+    store: &SharedStore,
+    session: &LfSession,
+    observe: bool,
+    if_free: bool,
+) -> Result<Option<SessionRecord>> {
+    crate::data_clone::require_writable_session(&session.id)?;
+    let Some(owner) = store.sqlite.session_transport(&session.id)? else {
+        return Ok(None);
+    };
+    if !owner_running(&store.sqlite, &owner)? {
+        return Ok(None);
+    }
+    let mut record = surface(store, session).await?;
+    record.open_argv = human_session_argv(&session.id, "attach")?;
+    if observe {
+        record.open_argv.push("--observe".into());
+    }
+    if if_free {
+        record.open_argv.push("--if-free".into());
+    }
+    Ok(Some(record))
+}
+
+/// An execution owner runs until it records its exit or the OS shows it gone,
+/// as after a restart. Unknown evidence is not exit.
+pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId) -> Result<bool> {
+    Ok(store
+        .process(owner)?
+        .is_some_and(|process| process.completed_at.is_none())
+        && crate::journal::process_evidence(store, owner)
+            != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
 /// A Session as its row and its current input describe it.
@@ -937,7 +984,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         }
         Vec::new()
     } else {
-        human_open_argv(&session.id)?
+        human_session_argv(&session.id, "connect")?
     };
     let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
@@ -959,7 +1006,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
     let mut reading = SessionRecord {
         preview: metadata.preview.clone(),
         primary_scope: metadata.primary_scope.clone(),
-        attention: session_attention(&metadata),
+        availability: session_availability(&metadata),
         program_status: metadata.program_status.clone(),
         agent_process_id: metadata.agent_process_id.clone(),
         task_primary: metadata.task_primary,
@@ -1200,7 +1247,7 @@ pub(crate) fn resume_native_session(
         return Ok(false);
     };
     crate::data_clone::require_writable_session(&session.id)?;
-    if session.artifact_key != *artifact_key {
+    if session.artifact_key.as_ref() != Some(artifact_key) {
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
@@ -1223,7 +1270,7 @@ pub(crate) fn resume_native_session(
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::agent_input_timing::record("native_resume_selected", &session.id);
     crate::lf::commands::util::resume_session_with_env(
-        &session.artifact_key,
+        session.input_key()?,
         provider_session.as_ref(),
         &environment,
         launch_lock.take(),
@@ -1231,7 +1278,7 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) fn human_open_argv(id: &str) -> Result<Vec<String>> {
+pub(crate) fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
     crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
@@ -1242,7 +1289,7 @@ pub(crate) fn human_open_argv(id: &str) -> Result<Vec<String>> {
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
         "session".to_string(),
-        "connect".to_string(),
+        command.to_string(),
         id.to_string(),
     ])
 }
@@ -1538,7 +1585,7 @@ mod tests {
                 let args = std::fs::read_to_string(home.join("client-args"))?;
                 let flag = if provider_name == "claude" { "--resume" } else { "--session" };
                 assert!(args.contains(&format!("{flag}\nsaved-thread\n")), "{args}");
-                assert_eq!(store.sqlite.input_provider_session(&session.artifact_key)?.unwrap()
+                assert_eq!(store.sqlite.input_provider_session(session.input_key()?)?.unwrap()
                     .agent_session.as_str(), "saved-thread");
                 Ok::<_, anyhow::Error>(())
             })
@@ -1587,9 +1634,12 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(session.state, super::SessionState::Unknown);
-        assert_eq!(session.attention, Some(super::SessionAttention::Available));
         assert_eq!(
-            serde_json::to_value(&session).unwrap()["attention"],
+            session.availability,
+            Some(super::SessionAvailability::Available)
+        );
+        assert_eq!(
+            serde_json::to_value(&session).unwrap()["availability"],
             "available"
         );
         assert!(matches!(
@@ -1626,7 +1676,7 @@ mod tests {
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             title: "Retained conversation".into(),
             title_source: crate::session::TitleSource::Human,
             ready_summary: None,
@@ -1704,7 +1754,7 @@ mod tests {
         let row = super::summary_surface(&summary);
         assert_eq!(row.state, super::SessionState::Unknown);
         assert_eq!(row.ready_summary, summary.ready_summary);
-        assert_eq!(row.attention, None);
+        assert_eq!(row.availability, None);
         summary.ready_summary = None;
         summary.completed_at = Some(1);
         assert_eq!(
@@ -1734,7 +1784,7 @@ mod tests {
 
     use std::ffi::OsString;
 
-    use super::{human_open_argv, session_is_resumable};
+    use super::{human_session_argv, session_is_resumable};
     use crate::session::LfSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
@@ -1962,7 +2012,7 @@ mod tests {
             captured: None,
             caller_artifact_key: None,
             id: "conversation".into(),
-            artifact_key: crate::session_record::new_artifact_key(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
             input_published: true,
             cwd: directory.path().into(),
             skill: None,
@@ -2025,7 +2075,7 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv("session_123").unwrap();
+        let argv = human_session_argv("session_123", "connect").unwrap();
 
         assert_eq!(
             &argv[argv.len() - 3..],

@@ -2,7 +2,7 @@
   "observed_at": 1791500000,
   "openings": [
     {
-      "url": "loopflow://open?repo=/missing",
+      "url": "loopflow://missing",
       "status": "failed",
       "reason": "Repository path is unavailable"
     }

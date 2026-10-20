@@ -83,12 +83,12 @@ struct DashboardView: View {
                     Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                 }.padding(10)
                 if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
-                    Text(error).foregroundStyle(palette.waiting).textSelection(.enabled)
+                    Text(error).foregroundStyle(palette.warning).textSelection(.enabled)
                 }
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
-                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.waiting).lineLimit(1)
+                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.warning).lineLimit(1)
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
                 }
@@ -154,7 +154,7 @@ struct DashboardView: View {
                     save(plan, tree: plan.arrangement.tree?.swapping(member, other)); return true
                 }
             if let entry, let content {
-                if let error = entry.persistenceError { Text(error).foregroundStyle(palette.waiting).textSelection(.enabled) }
+                if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
                 if let task = model.task(id: member.work.id)?.task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task)

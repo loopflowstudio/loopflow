@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import Loopflow
+@testable import LoopflowMac
 
 @Suite("Shared Work selection")
 struct WorkSelectionTests {
@@ -56,6 +57,19 @@ struct WorkSelectionTests {
         #expect(layout.hidden == ["pane-4"])
         let encoded = try JSONEncoder().encode(layout)
         #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == JSONSerialization.jsonObject(with: bytes) as? NSDictionary)
+    }
+
+    @Test("A delivered Wave link selects that Wave in its repository window") @MainActor
+    func deliveredWaveLinkSelectsWave() async throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
+        let wave = try #require(roadmap.waves.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Selection must not read") }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
+        await model.receiveWorkLink(.wave(id: wave.wave.id, address: "loopflow://loopflow/wave/\(wave.wave.id)"))
+        #expect(model.selection == .wave(id: wave.wave.id))
     }
 }
 

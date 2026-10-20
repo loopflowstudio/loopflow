@@ -816,20 +816,24 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
 }
 
 #[test]
-fn desktop_open_explanations_preserve_proposals_and_impediments() {
-    use loopflow::lf::commands::desktop::DesktopOpenExplanation;
-    let json = include_str!("../../../tests/fixtures/dto/desktop_open_explanations.json");
-    let reports: Vec<DesktopOpenExplanation> = serde_json::from_str(json).unwrap();
-    assert!(reports[0].url.as_ref().unwrap().contains("diff=true"));
-    assert!(reports[1].url.is_none());
-    assert!(!reports[1].impediments.is_empty());
+fn work_links_carry_readable_labels_routes_and_conversation_relation() {
+    use loopflow::lf::commands::open::{ConversationRelation, WorkLink};
+    let json = include_str!("../../../tests/fixtures/dto/work_links.json");
+    let links: Vec<WorkLink> = serde_json::from_str(json).unwrap();
     assert_eq!(
-        serde_json::to_value(reports).unwrap(),
+        links[0].conversation,
+        ConversationRelation::OtherConversation
+    );
+    assert!(links[0].target.execution_machine.is_some());
+    assert_eq!(links[1].conversation, ConversationRelation::Unknown);
+    assert!(links[1].url.contains("?repository="));
+    assert_eq!(
+        serde_json::to_value(links).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing[0].as_object_mut().unwrap().remove("impediments");
-    assert!(serde_json::from_value::<Vec<DesktopOpenExplanation>>(missing).is_err());
+    missing[0].as_object_mut().unwrap().remove("fallback_argv");
+    assert!(serde_json::from_value::<Vec<WorkLink>>(missing).is_err());
 }
 
 #[test]

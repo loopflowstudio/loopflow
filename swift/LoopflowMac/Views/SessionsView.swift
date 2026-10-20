@@ -105,7 +105,7 @@ extension PaneContent {
     }
 }
 
-/// One window's retained workspace for Work: the pane layout and the
+/// One retained workspace for Work: the pane layout and the
 /// pool of live surfaces behind it.
 @MainActor
 @Observable
@@ -125,6 +125,7 @@ final class SessionsWorkspace {
         do {
             let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
+            store.adoptPreparation(record)
             registry.revealSession(record, in: self)
             presentation.content = .terminals
             presentation.selectedSessionId = record.id
@@ -347,10 +348,8 @@ final class SessionsWorkspace {
     }
 }
 
-/// Owned by each window's root view. Keying workspaces per window keeps
-/// Sessions↔Work navigation and repo switches lossless inside that window
-/// while never sharing an NSView or multiplexer across windows — a Session
-/// viewed in another window is just another "active elsewhere" client.
+/// One repository's retained Work and surfaces, mounted by its current window.
+/// Different repositories never share native views or multiplexers.
 @MainActor
 @Observable
 final class SessionsWorkspaceRegistry {
@@ -588,7 +587,7 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    /// One native occurrence per window. A deliberate eligible Work opening can
+    /// One native occurrence per repository. A deliberate eligible Work opening can
     /// relocate presentation, but neither copies a surface nor binds the Session.
     func revealSession(_ record: SessionRecord, in workspace: SessionsWorkspace) {
         for other in workspaces.values where other !== workspace {
@@ -683,6 +682,29 @@ struct SessionItem: Identifiable, Equatable {
         guard case .failed(let message) = state else { return nil }
         return message
     }
+
+    mutating func adoptPreparation(_ record: SessionRecord, intent: Preparation) {
+        self.record = record
+        // A prepared attachment can join a free viewer even while the provider
+        // is active. Only an explicit move may displace an existing viewer.
+        if intent == .attach {
+            state = .prepared
+        } else if record.openArgv.isEmpty {
+            // Nothing to start: retained work attaches when shown.
+            state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
+        } else if intent != .moveHere, record.action(.moveHere) != nil {
+            state = .elsewhere
+        } else {
+            state = record.action(intent == .moveHere ? .moveHere : .open)?
+                .unavailableReason.map(State.failed) ?? .prepared
+        }
+    }
+}
+
+/// What a pane asked lf to prepare. Attaching never starts a provider; opening
+/// is `lf resume`, which attaches when it can and otherwise reopens history.
+enum Preparation {
+    case attach, open, moveHere
 }
 
 @MainActor
@@ -767,16 +789,14 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
-    private func recover(_ id: String, replacing: Bool = false) async {
-        guard let index = _index(id),
-              let action = sessions[index].record.action(replacing ? .moveHere : .open) else { return }
-        // A cached observation failure can outlive the client that caused it.
-        // An explicit open revalidates through connect; it never replaces a client.
-        if replacing, action.unavailableReason != nil { return }
+    private func prepare(_ id: String, intent: Preparation) async {
+        guard let index = _index(id) else { return }
+        let replacing = intent == .moveHere
+        if replacing, sessions[index].record.action(.moveHere)?.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed, .ended:
             sessions[index].state = .opening
-        case .elsewhere where replacing:
+        case .elsewhere where intent != .open:
             sessions[index].state = .opening
         case .elsewhere, .opening, .prepared, .live:
             return
@@ -790,22 +810,20 @@ final class SessionsStore {
                     throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
                 }
             }
-            Perf.agentInput("connect_prepare_begin", session: id)
-            let surface = try await executionQuery.prepareSession(
-                id: id,
-                takeover: replacing,
-                cwd: repoPath
-            )
-            Perf.agentInput("connect_prepare_returned", session: id)
+            let stage = intent == .attach ? "attach_prepare" : "connect_prepare"
+            Perf.agentInput("\(stage)_begin", session: id)
+            let surface: SessionRecord? = try await intent == .attach
+                ? executionQuery.prepareSessionAttachment(id: id, cwd: repoPath)
+                : executionQuery.prepareSession(id: id, takeover: replacing, cwd: repoPath)
+            try Task.checkCancellation()
+            Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
-                sessions[latest].record = surface
-                if !replacing, surface.action(.moveHere) != nil {
-                    sessions[latest].state = .elsewhere
-                } else if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
-                    sessions[latest].state = .failed(reason)
+                if let surface {
+                    sessions[latest].adoptPreparation(surface, intent: intent)
                 } else {
-                    sessions[latest].state = .prepared
+                    sessions[latest].state = sessions[latest].record.action(.moveHere) != nil
+                        ? .elsewhere : .pending
                 }
             }
         } catch {
@@ -817,16 +835,9 @@ final class SessionsStore {
     func adoptPreparation(_ record: SessionRecord) {
         guard let index = _index(record.id), localTerminal(for: record) == nil else { return }
         switch sessions[index].state {
-        case .pending, .failed, .ended:
-            sessions[index].record = record
-            if record.action(.moveHere) != nil {
-                sessions[index].state = .elsewhere
-            } else if let reason = record.action(.open)?.unavailableReason {
-                sessions[index].state = .failed(reason)
-            } else {
-                sessions[index].state = .prepared
-            }
-        case .elsewhere, .opening, .prepared, .live:
+        case .pending, .failed, .ended, .elsewhere:
+            sessions[index].adoptPreparation(record, intent: .open)
+        case .opening, .prepared, .live:
             break
         }
     }
@@ -841,11 +852,15 @@ final class SessionsStore {
             sessions[index].state = sessions[index].record.action(.moveHere) != nil
                 ? .elsewhere : .pending
         }
-        await recover(id)
+        await prepare(id, intent: .attach)
+    }
+
+    func resume(_ id: String) async {
+        await prepare(id, intent: .open)
     }
 
     func moveHere(_ id: String) async {
-        await recover(id, replacing: true)
+        await prepare(id, intent: .moveHere)
     }
 
     @discardableResult
@@ -903,11 +918,8 @@ final class SessionsStore {
         sessions[index].state = .failed(reason)
     }
 
-    /// A retained surface's child ended — provider exit or an external
-    /// takeover. Reclassify at once so the pane swaps to its placeholder
-    /// instead of presenting a dead terminal until the next poll. A window
-    /// whose own pool still holds a live surface for this Session (it just
-    /// took the client over) is unaffected.
+    /// Viewer exit does not establish provider exit. Keep its output and require
+    /// a deliberate retry; inventory refresh must not resume execution.
     func noteSurfaceClosed(_ terminal: TerminalIdentity, output: String? = nil) {
         guard case .session(let id, let machineId) = terminal,
               !surfaces.hasSurface(terminal),
@@ -1217,7 +1229,7 @@ struct SessionsContentView: View {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
                 HStack {
-                    Text("Layout not saved: " + error).foregroundStyle(palette.waiting).textSelection(.enabled)
+                    Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
                     Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
                 }.padding(8)
             }
@@ -1317,9 +1329,7 @@ struct SessionsContentView: View {
             do {
                 let repo = store.repoPath
                 let issue = task.task.task.identifier
-                let path = try await Task.detached(priority: .userInitiated) {
-                    try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-                }.value
+                let path = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
                 navigation.preparedTaskWorktrees[task.task.id] = path
             } catch {
                 launchErrorTitle = "Could not prepare checkout"
@@ -1396,9 +1406,7 @@ struct SessionsContentView: View {
             checkout = identity
         } else {
             let repo = store.repoPath
-            checkout = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-            }.value
+            checkout = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         // The captured entry receives a late preparation reply without changing selection.

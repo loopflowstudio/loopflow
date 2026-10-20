@@ -265,13 +265,14 @@ pub(crate) fn resolve_session_config(
         output_schema: cli.output_schema.clone(),
         ..Default::default()
     };
-    let request = match crate::session_record::resolve_manifest(
-        &crate::store::lf_home_dir(),
-        &session.artifact_key,
-    ) {
-        Ok((_, saved)) => saved.process,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error.into()),
+    let request = if let Some(key) = session.artifact_key.as_deref() {
+        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
+            Ok((_, saved)) => saved.process,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        None
     };
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
@@ -308,7 +309,13 @@ pub(crate) fn resolve_session_config(
         )?);
     }
     if !importing {
-        if let Some(native) = store.input_provider_session(&session.artifact_key)? {
+        if let Some(native) = session
+            .artifact_key
+            .as_deref()
+            .map(|key| store.input_provider_session(key))
+            .transpose()?
+            .flatten()
+        {
             config.resume_token = Some(native.agent_session);
             config.provider_account_id = native.account_id.or(config.provider_account_id);
         }

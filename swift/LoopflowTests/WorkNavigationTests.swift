@@ -227,7 +227,8 @@ struct WorkNavigationTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            if args.contains("--prepare") { await gate.wait() }
+            // Gate the conversation's preparation; showing it then attaches at once.
+            if args.contains("--prepare"), !args.contains("attach") { await gate.wait() }
             return json
         })
         let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
@@ -579,7 +580,7 @@ struct WorkNavigationTests {
     @Test("Task inspection retains Available links without a Session inventory")
     func inspectorKeepsExactAvailableConversation() async throws {
         var records = try JSONSerialization.jsonObject(with: Data(sessionsJSON().utf8)) as! [[String: Any]]
-        records[0]["attention"] = "available"
+        records[0]["availability"] = "available"
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: String(decoding: JSONSerialization.data(withJSONObject: records), as: UTF8.self))
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -761,7 +762,7 @@ struct WorkNavigationTests {
     func attentionNavigation(alreadyRetained: Bool) async throws {
         let record = try session("needs-answer", work: .task(id: "ts_review00000000000000000000000000"))
         var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
-        wire["attention"] = "available"
+        wire["availability"] = "available"
         let source = try ReadingSource(roadmap: navigatorRoadmapJSON(),
             sessions: String(decoding: JSONSerialization.data(withJSONObject: [wire]), as: UTF8.self))
         let query = RegistryQuery { args, _ in try await source.read(args) }

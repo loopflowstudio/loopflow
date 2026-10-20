@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from canonicalize_migrations import _order, _read_drafts, breaking_drafts
+
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
@@ -49,6 +51,7 @@ REGISTRY_ENTRY = re.compile(
         \},\s*
         name:\s*"(?P<name>[a-z0-9_]+)",\s*
         sql:\s*include_str!\("migrations/(?P<file>[^"]+)"\),?\s*
+        (?:reader_floor:\s*(?:None|Some\("[^"]+"\)),?\s*)?
     \}""",
     re.VERBOSE,
 )
@@ -368,6 +371,20 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _check_runtime_sql() -> None:
+    """An older lf writes a store a newer release extended additively, so runtime
+    SQL names its columns: no positional INSERT, no `SELECT *`."""
+    positional = re.compile(r"\bINSERT(?:\s+OR\s+\w+)?\s+INTO\s+\w+\s+VALUES\b", re.IGNORECASE)
+    wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
+    for path in sorted((REPO_ROOT / "rust/loopflow/src").rglob("*.rs")):
+        if "test" in path.stem:
+            continue
+        # Unit-test modules trail production code; their fixtures seed historical schemas.
+        source = path.read_text().split("#[cfg(test)]\nmod ", 1)[0]
+        if positional.search(source) or wildcard.search(source):
+            _fail(f"{path.relative_to(REPO_ROOT)} uses positional INSERT or SELECT *")
+
+
 def main() -> None:
     active = _package_version()
     tag = _last_release_tag()
@@ -432,6 +449,11 @@ def main() -> None:
                 _fail(f"released draft identity {marker!r} appears more than once")
             released_names.add(marker)
     _check_drafts(released_names)
+    _check_runtime_sql()
+    drafts = _order(_read_drafts())
+    if drafts:
+        breaking = breaking_drafts(drafts)
+        print(f"reader floor raised by: {', '.join(breaking) if breaking else '(none)'}")
 
     # Deterministic order across namespaces is the numeric tuple, never the string:
     # `0.10.001` sorts before `0.9.001` lexically.

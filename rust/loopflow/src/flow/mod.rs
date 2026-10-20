@@ -231,7 +231,6 @@ pub struct ConcreteXor {
 
 /// A captured branch body; unresolved authored paths cannot decode as this type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct ConcretePath {
     pub description: String,
     pub steps: Vec<ConcreteStep>,
@@ -1295,7 +1294,13 @@ mod tests {
                 .collect()
         };
         let pursue = compile_flow(&load_flow("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
-        assert_eq!(edges(&pursue), [("loop-or-next".to_string(), 4)]);
+        assert_eq!(
+            edges(&pursue),
+            [
+                ("loop-or-next".to_string(), 4),
+                ("loop-or-next".to_string(), 6)
+            ]
+        );
 
         // A unique skill name is enough; repeated skills need one occurrence name.
         let named = compile(

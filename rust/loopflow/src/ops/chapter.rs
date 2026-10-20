@@ -43,8 +43,9 @@ pub struct ChapterPlan {
     pub waves: Vec<WaveChapterPlan>,
 }
 
+/// Persisted in `project_transitions.local_plan_json`, so an older reader
+/// tolerates fields a newer release adds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct WaveChapterPlan {
     pub wave_id: WaveId,
     pub successor_id: String,

@@ -2322,17 +2322,7 @@ fn wt_prune_builds(
 ) -> Result<()> {
     let repo = find_repo_root()?;
     let main = main_repo_root(&repo)?;
-    // This path never opens a registry for writes or advances its frontier.
-    let selected = crate::store::default_db_path();
-    let production = crate::store::production_database_path();
-    // A missing or unreadable selected registry is unknown, not permission
-    // to rely exclusively on another Home's completed ownership.
-    let mut registries = vec![selected.clone()];
-    if production != selected
-        && !matches!(std::fs::metadata(&production), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-    {
-        registries.push(production);
-    }
+    let registries = build_cleanup_registries();
     let retention = std::time::Duration::from_secs(
         retention_hours
             .checked_mul(3600)
@@ -2372,20 +2362,46 @@ fn wt_prune_builds(
     Ok(())
 }
 
-fn wt_prune(dry_run: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
+/// Registries whose completed Task ownership authorizes build-output cleanup.
+/// This path never opens a registry for writes or advances its frontier.
+pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
+    let selected = crate::store::default_db_path();
+    let production = crate::store::production_database_path();
+    // A missing or unreadable selected registry is unknown, not permission
+    // to rely exclusively on another Home's completed ownership.
+    let mut registries = vec![selected.clone()];
+    if production != selected
+        && !matches!(std::fs::metadata(&production), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        registries.push(production);
+    }
+    registries
+}
+
+/// Remove clean worktrees whose branch merged, closed, lost its remote or went
+/// stale, retaining every unfinished Task's checkout and any process's cwd.
+pub(crate) fn prune_repo_worktrees(
+    main_repo: &Path,
+    current: &Path,
+    dry_run: bool,
+) -> Result<crate::git::worktrees::WorktreePruneReport> {
     if !dry_run {
-        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+        crate::ops::checkout::refresh_main(main_repo, &CliProgress)?;
     }
     let protected_paths = protected_worktree_paths()?;
-    let report = prune_worktrees(
-        &main_repo,
-        &repo_root,
+    Ok(prune_worktrees(
+        main_repo,
+        current,
         &protected_paths,
         WorktreePrunePolicy::manual(),
         dry_run,
-    )?;
+    )?)
+}
+
+fn wt_prune(dry_run: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root)?;
+    let report = prune_repo_worktrees(&main_repo, &repo_root, dry_run)?;
 
     if report.candidates.is_empty() {
         println!("No prunable worktrees.");

@@ -1242,6 +1242,7 @@ pub(crate) fn prune_process_receipts_at(
     }
     let store = SqliteStore::open_processes_read_only(&lf_home.join("loopflow.db"))
         .map_err(std::io::Error::other)?;
+    let pids: std::collections::HashSet<u32> = pids.iter().copied().collect();
     let mut removed = 0;
     for (path, receipt) in read_process_receipt_files_at(lf_home)? {
         if !pids.contains(&receipt.pid)

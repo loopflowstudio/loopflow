@@ -437,6 +437,14 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::monitor::MonitorCommand>,
     },
+    /// Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+    #[command(args_conflicts_with_subcommands = true)]
+    Disk {
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        cmd: Option<commands::disk::DiskCommand>,
+    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {

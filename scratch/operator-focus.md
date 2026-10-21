@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: the demo (agent run, demo/review) and the gate checks.
+Remaining: concept review 5 (below), then the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -46,6 +46,26 @@ deliberate `lf task unclaim`, and backlog is the right reading there.
 Considered and kept: repo-operate cleanup can `lf task abandon` your own
 Tasks while wave-operate never abandons. That is the cleanup duty decision 6
 keeps, scoped to your work; questions.md 1 covers reversing it.
+
+## Concept review 5 (2026-10-21): next implement direction
+
+Decision 2 keeps operators off another person's Task because their Processes
+are not visible here. The same holds for a Task you own whose
+`runtime.owner.machine` is not this Machine (`lf id`): local `lf ps` cannot
+see its Flow, so "Look for a live Flow process first" reads it as idle and the
+recover/continue bullets would `lf task run` it here. Ownership code does not
+stop that: checkout allocation is the only claim (`children.rs` `claim_in`,
+whose `require_writer_in` refuses another Machine), and it returns early when
+the Task already has a checkout, so a started Task skips the check.
+
+Implement in `wave_operate.md` "Keep started work moving", one sentence under
+**Yours**: a Task you own on another Machine has unknown liveness here; operate
+it on that Machine with `lf --machine <machine> --wave <wave> wave-operate`,
+or report it unknown, naming the Machine. Do not `lf task run`, recover or
+complete it from this Machine. repo-operate defers to wave-operate and its
+Machines paragraph already names `lf --machine`; no change there. No code
+change (exclusions stand). Reply groups unchanged: it lands under Stuck as
+unknown, or Moving with the remote pass's result.
 
 ## Problem
 

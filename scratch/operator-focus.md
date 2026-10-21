@@ -4,8 +4,23 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: the demo below (agent run, demo/review) and the gate checks. No
-skill or doc text from the target shapes is outstanding.
+Remaining: the demo (agent run, demo/review) and the gate checks.
+
+## Concept review (2026-10-21): implemented
+
+1. `lf config user` prints `config::participant_name()`, the identity
+   ownership uses, so `LF_USER_NAME` forwarded by `lf --machine` counts.
+   Test: `cli_discovery::config_user_reports_the_forwarded_participant`.
+   `load_user_name` is now private to `config.rs` (its last outside caller
+   is gone). The skill's "unset → unknown" rule stays.
+2. wave-operate judges ownership first: `next_move.owner: wave` names this
+   pass only on Tasks you own; another person's Task stays "theirs · left
+   alone". The opening paragraph finishes on your Tasks' dispositions plus a
+   listing of the others.
+
+Considered and kept: repo-operate cleanup can `lf task abandon` your own
+Tasks while wave-operate never abandons. That is the pre-existing cleanup
+duty decision 6 keeps, scoped to your work; questions.md 1 covers reversing it.
 
 ## Problem
 
@@ -186,4 +201,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch.
+Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch. Concept-review repairs (compress, 2026-10-21): `--test integration config_user` 1 passed, `--lib skills::` 28 passed, `--test golden_prompt` passed without regeneration.

@@ -4,12 +4,13 @@ action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, verify, and exit. You are this
 Wave's operator for your own work: a started Task you own with no live Flow
-process has nobody else to take its next step. A pass is finished when each
-started Task has a disposition, not after a number of moves. It works the
-Wave's existing Tasks and leaves the plan, its key results and metric targets,
-chapter rotation, new Tasks and backlog to the person. No chat or schedule is
-required. Another conversation or scheduled pass may be operating this Wave at
-the same time; work it is driving is moving, and you leave it alone.
+process has nobody else to take its next step. A pass is finished when every
+started Task you own has a disposition and every other Task is listed, not
+after a number of moves. It works the Wave's existing Tasks and leaves the
+plan, its key results and metric targets, chapter rotation, new Tasks and
+backlog to the person. No chat or schedule is required. Another conversation
+or scheduled pass may be operating this Wave at the same time; work it is
+driving is moving, and you leave it alone.
 
 Writes to `.lf/wave/` belong to the selected Loopflow Flow's procedure. Outside
 that Flow, keep proposed Wave changes in scratch; Work association alone
@@ -65,11 +66,12 @@ the Task as unknown and do not act on it. Include Tasks status lists under
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Flow process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
-When status gives `next_move.owner` as `wave`, that owner is you: the Task's
-disposition is yours to establish, never a handoff. Its recommended action is
-a suggestion to check against the rules below, not an instruction. No action is
-a valid result only when every started Task you own already holds a
-disposition above.
+Judge ownership first. When status gives `next_move.owner` as `wave` on a
+Task you own, its disposition is yours to establish, never a handoff; another
+person's Task stays “theirs · left alone” whatever `next_move` says. Its
+recommended action is a suggestion to check against the rules below, not an
+instruction. No action is a valid result only when every started Task you own
+already holds a disposition above.
 
 - **Look for a live Flow process first.** Read `lf task status <issue> --json` and
   check every Flow in `execution.work.flows` and every unfinished Process in
@@ -181,8 +183,9 @@ Use this ID-first form in operational lists; in prose, shorten later
 references when unambiguous.
 
 Take the identifier from `task.identifier` and the readable title from `task.name`. Give the Task's disposition as its status, not
-`runtime.status` alone, and take the next owner from `next_move.owner`. An
-owner of `wave` names work this pass acts on, not a handoff: report its result.
+`runtime.status` alone, and take the next owner from `next_move.owner`. On a
+Task you own, an owner of `wave` names work this pass acts on, not a handoff:
+report its result. Another person's Task stays “theirs · left alone”.
 Link the Task's optional `pr` using its recorded GitHub number and URL; omit
 the PR link when absent. State the next action only when supported by current evidence; leave
 unknown state unknown. Include an

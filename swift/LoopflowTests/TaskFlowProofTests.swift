@@ -379,7 +379,7 @@ private final class ScriptedReader {
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {
         sequence += 1
-        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId,
+        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
                                    "revisions": NSNull(), "unavailable": NSNull(), "body": body]
         guard let data = try? JSONSerialization.data(withJSONObject: line),
               let frame = try? WorkFrame.decode(line: data) else { return }

@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         Command::List => {
             for recipe in recipes::RECIPES {
                 println!(
-                    "{:<10} {:<10} {}",
+                    "{:<15} {:<10} {}",
                     recipe.name,
                     recipe.rung.as_str(),
                     recipe.demos

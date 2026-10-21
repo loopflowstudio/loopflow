@@ -156,13 +156,19 @@ pub(crate) struct TaskWorktreeOwnership {
     pub unfinished: bool,
 }
 
-pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskWorktreeOwnership>> {
+/// Open a registry read-only without migrating it.
+fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
+    Ok(conn)
+}
+
+/// SQL for an open Task and a Done Task over alias `t`, for this registry's schema.
+fn task_state_sql(conn: &Connection) -> StoreResult<(String, &'static str)> {
     // This guard reads the installed release without migrating it. Its completion
     // owner may still be the Workflow, rather than the candidate's planning field.
     let planning_completion: bool = conn.query_row(
@@ -183,6 +189,26 @@ pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskW
         "t.abandoned_at IS NULL AND EXISTS(SELECT 1 FROM task_workflows wf \
          WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
     };
+    Ok((open, done))
+}
+
+/// Every branch a Task names, on the Task or any of its PRs, and whether
+/// that Task is still open.
+pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
+    let conn = open_unmigrated(path)?;
+    let (open, _) = task_state_sql(&conn)?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT b.branch,({open}) FROM tasks t JOIN \
+         (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
+         ON b.task_id=t.id WHERE b.branch != ''"
+    ))?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.map(|row| row.map_err(StoreError::from)).collect()
+}
+
+pub(crate) fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskWorktreeOwnership>> {
+    let conn = open_unmigrated(path)?;
+    let (open, done) = task_state_sql(&conn)?;
     // Old registries still protect unfinished work, but cannot grant deletion
     // until they can establish this machine's positive checkout ownership.
     let placed: bool = conn.query_row(

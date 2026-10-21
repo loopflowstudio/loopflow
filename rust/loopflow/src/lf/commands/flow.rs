@@ -474,13 +474,9 @@ impl RunningFlow<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(flow_process::FLOW_ID_ENV, self.process.as_str());
-        if let Some((id, fd)) = self
-            .launcher
-            .cron_receipt
-            .as_ref()
-            .zip(self.launcher.cron_lock_fd)
+        if let Some(fd) =
+            crate::ops::cron::accounting::CronExecution::from_env().map(|cron| cron.lock_fd)
         {
-            command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
             // SAFETY: the cron launcher owns the descriptor throughout spawn;
             // fcntl preserves that exact capability in the step child.
             unsafe {

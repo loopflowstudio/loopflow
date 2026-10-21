@@ -5235,7 +5235,11 @@ fn linear_on_demand_hook_child() {
     };
     let cli = crate::lf::Cli::try_parse_from(serde_json::from_str::<Vec<String>>(&args).unwrap())
         .unwrap();
-    let Some(crate::lf::Commands::PlanningCheck { delivery }) = cli.command else {
+    let Some(crate::lf::Commands::ContextBlock {
+        delivery,
+        moment: crate::context_block::ContextMoment::Stop,
+    }) = cli.command
+    else {
         panic!("generated turn hook must select the planning callback")
     };
     let delivery =
@@ -5268,7 +5272,11 @@ fn linear_on_demand_hook_child() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     LINEAR_TEST_CONTEXT.sync_scope(context, || {
-        crate::lf::commands::context::check_planning(Some(&delivery)).unwrap();
+        crate::lf::commands::context::emit_block(
+            Some(&delivery),
+            crate::context_block::ContextMoment::Stop,
+        )
+        .unwrap();
     });
 }
 

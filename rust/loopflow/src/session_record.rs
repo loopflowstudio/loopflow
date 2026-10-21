@@ -1978,6 +1978,7 @@ impl CaptureHandle {
             });
         #[cfg(not(test))]
         let home = crate::store::lf_home_dir();
+        crate::disk::rotate_when_due(&home);
         Self::begin_at_with_id(
             &home,
             spec,
@@ -1996,6 +1997,7 @@ impl CaptureHandle {
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
+        crate::disk::rotate_when_due(&home);
         let caller = inherited_capture_key()?;
         Self::begin_reserved_at(&home, spec, artifact_key, caller, process, context, publish)
     }

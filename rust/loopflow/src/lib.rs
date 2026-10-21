@@ -10,6 +10,7 @@ pub mod config;
 pub mod context_block;
 pub mod context_usage;
 pub mod definition;
+pub mod disk;
 pub mod durable;
 pub mod error;
 pub mod flow;

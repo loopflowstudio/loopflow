@@ -356,6 +356,10 @@ pub struct Config {
     /// than the provider's native one. `--shared` overrides it per launch.
     #[serde(default)]
     pub isolate: bool,
+
+    /// Machine-local `~/.lf` disk budget, e.g. `20G`; oldest material rotates out.
+    #[serde(default)]
+    pub disk_budget: Option<String>,
 }
 
 fn default_land() -> String {
@@ -405,6 +409,7 @@ impl Default for Config {
             summary_tokens: default_summary_tokens(),
             release: ReleaseConfig::default(),
             isolate: false,
+            disk_budget: None,
         }
     }
 }

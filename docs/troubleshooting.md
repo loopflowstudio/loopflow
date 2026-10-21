@@ -129,6 +129,29 @@ Other options:
 - Reduce parallel waves
 - Switch a one-shot flow to a different model: `lf gate -a codex`
 
+## Disk space
+
+```bash
+lf disk                                # ~/.lf by category against its budget, plus every worktree
+lf disk clean --dry-run                # what an aggressive cleanup would remove
+lf disk clean                          # remove it; logs each removal to ~/.lf/logs/disk.log
+```
+
+`lf disk clean` removes worktrees `lf wt prune` would, completed Tasks' build
+output, dead process receipts, every database backup but the newest, and
+captures and logs older than `--keep-days` (7). It then rotates `~/.lf` to its
+budget. Set the budget in `~/.lf/config.yaml`:
+
+```yaml
+disk_budget: 20G                       # the default
+```
+
+Starting a Session rotates `~/.lf` at most hourly: the oldest backups, draft
+store copies, captures and logs go first. The database, account homes, the
+newest backup of each database, anything written in the last day and anything a
+process holds open are never removed, so `lf disk` can still show Home over
+budget.
+
 ## Worktree issues
 
 **Symptom:** Git worktree commands fail or show stale data.
@@ -140,6 +163,15 @@ lf wt list
 lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
 lf wt prune                            # remove those worktrees and their branches
 ```
+
+```bash
+lf wt prune --branches --dry-run       # finished branches on origin and locally, with reasons
+lf wt prune --branches                 # delete them; exit 1 on GitHub auth, rate limit or failed delete
+```
+
+A branch goes only with evidence at its exact head: a merged or closed PR, a
+finished Task already in the default branch, or a release candidate whose tag
+exists. An open PR, a worktree, or an unfinished Task always keeps it.
 
 ```bash
 lf wt timing                           # count, median, p95 and failures per lf version

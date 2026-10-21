@@ -20,7 +20,7 @@ thread_local! {
     static AFTER_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-const ROOTS: [&str; 4] = ["target", ".build", "swift/.build", "website/node_modules"];
+pub(crate) const ROOTS: [&str; 4] = ["target", ".build", "swift/.build", "website/node_modules"];
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BuildCleanupEntry {

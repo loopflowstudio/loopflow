@@ -233,19 +233,15 @@ the endpoint. Live cmux workspace/tab rename passed with a stand-in
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
-October 11 hook repair: Jack Heart initially requested publication for review;
-his later comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26` requests landing
-PR #1530 after sync and conflict resolution. A held WAL writer reproduced a callback exceeding six seconds
-before naming; ordinary Process admission permits a 15-second receipt wait.
-Optional prompt hooks need bounded observation as well as bounded ownership
-reads: lock waits and history scans are separate costs. Preserve best-effort
-Process recording, reuse the bounded connection for parent reads, and never
-retry failed early observation at exit with the ordinary budget. Unavailable
-ownership leaves names unchanged. Implementation decisions, not approvals.
-Lock fixtures and interrupted history scans
-prove source behavior; installed concurrent-Flow acceptance remains unproved.
-The slow status/ensure observations and unattributed records-read report have
-no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
+October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
+requests landing PR #1530 after sync. A held WAL writer reproduced a callback
+over six seconds before naming; Process admission permits a 15-second receipt
+wait. Optional prompt hooks bound observation and ownership reads separately
+(lock waits vs history scans), reuse the bounded connection for parent reads and
+never retry failed early observation at exit. Unavailable ownership leaves names
+unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
+acceptance and the slow status/ensure cause remain unproved.
+Plan: `scratch/stop-the-session-title-hook.md`.
 
 Jack Heart's October 11 Kata report (`d4991d61`) reproduced consecutive
 prompt timeouts outside Loopflow with one background shell. Shared-store contention
@@ -506,8 +502,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
-“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
+Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
+storage and autonomous cleanup”; current direction: Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -541,9 +537,9 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`, hosted CI passing.
-LOO-370 recovered and completed October 6 under the opaque-root decision.
-Installed acceptance is unproved; LOO-373 owns landing-placement reconciliation.
+Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb` with hosted CI green.
+LOO-370 completed October 6. Installed acceptance is unproved; LOO-373 owns
+landing-placement reconciliation.
 
 Save service, attached lf and provider identities before stop removes receipts.
 Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
@@ -921,12 +917,6 @@ Historical trigger/default-wait proposals need current selection. Current
 [delivery mechanics](../../../docs/architecture/delivery.md) and TESTING.md own
 their guidance; Wave learning stays with its identified owner.
 
-## Prompt reduction boundary (2026-09-24)
-
-LOO-287's open proof and Intelligence ownership of assembly remain at
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
-and consumed launch evidence stay separate.
-
 ## Installation and command scope (curated 2026-10-11)
 
 Jack Heart closed LOO-292 on machine evidence October 4. History and remaining
@@ -1066,10 +1056,13 @@ judgments; preserve unrelated provider associations and diagnose ambiguous moves
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
-## Earlier follow-ups
+## Archived pointers
 
-Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
+Archives authorize no work. Installed worker recovery (LOO-295/292 closed;
+LOO-373 retains placement repair): `10ca6bd39:wave/infrastructure/MEMORY.md`.
+Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
+earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
+referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 

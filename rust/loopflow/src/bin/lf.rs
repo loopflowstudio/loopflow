@@ -1707,12 +1707,6 @@ fn run() -> anyhow::Result<()> {
             return finish_command(result);
         }
     }
-    if let Some(Commands::SessionTitle { provider }) = &cli.command {
-        // Prompt callbacks must not enter ordinary admission or wait for its
-        // durable-write budget. Keep only bounded, noninitializing observation.
-        journal::observe_process_within(&args, std::time::Duration::from_millis(100));
-        return loopflow::lf::commands::session_history::name_native_session(provider);
-    }
     ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
@@ -2154,7 +2148,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
         cli.command,
-        None | Some(Commands::External(_) | Commands::Inline { .. } | Commands::Skill { .. })
+        None | Some(Commands::External(_) | Commands::Inline { .. })
+            | Some(Commands::Skill {
+                cmd: SkillCommand::External(_)
+            })
             | Some(Commands::Flow {
                 cmd: FlowCommand::External(_)
             })
@@ -2399,7 +2396,9 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Transport { cmd }) => loopflow::transport::run(cmd),
+        Some(Commands::TransportServe { terminal, argv }) => {
+            loopflow::transport::serve(argv, *terminal)
+        }
         Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
@@ -2424,12 +2423,6 @@ fn execute_command(
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
-        Some(Commands::PlanningCheck { delivery }) => {
-            loopflow::lf::commands::context::check_planning(delivery.as_deref())
-        }
-        Some(Commands::SessionTitle { .. }) => {
-            unreachable!("title callbacks dispatch before command admission")
-        }
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
@@ -2441,15 +2434,6 @@ fn execute_command(
             loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
         }
         Some(Commands::Repo { cmd }) => match cmd {
-            loopflow::lf::RepoCommand::Release {
-                cmd: loopflow::lf::ReleaseCommand::Run { version, target },
-            } if cli.cron_receipt.is_some() => in_repo_runtime(args, |_| {
-                loopflow::lf::commands::ops::run_cron_release(
-                    version.as_deref(),
-                    target.as_deref(),
-                    cli,
-                )
-            }),
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
@@ -2609,6 +2593,9 @@ fn execute_command(
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),
         },
+        Some(Commands::Disk { json, cmd }) => {
+            loopflow::lf::commands::disk::run(*json, cmd.as_ref())
+        }
         Some(Commands::History { feed, cmd }) => match cmd {
             Some(cmd) => loopflow::lf::commands::history::run(cmd),
             None => loopflow::lf::commands::activity::run(feed),

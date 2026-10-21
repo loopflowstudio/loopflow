@@ -529,9 +529,11 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
-        for member in task.wave!.tasks.items {
+        for member in task.wave!.tasks.items where member.id != "issue-later" {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(member.id)")
         }
+        // Completed work leaves the current plan; Project history keeps it.
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }
 

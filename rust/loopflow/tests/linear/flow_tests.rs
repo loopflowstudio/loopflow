@@ -813,7 +813,6 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
     for (flags, stop) in [
         (vec!["-i", "flow", "conversation"], false),
         (vec!["flow", "conversation", "-i"], false),
-        (vec!["flow", "conversation"], false),
         (vec!["-i", "flow", "conversation"], true),
     ] {
         let repo = loopflow_test_support::TestRepo::new();

@@ -44,14 +44,15 @@
     records.
 11. **LOO-555 publishes Machines.** Cron half DECIDED by Jack Heart
     (2026-10-21): per-cron opt-in (`lf cron publish`), each published cron
-    carrying person key, Machine key and label; LOO-555 steered. Still open:
-    `task_ownership.machine_label` (teammates see the Machine label on
-    ownership entries). Assumption: dropped; teammates see the person only.
-12. **Pickup default.** Assumption: on. Every Machine of yours lists
+    carrying person key, Machine key and label; LOO-555 steered.
+    `machine_label` DECIDED (Jack): kept when the Machine is public, dropped
+    when private.
+12. **Pickup default.** DECIDED (Jack): on. Every Machine of yours lists
     person-addressed Tasks until `lf machine pickup off`; the first open
     claims. Alternative: opt-in, which strands handovers for a person who
     never marks a Machine.
-13. **Machine ids in ownership entries.** Assumption: entries keep today's
+13. **Machine ids in ownership entries.** DECIDED (Jack): private and public
+    names stay separate; a public Machine has its own public name. Was: entries keep today's
     opaque `machine_id` (your own Machines need it to agree which one holds
     the Task); teammates' views never resolve or show it.
 

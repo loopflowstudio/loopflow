@@ -1,6 +1,6 @@
 # 878ecf: Assign Workflow stages to people and hand Tasks over without a service
 
-Status: draft design. Kickoff was 2026-10-21, revised twice the same day after
+Status: draft design. Kickoff was 2026-10-21, revised three times the same day after
 Jack Heart's design review and his person-only direction. Jack Heart filed the direction on 2026-10-21.
 
 - **Accepted (brief):** a node names a person, arrival transfers, leaving
@@ -139,6 +139,20 @@ addressed to me". It defaults on, so a single laptop needs no setup. `lf
 machine pickup off` on a cron host or a Mac mini keeps person-addressed Tasks
 off its Available list. It is a column on the local `machines` row for this
 Machine and never leaves it.
+
+**Public Machines** (Jack Heart, 2026-10-21, questions 11 and 13). A Machine
+has a private label (its local `machines.label`, never published) and an
+optional public name. `lf machine public <name>` / `lf machine public off` is a
+local setting, default off.
+- Ownership entries written by a public Machine carry `machine_label` set to
+  its public name, so teammates read "opened on studio-mini". A private
+  Machine's entries carry no label, and teammates see the person only.
+- Entries always keep the opaque `machine_id`, which your own Machines need
+  to agree which one holds the Task.
+- Public is visibility only. It does not make a Machine addressable:
+  handovers still name a person.
+- Published crons (LOO-555) carry the Machine key, and the public name when
+  the Machine is public.
 
 Teams are excluded: no consumer needs one yet (one person per node).
 
@@ -437,10 +451,8 @@ the assignee, so a Machine never needs a credential for anyone else.
     its person key, Machine key and Machine label. LOO-555 was steered to
     drop the general Machine record (`ops/machine_record.rs`) in favor of
     published crons only.
-  - Still open (question 11): `task_ownership.machine_label`, which shows
-    teammates the Machine label on ownership entries. 878ecf assumes it is
-    dropped; if it lands, 878ecf's first slice removes it with no dual
-    reading.
+  - `task_ownership.machine_label` stays, filled only from a public
+    Machine's public name (question 11). LOO-555 was steered accordingly.
 - **LOO-552** makes the shared ref the default. Until then the demo world
   configures `shared:` explicitly.
 - **Asana assignee** waits for the Asana provider (LOO-520). Until then 878ecf
@@ -457,13 +469,13 @@ the assignee, so a Machine never needs a credential for anyone else.
 - The separate same-person handoff path behind `lf machine use --task`, merged
   into the one handover writer. The command stays.
 - If LOO-555 lands them: a general Machine record or
-  `refs/loopflow/machines/*` beyond published crons, and
-  `task_ownership.machine_label`, with their tests.
+  `refs/loopflow/machines/*` beyond published crons, and any
+  `machine_label` written from a private Machine, with their tests.
 
 Forbidden:
 - A separate transfer table or record type alongside the ownership log.
-- Any published Machine record or Machine list. A Machine key and label
-  appear only on crons their person published.
+- Any published Machine record or Machine list. A Machine's private label
+  never leaves it; its public name appears only when it is public.
 - Pickup stored anywhere but this Machine's local row.
 - Exchanging `task_workflows`.
 - Launching from import.

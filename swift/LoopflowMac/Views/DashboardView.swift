@@ -152,16 +152,17 @@ struct DashboardView: View {
     private func tile(_ member: WorkMemberRef, plan: WorkViewPlan) -> some View {
         let content = plan.contents.first { $0.work == member.work }
         let entry = workspaces.retained(member.work)
+        let task = model.task(id: member.work.id)
         // Only a saved Dashboard has an arrangement to write.
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
                 Button { zoom(member, plan: plan) } label: {
-                    if let task = model.task(id: member.work.id)?.task { TaskHeading(task: task) }
+                    if let task { TaskHeading(task: task.task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
                 Spacer(minLength: 0)
-                if let task = model.task(id: member.work.id) {
+                if let task {
                     Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
                         label: { Image(systemName: "ellipsis") }
                         .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
@@ -186,8 +187,8 @@ struct DashboardView: View {
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
-                if let task = model.task(id: member.work.id)?.task, content.states.contains(.backlog) {
-                    TaskStartOffer(model: model, task: task)
+                if let task, content.states.contains(.backlog) {
+                    TaskStartOffer(model: model, task: task.task)
                 } else if let pane = entry.multiplexer.zoomedPaneId.flatMap({ entry.multiplexer.layout.pane(for: $0) })
                     ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) }) {
                     WorkspacePanesView(workspace: entry, isFocused: workspaces.selectedWork == member.work, sessions: sessions, model: model,
@@ -195,7 +196,7 @@ struct DashboardView: View {
                             workspaces.focus(entry.key)
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
-                } else if let task = model.task(id: member.work.id)?.task {
+                } else if let task = task?.task {
                     // A Task with a recorded conversation opens it; one with nothing to open offers Start.
                     if model.taskSessions(task.id).isEmpty, !task.task.isTerminal {
                         TaskStartOffer(model: model, task: task)
@@ -207,11 +208,11 @@ struct DashboardView: View {
                         }
                     }
                 } else {
-                    PaneEmptyState(title: "No primary Session", systemImage: "bubble.left") { EmptyView() }
+                    PaneEmptyState(title: "No primary Session", systemImage: "bubble.left")
                 }
-            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") { EmptyView() } }
+            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
+            // The slot grid clips each tile at its frame.
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
                 .strokeBorder(workspaces.selectedWork == member.work ? palette.borderActive : palette.border))
             .contentShape(Rectangle())

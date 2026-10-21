@@ -75,46 +75,32 @@ struct SessionSlotOffer<Description: View>: View {
     let perform: () -> Void
     @ViewBuilder let description: Description
     @Environment(\.theme) private var theme
-
     @Environment(\.compactPanes) private var compact
 
     var body: some View {
-        Group {
-            if compact {
-                PaneEmptyLine(title: title, systemImage: systemImage, detail: unavailable ?? note) { button }
-            } else {
-                ContentUnavailableView {
-                    Label(title, systemImage: systemImage)
+        PaneEmptyState(title: title, systemImage: systemImage, summary: unavailable ?? note) {
+            description
+        } actions: {
+            if let action {
+                VStack(spacing: Spacing.sm) {
+                    Button(action: perform) { Label(action, systemImage: actionImage) }
+                        .buttonStyle(.bordered)
+                        .tint(theme.palette.text)
                         .foregroundStyle(theme.palette.text)
-                } description: {
-                    description.foregroundStyle(theme.palette.textSecondary)
-                } actions: {
-                    VStack(spacing: Spacing.sm) {
-                        button
-                        if action != nil, let note = unavailable ?? note {
-                            Text(note)
-                                .font(Typography.caption(9))
-                                .foregroundStyle(theme.palette.textSecondary)
-                        }
+                        .disabled(unavailable != nil)
+                        .help(unavailable ?? help)
+                        .accessibilityLabel(accessibilityLabel ?? action)
+                        .accessibilityHint(accessibilityHint ?? "")
+                        .accessibilityIdentifier(actionIdentifier)
+                    if !compact, let note = unavailable ?? note {
+                        Text(note)
+                            .font(Typography.caption(9))
+                            .foregroundStyle(theme.palette.textSecondary)
                     }
                 }
             }
         }
         .accessibilityElement(children: .contain)
-    }
-
-    @ViewBuilder private var button: some View {
-        if let action {
-            Button(action: perform) { Label(action, systemImage: actionImage) }
-                .buttonStyle(.bordered)
-                .tint(theme.palette.text)
-                .foregroundStyle(theme.palette.text)
-                .disabled(unavailable != nil)
-                .help(unavailable ?? help)
-                .accessibilityLabel(accessibilityLabel ?? action)
-                .accessibilityHint(accessibilityHint ?? "")
-                .accessibilityIdentifier(actionIdentifier)
-        }
     }
 }
 
@@ -124,47 +110,49 @@ extension EnvironmentValues {
 }
 
 /// A pane with nothing running in it yet: what that means and its next action.
-/// Full panes explain themselves; a compact pane says the state in one line.
-struct PaneEmptyState<Actions: View>: View {
+/// Full panes explain themselves; a compact pane says the state in one line,
+/// with `summary` as its help.
+struct PaneEmptyState<Description: View, Actions: View>: View {
     let title: String
     let systemImage: String
-    var description: String?
+    let summary: String?
+    @ViewBuilder let description: Description
     @ViewBuilder let actions: Actions
     @Environment(\.compactPanes) private var compact
     @Environment(\.theme) private var theme
 
     var body: some View {
         if compact {
-            PaneEmptyLine(title: title, systemImage: systemImage, detail: description) { actions }
+            HStack(spacing: Spacing.sm) {
+                Label(title, systemImage: systemImage)
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(theme.palette.text)
+                    .help(summary ?? title)
+                actions.controlSize(.small).fixedSize()
+            }
+            .font(Typography.body(12))
+            .padding(Spacing.sm)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView {
                 Label(title, systemImage: systemImage).foregroundStyle(theme.palette.text)
             } description: {
-                if let description { Text(description).foregroundStyle(theme.palette.textSecondary) }
+                description.foregroundStyle(theme.palette.textSecondary)
             } actions: { actions }
         }
     }
 }
 
-/// One line: the state, then its action; the explanation moves to help.
-private struct PaneEmptyLine<Actions: View>: View {
-    let title: String
-    let systemImage: String
-    let detail: String?
-    @ViewBuilder let actions: Actions
-    @Environment(\.theme) private var theme
+extension PaneEmptyState where Description == Text? {
+    init(title: String, systemImage: String, description: String? = nil, @ViewBuilder actions: () -> Actions) {
+        self.init(title: title, systemImage: systemImage, summary: description,
+                  description: { description.map { Text($0) } }, actions: actions)
+    }
+}
 
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            Label(title, systemImage: systemImage)
-                .lineLimit(1).truncationMode(.tail)
-                .foregroundStyle(theme.palette.text)
-                .help(detail ?? title)
-            actions.controlSize(.small).fixedSize()
-        }
-        .font(Typography.body(12))
-        .padding(Spacing.sm)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+extension PaneEmptyState where Description == Text?, Actions == EmptyView {
+    init(title: String, systemImage: String) {
+        self.init(title: title, systemImage: systemImage) { EmptyView() }
     }
 }
 

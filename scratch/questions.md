@@ -34,3 +34,20 @@
 - Without a provider, put a basic users system into Git. Survey user and team
   records on Asana, Notion and Linear; put their common core into Git and use
   it as the API to all three.
+
+## Jack Heart's decisions (2026-10-21, after the people research)
+
+1. Git serves as the backup where providers fall short: provider user
+   accounts first; Loopflow keeps Person/Machine (and Team) records in Git
+   for what providers cannot hold (Machines, default pickup, teams where
+   missing).
+2. Notion may be cancelled if it is what blocks the shared core (no email
+   lookup, no teams). Design to the Linear+Asana core; do not bend for Notion.
+3. 878ecf takes on LOO-555's identity work. Farmed out to LOO-555 to land
+   first (steered 2026-10-21, while its autonomous Flow was running): person
+   key = lowercase Git user.email; per-Machine ref generalized to
+   `refs/loopflow/machines/<machine-id>` {machine_id, label, person_key,
+   person, crons}. 878ecf adds public / default-pickup fields, provider
+   accounts, teams, and the handover itself on top.
+- Drop the GitHub review request entirely; notification is provider
+  assignment, or nothing.

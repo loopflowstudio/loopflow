@@ -261,7 +261,7 @@ impl Cli {
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        // A person takes part at Workflow nodes, so a Flow's steps run headless
+        // A person takes part at Workflow nodes, so a Graph's steps run headless
         // even from a terminal unless the caller asks for `-i`.
         for (flag, enabled) in [
             ("--batch", !self.interactive),

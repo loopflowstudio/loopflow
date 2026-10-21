@@ -294,7 +294,7 @@ fn lifecycle(world: &World) -> Result<()> {
                 days + 0.2,
             )?;
         }
-        world.flow(
+        world.graph(
             Some(&task),
             "implement",
             &["implement", "gate"],
@@ -325,7 +325,7 @@ fn lifecycle(world: &World) -> Result<()> {
         ],
         2.0,
     )?;
-    world.flow(
+    world.graph(
         Some(&paused),
         "implement",
         &["implement"],
@@ -341,7 +341,7 @@ fn lifecycle(world: &World) -> Result<()> {
         "Publish nightly builds to a second channel.",
     )?;
     let abandoned = world.checkout(&abandoned)?;
-    world.flow(
+    world.graph(
         Some(&abandoned),
         "implement",
         &["implement", "gate"],
@@ -357,7 +357,7 @@ fn lifecycle(world: &World) -> Result<()> {
         "Mirror releases to a second registry.",
     )?;
     let canceled = world.checkout(&canceled)?;
-    world.flow(
+    world.graph(
         Some(&canceled),
         "implement",
         &["implement"],
@@ -395,7 +395,7 @@ fn lifecycle(world: &World) -> Result<()> {
         ],
         0.2,
     )?;
-    world.flow(
+    world.graph(
         Some(&running),
         "implement",
         &["implement"],

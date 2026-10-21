@@ -269,3 +269,4 @@ Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one co
 Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no stale `started` names; no checks rerun. Full CI: submit.
+Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks.

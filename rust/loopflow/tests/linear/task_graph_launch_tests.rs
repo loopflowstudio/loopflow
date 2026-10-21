@@ -1355,7 +1355,7 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM graph_processes f JOIN processes d ON d.id=f.lf_process_id
+            "SELECT d.outcome FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
              WHERE d.parent_lf_process_id=?1 ORDER BY d.rowid",
         )
         .unwrap();

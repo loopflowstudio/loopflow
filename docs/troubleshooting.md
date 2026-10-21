@@ -127,7 +127,7 @@ Other options:
 
 - Wait and retry
 - Reduce parallel waves
-- Switch a one-shot flow to a different model: `lf gate -a codex`
+- Switch a one-shot run to a different model: `lf gate -a codex`
 
 ## Disk space
 

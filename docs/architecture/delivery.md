@@ -136,7 +136,7 @@ prepares and publishes a replacement head. Task completion remains separate:
 verified merge is required.
 
 `lf pr open` is the presenting verb; it opens the review surface after
-publishing. Headless Task flows use publish or land.
+publishing. Headless Task Graphs use publish or land.
 
 ## Serialize the exact Git races
 

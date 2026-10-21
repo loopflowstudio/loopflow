@@ -133,7 +133,7 @@ fn process_query(
             SELECT lf_process_id FROM session_events
             WHERE kind='started' AND {column}={value} AND lf_process_id IS NOT NULL
             UNION
-            SELECT op.id FROM graph_process_steps fs JOIN processes op ON op.id=fs.lf_process_id
+            SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
             WHERE tw.worktree!=''
               AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)

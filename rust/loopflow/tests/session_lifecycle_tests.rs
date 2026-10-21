@@ -2296,7 +2296,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let error: String = fixture
         .db()
         .query_row(
-            "SELECT d.error FROM processes d JOIN graph_processes f ON f.lf_process_id=d.id",
+            "SELECT d.error FROM processes d JOIN graph_processes g ON g.lf_process_id=d.id",
             [],
             |row| row.get(0),
         )

@@ -213,15 +213,15 @@ struct WorldRead: Sendable, CustomTestStringConvertible {
             let file = try await world.query.taskFile(issue: task.identifier, path: "README.md", cwd: world.repo.path)
             #expect(file.content?.contains("paints its last turns first") == true)
         },
-        WorldRead("flow list --processes --for-task", "taskFlowProcesses") { world in
+        WorldRead("graph list --processes --for-task", "taskGraphProcesses") { world in
             let task = try await world.task(named: running)
-            let flows = try await world.query.taskFlowProcesses(task: task.identifier, cwd: world.repo.path)
-            #expect(flows.count == 1)
-            #expect(!(flows.first?.steps.isEmpty ?? true))
+            let graphs = try await world.query.taskGraphProcesses(task: task.identifier, cwd: world.repo.path)
+            #expect(graphs.count == 1)
+            #expect(!(graphs.first?.steps.isEmpty ?? true))
         },
-        WorldRead("flow list", "flowCatalog") { world in
-            let read = try await world.query.flowCatalog(cwd: world.repo.path)
-            #expect(read.contains { $0.graph != nil })
+        WorldRead("graph list", "graphCatalog") { world in
+            let read = try await world.query.graphCatalog(cwd: world.repo.path)
+            #expect(read.contains { $0.compiled != nil })
         },
         WorldRead("wave workflow list", "workflowCatalog") { world in
             let read = try await world.query.workflowCatalog(cwd: world.repo.path)
@@ -306,7 +306,7 @@ struct WorldRead: Sendable, CustomTestStringConvertible {
         "watchTaskFiles": "a file stream; TaskFilesTests observes it",
         "prepareSessionAttachment": "returns nil without a running Session; a world has none",
         "ensureProject": "writes", "setAutomation": "writes", "automateTask": "writes",
-        "saveWorkflow": "writes", "customizeFlow": "writes", "runTask": "starts work",
+        "saveWorkflow": "writes", "customizeGraph": "writes", "runTask": "starts work",
         "resumeInterrupted": "starts work", "moveTask": "writes", "pauseTask": "writes",
         "completeTask": "writes", "reopenTask": "writes", "abandonTask": "writes",
         "updateTaskDirective": "writes", "saveTaskFile": "writes", "bindSession": "writes",

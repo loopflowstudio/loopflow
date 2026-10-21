@@ -32,7 +32,7 @@ pub(super) fn graphs_in(
         .expect("Process select ends with its table");
     let graph_processes = conn
         .prepare(&format!(
-            "{columns},f.graph,f.compiled FROM graph_processes f JOIN processes e ON e.id=f.lf_process_id
+            "{columns},g.graph,g.compiled FROM graph_processes g JOIN processes e ON e.id=g.lf_process_id
              WHERE ({scope}) ORDER BY e.rowid"
         ))?
         .query_map(values, |row| {
@@ -44,8 +44,8 @@ pub(super) fn graphs_in(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut steps = conn.prepare(&format!(
-        "{columns},fs.node,fs.iterations FROM graph_process_steps fs JOIN processes e ON e.id=fs.lf_process_id
-         WHERE fs.graph_lf_process_id=?1 ORDER BY fs.seq"
+        "{columns},gs.node,gs.iterations FROM graph_process_steps gs JOIN processes e ON e.id=gs.lf_process_id
+         WHERE gs.graph_lf_process_id=?1 ORDER BY gs.seq"
     ))?;
     graph_processes
         .into_iter()
@@ -578,12 +578,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let edges: Vec<crate::workflow::WorkflowEdge> = serde_json::from_value(
-            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["edges"].take(),
-        )
-        .unwrap();
+        let workflow: crate::workflow::WorkflowDefinition = serde_json::from_str(&stored).unwrap();
         assert_eq!(
-            edges
+            workflow
+                .edges
                 .iter()
                 .map(|edge| edge.graph.as_deref())
                 .collect::<Vec<_>>(),

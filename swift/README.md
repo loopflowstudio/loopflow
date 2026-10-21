@@ -19,7 +19,7 @@ only through the Task Work that owns them.
 
 A returning launch opens on the workspace saved at `<Machine>/desktop-cache/workspace.json`
 and shows **Updating…** until this launch's reads replace it. Saved rows open
-and navigate; Flow state, Task condition, Session state and every action except
+and navigate; Graph process state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed

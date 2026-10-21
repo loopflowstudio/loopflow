@@ -122,7 +122,7 @@ struct TaskWorkflowHeader: View {
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
             )) {
                 if let workflow = work.value?.workflow {
-                    WorkflowGraph(
+                    WorkflowDiagram(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },

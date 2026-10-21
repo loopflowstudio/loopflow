@@ -499,7 +499,7 @@ struct DesktopHeadlessTests {
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-3")
         let workflow = try #require(drawnWorkflow)
-        let drawn = WorkflowGraphLayout(nodes: workflow.nodes, edges: workflow.edges)
+        let drawn = WorkflowDiagramLayout(nodes: workflow.nodes, edges: workflow.edges)
         #expect(drawn.arrows.map(\.route) == [.straight, .loop(level: 0), .straight, .loop(level: 0), .straight])
         #expect(drawn.boxes.map(\.terminal) == [true, false, false, true])
         // Each revise loop arcs over its own node, above the row.
@@ -528,7 +528,7 @@ struct DesktopHeadlessTests {
         // An edge that goes back, or passes over a node, takes its own lane below the row.
         let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }
         let edge = { Workflow.Edge(from: $0, to: $1, graph: $2) }
-        let lanes = WorkflowGraphLayout(nodes: [node("a"), node("b")], edges: [
+        let lanes = WorkflowDiagramLayout(nodes: [node("a"), node("b")], edges: [
             edge("start", "a", "one"), edge("a", "b", "two"), edge("b", "a", "back"), edge("start", "b", "skip"),
         ])
         #expect(lanes.arrows.map(\.route) == [.straight, .straight, .lane(level: 0), .lane(level: 1)])

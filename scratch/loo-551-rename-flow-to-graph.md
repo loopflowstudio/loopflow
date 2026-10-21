@@ -63,9 +63,11 @@ Desktop: the Task work pane says "Graph processes", the palette offers
 | generated skill front matter `loopflow-kind: flow`, `loopflow-flow:` | `loopflow-kind: graph`, `loopflow-graph:` (files are found by `loopflow: true`, so sync replaces them) |
 | "Flow process" (one lf process running a Graph) | "Graph process" |
 
-Workflow, `WorkflowDefinition`, `WorkflowGraph`, `task_workflows.graph` and
-`.lf/workflows/` keep their names (decision). `WorkflowGraph` reads as "a
-Workflow's graph"; its edges now name the `graph` each runs.
+Workflow, `WorkflowDefinition`, `task_workflows.graph` and `.lf/workflows/`
+keep their names (decision). Desktop's Workflow drawing becomes
+`WorkflowDiagram` (`WorkflowDiagram.swift`, `WorkflowDiagramLayout`), parallel
+to `GraphDiagram`: with Graph naming the definition, `WorkflowGraph` reads as
+"the Graph a Workflow edge runs" (concept review).
 
 Unchanged by decision: musical "flow" in product copy ("the creator's flow"),
 the Loopflow name, and the "loopflow" pun ("A **loopflow** is a Graph with one
@@ -87,11 +89,9 @@ or more backward edges" — the authoring heading stays "Loopflows").
    with `'graphs'`, carrying the counter value, and recreate every trigger that
    bumps that domain.
 3. **`wave_workflows.content` is authored YAML text** (4 rows locally, edges in
-   flow style `{ from: start, to: end, flow: x }`). SQL `replace` must not touch
-   `workflow:`; rewrite the edge forms `, flow: ` / `{ flow: ` and block form
-   `\n<indent>flow: `, then the post-migration check parses every row with the
-   `WorkflowDefinition` parser, which already has `deny_unknown_fields`, so a
-   missed `flow:` rolls the transaction back.
+   flow style `{ from: start, to: end, flow: x }`). The draft rewrites ` flow:`
+   and `{flow:` by text replace, which leaves `workflow:` alone and covers both
+   inline and block edges; it does not re-parse the rows.
 4. **Session capture manifests are shipped history on disk.** `manifest.json`
    carries `"flow": {"kind": …}`; 4,851 observed `session_events` rows copy it
    and the `session_input_membership` index reads `$.evidence.flow.kind`.
@@ -138,10 +138,12 @@ One indivisible PR. A partial rename leaves two nouns, which is the bug.
 2. **Draft migration** `rename_flow_to_graph`
    (`uv run python scripts/new_migration.py rename_flow_to_graph`): tables,
    columns, index, triggers, `store_revisions` domain, `task_workflows` edge JSON,
-   `wave_workflows` YAML. Upgrade test seeded from the released 0.14.12 fixture
-   under `tests/fixtures/migrations/`: a Task mid-edge with `flow: pursue`, a
-   Graph process with two steps, a Wave workflow; after migration
-   `lf task workflow show` and `lf graph list --processes --for-task` read them.
+   `wave_workflows` YAML. Upgrade test
+   (`graph_inventory::released_flow_records_read_as_graphs_after_the_rename`)
+   seeds the released frontier from `tests/fixtures/migrations/graph_rename_released.sql`
+   (a Flow process with one step, a Task mid-edge with `flow: pursue`, a Wave
+   workflow), applies the draft, and reads them back through `SqliteStore`:
+   Graph process, `graphs` revision, `graph` edges, rewritten Wave YAML.
    The draft is a rename, so the cut raises the reader floor (expected; goes to
    `release/unreleased/BREAKING.md` at cut time).
 3. **Wire/DTO** — rename fields and kinds; rename fixtures; update
@@ -170,8 +172,8 @@ One indivisible PR. A partial rename leaves two nouns, which is the bug.
 - Installed cron whose saved command runs `lf flow`: the run fails with the
   ordinary unknown-command error in its receipt; `lf doctor` cron section and
   the cron receipt name `lf wave cron sync --wave <wave>`.
-- Migration finds an unparseable `wave_workflows` row after rewrite: whole
-  migration rolls back, report names the row.
+- `wave_workflows` rows are rewritten by text replace (` flow:` / `{flow:`);
+  the draft does not re-parse them.
 
 ## Exclusions
 
@@ -211,13 +213,36 @@ a second migration draft; "Flow" left in `lf help --all` or Desktop strings.
 
 ## Remaining work
 
-Implemented (October 21, 2026): file moves, scripted rename across Rust, Swift,
-YAML, docs and website, draft `rename_flow_to_graph`, manifest `serde(rename =
-"flow")` pins. Kept as history: Linear Project description `flow:` declarations
+Exists (October 21, 2026): file moves (incl. `WorkflowDiagram.swift`); rename across Rust, Swift, YAML, docs and
+website; draft `rename_flow_to_graph` and its upgrade test; manifest
+`serde(rename = "flow")` pins; regenerated `docs/lf-reference.md` and prompt
+goldens. Kept as history: Linear Project description `flow:` declarations
 (`linear/project_document.rs`), `legacy_flow` session events, auth-flow names.
-Migration upgrade test (`graph_rename_upgrades_released_flow_records`),
-regenerated `docs/lf-reference.md` and prompt goldens. Left: gate suites
-(Python, Swift, website e2e, residual-noun check), manabot companion PR at landing.
+
+Left:
+- Gate: full `cargo test` (incl. `cli_reference` after the v0.14.14 merge),
+  Python, Swift `DTOFixtureTests`/`DesktopHeadlessTests`, website e2e `#graphs`
+  anchor, residual-noun check, copy-of-real-store `lf task workflow show`.
+- manabot companion PR at landing.
+
+## Land-to-release window (concept review, October 21, 2026)
+
+Installed lf (0.14.12) reads this checkout as follows, verified with
+`command lf` here; main behaves the same from landing until the release is installed:
+
+- Repo Graphs (`.lf/graphs/`) are invisible: `lf flow show release-run` →
+  "flow not found". Builtin Graphs still run from the binary. Installed cron
+  plists keep running `lf flow telemetry-daily`/`release-run` and fail until
+  the release is installed and `lf wave cron sync` runs (accepted: cron renames too).
+- `.lf/workflows/autonomous.yaml`'s edge parses as `"flow": null`, a
+  graphless start → end edge. Taking it up with installed lf
+  (`lf wave workflow set autonomous`) would capture an edge that runs nothing
+  and requests completion. Stored Wave/Task Workflows are unaffected (DB copies
+  still say `flow:` until the migration runs).
+- Cut the release right after landing with `lf repo release run patch`
+  directly (what `release-run.yaml` runs), not via the repo Graph, and avoid
+  selecting the `autonomous` Workflow until it is installed. Jack ruled out
+  compatibility exceptions, so this is sequencing, not a shim.
 
 ## Decisions
 
@@ -233,4 +258,5 @@ regenerated `docs/lf-reference.md` and prompt goldens. Left: gate suites
 ## Checks
 
 Kickoff: SQLite 3.51 rename/JSON probe on schema copy of live store — passed.
+Compress: clippy -D warnings, `cargo test --lib graph_inventory`, Swift `build-for-testing` (fixed merged-in `WorldReadTests` Flow queries) — passed.
 Implement: clippy -D warnings, upgrade test, `dto_fixtures`+`graph_discovery`, `lf graph show pursue` (8 steps), `lf flow list` exit 2 — passed. Gate owns the rest.

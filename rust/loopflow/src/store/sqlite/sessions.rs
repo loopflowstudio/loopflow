@@ -16,13 +16,13 @@ use super::SqliteStore;
 /// `s`'s current input. Sessions carry no Graph column of their own.
 macro_rules! session_graph {
     () => {
-        "(SELECT fs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
+        "(SELECT gs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
     };
 }
 /// That step's node and loop counts, as its Graph process recorded them.
 macro_rules! session_step {
     ($column:literal) => {
-        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
+        concat!("(SELECT gs.", $column, " FROM session_events captured JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
     };
 }
 pub(super) const SESSION_GRAPH: &str = session_graph!();
@@ -217,7 +217,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
         SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
-        (fs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=fs.graph_lf_process_id)),
+        (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
@@ -234,10 +234,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
-        LEFT JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id
-        LEFT JOIN graph_processes graph ON graph.lf_process_id=fs.graph_lf_process_id
-        LEFT JOIN processes step ON step.id=fs.lf_process_id
-        LEFT JOIN processes graph_process ON graph_process.id=fs.graph_lf_process_id
+        LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
+        LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
+        LEFT JOIN processes step ON step.id=gs.lf_process_id
+        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),

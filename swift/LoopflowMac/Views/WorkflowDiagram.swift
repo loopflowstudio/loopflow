@@ -6,7 +6,7 @@ import SwiftUI
 /// circles and each node a box, in authored order on one row. An edge into
 /// the next column runs straight; one that returns to its own node arcs over
 /// it; any other takes its own lane below the row.
-struct WorkflowGraphLayout {
+struct WorkflowDiagramLayout {
     enum Route: Equatable {
         case straight
         case loop(level: Int)
@@ -146,7 +146,7 @@ struct WorkflowGraphLayout {
 /// A workflow as a graph. Given a Task's position it marks the node the Task
 /// waits at or the edge it is on, running or stopped, and the edges that can
 /// be chosen now are its buttons.
-struct WorkflowGraph: View {
+struct WorkflowDiagram: View {
     let nodes: [Workflow.Node]
     let edges: [Workflow.Edge]
     var position: Workflow.Position?
@@ -164,7 +164,7 @@ struct WorkflowGraph: View {
     private static let smallest: CGFloat = 0.6
 
     var body: some View {
-        let layout = WorkflowGraphLayout(nodes: nodes, edges: edges)
+        let layout = WorkflowDiagramLayout(nodes: nodes, edges: edges)
         let scale = fits ? min(1, max(Self.smallest, (offered ?? layout.size.width) / max(layout.size.width, 1))) : 1
         ScrollView(.horizontal, showsIndicators: false) {
             drawing(layout)
@@ -175,7 +175,7 @@ struct WorkflowGraph: View {
         .accessibilityIdentifier("task-workflow-graph")
     }
 
-    private func drawing(_ layout: WorkflowGraphLayout) -> some View {
+    private func drawing(_ layout: WorkflowDiagramLayout) -> some View {
             ZStack(alignment: .topLeading) {
                 Canvas { context, _ in
                     for arrow in layout.arrows {
@@ -202,7 +202,7 @@ struct WorkflowGraph: View {
         running(edge).map { $0 ? .running : .stopped }
     }
 
-    private func node(_ box: WorkflowGraphLayout.Box) -> some View {
+    private func node(_ box: WorkflowDiagramLayout.Box) -> some View {
         let marked = position == .node(box.name)
         let shape = box.terminal ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 7))
         return VStack(spacing: 1) {
@@ -227,7 +227,7 @@ struct WorkflowGraph: View {
     }
 
     @ViewBuilder
-    private func label(_ arrow: WorkflowGraphLayout.Arrow) -> some View {
+    private func label(_ arrow: WorkflowDiagramLayout.Arrow) -> some View {
         let state = running(arrow.index).map { $0 ? "Running" : "Stopped" } ?? ""
         Group {
             if choices.contains(arrow.index) {
@@ -246,8 +246,8 @@ struct WorkflowGraph: View {
             }
         }
         .lineLimit(1)
-        .frame(width: arrow.labelWidth, height: WorkflowGraphLayout.labelHeight, alignment: .bottom)
-        .offset(x: arrow.label.x - arrow.labelWidth / 2, y: arrow.label.y - WorkflowGraphLayout.labelHeight / 2)
+        .frame(width: arrow.labelWidth, height: WorkflowDiagramLayout.labelHeight, alignment: .bottom)
+        .offset(x: arrow.label.x - arrow.labelWidth / 2, y: arrow.label.y - WorkflowDiagramLayout.labelHeight / 2)
     }
 }
 #endif

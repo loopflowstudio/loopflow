@@ -651,7 +651,7 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut graph_processes = db
         .prepare(
-            "SELECT d.id,d.outcome,f.graph,f.compiled FROM graph_processes f JOIN processes d ON d.id=f.lf_process_id
+            "SELECT d.id,d.outcome,g.graph,g.compiled FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
              ORDER BY d.rowid",
         )
         .expect("select Graph processes");

@@ -219,18 +219,19 @@ Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
 unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
 
-### Name "current" once — next (concept review, 2026-10-21)
+### Name "current" once — done (concept review, 2026-10-21)
 
 The accepted product word is *current* ("A Wave pairs its conversation with all
 current planned and started Tasks"). Desktop spells it only as the default
 `TaskHistoryFilter`'s first branch, so `WaveTaskGroups` builds a throwaway filter
 and passes an unread `now:` with a comment apologizing for it.
 
-1. Add `RoadmapTask.isCurrent` (`!task.isTerminal || condition.unresolvedExecution`)
-   beside `WaveTaskGroups` in `TaskHistoryFilter.swift`.
-2. `TaskHistoryFilter.includes` opens with that predicate; `WaveTaskGroups` filters
-   on it directly. No filter instance, no `now`, no comment. Behavior unchanged;
-   still one history filter (Forbidden outcomes hold).
+`TaskPlanningSnapshot.isCurrent(_ condition:)` (`!isTerminal ||
+condition.unresolvedExecution`) sits beside `WaveTaskGroups`. `includes` opens
+with it and `WaveTaskGroups` filters on it directly: no filter instance, no `now`.
+Implement (2026-10-21): the predicate lives on the planning snapshot, not
+`RoadmapTask`, because `WaveDetailPane` filters `WaveTaskWork` rows through the
+same `includes`.
 
 Focused check: `scripts/test_desktop.sh --filter
 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
@@ -270,3 +271,4 @@ Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 
 Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no stale `started` names; no checks rerun. Full CI: submit.
 Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks.
+Implement (2026-10-21): `isCurrent` named once; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.

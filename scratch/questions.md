@@ -19,8 +19,10 @@
    Notification is provider assignment (Linear now, Asana with LOO-520), or
    nothing.
 7. **Linear assignee edited by hand.** DECIDED by Jack Heart (2026-10-21): a
-   Linear reassignment hands the Task to the new person; the previous
-   holder's work is not stopped, they get a steer and a ledger entry. (Was: The
+   Linear reassignment gives the Task to the new person as a take (a
+   person-level claim, not a handoff: a handoff means the holder's Machine
+   actively relinquished). The previous holder is superseded, not stopped;
+   they get the superseded steer and a ledger entry. (Was: The
    ownership log is authoritative, and the assignee mirrors the holder. The
    alternative reads someone reassigning in Linear's UI as a manual handover,
    which would make Linear handovers work without lf on the sender side, at

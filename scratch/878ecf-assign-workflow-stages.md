@@ -250,20 +250,22 @@ transaction, after the network step.
    someone's work in progress.
 7. **Reassignment in the provider.** Jack Heart (2026-10-21): reassigning in
    Linear gives the Task to the new person without stopping the existing
-   holder's work.
+   holder's work. It is a take, not a handoff: a handoff is written by the
+   holder's Machine actively relinquishing, and here nobody relinquished.
    - Linear observe sees the assignee change to an account that is not the
      holder's. It resolves the account to a person key through Machine
      records' `accounts`, falling back to the Linear user's email.
-   - It appends `handoff{person, handover{node, returns_to: None, head: None,
-     note: "<actor> reassigned in Linear"}}`. The entry ID derives from the
-     Linear history event, so every Machine that observes it writes the same
-     entry once.
-   - The previous holder keeps running: live Flows and Sessions continue,
-     nothing is cancelled or unclaimed. Their Sessions get a steer, and the
-     ledger shows "Dustin took this in Linear". What they do with their
-     in-flight work is their call.
-   - The recipient opens the Task at whatever its recorded branch has on
-     `origin`, since nobody pushed for this handover.
+   - It appends `claim{person, machine_id: None}` with no `handover`. A
+     person-level claim, like a person handover, lands on that person's
+     pickup Machine when read. The entry ID derives from the Linear history
+     event, so every Machine that observes it writes the same entry once.
+   - The previous holder is superseded, exactly as when an owner reclaims:
+     live Flows and Sessions continue, nothing is cancelled or unclaimed, and
+     their Sessions get the existing superseded steer. The ledger reads
+     "Dustin took this in Linear". What happens to their in-flight work is
+     their call.
+   - Nothing was pushed for it, so the recipient opens the Task at whatever
+     its recorded branch has on `origin`.
    - Loopflow's own assignee writes match the holder and produce no entry.
 
 Concurrency keeps today's rule: the latest entry in provider order wins. An
@@ -471,7 +473,7 @@ This slice: 1.
 - `cargo test -p loopflow --lib task_ownership`: under a Linear test double, a
   handoff queues the recipient's Linear account as assignee, and a handback
   queues the owner's. A reassignment observed in Linear appends exactly one
-  handoff to the new person across two observing Machines, and the previous
+  person-level claim for the new person across two observing Machines, and the previous
   holder's running Flow keeps running with a steer.
 - `swift test --package-path swift --filter WorkModelTests`: a Task picked up
   here with no Session appears under Available, and a Task held by someone else

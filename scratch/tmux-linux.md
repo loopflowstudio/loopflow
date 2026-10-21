@@ -33,6 +33,11 @@ Linux: an interactive turn with a tool call and a failed tool, detach, `lf
 resume`, another turn, then `lf -b`: no hook error on screen, empty
 `hookErrors` in every transcript record, clean headless stderr.
 
+Jack Heart chose less debug output in production, broadly: tracing goes to
+`logs/lf.log` (`-v`/`RUST_LOG` for stderr), and launches no longer announce
+diagnostics paths (Loopflow's or OpenCode's). LOO-554 carries the four-harness
+QA of this on Linux.
+
 ## Left
 
 - Linux Worktree sandbox (`failIfUnavailable`, bubblewrap/socat) and the two
@@ -46,10 +51,6 @@ resume`, another turn, then `lf -b`: no hook error on screen, empty
 
 ## Questions
 
-- Every interactive launch prints `Loopflow diagnostics: <log>` once per lf
-  layer (twice for `lf skill default`), before anything was recorded. #1595
-  announces deliberately; the exit line already reports a log that grew.
-  Keep, dedupe, or announce only on exit?
 
 - Herdr inside tmux vs tmux inside Herdr both carry both env sets; this picks
   Herdr. Revisit if someone nests them.

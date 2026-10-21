@@ -1433,23 +1433,35 @@ fn init_tracing(verbose: bool) {
             .init();
         return;
     }
-    let directory = loopflow::store::lf_home_dir().join("logs");
-    let log = std::fs::create_dir_all(&directory).and_then(|()| {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(directory.join("lf.log"))
-    });
-    let subscriber = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("warn"))
-        .with_ansi(false);
-    match log {
-        Ok(log) => subscriber.with_writer(std::sync::Mutex::new(log)).init(),
-        // An unwritable home still runs; its diagnostics stay visible.
-        Err(_) => subscriber
-            .with_writer(std::io::stderr)
-            .without_time()
-            .init(),
+        .with_ansi(false)
+        .with_writer(|| DiagnosticLog)
+        .init();
+}
+
+/// Opened per event, so a command that logs nothing creates no home.
+struct DiagnosticLog;
+
+impl std::io::Write for DiagnosticLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let directory = loopflow::store::lf_home_dir().join("logs");
+        let log = std::fs::create_dir_all(&directory).and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(directory.join("lf.log"))
+        });
+        match log {
+            Ok(mut log) => log.write_all(bytes),
+            // An unwritable home still runs; its diagnostics stay visible.
+            Err(_) => std::io::stderr().write_all(bytes),
+        }?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 

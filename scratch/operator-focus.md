@@ -6,7 +6,7 @@ recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
 Remaining: the demo (agent run, demo/review) and the gate checks.
 
-## Concept review (2026-10-21): implemented
+## Concept review (2026-10-21): implemented in `78f5db2b89`
 
 1. `lf config user` prints `config::participant_name()`, the identity
    ownership uses, so `LF_USER_NAME` forwarded by `lf --machine` counts.

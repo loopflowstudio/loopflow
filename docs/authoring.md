@@ -26,6 +26,13 @@ lf audit                               # run it
 lf audit: focus on auth                # {args} in the file receives "focus on auth"
 ```
 
+```bash
+lf skill customize pr-message          # copy the builtin into .lf/skills/ and print its path
+```
+
+A repository skill replaces the builtin with the same name. Customize copies the
+builtin once, then keeps printing the existing local file.
+
 Write skills direct and imperative — state what to do, not what the skill
 is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill

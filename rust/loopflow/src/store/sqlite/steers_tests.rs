@@ -38,6 +38,17 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
 }
 
 #[test]
+fn saving_a_steer_wakes_tool_hooks() {
+    let (home, store, _) = fixture();
+    let latest = crate::steer::latest_marker(home.path());
+    assert!(!latest.exists());
+    store
+        .save_session_steer("session", "Named author", "Change direction")
+        .unwrap();
+    assert!(latest.exists(), "a saved steer must reach gated tool hooks");
+}
+
+#[test]
 fn emitted_direction_is_not_replayed_and_retry_is_explicit() {
     let (_home, store, adapter) = fixture();
     let steer = store

@@ -79,7 +79,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         }
         Some(PrCommand::Submit {
             strict,
-            create_pr: _,
             worktree,
             message,
             title,
@@ -1734,31 +1733,6 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `repo release run` under a cron firing: the release is accounted to the
-/// receipt its launcher named.
-pub fn run_cron_release(
-    version_input: Option<&str>,
-    target_name: Option<&str>,
-    cli: &crate::lf::Cli,
-) -> Result<()> {
-    let cron = cli
-        .cron_receipt
-        .as_ref()
-        .zip(cli.cron_lock_fd)
-        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
-            receipt_id: id.clone(),
-            lock_fd: fd,
-        });
-    crate::ops::release_run_with_cron(
-        &find_repo_root()?,
-        version_input.unwrap_or("patch"),
-        target_name,
-        &CliProgress,
-        cron.as_ref(),
-    )?;
-    Ok(())
-}
-
 fn release_run_cmd(
     version_input: Option<&str>,
     target_name: Option<&str>,
@@ -1766,6 +1740,11 @@ fn release_run_cmd(
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
+    // A cron firing accounts the release to the receipt its launcher named.
+    if let Some(cron) = crate::ops::cron::accounting::CronExecution::from_env() {
+        crate::ops::release_run_with_cron(&repo_root, input, target_name, progress, Some(&cron))?;
+        return Ok(());
+    }
     match release_run(&repo_root, input, target_name, progress)? {
         crate::ops::ReleaseRunOutcome::NoChanges {
             target, latest_tag, ..

@@ -84,17 +84,6 @@ pub(crate) fn collect_history(
     )?)
 }
 
-/// Supply a name to a plain native conversation without changing its execution.
-pub fn name_native_session(provider: &str) -> Result<()> {
-    let payload: serde_json::Value = serde_json::from_reader(std::io::stdin().lock())?;
-    match crate::harness::native_titles::name_native_session(provider, &payload) {
-        Ok(Some(output)) => println!("{output}"),
-        Ok(None) => {}
-        Err(error) => eprintln!("Session title unavailable: {error:#}"),
-    }
-    Ok(())
-}
-
 pub fn inspect(
     selector: &str,
     events: bool,

@@ -74,44 +74,6 @@ Open Loopflow or run its CLI
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
-## lf transport
-
-Retain command execution independently of terminal viewers
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf transport start
-
-Start an independently owned command and print its Process identity
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport serve
-
-Own a command's transport until it exits (normally launched by start)
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport attach
-
-Attach to an existing execution; Ctrl+] detaches without stopping it
-
-| Argument | What it does |
-|---|---|
-| `<process>` | process |
-| `--observe` | observe Default: false. |
-| `--help / -h` | Print help |
-
 ## lf clone
 
 Create and use an offline, isolated development data clone (macOS)
@@ -2145,4 +2107,13 @@ Run a skill explicitly
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf skill customize
+
+Print the repository file that defines a skill, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |

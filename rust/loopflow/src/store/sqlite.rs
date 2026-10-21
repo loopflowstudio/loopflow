@@ -684,19 +684,6 @@ impl SqliteStore {
         })
     }
 
-    /// Bound both lock waits and query execution for optional prompt naming.
-    pub(crate) fn open_native_title_reader(path: &Path) -> StoreResult<Self> {
-        let store = Self::open_read_only(path)?;
-        {
-            let conn = store.conn.lock().expect("store mutex poisoned");
-            let budget = Duration::from_millis(100);
-            conn.busy_timeout(budget)?;
-            let started = std::time::Instant::now();
-            conn.progress_handler(1000, Some(move || started.elapsed() >= budget))?;
-        }
-        Ok(store)
-    }
-
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;

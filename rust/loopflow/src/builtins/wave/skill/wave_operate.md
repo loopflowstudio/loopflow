@@ -45,10 +45,11 @@ whether or not a Flow process is alive now. Compare its `person` with
 - **Yours:** the owner's person is you, or the owner names no person. Give
   every unfinished Task you own exactly one disposition, with its evidence:
   the first row below that fits. A Task you own whose `runtime.owner.machine`
-  is not this Machine (`lf id`) has unknown liveness here: operate it on that
-  Machine with `lf --machine <machine> --wave <wave> wave-operate`, or report
-  it unknown and name the Machine. Never `lf task run`, recover or complete it
-  from this Machine.
+  is not this Machine (`lf id`) has unknown liveness here: operate that one
+  Task on its Machine with `lf --machine <machine> task-operate <issue>` and
+  file its returned disposition under the matching heading in Finish, or
+  report it unknown and name the Machine. Never `lf task run`, recover or
+  complete it from this Machine.
 - **Theirs:** another person owns it. List it with that person and Machine as
   “theirs · left alone”. Do not run, recover, complete, claim, move,
   interrupt or comment on it, and do not judge its liveness: their Processes

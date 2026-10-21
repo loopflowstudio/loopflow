@@ -340,7 +340,7 @@ Keep one implementation. Avoid `v2_`, `_old`, `_new`, `_backup` prefixes and suf
 
 Don't maintain backwards compatibility unless explicitly required. If a config format or API changes, migrate everything to the new format—don't write code that handles both old and new. Backwards compatibility is for production databases and published APIs with external users, not internal config files. Unless the design doc specifies a migration path, assume we don't want compatibility shims.
 
-One exception: a file that the released lf and a branch build both read, such as `.lf/config.yaml`. Until the new shape is released and installed, the branch keeps the released shape readable, so the change doesn't break lf in its own repository. Mark the fallback with the Task that removes it, and file that Task in the same change.
+One exception: a file that the released lf and a branch build both read, such as `.lf/config.yaml`. Until the new shape is released and installed, the branch keeps the released shape readable, so the change doesn't break the released build in its own repository. Mark the fallback with the Task that removes it, and file that Task in the same change.
 
 Use header comments to group related code sections.
 

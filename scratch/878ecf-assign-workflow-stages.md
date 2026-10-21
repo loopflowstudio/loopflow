@@ -118,8 +118,9 @@ ProviderAccount { provider: linear | asana, id, email }
   `--force-with-lease` against the fetched object. A lost lease refetches and
   retries once, then reports. Sync publishes after provider auth, so a
   Machine's Linear viewer reaches the record without a command.
-- **Readers.** `lf refresh` and planning sync fetch `refs/loopflow/people/*`
-  into a local `people` cache. `lf person list` and Desktop's picker read it.
+- **Readers.** `lf refresh` fetches `refs/loopflow/people/*` into a local
+  `people` cache (Git-only planning sync does not yet; see Slices). Ref Git
+  calls are bounded at 30 seconds, as planning Git is. `lf person list` and Desktop's picker read it.
 - **Providers first.** Under Linear (and Asana with LOO-520), resolving an
   email to an account tries the record's `accounts`, then the provider's
   by-email lookup (`users(filter:{email})`, `GET /users/{email}`). Git-only
@@ -218,7 +219,8 @@ that prose reaches the recipient's Sessions with no further work.
 `AuthoredNode` and `WorkflowNode` gain `person: <email>`. The field is
 captured in the graph like every other node field. There is no `machine:` node
 field: Machines are never published.
-- Parse rejects a `person` value with no `@`.
+- Parse keys `person` through `person::person_key`, the same rule as your Git
+  email: lowercased, and rejected unless it is an email Git can name as a ref.
 - An unknown person is not an error. The handover is written, waits on the ref,
   and shows "not opened yet".
 
@@ -370,8 +372,9 @@ the assignee, so a Machine never needs a credential for anyone else.
 - **Schema:** one migration draft.
   - `task_ownership` gains `handover TEXT` (JSON `Handover`, NULL otherwise).
   - `task_workflow_moves.kind` allows `received`.
-  - `people(key PRIMARY KEY, name, accounts JSON, updated_at, fetched_at)`.
-  - `machines` gains `pickup INTEGER NOT NULL DEFAULT 1`.
+  - Done: `people(key PRIMARY KEY, name, accounts JSON, updated_at)`.
+  - Done: `machines` gains `pickup INTEGER NOT NULL DEFAULT 1` and
+    `public_name TEXT`.
 - **Wire DTOs:**
   - `TaskOwnershipEntry` adds `handover`.
   - The Task runtime owner gains `is_you: bool` and
@@ -503,13 +506,15 @@ and 2), then rebase onto LOO-555 for the handover protocol.
   `machines.pickup`, `machines.public_name` and `people`. `lf refresh`
   publishes your Person record (Git email, name, Linear viewer account) and
   caches everyone's before it refreshes Linear; a failure warns and planning
-  continues. `lf person list [--json]` reads the cache. `LinearClient::viewer`
-  replaced `viewer_id`.
+  continues. Publish and fetch run in one blocking hop. `lf person list
+  [--json]` reads the cache. `LinearClient::viewer` replaced `viewer_id`.
 - Remaining in slice 2:
   - Git-only planning has no `lf refresh` path yet (refresh is Linear-only),
     so the people fetch should also ride Git planning sync at a low cadence.
-- Next: rebase onto LOO-555 (take its `config::participant_email`, which
-  878ecf copied verbatim), then slice 3.
+- Next: rebase onto LOO-555, then slice 3. LOO-555 had not landed on
+  `origin/main` as of 2026-10-21 (main = this branch's base). On rebase, take
+  LOO-555's `config::participant_email` but keep its result keyed through
+  `person::person_key`, so node persons and Person records share one rule.
 - Docs for pickup, public names and `lf person` land with slice 3, which also
   deletes the "cross-person handoff is deferred" text; until then neither
   setting has a reader.

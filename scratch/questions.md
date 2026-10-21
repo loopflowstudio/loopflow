@@ -109,7 +109,9 @@ LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).
 
 14. **Person key before LOO-555.** Slice 2 reads the key as the lowercase Git
     `user.email` itself; LOO-555's worktree has `config::participant_email`.
-    On rebase, 878ecf switches to LOO-555's function and deletes its own.
+    On rebase, 878ecf switches to LOO-555's function and deletes its own,
+    keeping `person::person_key` as the one validation rule (it rejects
+    emails Git cannot name as a ref, which LOO-555's may not).
 15. **Public name on `lf machine public <name>`.** `off` is reserved as the
     word that makes this Machine private; no Machine can be publicly named
     "off".

@@ -1,6 +1,6 @@
 # LOO-559: settle exited agent groups under load
 
-Status: implemented 2026-10-21; awaiting gate. No product decision is open; the
+Status: implemented and gated 2026-10-21. No product decision is open; the
 assumptions below are reversible and recorded in `scratch/questions.md`.
 
 ## Problem
@@ -138,3 +138,5 @@ Check results: `cargo test -p loopflow --lib -- os_process agent_process top::`
 55 passed; clippy clean. Linux → CI.
 
 Concept review (2026-10-21): concepts hold — one exit predicate (`has_exited`), one group reader, survivors named in both failures. No change, no open choice.
+
+Gate (2026-10-21): `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- os_process agent_process top:: harness::claude harness::opencode lifeline` 100 passed; `agent_process os_process` 47 passed under 32 `yes` loops. Linux and `human_session` → CI.

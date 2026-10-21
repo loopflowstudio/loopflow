@@ -240,8 +240,9 @@ pub(super) struct Probe {
     pub version: String,
 }
 
-pub(super) const REMOTE_PATH: &str =
-    "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"";
+// Non-interactive SSH skips shell profiles. Agent CLIs installed with npm live
+// under its configured prefix, which a user-level prefix moves out of PATH.
+pub(super) const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
 
 // Public installer, identical to the first-install command in README.md.
 const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";

@@ -90,7 +90,7 @@ pub(crate) fn native_args(harness: &str, context: Option<&ContextDelivery>) -> R
 pub(crate) fn pi_args(context: Option<&ContextDelivery>, native: bool) -> Result<Vec<String>> {
     let source = format!(
         "const spec = {};\n{}",
-        json!({"native":native}),
+        json!({"native":native, "executable":crate::os_process::resolve_lf_binary()?}),
         include_str!("context_pi.mjs")
     );
     let home = context
@@ -168,6 +168,23 @@ mod tests {
         let restored: ContextDelivery =
             serde_json::from_slice(&std::fs::read(&saved[0]).unwrap()).unwrap();
         assert_eq!(restored, contexts[0]);
+    }
+
+    #[test]
+    fn pi_extension_names_lf_without_an_inherited_lf_bin() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let executable = std::env::current_exe().unwrap();
+        std::env::set_var("LF_BIN", &executable);
+
+        let args = super::pi_args(None, true).unwrap();
+
+        // A fresh machine's Pi process inherits no LF_BIN; the source carries it.
+        let source = std::fs::read_to_string(&args[1]).unwrap();
+        assert!(source.contains(&serde_json::to_string(&executable).unwrap()));
+        assert!(!source.contains("process.env.LF_BIN"));
     }
 
     #[test]

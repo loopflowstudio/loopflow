@@ -132,13 +132,8 @@ fn every_recipe_builds_a_world_lf_reads() {
 
 #[test]
 fn lifecycle_world_reports_each_state() {
-    let (root, world, env) = build("lifecycle");
-    let shown = lf(
-        root.path(),
-        &world,
-        &env,
-        &["wave", "show", "--all", "--json"],
-    );
+    let built = Built::new("lifecycle");
+    let shown = built.lf(&["wave", "show", "--all", "--json"]);
     let tasks = shown["tasks"]["items"].as_array().unwrap();
     let task = |name: &str| {
         tasks

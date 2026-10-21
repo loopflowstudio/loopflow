@@ -483,11 +483,11 @@ fn wave_backlog(world: &World) -> Result<()> {
         &[],
     )?;
     for (title, brief) in BACKLOG {
-        world.task("desktop", title, brief)?;
+        world.task(Some("desktop"), title, brief)?;
     }
 
     let recent = world.task(
-        "desktop",
+        Some("desktop"),
         "Paint the conversation tail first",
         "Opening a long Task waits on its full history. Paint the last turns first.",
     )?;
@@ -513,7 +513,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     )?;
 
     let failed = world.task(
-        "desktop",
+        Some("desktop"),
         "Keep scroll position across Task switches",
         "Switching Tasks resets the conversation to the top.",
     )?;
@@ -528,7 +528,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     )?;
 
     let idle = world.task(
-        "desktop",
+        Some("desktop"),
         "Name Sessions from their first request",
         "Untitled Sessions read as provider ids. Name them from the first request.",
     )?;
@@ -544,7 +544,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     )?;
 
     let merged = world.task(
-        "desktop",
+        Some("desktop"),
         "Show PR state on Task rows",
         "Rows don't say whether a Task's PR is open, merged or missing.",
     )?;
@@ -578,7 +578,11 @@ fn wave_backlog(world: &World) -> Result<()> {
         ("Open the dashboard on launch", 6.0),
         ("Remember the selected Wave", 3.0),
     ] {
-        let done = world.task("desktop", title, "Small polish from the last chapter.")?;
+        let done = world.task(
+            Some("desktop"),
+            title,
+            "Small polish from the last chapter.",
+        )?;
         let done = world.checkout(&done)?;
         world.flow(
             Some(&done),
@@ -588,7 +592,7 @@ fn wave_backlog(world: &World) -> Result<()> {
             12,
             "succeeded",
         )?;
-        world.complete(&done, "Landed")?;
+        world.complete(&done, "Landed", 0.0)?;
     }
 
     world.wave_conversation(
@@ -621,12 +625,12 @@ fn wave_backlog(world: &World) -> Result<()> {
     )?;
 
     world.task(
-        "systems",
+        Some("systems"),
         "Compact old Process rows",
         "Process history grows without bound. Compact finished Flows older than a month.",
     )?;
     let systems = world.task(
-        "systems",
+        Some("systems"),
         "Retry store writes on busy",
         "A busy store fails the write. Retry with backoff before failing.",
     )?;
@@ -646,7 +650,11 @@ fn task_review(world: &World) -> Result<()> {
     world.wave("desktop")?;
     world.files(None, &seed_files(), "Lay out the search engine")?;
 
-    let review = world.task("desktop", "Rank search results by recency", REVIEW_BRIEF)?;
+    let review = world.task(
+        Some("desktop"),
+        "Rank search results by recency",
+        REVIEW_BRIEF,
+    )?;
     let review = world.checkout(&review)?;
     world.files(
         Some(&review),
@@ -731,7 +739,7 @@ fn task_review(world: &World) -> Result<()> {
     )?;
 
     let draft = world.task(
-        "desktop",
+        Some("desktop"),
         "Highlight matched terms",
         "Results show the whole turn; highlight the matched terms.",
     )?;
@@ -758,7 +766,7 @@ fn task_review(world: &World) -> Result<()> {
     )?;
 
     let landed = world.task(
-        "desktop",
+        Some("desktop"),
         "Index Codex transcripts",
         "Only Claude transcripts are indexed.",
     )?;
@@ -779,10 +787,10 @@ fn task_review(world: &World) -> Result<()> {
         &PASSING,
     )?;
     world.merge(&landed)?;
-    world.complete(&landed, "Landed")?;
+    world.complete(&landed, "Landed", 0.0)?;
 
     let merged = world.task(
-        "desktop",
+        Some("desktop"),
         "Rebuild the index on schema change",
         "An index from an older schema returns nothing.",
     )?;
@@ -804,7 +812,7 @@ fn task_review(world: &World) -> Result<()> {
     )?;
     world.merge(&merged)?;
 
-    let local = world.task("desktop", "Try a trigram index", "")?;
+    let local = world.task(Some("desktop"), "Try a trigram index", "")?;
     let local = world.checkout(&local)?;
     world.files(
         Some(&local),
@@ -816,7 +824,7 @@ fn task_review(world: &World) -> Result<()> {
     )?;
 
     let unavailable = world.task(
-        "desktop",
+        Some("desktop"),
         "Page search results",
         "Long result lists load at once; page them.",
     )?;
@@ -849,17 +857,17 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         &[],
     )?;
     world.task(
-        "desktop",
+        Some("desktop"),
         "Delete an empty Wave",
         "An empty Wave can't be removed from Desktop.",
     )?;
     world.task(
-        "desktop",
+        Some("desktop"),
         "Say what deleting a Wave keeps",
         "Before removing a Wave with work, say what happens to its Tasks and Sessions.",
     )?;
     let open = world.task(
-        "desktop",
+        Some("desktop"),
         "Add a Wave from Desktop",
         "Creating a Wave writes GOAL.md, but the Wave doesn't appear until `lf wave ensure`.",
     )?;
@@ -882,7 +890,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         "succeeded",
     )?;
     let done = world.task(
-        "desktop",
+        Some("desktop"),
         "List Waves alphabetically",
         "Waves list in creation order.",
     )?;
@@ -895,7 +903,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         10,
         "succeeded",
     )?;
-    world.complete(&done, "Landed")?;
+    world.complete(&done, "Landed", 0.0)?;
     world.wave_conversation(
         "desktop",
         &[
@@ -909,7 +917,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         ("Retire the old release script", 20.0),
         ("Move fixtures to worlds", 12.0),
     ] {
-        let done = world.task("archive", title, "Finished last chapter.")?;
+        let done = world.task(Some("archive"), title, "Finished last chapter.")?;
         let done = world.checkout(&done)?;
         world.flow(
             Some(&done),
@@ -919,7 +927,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
             15,
             "succeeded",
         )?;
-        world.complete(&done, "Landed")?;
+        world.complete(&done, "Landed", days)?;
     }
     Ok(())
 }

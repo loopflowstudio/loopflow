@@ -6,15 +6,11 @@ Full record (observations, evidence links, launch details):
 
 ## Native review at `e08cbb102d` (synthetic Work, no provider)
 
-Proved in the real app with shared lfdb readers: Dashboard `review` beside the
-ordinary Product view; hide collapses to the sibling split; resize 50→52% persists;
-restore returns the original 33% outer split; entering a Task and returning keeps
-the composition; with autosave off, an unsaved Files draft is held in the shared pane
-record and recovered with hidden occurrence/split/tab by a fresh process on the same
-lfdb. Zero Sessions and Task admissions throughout. Not proved: same-identity unsaved
+Proved then, against the since-deleted split tree: a Dashboard beside the Product view,
+hide/restore, a Task round trip, and an unsaved Files draft recovered by a fresh process
+on the same lfdb, with zero Sessions or admissions. Not proved: same-identity unsaved
 badge, live Session/shell continuity (LOO-416), duplicate promotion, stale-write
-conflict, anonymous-query arrangement, candidate CLI↔native parity (control targets
-`com.loopflow.mac`).
+conflict, anonymous-query arrangement, CLI↔native parity (control targets `com.loopflow.mac`).
 
 ## Jack Heart's open walkthrough items (October 18)
 
@@ -37,8 +33,6 @@ from disk), `f03d7cd21d` (roadmap writes each Task once). Proof tests:
 `5e08b6655f`: `desktop_commands_do_not_route_to_the_execution_machine`,
 `released_work_upgrades_to_saved_intent_without_rewriting_work`.
 
-30 leaked `ship` Waves on deleted temp dirs came from a since-deleted test
-(`22e34abc54`…`418e52ba65`) resolving the ambient registry; cleanup is Jack's call,
-nothing deleted. Machine-wide frame kept: repository scoping saves ~35%; remaining
-bytes are mostly descriptions (1.47 MB) and PR evidence (0.75 MB). Open: send
-descriptions on demand or bound completed Tasks before scoping.
+30 leaked `ship` Waves (since-deleted test, `22e34abc54`…`418e52ba65`) await Jack's
+cleanup call; nothing deleted. Open: frame bytes are mostly descriptions (1.47 MB) and
+PR evidence (0.75 MB); send descriptions on demand or bound completed Tasks.

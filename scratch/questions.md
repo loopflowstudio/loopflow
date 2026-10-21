@@ -58,10 +58,8 @@ flicker in the demo. Plans now report `slots`.
 October 20 order/slot assumptions: the person's Task order comes first; Tasks it never
 named append after it, waiting first. It is one repository order, so Wave sidebars and
 unarranged Dashboards follow it too. A drop puts the dragged Task in the target's place.
-Every saved Dashboard renders through slots (Jack: “theres always a fixed number of
-slots”); its visible occurrences fill them in arrangement order, and tile drag still swaps
-occurrences. Member-tree resize is removed. Settled by the October 21 concept review
-(design.md): the tree collapses to an ordered occurrence list and Dashboard drag moves.
+Every saved Dashboard renders through slots; its visible occurrences fill them in
+order (October 21 concept review, design.md).
 
 Historical notes removed October 20 (full text at `f492be7f19:scratch/`): the October 16
 Arrange handoff (owners: LOO-416 Session retention, LOO-453 readiness/events, LOO-422/415
@@ -75,3 +73,9 @@ DTO and the Desktop breadcrumb Machine menu were removed rather than ported. "St
 for Working Tasks now means a current ownership-log owner or a published PR. Settled by
 the October 21 concept review (design.md): Jack's October 19 request (“a place to both view
 and set the machine”) still stands, so the control returns over main's `lf machine use`.
+
+October 21 implementation assumptions: the Machine control appears only on started Tasks
+(an unstarted Task's Machine is chosen at start from its Wave) and on Waves; repository
+and Dashboard views have none. "This Mac" heads the choices; a Wave with no default
+reads as this Machine. Auto-mode Dashboards follow query order (the old 2:1 attention
+weighting sized nothing once slots owned geometry).

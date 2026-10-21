@@ -146,6 +146,9 @@ reintroduce:
   `newShell(beside:focus:)`, pane-keyed `shellCommands`, `retainedShells`,
   `DesktopCommand::Split`/`DesktopPaneAction.split`, synthetic `PaneState` in inspection.
 - Duplicate `WorkArrangementTree.Axis` (use `SplitAxis`).
+- Arrangement tree (October 21): `ArrangementTree`, `ArrangementAxis` (now `SplitAxis`),
+  `tiled`, `retaining`, `SelectionError::Ratio`, Swift `WorkArrangementTree` and
+  `DashboardView.swapping`; window-level `DesktopWorkLayoutInspection` (now `open_work`).
 - The repo-name chevron that opened Find Work, then the `This Mac ›` crumb and
   `WorkJumpScope.repositories` (October 19; jump bar and Machine control replace them).
 
@@ -165,7 +168,7 @@ Validation covers only the edited selection and its references.
 Separate Dashboard destinations, pinned discovery, Cmd K entries and name/query/
 pin editing consume Rust plans. Tiles reuse retained Task workspaces, show their
 primary Session or explicit zoom; unstarted Tasks offer Start (agreed-ux.md). Hide/restore
-and drag swap edit the full saved occurrence tree; slot edits write `slots_json` (October 20).
+and drag-to-move edit the full saved occurrence order; slot edits write `slots_json` (October 20).
 Ordinary repository/Wave views retain the Console contract.
 
 Live `lf view EXPRESSION` opens the existing repository URL route; `--plan` stays
@@ -189,7 +192,6 @@ rewrite it before review.
 - Demo checks (agreed-ux.md §5): golden geometry, focus growth, page turns, drag
   reorder in sidebar and grid, slot editing, terminal behavior during animation, and the
   October 20 golden-grid fixes (desktop-dashboard-demo.md).
-- Next implement pass: the two October 21 concept-review changes below.
 
 - Demo preparation: #1612 draft-copy builds and `lf-world` fixtures are merged here;
   the CLI↔native targeting gap remains ([desktop-dashboard-demo.md](desktop-dashboard-demo.md)).
@@ -199,41 +201,13 @@ rewrite it before review.
   Shell tab and restore has no admission handle, so restored shells stay unattached.
   No provider launch, lifetime registry or saved attachment authority was added.
 
-## Concept review — October 21
+## Concept review — October 21 (implemented)
 
-Against agreed-ux.md §5 and the implemented branch. Both changes follow from Jack
-Heart's accepted decisions; neither changes what the product is. No open product choice.
-
-**One arrangement: ordered occurrences.** Jack: “theres always a fixed number of
-slots”, “they always get arranged in order”, nobody pins a Task to a slot. Geometry
-lives in `SlotLayout`; the saved `ArrangementTree`'s axes and ratios shape nothing, and
-the 2:1 attention weighting in `tiled` sizes nothing. Two trees for one Dashboard is a
-second authority waiting to drift. Replace `ArrangementTree`/`ArrangementAxis` with
-`Arrangement { order: Vec<MemberRef>, hidden, mode }`: first-wins scans the list,
-hide/restore keeps position, full replacement is a permutation of every occurrence.
-Delete `tiled`, `retaining`, ratio validation and `SelectionError::Ratio`. Carry it through
-`saved_selections.sql` (draft, edited in place), CLI `arrange` input, `view_plan.json`/
-`dashboard.json` fixtures, Swift `WorkArrangementTree` and `DashboardView.swapping`.
-Expression-keyed history, hidden members and nested-query occurrences survive unchanged.
-
-**One reorder gesture.** Working Tasks drag moves (A takes B's place, `task_orders`);
-saved-Dashboard tile drag swaps occurrences. Same gesture, two outcomes, and swap is not
-“reorder”. Dashboard tile drag moves the occurrence to the target's position in its
-Dashboard's order. The order *source* stays distinct: Working Tasks and sidebar share the
-repository order (Jack, October 20); each saved Dashboard owns its arrangement. Edit Slots
-drag still exchanges slot geometry: that edits the layout, not the order.
-
-**Machine control returns.** The October 21 sync removed the breadcrumb Machine control
-with main's deleted placement. Jack's October 19 request (“a place to both view and set
-the machine that this work is happening on”) was not withdrawn, and main now owns both
-halves: `lf task status --json` reports `machine`, and `lf machine use <m> --task <t>` /
-`lf machine use <m> <wave>` set it. Restore `WorkMachineControl` over those owners; Task
-selection is a handoff that keeps Jack its person, so the menu labels it “Run on <m>”.
-Lower priority than the two changes above; no new DTO or store writer.
-
-Next proof: Rust selection tests over list order (permutation, hide in middle, duplicate
-promotion, nested query), DTO round-trips, and a Swift test that dropping tile C on A
-yields order C, A, B on both a saved Dashboard and Working Tasks.
+Full text: `0b4028305d:scratch/design.md`. Arrangement is `{ order, hidden, mode }`;
+replacement permutes every occurrence. Dashboard tile drag moves an occurrence into the
+target's place, as `task_orders` does; Edit Slots drag still exchanges geometry.
+`WorkMachineControl` (Jack, October 19) reads the Task's `runtime.owner.machine` or the
+Wave's `WaveSnapshot.machine` and writes `lf machine use`, each choice “Run on <m>”.
 
 ## Acceptance and review
 
@@ -252,7 +226,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → add a slot, focus B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 20): Rust selections/selection/desktop/migrations lib tests 162 passed, `dto_fixtures` 44, clippy clean; Swift Dashboard/Panes/Polish/Navigation/Selection filters passed; October 21 `swift test --filter WorkDestinationTests` 54 passed after the shared `SessionsWorkspace.openConversation` refactor. Native and broader suites stay gate-owned.
+Check (October 21): Rust `--lib selection selections desktop migrations` 196 passed, integration `dto_fixtures`+`cli_discovery` passed, clippy clean; Swift WorkSelection/Dashboard/DTOFixture/PaneControl/Retention/Destination/Theme/Opening/Navigation filters passed. Native and broader suites stay gate-owned.
 
 ## History
 

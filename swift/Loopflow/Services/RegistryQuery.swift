@@ -391,6 +391,19 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "move", issue] + destination, cwd)
     }
 
+    /// Your registered Machines. This Machine appears only when a default names it.
+    public func machines(cwd: String?) async throws -> [Machine] {
+        try Self.decode([Machine].self, from: await run(["machine", "list", "--json"], cwd))
+    }
+
+    /// Hand a Task to `machine`, or set a Wave's default Machine, through `lf machine use`.
+    public func useMachine(_ machine: String, for target: WorkMachineTarget, cwd: String?) async throws {
+        switch target {
+        case .task(let issue): _ = try await run(["machine", "use", machine, "--task", issue, "--json"], cwd)
+        case .wave(let id): _ = try await run(["machine", "use", machine, id, "--json"], cwd)
+        }
+    }
+
     public func pauseTask(issue: String, paused: Bool, cwd: String?) async throws {
         _ = try await run(["task", paused ? "pause" : "resume", issue], cwd)
     }
@@ -653,6 +666,12 @@ public struct Machine: Decodable, Sendable, Hashable {
         case createdAt = "created_at"
         case observedAt = "observed_at"
     }
+}
+
+/// The Work a Machine control reads and sets: a started Task or a Wave.
+public enum WorkMachineTarget: Sendable, Hashable {
+    case task(issue: String)
+    case wave(id: String)
 }
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals

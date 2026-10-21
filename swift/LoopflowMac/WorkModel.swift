@@ -1934,6 +1934,48 @@ final class WorkModel {
         }
     }
 
+    /// The Work the Machine control describes: the current started Task, else the
+    /// selected Wave. Repository and Dashboard views, and unstarted Tasks, have none.
+    var machineTarget: WorkMachineTarget? {
+        if let task = breadcrumb?.task?.task {
+            return task.runtime?.owner == nil ? nil : .task(issue: task.task.identifier)
+        }
+        if let work = selection, work.kind == .wave, navigation.dashboardID == nil { return .wave(id: work.id) }
+        return nil
+    }
+
+    var localMachineId: String? { workspaceRegistry?.localMachineId }
+
+    /// The Machine the target runs on, from planning. A Wave without its own
+    /// default runs here; a started Task without one is unknown.
+    func machine(of target: WorkMachineTarget) -> (id: String?, label: String?) {
+        switch target {
+        case .task:
+            let machine = breadcrumb?.task?.task.runtime?.owner?.machine
+            return (machine?.id, machine?.label)
+        case .wave(let id):
+            guard let machine = wave(id: id)?.wave.machine else { return (localMachineId, nil) }
+            return (machine.id, machine.label)
+        }
+    }
+
+    func machines(for target: WorkMachineTarget) async throws -> [Machine] {
+        try await query.machines(cwd: machineCwd(target))
+    }
+
+    /// Hand off the Task or set the Wave's default, then confirm the Work update
+    /// so planning and other windows read the same Machine.
+    func useMachine(_ machine: String, for target: WorkMachineTarget) async throws {
+        let home = workDataDirectory
+        try await query.useMachine(machine, for: target, cwd: machineCwd(target))
+        try await confirmWorkUpdate(after: home)
+    }
+
+    private func machineCwd(_ target: WorkMachineTarget) -> String? {
+        if case .task = target, let task = breadcrumb?.task { return WaveOrigin.resolve(task.task.task.repo) }
+        return repoPath
+    }
+
     /// Put the Task at a node of its Workflow, then confirm its subscription
     /// update. A refusal is kept on that Task's draft.
     func moveTask(to node: String, task: RoadmapTask) async {

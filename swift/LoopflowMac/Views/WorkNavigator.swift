@@ -261,7 +261,66 @@ struct WorkBreadcrumbs: View {
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
             }
+            if let target = model.machineTarget {
+                WorkMachineControl(model: model, target: target).padding(.leading, 6)
+            }
         }
+    }
+}
+
+/// Where the current Task or Wave runs, and the Machines it can run on instead.
+/// Planning supplies the reading; `lf machine use` writes. A Task handoff keeps
+/// its person, so each choice reads “Run on”.
+struct WorkMachineControl: View {
+    let model: WorkModel
+    let target: WorkMachineTarget
+    @State private var machines: [Machine] = []
+    @State private var error: String?
+
+    var body: some View {
+        let current = model.machine(of: target)
+        Menu {
+            ForEach(choices, id: \.self) { id in
+                Button("Run on \(name(id))") { Task { await use(id) } }
+                    .disabled(id == current.id)
+                    .accessibilityIdentifier("work-machine-" + id)
+            }
+            if let error { Text(error) }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
+            }
+            .font(Typography.caption())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Machine this Work runs on")
+        .accessibilityIdentifier("work-machine")
+        .task(id: target) { await load() }
+    }
+
+    /// This Machine first, then your registered Machines.
+    private var choices: [String] {
+        var ids = model.localMachineId.map { [$0] } ?? []
+        for machine in machines where !ids.contains(machine.id) { ids.append(machine.id) }
+        return ids
+    }
+
+    private func name(_ id: String) -> String {
+        if id == model.localMachineId { return "This Mac" }
+        let current = model.machine(of: target)
+        return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
+    }
+
+    private func load() async {
+        error = nil
+        do { machines = try await model.machines(for: target) } catch { self.error = error.localizedDescription }
+    }
+
+    private func use(_ id: String) async {
+        error = nil
+        do { try await model.useMachine(id, for: target) } catch { self.error = error.localizedDescription }
     }
 }
 

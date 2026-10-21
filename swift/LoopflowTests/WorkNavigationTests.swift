@@ -916,6 +916,23 @@ struct WorkNavigationTests {
         return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
     }
 
+    @Test("The Machine control reads the current Work's Machine from planning; unstarted Tasks and the repository have none")
+    func machineControl() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
+        #expect(model.machineTarget == .task(issue: "W2-131"))
+        #expect(model.machine(of: .task(issue: "W2-131")).label == "mini")
+        model.select(.task(id: "issue-now"))
+        #expect(model.machineTarget == nil)
+        model.select(.wave(id: "wave-1"))
+        #expect(model.machineTarget == .wave(id: "wave-1"))
+        #expect(model.machine(of: .wave(id: "wave-1")).id == "home_00000000000000000000000000000001")
+        model.select(nil)
+        #expect(model.machineTarget == nil)
+    }
+
     private func model() throws -> WorkModel {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")

@@ -849,7 +849,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute_batch(&format!(
-                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); UPDATE tasks SET started_at=2 WHERE id='{three}';"
+                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,1);"
             ))
             .unwrap();
         assert_eq!(
@@ -1582,9 +1582,12 @@ mod tests {
             0
         );
         assert_eq!(
-            conn.query_row("SELECT count(*) FROM task_admissions", [], |row| row
-                .get::<_, i64>(0))
-                .unwrap(),
+            conn.query_row(
+                "SELECT count(*) FROM task_ownership WHERE kind!='recorded'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
             0
         );
     }

@@ -1218,7 +1218,7 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         .unwrap();
     conn.execute("UPDATE waves SET repo=?1", [&path]).unwrap();
     let counts = || -> (i64, i64, i64) {
-        conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_admissions), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+        conn.query_row("SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM task_ownership), (SELECT count(*) FROM processes)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
     };
     let before = counts();
     let command = |args: &[&str]| {

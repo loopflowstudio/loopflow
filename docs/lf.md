@@ -883,19 +883,20 @@ one folder name need `?repository=<id>`; an unqualified link to them changes
 nothing and lists the qualified links. Emitted links add the qualifier when needed.
 
 `--host auto` opens where you are: a new workspace in this Herdr pane or cmux
-workspace, then Loopflow Desktop when installed (macOS), then a plain terminal:
-this terminal for a person at a prompt, otherwise a new Terminal window on macOS
-or the desktop's terminal launcher on Linux. A host is current only through its
-own caller context (`HERDR_*`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
+workspace, or a new window right after this one in tmux, then Loopflow Desktop
+when installed (macOS), then a plain terminal: this terminal for a person at a
+prompt, otherwise a new Terminal window on macOS or the desktop's terminal
+launcher on Linux. A host is current only through its own caller context
+(`HERDR_*`, `TMUX`/`TMUX_PANE`, `CMUX_*`, Desktop's `LF_DESKTOP`); nothing scans
 running applications. A clicked link carries no caller, so it opens in Desktop.
-Use `--host desktop` from a cmux or Herdr shell to open in Desktop anyway. An
+Use `--host desktop` from a cmux, tmux or Herdr shell to open in Desktop anyway. An
 explicit `--host` wins. A destination that refuses lets the next one try; an
 unanswered request is reported and never repeated elsewhere.
 
 Terminal destinations run `lf session connect` for the resolved Work, so its
 primary conversation, admission and attachment fences decide what opens. A
-conversation already live in a cmux or Herdr workspace is focused there, draft
-intact, when this caller is in that host. Live in any other client, it is
+conversation already live in a cmux or Herdr workspace or a tmux pane is
+focused there, draft intact, when this caller is in that host. Live in any other client, it is
 reported as `elsewhere` with its `--takeover` command; ordinary opening never
 moves it. Openings of one Work are serialized: a repeat while its new workspace
 is still starting focuses that workspace instead of creating another. `--available` opens

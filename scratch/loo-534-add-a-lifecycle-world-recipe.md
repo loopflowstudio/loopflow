@@ -3,7 +3,9 @@
 Status: implemented, gated and published as [#1621](https://github.com/loopflowstudio/loopflow/pull/1621)
 (2026-10-20); main merged at 52ed99b138 (#1622's `wave-backlog`, `task-review`, `wave-lifecycle`
 recipes adapted to `task(Option<&str>)` and dated `complete`). Main merged again at f8d1b4f3cf
-(2026-10-21) for #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned. Remaining: CI, review and merge; Task completion follows delivery. Jack Heart requested this as an
+(2026-10-21) for #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned. Remaining: CI, review and merge; Task completion follows delivery.
+CI's matrix runs only once scratch is cleared (`scratch-clear` candidate), so it
+runs at submit; #1621's head 40b769765f has only `scratch-clear` passing, the rest skipped. Jack Heart requested this as an
 autonomous follow-up to lf-world (#1612) on 2026-10-20.
 
 ## Problem
@@ -242,3 +244,4 @@ Realign after main merge (2026-10-20): `cargo test -p loopflow --test integratio
 Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one conflict, `WorkSurfaceView.swift`; branch code still reads removed `runtime.started`.
 Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
+Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no stale `started` names; no checks rerun. Full CI: submit.

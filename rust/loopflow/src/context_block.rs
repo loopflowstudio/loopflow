@@ -232,7 +232,8 @@ impl ContextDelivery {
         Ok(serde_json::json!({
             "Stop": [{"hooks":[{"type":"command","command":format!("{command} stop"),"timeout":10}]}],
             "PostToolUse": [{"hooks": [{"type":"command", "command": format!(
-                "[ -n \"${seen}\" ] || exit 0; [ \"${seen}\" -nt {latest} ] && exit 0; {command} tool",
+                // dash's -nt is false when the second file is missing, so test existence first.
+                "[ -n \"${seen}\" ] || exit 0; [ -e \"${seen}\" ] && {{ [ ! -e {latest} ] || [ \"${seen}\" -nt {latest} ]; }} && exit 0; {command} tool",
                 seen = crate::steer::STEER_SEEN_ENV,
                 latest = quote(&crate::steer::latest_marker(&self.home)),
             ), "timeout":30}]}],

@@ -693,24 +693,19 @@ read -r answer < /dev/tty
     };
     let mut owners = Vec::new();
     for input in ["first", "second", "left"] {
-        let output = fixture
-            .command(&[
-                "transport",
-                "start",
-                "--terminal",
-                "--",
+        let mut owner = fixture.serve(
+            true,
+            &[
                 env!("CARGO_BIN_EXE_lf"),
                 "--interactive",
                 "--agent",
                 "claude",
                 ":",
                 input,
-            ])
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        owners.push(String::from_utf8(output.stdout).unwrap().trim().to_owned());
+            ],
+        );
+        owner.env("PATH", &path);
+        owners.push(fixture.owner(owner));
         launches(owners.len());
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
@@ -885,20 +880,19 @@ fi
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let launched = fixture
-        .command(&["transport", "start", "--terminal", "--"])
-        .args([
+    let mut owner = fixture.serve(
+        true,
+        &[
             env!("CARGO_BIN_EXE_lf"),
             "--interactive",
             "--agent",
             "claude",
             ":",
             "call the nested CLI",
-        ])
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-        .output()
-        .unwrap();
-    assert!(launched.status.success(), "{launched:?}");
+        ],
+    );
+    owner.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    fixture.owner(owner);
     let caller = fixture.wait_file("caller");
     let nested = fixture.wait_file("nested-launches");
     let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();

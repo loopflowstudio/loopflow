@@ -267,6 +267,7 @@ fn density(world: &World) -> Result<()> {
             let task = world.task(wave, &title, "One of many Tasks in a dense Wave.")?;
             let global = wave_index * 50 + index;
             if global < 140 && global % 7 == 0 {
+                world.claim(&task)?;
                 world.session(
                     Some(&task),
                     &title,

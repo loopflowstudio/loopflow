@@ -176,14 +176,10 @@ refuses an edge with no Flow or into `end` (completion belongs to
 
 ## Remaining
 
-- Gate: affected suites, including the Swift built-world suites
-  (`LifecycleWorldTests`, `WorkDensityWorldTests`, and #1619's `WorldReadTests`,
-  which builds `portfolio`) whose recipes changed Flow shape; regenerate
-  `portfolio` screenshots. `WorldReadTests`' `taskFlowProcesses` row expects
-  exactly one non-empty Flow on the running Task: still true (one
-  `task-design` Flow; the move to `demo` records no Flow). Its Wave/roadmap
-  Task counts are unchanged, since no recipe adds or removes Tasks.
 - Done-when 4 (Desktop demo by eye) and 5 (LOO-392/LOO-434 comments after merge).
+- `portfolio` wave-proof screenshots (`scripts/generate_screenshots.py`) are
+  uncommitted, display-launched captures: demo/review owns them, not gate.
 
 Check (realign, 2026-10-21): `cargo test -p loopflow --test integration world_recipes` — 5 passed after updating the stale six-step `pursue` assertion to #1611's eight steps; `cargo clippy --all-targets -- -D warnings` clean; gate owns affected suites.
 Concept review (2026-10-21): no change. `task_run`/`move_to` map 1:1 to `lf task run`/`lf task workflow move`; every main recipe Flow was Task-bound, so private `flow` loses no caller; `pursue` on a Task with no Workflow selects a plain Flow (`select_task_run`), so the 13 rebased recipes take up nothing. No open product choice.
+Gate (2026-10-21): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --test integration world` 5 passed; `scripts/test_desktop.sh --filter 'WorldReadTests|LifecycleWorldTests|WorkDensityWorldTests'` all passed (first run hung in `BuiltWorld.run`'s `waitUntilExit` under host load ~180 after its child exited; rerun passed, density build unaffected by this branch).

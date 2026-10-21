@@ -6,8 +6,8 @@ classifier and the executor's filter, the summary line as `BranchPruneReport`'s
 `Display`, `deleted(copy)` replacing `count(copy, status)`, `clock` made private,
 `#[non_exhaustive]` dropped from two crate-private enums, and an unneeded
 `branch != ''` filter removed from `read_task_branches` (both columns are
-`NOT NULL`; an empty name matches no ref). It needs its own PR in this Task.
-Remaining: publish that follow-up, the real (non-dry) run with second-run
+`NOT NULL`; an empty name matches no ref). Published as PR #1626.
+Remaining: review of #1626, the real (non-dry) run with second-run
 idempotence for demo, and Jack's call on retired release debris
 (`questions.md`). Product direction is Jack's, from the LOO-539 brief.
 

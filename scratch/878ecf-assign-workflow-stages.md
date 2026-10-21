@@ -508,8 +508,6 @@ and 2), then rebase onto LOO-555 for the handover protocol.
 - Remaining in slice 2:
   - Git-only planning has no `lf refresh` path yet (refresh is Linear-only),
     so the people fetch should also ride Git planning sync at a low cadence.
-  - `person.rs`'s Git calls have no deadline; planning Git kills at 30 s.
-    Give the people ref the same bound.
 - Next: rebase onto LOO-555 (take its `config::participant_email`, which
   878ecf copied verbatim), then slice 3.
 - Docs for pickup, public names and `lf person` land with slice 3, which also

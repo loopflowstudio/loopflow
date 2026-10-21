@@ -2,12 +2,15 @@
 //! `refs/loopflow/people/<key>` on `origin`; every Machine fetches all of them
 //! into its local `people` cache. Machines are never published.
 
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 const PEOPLE: &str = "refs/loopflow/people/";
+const DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, thiserror::Error)]
 pub enum PersonError {
@@ -19,6 +22,8 @@ pub enum PersonError {
         operation: &'static str,
         code: Option<i32>,
     },
+    #[error("people Git {0} timed out")]
+    Timeout(&'static str),
     #[error("people Git I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("person record {reference} is unreadable: {error}")]
@@ -227,8 +232,11 @@ fn git(
     args: &[&str],
     input: &[u8],
 ) -> Result<Vec<u8>, PersonError> {
-    let mut command = Command::new("git");
-    command
+    let mut stdin = tempfile::tempfile()?;
+    stdin.write_all(input)?;
+    stdin.rewind()?;
+    let mut stdout = tempfile::tempfile()?;
+    let mut child = Command::new("git")
         .current_dir(repo)
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(args)
@@ -237,23 +245,32 @@ fn git(
         .env("GIT_AUTHOR_EMAIL", "people@loopflow.invalid")
         .env("GIT_COMMITTER_NAME", "Loopflow")
         .env("GIT_COMMITTER_EMAIL", "people@loopflow.invalid")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    let mut child = command.spawn()?;
-    {
-        use std::io::Write;
-        let mut stdin = child.stdin.take().expect("stdin is piped");
-        stdin.write_all(input)?;
-    }
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
+        .stdin(stdin)
+        .stdout(stdout.try_clone()?)
+        .stderr(Stdio::null())
+        .spawn()?;
+    let deadline = Instant::now() + DEADLINE;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(PersonError::Timeout(operation));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    if !status.success() {
         return Err(PersonError::Git {
             operation,
-            code: output.status.code(),
+            code: status.code(),
         });
     }
-    Ok(output.stdout)
+    stdout.rewind()?;
+    let mut bytes = Vec::new();
+    stdout.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[cfg(test)]

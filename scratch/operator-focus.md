@@ -66,6 +66,11 @@ is local there, so it never delegates further. repo-operate's Machines
 paragraph keeps whole-Wave `lf --machine … wave-operate` as a person's
 selection, not delegation within a pass. No code change, no guard terms.
 
+Concept review 7 (2026-10-21) found nothing to change. task-operate now runs
+inside operator passes (wave-operate's cross-Machine Tasks, repo-operate's
+Waveless Tasks). It only receives Tasks you own, files no Tasks and checks no
+KRs, and its "recommend a follow-up Task" is a proposal, so the boundaries hold.
+
 ## Problem
 
 Jack (2026-10-21): "repo and wave operate should both be focused on the work in

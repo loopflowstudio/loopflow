@@ -47,35 +47,23 @@ Considered and kept: repo-operate cleanup can `lf task abandon` your own
 Tasks while wave-operate never abandons. That is the cleanup duty decision 6
 keeps, scoped to your work; questions.md 1 covers reversing it.
 
-## Concept review 5 (2026-10-21): implemented
+## Concept reviews 5–6 (2026-10-21): implemented
 
 Decision 2 keeps operators off another person's Task because their Processes
 are not visible here. The same holds for a Task you own whose
 `runtime.owner.machine` is not this Machine (`lf id`): local `lf ps` cannot
 see its Flow, so it reads as idle and recover/continue would `lf task run` it
 here. Checkout allocation (`children.rs` `claim_in`, `require_writer_in`) is
-the only claim and returns early for a started Task. Fixed in
-`wave_operate.md` "Keep started work moving" under **Yours**: such a Task has
-unknown liveness here; operate it with `lf --machine <machine> --wave <wave>
-wave-operate`, or report it unknown naming the Machine; never `lf task run`,
-recover or complete it from this Machine. It lands under Stuck as unknown, or
-Moving with the remote pass's result. repo-operate unchanged; no code change.
-
-## Concept review 6 (2026-10-21): implemented
-
-Review 5's delegation can recurse. A pass on Machine A sends Task X (yours, on
-B) to `lf --machine B --wave <wave> wave-operate`. That whole-Wave pass sees
-your Task Y on A as "another Machine" and may delegate back to A. Each pass
-is allowed to delegate, so ping-pong has no bound. It also re-judges the whole
-Wave remotely when only X needed a step. The accepted unit is the one Task, and
-`task-operate` is its explicitly selected operator. So, in `wave_operate.md`
-**Yours**: operate it on its Machine with `lf --machine <machine>
-task-operate <issue>` and read its disposition, or report it unknown naming the
-Machine. That Task is local to B, so task-operate never delegates further. Put
-its result under Moving/Stuck as today. repo-operate's Machines paragraph keeps
-whole-Wave `lf --machine … wave-operate` for running a Wave on its Machine.
-That is a person's selection, not delegation within a pass. It is unchanged.
-No code change, and no guard terms touched.
+the only claim and returns early for a started Task. `wave_operate.md` "Keep
+started work moving" under **Yours** (`505509f5e5`, `62c5a3a3b1`): such a Task
+has unknown liveness here; operate that one Task with `lf --machine <machine>
+task-operate <issue>` and file its disposition under Moving/Stuck, or report it
+unknown naming the Machine; never `lf task run`, recover or complete it from
+this Machine. Review 5 first delegated to a remote whole-Wave `wave-operate`,
+which could hand your Task on A back from B without bound; task-operate's Task
+is local there, so it never delegates further. repo-operate's Machines
+paragraph keeps whole-Wave `lf --machine … wave-operate` as a person's
+selection, not delegation within a pass. No code change, no guard terms.
 
 ## Problem
 
@@ -256,4 +244,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results (2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard; `--test golden_prompt` passed; `--test integration config_user` 1 passed; `cargo fmt --check` clean; docs grep clean outside scratch. Concept reviews 3–5 and their compress passes changed prose no test asserts (no guard terms added); no rerun. Gate owns the suites once.
+Check results (2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard; `--test golden_prompt` passed; `--test integration config_user` 1 passed; `cargo fmt --check` clean; docs grep clean outside scratch. Concept reviews 3–6 and their compress passes changed prose no test asserts (no guard terms added); no rerun. Gate owns the suites once.

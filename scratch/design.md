@@ -39,13 +39,13 @@ supersede the October 17 correction.
 - Rust owns the bounded wave/task/query/kind/state grammar, implicit AND, OR and
   grouping, evaluation, attention and first-wins projection. No Swift evaluator.
   Authored clause IDs survive sibling insertion, repeated clauses and value edits.
-- Retained binary trees own axes, ratios and hidden members. Full replacement
+- Geometry is the slot layout (October 20); arrangement is occurrence order plus
+  hidden members (October 21 review, below). Full replacement
   requires every occurrence exactly once, including hidden members. First visible
-  Work occurrence wins in tree order; focus cannot choose the winner. Hide/restore
+  Work occurrence wins in order; focus cannot choose the winner. Hide/restore
   retains current edits and promotes duplicates without creating content.
-- Waiting Tasks sort first; the implemented 2:1 automatic area remains a provisional
-  weighting choice. Structural edits
-  freeze order/proportions; arrivals append. Incomplete reads preserve existing
+- Waiting Tasks sort first among Tasks the person never ordered. Reordering
+  freezes order; arrivals append. Incomplete reads preserve existing
   members/geometry; confirmed departures prune. Missing refs are unavailable
   evidence; cycles, invalid IDs and invalid layouts are errors.
 - lfdb owns Dashboard metadata, expression-keyed arrangement history, and portable
@@ -189,9 +189,7 @@ rewrite it before review.
 - Demo checks (agreed-ux.md §5): golden geometry, focus growth, page turns, drag
   reorder in sidebar and grid, slot editing, terminal behavior during animation, and the
   October 20 golden-grid fixes (desktop-dashboard-demo.md).
-- Saved Dashboards now render through slots, so `ArrangementTree` axes/ratios no longer
-  shape native geometry; they remain only as occurrence order. Collapsing the tree to an
-  ordered occurrence list (Rust, CLI `arrange`, fixtures) awaits Jack's call (questions.md).
+- Next implement pass: the two October 21 concept-review changes below.
 
 - Demo preparation: #1612 draft-copy builds and `lf-world` fixtures are merged here;
   the CLI↔native targeting gap remains ([desktop-dashboard-demo.md](desktop-dashboard-demo.md)).
@@ -200,6 +198,42 @@ rewrite it before review.
 - LOO-416 cold Shell attachment: native launches record no `lf_process_id` on the
   Shell tab and restore has no admission handle, so restored shells stay unattached.
   No provider launch, lifetime registry or saved attachment authority was added.
+
+## Concept review — October 21
+
+Against agreed-ux.md §5 and the implemented branch. Both changes follow from Jack
+Heart's accepted decisions; neither changes what the product is. No open product choice.
+
+**One arrangement: ordered occurrences.** Jack: “theres always a fixed number of
+slots”, “they always get arranged in order”, nobody pins a Task to a slot. Geometry
+lives in `SlotLayout`; the saved `ArrangementTree`'s axes and ratios shape nothing, and
+the 2:1 attention weighting in `tiled` sizes nothing. Two trees for one Dashboard is a
+second authority waiting to drift. Replace `ArrangementTree`/`ArrangementAxis` with
+`Arrangement { order: Vec<MemberRef>, hidden, mode }`: first-wins scans the list,
+hide/restore keeps position, full replacement is a permutation of every occurrence.
+Delete `tiled`, `retaining`, ratio validation and `SelectionError::Ratio`. Carry it through
+`saved_selections.sql` (draft, edited in place), CLI `arrange` input, `view_plan.json`/
+`dashboard.json` fixtures, Swift `WorkArrangementTree` and `DashboardView.swapping`.
+Expression-keyed history, hidden members and nested-query occurrences survive unchanged.
+
+**One reorder gesture.** Working Tasks drag moves (A takes B's place, `task_orders`);
+saved-Dashboard tile drag swaps occurrences. Same gesture, two outcomes, and swap is not
+“reorder”. Dashboard tile drag moves the occurrence to the target's position in its
+Dashboard's order. The order *source* stays distinct: Working Tasks and sidebar share the
+repository order (Jack, October 20); each saved Dashboard owns its arrangement. Edit Slots
+drag still exchanges slot geometry: that edits the layout, not the order.
+
+**Machine control returns.** The October 21 sync removed the breadcrumb Machine control
+with main's deleted placement. Jack's October 19 request (“a place to both view and set
+the machine that this work is happening on”) was not withdrawn, and main now owns both
+halves: `lf task status --json` reports `machine`, and `lf machine use <m> --task <t>` /
+`lf machine use <m> <wave>` set it. Restore `WorkMachineControl` over those owners; Task
+selection is a handoff that keeps Jack its person, so the menu labels it “Run on <m>”.
+Lower priority than the two changes above; no new DTO or store writer.
+
+Next proof: Rust selection tests over list order (permutation, hide in middle, duplicate
+promotion, nested query), DTO round-trips, and a Swift test that dropping tile C on A
+yields order C, A, B on both a saved Dashboard and Working Tasks.
 
 ## Acceptance and review
 

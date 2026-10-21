@@ -103,6 +103,11 @@ before/after shows only your Task's execution changed. Repeat with
   Drive work through Waves (with decisions 1–3; backlog listed), Sessions and
   reviews, Diagnose execution and auth, a compact Machines paragraph (must keep
   `lf machine use`; asserted by `skills/mod.rs` export test).
+- Compress: "Drive work through Waves" states the ownership rule once and
+  defers dispositions and recovery to `lf help wave-operate` (one owner, no
+  drifting second vocabulary); "Advancing your Tasks", the shared-readers and
+  bounded-contribution paragraphs are gone; "Machines" keeps `lf machine use`
+  and `lf task interrupt` for your own Tasks.
 - Delete: "Capture new Tasks"; from "Launching and advancing work": filing,
   `lf update-plan`, chapter rotation, `lf task delete`; "Existing-design
   handoff"; bounded-contribution paragraphs that teach starting other work
@@ -178,4 +183,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results: none yet.
+Check results: `cargo test -p loopflow --lib skills::` — 28 passed (compress, 2026-10-21); docs grep deferred to gate.

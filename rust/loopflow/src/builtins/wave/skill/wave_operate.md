@@ -117,8 +117,7 @@ installs no schedule; an open conversation does not schedule its next turn.
 
 Use these questions together over the Wave's existing Tasks; investigate the
 material tension, not five mandatory reports or five agents. Report findings
-and proposals in the reply. Starting other work, filing Tasks and changing the
-plan belong to the person and the skills they select.
+and proposals in the reply.
 
 | Function | Question and possible response |
 | --- | --- |
@@ -145,9 +144,6 @@ worktrees, ownership and execution history.
   Workflow edge or default Flow. Each run is a fresh Flow and returns when it
   ends; background it with your own tool. Leave a live one running instead of
   duplicating it.
-- Inspect `lf task status` and existing logs before recovery. Headless
-  operation stops with the reason when it cannot proceed. Preserve historical
-  review evidence; discuss feedback and next work in the ongoing Task conversation.
 - Use supported Task/Work operations, not raw stores, unclaimed process
   signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.

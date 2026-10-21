@@ -106,40 +106,19 @@ put routine progress in this conversation, not Task comments.
 
 ## Drive work through Waves
 
-Ownership (`runtime.owner` in `lf wave show --json`) decides what this pass
-may touch. A Task is yours when its owner's person is `lf config user` or names
-no person. Every started, unfinished Task you own ends this pass with one
-disposition and its evidence: **moving** (a live Flow process was observed),
-**acted** (continued, recovered or delivered here, then verified), **waiting on
-a person** (the named review, decision or merge click and its Session or PR),
-**waiting on a dependency or capacity**, **paused** (an explicit hold or
-instruction), or **unknown** (the missing read or liveness evidence). “Ready”,
-“needs reconciliation” and “its Wave owns this” are not dispositions. A Task
-another person owns is listed with that person and Machine as “theirs · left
-alone”: never run, recover, complete, claim, move or interrupt it, and do not
-judge its liveness from this Machine. Unowned backlog, including due
-follow-ups, is listed and left alone: starting it is the person's selection.
-An unreadable owner or unset `lf config user` leaves the Task unknown and untouched.
-
-Operate each Wave that has started work with `wave-operate`: read its
-objective, memory and current work, and give your started Tasks their
-dispositions. Do that here, or run
+Operate each Wave that has started work by following `lf help wave-operate`:
+it owns the ownership rule, dispositions and recovery. Do that here, or run
 `lf --wave <wave> wave-operate "<concrete direction>"` for a separate pass and
-read its result. Operate started Tasks outside any Wave with
-`lf task-operate <issue>` when you own them. Sending the user to another
-conversation is not operating. The repository view connects outcomes and dependencies across
-Waves; the Wave pass owns the detailed judgment within each Wave.
+read its result. Either way, a Task is yours when its owner's person is
+`lf config user` or names no person; another person's Task is listed as
+theirs and left alone, and unowned backlog is listed for the person to select.
+Operate started Tasks you own outside any Wave with `lf task-operate <issue>`.
+Sending the user to another conversation is not operating. The repository view
+connects outcomes and dependencies across Waves; the Wave pass owns the
+detailed judgment within each Wave.
 
-Leave live Flows running. For a failed or stopped Flow, read its log and effects,
-repair the cause, and launch only authorized remaining work through
-`lf task run <issue> <flow> --reason "<what changed>"`. Verify from
-`lf task status <issue> --json`; nothing resumes a stopped Flow process. A Flow ends
-where authored. Work awaiting review or a new direction stays in the Task
-conversation, with the PR and remaining scope named.
-
-Preserve Task identity, Flow history, conversations and existing execution.
-Do not create a competing Flow process or require a repository pass before a Task
-can progress. Follow an intervention through to its observed result, then
+Do not create a competing Flow process or require a repository pass before a
+Task can progress. Follow an intervention through to its observed result, then
 include that result in the repository update.
 
 ## Reviewer mode
@@ -181,34 +160,7 @@ perspective is an ordinary `lf --task <task> : "<prompt>"` contribution.
 Headless work that lacks required input explains its failure and stops; the
 Wave operator reads its logs.
 
-## Advancing your Tasks
-
-Inspect whether a Task you own already has prepared context or a running Flow
-before launching. Continue it on its workflow:
-
-```bash
-lf task run <existing-issue>   # its workflow's next edge, or its Wave/repository default
-```
-
-A Workflow has nodes where a person takes part in the Task conversation,
-joined by edges that each run one Flow. A Task on a workflow takes only an edge
-leaving its current node. Bare `lf task run <issue>` takes the only one or
-names the choices, `lf task run <issue> <flow>` picks one, and
-`lf task run <issue> end` takes an edge that runs nothing. A Task with no
-workflow takes up its Wave default, then repository `workflow:`. Read the
-actual Flow before describing its review gates. Do not take an edge that needs
-the person's choice.
-
-For review feedback, preserve the agreed direction and discuss the next action
-in the existing conversation. Inspect exact execution and effect history before
-starting authorized work. Session closure supplies no navigation authority.
-State what actually started after checking status.
-
-## Machines and bounded contributions
-
-Use shared readers: `lf wave list --json` for the repository, `lf wave status <wave> --json`
-for one Wave, and `lf wave show --json` for the plan joined to runtime evidence.
-Do not reconstruct their state from processes, checkouts or Linear alone.
+## Machines
 
 A Task is owned by a person on a Machine, or unowned. Each person picks their own
 Machine for a Wave's or the repository's new Tasks with `lf machine use <machine> <wave>`
@@ -220,22 +172,9 @@ the command. This pass changes no Task's owner or Machine. Use `lf id`, then
 Work. Connect missing logins in the foreground with `lf machine connect`; work
 uses credentials resident on its Machine.
 
-For one bounded contribution to a Task you own use
-`lf --task <issue> research "<question>"`, or
-`lf --wave <wave> wave-operate "<direction>"` for a Wave. `--task TASK` /
-`--wave WAVE` attributes a skill, inline prompt, or Flow. Every attributed
-contribution is equally the Task's work; none claims exclusive ownership.
-Give independent contributions distinct paths and inspect their artifacts. A
-bounded contributor leaves edits uncommitted and never claims unrelated dirty
-files. `lf task run <issue>` returns when its Flow ends; run it with your own
-background tool for pursuit you will not wait on.
-
-When evidence invalidates the attempt, `lf task interrupt <issue>` its live
-execution, update the Task, and wait for required contributions. Then launch
-fresh work with `lf task run <issue> <flow> --reason "<changed direction>"`.
+When evidence invalidates an attempt on a Task you own, `lf task interrupt <issue>`
+its live execution and discuss the changed direction in the Task conversation.
 The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
-Reconcile prior scratch against the new evidence rather than treating it as
-approved design.
 
 ## Diagnose execution and auth
 

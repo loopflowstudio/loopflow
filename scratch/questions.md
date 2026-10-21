@@ -20,3 +20,17 @@
    resolution exists for `lf task handover --to` only.
 6. **Notifying.** Assumption: request a GitHub review only when a PR already
    exists, and never open a PR just to notify. Under Linear, set the assignee.
+
+## Jack Heart's direction (2026-10-21, design review)
+
+- Drop the GitHub review request. The real question is how a handover knows
+  about Dustin and Dustin's Machine.
+- Addressing: either use the person's account on the planning provider
+  (Linear, Asana, Notion), or put a Machine field on the handover and parse
+  it; the Machine that matches picks it up.
+- Machines can be public (or a person marks a Machine public). Also allow
+  "just this user", with a Machine declaring "I am the default for this user;
+  I pick it up" (e.g. the laptop).
+- Without a provider, put a basic users system into Git. Survey user and team
+  records on Asana, Notion and Linear; put their common core into Git and use
+  it as the API to all three.

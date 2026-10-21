@@ -222,7 +222,7 @@ fn canonical_ids_retained_receipt_and_trace_locator_survive_identity_change() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        crate::journal::recorded_process_evidence(&record, Some(&[retained]), |pid, start| {
+        crate::journal::recorded_process_evidence(&record, &Ok(Some(retained)), |pid, start| {
             assert_eq!((pid, start), (std::process::id(), 1));
             ProcessIdentityEvidence::Dead
         }),

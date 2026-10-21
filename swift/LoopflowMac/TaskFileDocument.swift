@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import Loopflow
 import Observation
+import os
 
 /// One native buffer per Task/path. Its view, undo stack and selection outlive navigation.
 @MainActor
@@ -351,6 +352,8 @@ final class TaskFilesStore {
 
     private var invalidation: Task<Void, Never>?
     private var pendingPaths: Set<String> = []
+    private var pendingComparison = false
+    private var ignoreFailureLogged = false
     private var autosaves: [String: Task<Void, Never>] = [:]
     var autosave = true {
         didSet { for document in documents.values { scheduleSave(document) } }
@@ -386,7 +389,7 @@ final class TaskFilesStore {
                         throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
                     }
                     guard let self else { break }
-                    if frame.changed { self.error = nil; self.invalidate([""]) }
+                    if !frame.paths.isEmpty { self.error = nil; self.invalidate(frame.paths) }
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
             } catch {
@@ -401,27 +404,38 @@ final class TaskFilesStore {
     }
 
     private func invalidate(_ paths: [String]) {
-        // A commit, checkout or staging moved what the comparison reads.
-        var comparisonChanged = false
         for path in paths {
             if path == ".git" || path.hasPrefix(".git/") {
-                // Git and lf write other files here on every read; these move with the comparison.
+                // Git and lf write other files here on every read. A commit,
+                // checkout or staging moves what the comparison reads.
                 let name = (path as NSString).lastPathComponent
                 if ["HEAD", "ORIG_HEAD", "index"].contains(name) || path.contains("/refs/") {
-                    comparisonChanged = true
+                    pendingComparison = true
                 }
                 continue
             }
             pendingPaths.insert(path)
         }
-        guard !pendingPaths.isEmpty || comparisonChanged else { return }
+        guard !pendingPaths.isEmpty || pendingComparison else { return }
         invalidation?.cancel()
         invalidation = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             guard let self else { return }
             let changed = self.pendingPaths
+            var comparisonChanged = self.pendingComparison
             self.pendingPaths.removeAll()
-            defer { if Task.isCancelled { self.pendingPaths.formUnion(changed) } }
+            self.pendingComparison = false
+            defer {
+                if Task.isCancelled {
+                    self.pendingPaths.formUnion(changed)
+                    self.pendingComparison = self.pendingComparison || comparisonChanged
+                }
+            }
+            // Every lf read journals under the checkout and builds write ignored
+            // output; those writes never move the comparison. A peer filters its own.
+            let ignored = self.query.remoteMachine == nil ? await self.ignoredPaths(changed) : []
+            guard !Task.isCancelled else { return }
+            comparisonChanged = comparisonChanged || changed.contains { !ignored.contains($0) }
             // Re-read retained documents even when another file or terminal is visible.
             for (path, document) in self.documents where changed.contains(where: {
                 $0.isEmpty || $0 == path || path.hasPrefix($0 + "/")
@@ -437,10 +451,51 @@ final class TaskFilesStore {
                     await document.reconcile(next)
                 } catch { self.error = error.localizedDescription }
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, comparisonChanged else { return }
             await self.refreshChanges()
             if !Task.isCancelled, self.mode == .diff { await self.loadDiff() }
         }
+    }
+
+    /// The paths git ignores in this checkout. When git cannot judge, none are.
+    private func ignoredPaths(_ paths: Set<String>) async -> Set<String> {
+        let candidates = paths.filter { !$0.isEmpty }
+        guard !candidates.isEmpty else { return [] }
+        let cwd = self.cwd
+        do { return try await Task.detached { try Self.checkIgnore(candidates, in: cwd) }.value } catch {
+            if !ignoreFailureLogged {
+                ignoreFailureLogged = true
+                Self.logger.warning("File observation keeps ignored paths: \(error.localizedDescription, privacy: .public)")
+            }
+            return []
+        }
+    }
+
+    private static let logger = Logger(subsystem: "studio.loopflow", category: "task-files")
+
+    private nonisolated static func checkIgnore(_ paths: Set<String>, in checkout: String) throws -> Set<String> {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "-C", checkout, "check-ignore", "--stdin", "-z"]
+        let input = Pipe(), output = Pipe(), errors = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = errors
+        try process.run()
+        // Write on another thread so a batch larger than a pipe buffer cannot deadlock.
+        let request = Data(paths.joined(separator: "\0").utf8 + [0])
+        DispatchQueue.global().async {
+            try? input.fileHandleForWriting.write(contentsOf: request)
+            try? input.fileHandleForWriting.close()
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        // Status 1 means no path is ignored.
+        guard [0, 1].contains(process.terminationStatus) else {
+            throw RegistryQueryError(String(decoding: stderr, as: UTF8.self))
+        }
+        return Set(data.split(separator: 0).map { String(decoding: $0, as: UTF8.self) })
     }
 
     private func scheduleSave(_ document: TaskFileDocument) {

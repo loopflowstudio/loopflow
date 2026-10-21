@@ -35,17 +35,17 @@ struct TaskHistoryFilter: Equatable {
     }
 }
 
-/// A Wave's current Tasks by rank, split by whether their work has started.
+/// A Wave's current Tasks by rank, split by whether someone owns them.
 struct WaveTaskGroups {
-    let started: [RoadmapTask]
-    let notStarted: [RoadmapTask]
+    let owned: [RoadmapTask]
+    let unowned: [RoadmapTask]
 
     init(_ tasks: [RoadmapTask], now: Date) {
         let filter = TaskHistoryFilter()
         let current = tasks.sorted { $0.task.rank < $1.task.rank }
             .filter { filter.includes($0.task, condition: $0.condition, now: now) }
-        started = current.filter { $0.runtime?.started == true }
-        notStarted = current.filter { $0.runtime?.started != true }
+        owned = current.filter { $0.runtime?.owner != nil }
+        unowned = current.filter { $0.runtime?.owner == nil }
     }
 }
 

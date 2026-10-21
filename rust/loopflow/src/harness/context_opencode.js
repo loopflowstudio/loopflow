@@ -30,7 +30,8 @@ export default {
       for await (const item of event.subscribe({ signal: controller.signal })) {
         if (item.type !== "session.execution.succeeded" || item.data.sessionID !== owner) continue;
         try {
-          execFileSync(spec.executable, ["__planning-check", "--delivery", delivery], {
+          execFileSync(spec.executable, ["__context-block", "--delivery", delivery,
+            "--moment", "stop"], {
             env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo,
             timeout: 10000, stdio: "ignore",
           });

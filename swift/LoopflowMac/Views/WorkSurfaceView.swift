@@ -24,8 +24,8 @@ struct WaveTaskInventory: View {
                     case .unavailable(let reason): Text(reason).foregroundStyle(palette.warning)
                     case .available(let tasks, let truncated):
                         let groups = WaveTaskGroups(tasks, now: Date())
-                        taskGroup("Started", groups.started)
-                        taskGroup("Not started", groups.notStarted)
+                        taskGroup("Owned", groups.owned)
+                        taskGroup("Unowned", groups.unowned)
                         if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }
                     }
                     WaveMetricPortfolioView(portfolio: wave.metricPortfolio)
@@ -33,6 +33,7 @@ struct WaveTaskInventory: View {
             }.padding(16).accessibilityIdentifier("loopflow-detail-wave")
         }.background(palette.background).accessibilityIdentifier("wave-task-inventory")
     }
+
     @ViewBuilder
     private func taskGroup(_ title: String, _ group: [RoadmapTask]) -> some View {
         Text("\(title) · \(group.count)")

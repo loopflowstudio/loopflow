@@ -2,9 +2,8 @@
 
 Status: implemented, gated and published as [#1621](https://github.com/loopflowstudio/loopflow/pull/1621)
 (2026-10-20); main merged at 52ed99b138 (#1622's `wave-backlog`, `task-review`, `wave-lifecycle`
-recipes adapted to `task(Option<&str>)` and dated `complete`). #1621 now conflicts with main
-(2026-10-21): #1610 (LOO-523) removed `runtime.started` and regrouped the inventory as Owned/Unowned.
-Remaining: the **Main moved** slice below, then CI, review and merge; Task completion follows delivery. Jack Heart requested this as an
+recipes adapted to `task(Option<&str>)` and dated `complete`). Main merged again at f8d1b4f3cf
+(2026-10-21) for #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned. Remaining: CI, review and merge; Task completion follows delivery. Jack Heart requested this as an
 autonomous follow-up to lf-world (#1612) on 2026-10-20.
 
 ## Problem
@@ -198,7 +197,7 @@ by `WaveTaskGroups`, not kept beside it.
 
 ## Slices
 
-### Main moved — This slice (2026-10-21)
+### Main moved — done (2026-10-21)
 
 Jack Heart's #1610 (LOO-523) is an accepted product decision: Task ownership
 (person, Machine) replaced write-once `started_at`; `RoadmapTaskRuntime.started`
@@ -211,11 +210,8 @@ is gone and `WaveTaskInventory` groups Owned / Unowned. `lf task checkout`
    `runtime?.owner != nil`; callers in `WorkSurfaceView`, `LifecycleWorldTests`
    (lines asserting `current.started`/`notStarted`) follow. No `started` field
    or Started label survives.
-3. Risk to settle first: the world's `checkout` claim writes `task_ownership`
-   with the caller's person and Machine under the world's `LF_HOME`. If the
-   claim fails or records no owner in a fresh world, give `World::new` the
-   identity through production writers (machine registration), never a raw
-   `task_ownership` insert.
+3. Settled: the world's `checkout` claim records an owner in a fresh world;
+   `World::new` needed no identity change.
 
 Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
 unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
@@ -244,3 +240,4 @@ Gate: `scripts/test_desktop.sh -Xswiftc -gnone`: 615/616; `ProgramStatusTests` "
 Publish revision: inventory is current-only with no history control (#1594's assertion); completed ranges are proved on `TaskHistoryFilter` over world rows.
 Realign after main merge (2026-10-20): `cargo test -p loopflow --test integration world_recipes` 3/3 passed at 52ed99b138; Swift and full CI deferred to #1621's CI.
 Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one conflict, `WorkSurfaceView.swift`; branch code still reads removed `runtime.started`.
+Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.

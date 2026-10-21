@@ -89,10 +89,6 @@ fn wave_detail_preserves_flow_and_machine() {
         Some("mini")
     );
     assert_eq!(
-        snapshot.wave.machine.as_ref().unwrap().repo.as_deref(),
-        Some("src/project")
-    );
-    assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
@@ -394,6 +390,22 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     assert!(!status.planning_stale);
     assert!(status.planning_error.is_none());
     assert!(status.execution.is_none());
+    let ownership = status.ownership.as_ref().unwrap();
+    assert_eq!(
+        ownership.owner.as_ref().unwrap().to_string(),
+        "Jack Heart on mini"
+    );
+    assert_eq!(
+        ownership
+            .log
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        [
+            loopflow::durable::OwnershipKind::Claim,
+            loopflow::durable::OwnershipKind::Handoff
+        ]
+    );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(status).unwrap(), value);
     let mut missing = value;

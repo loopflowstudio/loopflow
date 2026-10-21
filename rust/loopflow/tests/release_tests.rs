@@ -1170,7 +1170,7 @@ fn first_release_cli_needs_no_baseline_and_retries_without_another_release() {
     let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
     let run = || {
         Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["release", "run", "0.1.0"])
+            .args(["repo", "release", "run", "0.1.0"])
             .current_dir(repo.path())
             .output()
             .unwrap()

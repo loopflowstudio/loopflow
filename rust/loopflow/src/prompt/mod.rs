@@ -1957,9 +1957,9 @@ mod tests {
             let orchestrates = scope.is_some();
             assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
             assert_eq!(
-                prompt.contains("lf wave place"),
+                prompt.contains("lf machine use"),
                 scope == Some("repo"),
-                "{name}: lf wave place"
+                "{name}: lf machine use"
             );
             if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");

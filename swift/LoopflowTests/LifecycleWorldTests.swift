@@ -19,14 +19,14 @@ struct LifecycleWorldTests {
         let names = { (group: [RoadmapTask]) in Set(group.map(\.task.name)) }
 
         let current = WaveTaskGroups(tasks, now: Date())
-        // Started work survives an upstream cancel until someone disposes of it.
-        #expect(names(current.started) == ["Paused mid-flight", "Canceled upstream", "Lost checkout", "In progress"])
-        #expect(names(current.notStarted) == ["Not started"])
+        // Owned work survives an upstream cancel until someone disposes of it.
+        #expect(names(current.owned) == ["Paused mid-flight", "Canceled upstream", "Lost checkout", "In progress"])
+        #expect(names(current.unowned) == ["Not started"])
 
         // Project history admits successful completions by range, never abandoned or canceled work.
         var filter = TaskHistoryFilter()
         filter.showCompleted = true
-        let settled = tasks.filter { !current.started.contains($0) && !current.notStarted.contains($0) }
+        let settled = tasks.filter { !current.owned.contains($0) && !current.unowned.contains($0) }
         for (days, expected) in [("7", ["Shipped yesterday", "Shipped this week"]),
                                  ("30", ["Shipped yesterday", "Shipped this week", "Shipped last fortnight"]),
                                  ("0", ["Shipped yesterday", "Shipped this week", "Shipped last fortnight", "Shipped last quarter"])] {

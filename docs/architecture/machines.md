@@ -9,7 +9,7 @@ Opaque `home_…` IDs, existing scheduled-job keys and historical evidence retai
 their stored spelling. Live commands and DTOs use `machine` and `machine_id`.
 
 ```bash
-lf machine add mini --repo '~/src/project'
+lf machine add mini
 lf machine list
 lf machine status mini
 lf --machine mini session list
@@ -52,7 +52,7 @@ login through SSH stdin; account-selected launches connect missing logins in the
 foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
-identity, routes and Work placements remain in SQLite. Previously observed routes
+identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
 need an explicit add before they can receive a login.
 
 ## Local by default
@@ -68,32 +68,84 @@ lf --machine build-home --wave product wave-operate
 
 `lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
 its Machine identity, resolves its own files and store, and returns the result.
-There is no central execution database. Shared-Task routing may observe added
-Machines for a retained execution owner, as described below; ordinary inventories
-remain local.
+Planning intent, including Task ownership, has one owner of record: the planning
+provider, or Loopflow's journal when the plan is local. Execution facts stay with
+the Machine that produced them, and inventories remain local. There are no
+daemons or listeners.
 
-The Machine and placement types live in
+The Machine and ownership types live in
 [`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
 the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 
-## Place Work
+## Own Tasks
 
-`Placement` maps one `WorkRef` to one `MachineId`. It records where Work belongs,
-not whether a process exists. `lf wave place` sets the Machine used by Wave schedules.
-Resolve the nearest assignment through Task, Project and ancestor Waves.
-New children store no assignment copy, so later
-delegation applies to existing
-unassigned children as well as future ones. An explicit narrower assignment wins,
-even when it selected the same Machine as its parent. The read exposes `source`
-and `provenance`; historical rows remain `legacy` because an explicit choice cannot
-be distinguished from a copied value. With no assignment, the root Wave supplies
-a `local_default`. Delegation does not move a checkout or launch a process. `lf wave status` reads
-planning, Task conditions, metrics and Session history; no process needs to be running.
-The current routing prototype uses recorded checkout Machine before delegation
-for known Task launches and checkout preparation. `task run`, `task checkout` and
-global `--task` share that read before Workflow/checkout effects. Allocation checks
-the effective destination again in its transaction; unknown historical checkout
-Machine is unavailable, never a local default.
+```bash
+lf task claim LOO-123               # you, on this Machine
+lf machine use mini --task LOO-123  # same person, mini's Machine
+lf task unclaim LOO-123             # unowned, history intact
+lf task status LOO-123 --json       # ownership: {owner, superseded_by, log}
+```
+
+A Task is owned by (person, Machine) or unowned. Its append-only ownership log
+holds `claim`, `handoff` and `unclaim` entries; the later entry wins in provider
+order. A handoff moves the claim to its target Machine and keeps the person; it
+needs only the target's identity, not a connection. `lf task run` and
+`lf task checkout` claim an unowned Task when they allocate its checkout.
+Completion, abandonment and reopening write no entries; a Done Task shows its
+last owner as history.
+
+Which Machine runs a person's Wave work is that person's choice, never
+repository content:
+
+```bash
+lf machine use mini infrastructure            # this Wave's new Tasks and its Session
+lf machine use laptop infrastructure --session  # only the Wave Session
+lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf machine list                               # each Machine with the defaults naming it
+```
+
+Bare `lf machine use mini` applies to the worktree's Task (a handoff), else its
+Wave, else this repository; `--task`, `--repo` or a Wave argument always wins.
+A Wave or repository has two settings, where its new Tasks run and where its
+primary Session runs. `--tasks` or `--session` sets one (bare, it skips the
+worktree's Task); neither sets both. Each resolves on its own, with no fallback
+from one to the other.
+A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
+repository identity, and is copied to the
+person's other added Machines over `lf --machine`, so the laptop launches there and
+mini receives the runs. An unreachable Machine gets a warning; rerun later.
+Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
+so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
+field read the same resolver.
+
+Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
+Session and the new Machine admits a fresh one (fresh Wave context, as with
+`--fresh`; native provider history stays behind). `lf session connect --wave <w>`,
+a bare connect resolving to a Wave or the repository, and Desktop's Wave Session
+route to the Session Machine over `lf --machine`. `lf open` reads a primary on
+another of your Machines through that connect, never from this Machine's copy.
+
+A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
+moves no existing Task; `lf machine use <machine> --task <task>` moves one and completes
+its primary Session on the old Machine. The new Machine admits a primary on first
+connect.
+
+Forwarding stays within one person's Machines. Claim, handoff, unclaim,
+`task run`, `task checkout` and global `--task` pick their writer and re-check
+inside one IMMEDIATE transaction:
+
+| Task is | Writer |
+|---|---|
+| Yours, on another of your Machines | That Machine, over `lf --machine` |
+| Unowned | Your Wave Machine |
+| Someone else's | Your own Wave Machine; your later claim wins |
+
+Nothing routes to another person's Machine, and nobody hands off or unclaims
+another person's claim; cross-person handoff is deferred. The Machine in a claim
+comment is informational. Routing reports its source: `owner`,
+`owning_machine:wave:<name>` or `owning_machine:this_machine`. Ownership does not move
+a checkout or launch a process. `lf wave status` reads planning, Task conditions,
+metrics and Session history; no process needs to be running.
 
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or
@@ -107,11 +159,12 @@ planning destination and publishes nothing. A shared code remote
 or equal clone name supplies no identity. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
 LOO-412 supplies user/shared destination selection and portable Work exchange.
-The journal carries authored delegation as Machine ID, placement time and
-explicit/legacy provenance, not connections or execution locations. Missing
-assignments retain inheritance. Concurrent losing assignments remain in the journal;
-imports project into the same Placement owner without echoing a local save. An
-unknown Machine remains an assignment reference, never an invented SSH route.
+Ownership entries travel as marked Task comments ("Jack Heart claimed this on
+mini" plus a `loopflow-ownership` HTML comment carrying the entry) through the
+ordinary comment delivery to Linear or the Git planning journal; inbound comments
+are parsed into the log. In the journal each local append sorts after every entry
+its Machine has seen. An unknown Machine remains an entry reference, never an
+invented SSH route.
 The journal does not carry RepositoryId: unbound import creates a local repository
 ID. Explicit association converges established roots on a selected ID without
 rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
@@ -131,13 +184,9 @@ unreachable or unassociated reply is unavailable. A negative reading says only
 that its Machine has no record. No connections, execution records or credentials
 are imported or created by observation.
 
-Routing shared Tasks without local execution now reads these peers before using
-any delegation. One positive owning-Machine record routes retained work there,
-even after delegation changes. Conflicting positive records refuse; no positive
-record retains the first-start refusal. Added peers are not a complete global
-inventory, and an observation reserves nothing. The destination re-resolves Work
-and retains its preparation/admission checks. Local-only work still inherits its
-nearest assignment. No execution-location cache or second placement writer exists.
+Peer observation routes nothing; the ownership log alone selects the Machine.
+Added peers are not a complete global inventory, and an observation reserves
+nothing. No execution-location cache exists.
 
 Task-run, move, checkout and Desktop opening explanations share one location
 projection, including local/peer provenance and unavailable checkout paths for
@@ -148,15 +197,24 @@ owned-line transport and retain drafts on disconnect. Missing or stale ownership
 prepares nothing and never falls back to local paths. Headless fixtures cover
 these paths; configured SSH and mounted native usability remain unproved.
 
-Exclusive first-start admission is still unavailable. Tasks selected into any Git
-destination without a retained checkout refuse first start, including user refs.
-Saves and acquisition remain usable. Neither a negative peer response nor a local
-SQLite transaction supplies cross-Machine exclusion.
+An inbound entry never ends this Machine's own open claim; only its own unclaim
+or handoff does. If another Machine claims later, every other Machine shows the
+later claim, while the earlier claimant still owns it locally, reports
+`superseded_by` ("Also claimed later by Kim on mini" in `lf task status`) and
+steers its live Sessions. Nothing is cancelled. If the log stops showing this
+Machine as owner for any other reason, such as a stale Machine's unclaim, the
+owner claims again.
+
+With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
+backlog, triage or `unstarted` to `started`; unclaim clears the assignee; handoff
+leaves it. The assignee is not a second ownership store: assignee changes write no
+entries, and the claim's Machine re-asserts its assignee while its claim is
+unsuperseded.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts
 record the preparing Machine. Existing checkouts retain their recorded location
-when Work assignment changes; no process or checkout is moved. Status, file access
+when ownership changes; no process or checkout is moved. Status, file access
 and checkout-based Session/Process membership use that location. Unknown historical
 Machines stay unknown, and file access cannot treat their paths as local. Explicit
 Session bindings retain membership independently of checkout location.
@@ -220,8 +278,8 @@ A bare slug may be ambiguous across repositories and is not mutation authority.
 lf relocate <wave-id> --repo <target> --name <slug>
 ```
 
-Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM, Work, and Machine
-placement joined to the unchanged UUID. A local receipt bridges the filesystem
+Relocation fences the locator, moves authored files, commits the new locator transactionally, and keeps PM and Work
+joined to the unchanged UUID. A local receipt bridges the filesystem
 and SQLite commit boundary so retry can finish verified cleanup after a crash.
 
 ## One main Machine

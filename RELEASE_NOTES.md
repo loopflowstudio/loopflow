@@ -1,39 +1,48 @@
-# v0.14.10
+# v0.14.12
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.10 keeps your conversations when Desktop doesn't. Before this release, closing a repository window, switching Tasks or restarting the Mac could cut you off from a running Session. Getting back took several manual reattaches, and after a reboot you had to find each interrupted Session yourself. Now Desktop keeps each repository's panes and drafts until it quits and reattaches to running Sessions without restarting them. At launch it brings back every conversation a reboot or crash interrupted. Upgrade if you keep several Tasks open at once or have lost a Session to a restart. (#1605, LOO-416)
+v0.14.12 gives every Task one clear answer to "who is working on this, and where": a person on a Machine, or nobody. That answer can be claimed, handed to another of your Machines or released, and each change shows up in Linear or Git planning. The release also keeps Sessions that were already running able to finish their turns after an `lf` upgrade. It carries a store break: lf < 0.14.12 can no longer open the store (raised by: task_ownership). Upgrade every Machine that shares the store.
 
-## Interrupted conversations come back
+## A Task is owned by a person on a Machine
 
-`lf resume --all` reopens every Session whose execution owner is gone without recording an exit. A reboot, crash or kill leaves Sessions in that state. Sessions you exited deliberately are left alone. Desktop runs the command at launch, so after a restart your conversations are already back.
+Before this release, three overlapping records tried to say who was working on a Task and where. They were a write-once `started_at`, Machine placement inherited through Wave, Project and Task, and a first-start admission that tied a Task permanently to the Machine that created it. None of them reached Linear, none could be handed off or released, and starting a laptop-created Task on mini needed an SSH connection back to the laptop. All three are replaced by one append-only ownership log. (#1610)
 
-- `lf resume --all` resumes each Session through the ordinary `lf resume` path, in a new owner with no viewer. It skips Sessions you exited through the provider or detached from with Ctrl+].
-- The output lists each Session as resumed, still starting or failed. It also flags any turn the restart cut off. That turn is not replayed.
-- It waits up to 20 seconds for each Session's owner to bind. If the owner hasn't bound by then, the Session is reported as still starting.
-- Leaving a Session now prints the `lf resume` command that returns to it, on every harness. A resume that fails during launch is logged rather than silently dropped.
+- **Claim, release, hand off.** `lf task claim` and `lf task unclaim` change ownership. `lf machine use <machine> --task <task>` hands a Task to another of your Machines and needs only that Machine's identity, not a live connection to it.
+- **Claiming happens on its own.** `lf task run` and `lf task checkout` claim an unowned Task when they allocate its checkout.
+- **Each command writes on the right Machine.** Within your own Machines, ownership commands run on the Machine that should record the entry, over `lf --machine`. Nothing is routed to another person's Machine.
+- **Competing claims are visible, not destructive.** If two Machines claim, the later claim wins and nothing is cancelled. On its own Machine the earlier claimant stays the owner, `lf task status` reports "Also claimed later by …", and its live Sessions receive a steer.
+- **Planning sees it.** Each change is posted as a marked Task comment, such as "Jack Heart claimed this on mini". In Linear, a claim assigns the Task to that Machine's Linear viewer and moves a backlog Task to started. An unclaim clears the assignee and leaves the status alone.
+- **Ownership outlives completion.** Completing, abandoning or reopening a Task does not change its owner, so a Done Task shows who last held it.
+- **Desktop.** Task rows show an owner line ("Jack Heart on mini" or "Unowned"), and Tasks are grouped as Owned or Unowned.
 
-## Desktop holds its place
+## Choose your Machine per Wave or repository
 
-Desktop now treats a repository window as a view onto work that keeps running, not as the owner of that work. Closing the window, switching Tasks or showing a pane again no longer costs you anything.
+Placement used to be shared, inherited configuration. It is now a personal default that stays on your Machines. (#1610)
 
-- Closing a repository window keeps its panes, selected Work and file drafts until Desktop quits. Reopening a repository you have used before shows that content immediately, even while repository lookup is still running or has failed.
-- **Resume** in Desktop now does the same thing as `lf resume`. It attaches to a conversation that is still running, or reopens its saved provider history.
-- `lf session attach --if-free` attaches only if no other viewer has input control, and never takes control from one. `lf session attach --prepare --json` returns an attach-only command without starting a provider. Desktop uses both to restore panes, so a pane becoming visible never takes input away from anyone.
-- CLI requests from Desktop time out after 30 seconds, and canceling one stops only that request. When a change times out, its outcome is treated as unknown and the change is never retried automatically.
+- `lf machine use <machine> <wave>` (or `--repo`) sets which of your Machines gets a scope's new Tasks and its Session. `--tasks` or `--session` sets only one of them. With neither flag, both are set.
+- These defaults live in this Machine's store and are copied to your other added Machines. They are never committed.
+- An unowned Task resolves through its Wave, then parent Waves, then the repository, then this Machine. A single-Machine setup needs no configuration.
+- Moving the Session Machine completes the old Wave primary Session and starts a fresh one on the new Machine. Native provider history stays on the old Machine.
+- `lf connect` and `lf open` route to your Session Machine when they resolve from context.
 
-## Conversations exist from the moment work does
+## Running Sessions finish their turns after an upgrade
 
-Creating a Task now saves its primary conversation in the same step. Wave admission does the same for the Wave and repository conversations. Saving a conversation starts no provider and doesn't mark the Task Started. Both happen on the first input reserved by `lf connect`. This replaces the earlier step that prepared the first input in advance.
+Provider hooks call the installed `lf` entry point, and a Session keeps the hook callbacks that `lf` wrote when it launched. An upgrade that removes one of those callbacks, such as `__planning-check` or `__session-title`, used to make the call fail as an unknown command. At Stop, Claude reads that failure as "keep working", so the agent could not end its turn. (#1629, #1630)
 
-## Limits
-
-- If Desktop itself dies, its in-app state is lost. The Session, its native history and a repaint come back, but live input and exact scrollback do not. The owner keeps a bounded vt100 text state, not a full terminal snapshot.
-- A turn cut off mid-flight is flagged and never replayed. With Codex, leaving during the `after-thread` startup window stops the provider, so a first turn it had already accepted can lose its input.
-- Not included: preserving layouts across Desktop installations and keeping a durable record of the intended layout. That work is tracked as LOO-497 and LOO-489. Full acceptance of LOO-416 still needs that integration, plus a measured check that native Sessions survive in an installed build.
+- An unknown command whose name starts with `__` now exits 0 and prints a note on stderr telling you to restart the Session to refresh its hooks.
+- Callbacks that still exist run as before. Unknown commands without the `__` prefix still fail; `lf no-such-skill` reports an error.
 
 ## Operational notes
 
-- **Schema migration:** the `session_admission` draft is released with this version. It stores the conversations that Task creation and Wave admission save. Seed fixtures for the previously released schema live at `tests/fixtures/migrations/conversation_admission_released.sql`.
-- **New CLI surface:** `lf resume --all`, `lf session attach --if-free` and `lf session attach --prepare --json`.
-- **Verification:** new Rust tests cover `resume --all` flagging a cut-off turn and stopping the owners it resumes. New transport tests cover `--if-free` and attach-only preparation. On the Swift side, `WorkspaceRetentionTests` checks that twelve Work layouts and their drafts survive window closure. These are twelve layouts, not twelve live providers. `SessionsStoreTests` and the local Wave agent launcher tests were also updated.
+- **Store break.** lf < 0.14.12 can no longer open the store (raised by: task_ownership). Upgrade `lf` on every Machine before running it against an upgraded store, including cron hosts.
+- **Migration.** The `task_ownership` migration converts existing Started and placement facts into `recorded` ownership entries. Recorded entries are never posted to Linear or Git planning, so upgrading doesn't flood Tasks with comments.
+- **Removed commands and records.** `lf task admission`, `lf wave place`, first-start admission (`tasks.admission_authority`, `task_admissions`), `work_placements`, the delegation WorkValues and the `started_at` triggers are gone. Scripts that call `lf wave place` should use `lf machine use <machine> <wave>`.
+- **Known limits.** Desktop's Task detail doesn't show the full ownership log yet. Handoff to another person is not included; the owner unclaims and the other person claims. Editing the assignee in Linear creates no ownership entry.
+- **Restart Sessions after hook changes.** A skipped hook does nothing until its Session restarts, and if a hook was renamed, the new name doesn't run in that Session either. The stderr note is the signal. `a_hook_left_by_an_older_lf_does_not_fail_the_provider_turn` and `hooks_from_an_earlier_lf_never_block_their_provider` cover the behavior. It hasn't been observed against a live Session across a real upgrade.
+- **Earlier draft.** These notes replace the v0.14.12 notes from #1631, which were written before the ownership change joined the release and said there was no compatibility break.
+
+## Small changes
+
+- `docs/architecture-reference.md` now opens with the principle "intent flows down, execution facts flow up". The README, `docs/lf.md`, `docs/waves.md`, the architecture pages and the builtin skills now describe ownership instead of placement and admission.
+- `lf wave rename` moved into its own module, with no change in behavior.

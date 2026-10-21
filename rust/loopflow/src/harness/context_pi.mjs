@@ -152,7 +152,7 @@ export default function (pi) {
     report(event, ctx, { events });
     turn = undefined; events = []; tools.clear();
     if (process.env.LF_CONTEXT_DELIVERY) {
-      try { invoke("__planning-check", {}); } catch { /* Next boundary retries planning. */ }
+      try { invoke("__context-block", {}, ["--moment", "stop"]); } catch { /* Next boundary retries planning. */ }
     }
   });
 }

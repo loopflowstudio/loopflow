@@ -67,30 +67,6 @@ impl Handoff {
     }
 }
 
-#[derive(Debug, clap::Subcommand)]
-pub enum TransportCommand {
-    /// Start an independently owned command and print its Process identity
-    Start {
-        #[arg(long)]
-        terminal: bool,
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
-    },
-    /// Own a command's transport until it exits (normally launched by start)
-    Serve {
-        #[arg(long)]
-        terminal: bool,
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
-    },
-    /// Attach to an existing execution; Ctrl+] detaches without stopping it
-    Attach {
-        process: String,
-        #[arg(long)]
-        observe: bool,
-    },
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Request {
@@ -179,22 +155,6 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
     HANDOFF.get().map(|handoff| &handoff.owner)
 }
 
-pub fn run(command: &TransportCommand) -> Result<()> {
-    match command {
-        TransportCommand::Start { terminal, argv } => {
-            println!(
-                "{}",
-                start(argv, *terminal, &std::env::current_dir()?, &|_| {})?
-            );
-            Ok(())
-        }
-        TransportCommand::Serve { terminal, argv } => serve(argv, *terminal),
-        TransportCommand::Attach { process, observe } => {
-            attach(&LfProcessId::parse(process)?, *observe, true)
-        }
-    }
-}
-
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current() -> Result<bool> {
@@ -239,7 +199,7 @@ pub(crate) fn start(
         .open(logs.join("transport.log"))
         .with_context(|| format!("Cannot open execution transport log in {}", logs.display()))?;
     let mut command = Command::new(std::env::current_exe()?);
-    command.args(["transport", "serve"]);
+    command.arg("__transport-serve");
     if terminal {
         command.arg("--terminal");
     }
@@ -426,7 +386,8 @@ impl Viewer {
     }
 }
 
-fn serve(argv: &[String], terminal: bool) -> Result<()> {
+/// Own a command's transport until it exits; only `start` launches this.
+pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let id =
         crate::journal::current_lf_process_id().context("Transport needs an admitted Process")?;
     let path = endpoint(&id).context("Prepare transport socket")?;
@@ -931,7 +892,7 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     Ok(())
 }
 
-pub fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
+pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;

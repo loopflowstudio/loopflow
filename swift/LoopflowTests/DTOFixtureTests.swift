@@ -603,7 +603,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
-        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 
@@ -674,7 +673,7 @@ struct DTOFixtureTests {
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
-        #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
+        #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
         #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
 
     }

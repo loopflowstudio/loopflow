@@ -7,7 +7,8 @@ Heart's design review. Jack Heart filed the direction on 2026-10-21.
   transfers on, a handover button and command, and no Loopflow service.
 - **Accepted (Jack, design review 2026-10-21):**
   - A handover addresses a person (their provider account and their
-    default-pickup Machine) or a Machine (public, or one of theirs).
+    default-pickup Machine). Machines stay private: another person's Machine
+    is never addressed directly (Jack, 2026-10-21).
   - Loopflow keeps Person and Machine records in Git as the backup where
     providers fall short.
   - Design to the Linear and Asana core; Notion may go.
@@ -57,9 +58,7 @@ lf task run w-1      # runs ship, the edge Dustin chose
 
 Desktop on Jack's side shows the Task as "With Dustin · design · not opened
 yet". Once Dustin's claim lands it reads "With Dustin · opened on dustin-mbp".
-The Task returns to Available when Dustin hands it back. A second world variant
-hands to the public Machine `studio-mini` and checks that only that Machine
-lists it.
+The Task returns to Available when Dustin hands it back.
 
 ## Problem, and what exists today
 
@@ -101,7 +100,6 @@ Linear and with the Git ref.
 MachineRecord {
   machine_id, label, person_key, person, crons,   // LOO-555
   pickup: bool,      // "I pick up work handed to my person" (e.g. the laptop)
-  public: bool,      // other people may hand Tasks to this Machine
   accounts: Vec<ProviderAccount>,                 // this Machine's provider identities
   updated_at,
 }
@@ -120,16 +118,15 @@ team yet (one person per node).
 
 Commands:
 - `lf machine pickup` marks this Machine as the person's pickup Machine.
-- `lf machine public on|off` sets whether others may hand Tasks to it.
 - `lf machine list --all` lists teammates' Machines from the fetched records,
-  with person, pickup and public.
+  with person and pickup.
 - `lf person list` lists the derived people: key, name, pickup Machine and
   accounts. Desktop's picker reads the same list.
 
 ### Address
 
 ```
-HandoverAddress = Person(PersonKey) | Machine(MachineLabel or MachineId)
+HandoverAddress = Person(PersonKey) | OwnMachine(MachineLabel or MachineId)
 ```
 
 The sender resolves the address against the fetched records when it writes the
@@ -137,12 +134,12 @@ entry:
 - **Person.** `person_key` is the recipient's key. `machine_id` is left `None`,
   so pickup is resolved when the Task is read. Their provider account receives
   the assignment.
-- **Machine.** The Machine must be public, or belong to the sender. It
-  resolves to `(machine.person_key, machine_id)`.
-  - A Machine of your own is the existing same-person handoff. `lf task
-    handover --to <your mini>` and `lf machine use mini --task` share one
-    implementation.
-  - An unknown or ambiguous label is an error that lists the matching Machines.
+- **Your own Machine.** Machines are private, so only the sender's own
+  Machines can be named. This is the existing same-person handoff: `lf task
+  handover --to <your mini>` and `lf machine use mini --task` share one
+  implementation. Another person's Machine label resolves to nothing; to reach
+  that person, name the person.
+  - An unknown or ambiguous label is an error that lists your Machines.
 
 The Task is *picked up here* when either:
 - the entry's `machine_id` is this Machine, or
@@ -183,14 +180,13 @@ that prose reaches the recipient's Sessions with no further work.
 
 ### Node person
 
-`AuthoredNode` and `WorkflowNode` gain either `person: <email>` or
-`machine: <label>`, but not both. The field is captured in the graph like every
-other node field.
+`AuthoredNode` and `WorkflowNode` gain `person: <email>`. The field is
+captured in the graph like every other node field. There is no `machine:` node
+field: Machines are private, and a committed file naming one person's Machine
+would only hold for that person.
 - Parse rejects a `person` value with no `@`.
 - An unknown person is not an error. The handover is written, waits on the ref,
   and shows "not opened yet".
-- An unknown `machine` cannot be resolved. The arrival stands, and the Task is
-  *due for handover* with that error.
 
 ### Transfer protocol
 
@@ -309,8 +305,8 @@ the assignee, so a Machine never needs a credential for anyone else.
 - **Desktop.**
   - Every Task workspace header has a **Hand over** button. Its popover
     offers:
-    - a picker of people and of public Machines (plus email entry), built from
-      `lf person list` and the Machine records;
+    - a picker of people (plus email entry) built from `lf person list`, and
+      your own Machines;
     - a note field;
     - the holder-only rule.
   - The Available sidebar filter includes Tasks picked up here that have no
@@ -335,7 +331,7 @@ the assignee, so a Machine never needs a credential for anyone else.
 - **Schema:** one migration draft.
   - `task_ownership` gains `handover TEXT` (JSON `Handover`, NULL otherwise).
   - `task_workflow_moves.kind` allows `received`.
-  - The Machine record cache gains `pickup`, `public`, `accounts` and
+  - The Machine record cache gains `pickup`, `accounts` and
     `updated_at`.
 - **Wire DTOs:**
   - `TaskOwnershipEntry` adds `handover`.
@@ -349,8 +345,7 @@ the assignee, so a Machine never needs a credential for anyone else.
     `swift/Loopflow/Models/TaskWork.swift` and the owner model.
 - **Docs:** update `docs/lf.md` "Work with another person" and its ownership
   table, `docs/architecture/machines.md` (cross-person handoff is no longer
-  deferred; publication, pickup and public), workflow authoring (`person:` and
-  `machine:`), and regenerate `docs/lf-reference.md`.
+  deferred; publication and pickup), workflow authoring (`person:`), and regenerate `docs/lf-reference.md`.
 
 ## Alternatives considered
 
@@ -361,7 +356,7 @@ the assignee, so a Machine never needs a credential for anyone else.
   (name, provider accounts, pickup) is known by one of that person's Machines,
   and a shared person ref would have several writers needing merge logic.
 - **Provider users as the only roster.** Rejected. This was Jack's direction:
-  no provider can hold a Machine, pickup or public flag, and Git-only planning
+  no provider can hold a Machine or pickup flag, and Git-only planning
   has no users at all. Provider accounts appear as fields on a record, never as
   the source of who exists.
 - **Keep the Linear assignee one-way.** Rejected by Jack (question 7): a
@@ -440,10 +435,9 @@ Forbidden:
 
 ## Slices (one PR, after LOO-555)
 
-1. Node `person` and `machine` in the definition, the graph DTO and validation.
+1. Node `person` in the definition, the graph DTO and validation.
    Focused test: `cargo test -p loopflow --lib workflow::`.
-2. Machine record fields, `lf machine pickup` and `lf machine public`,
-   `lf machine list --all` and `lf person list`, and pickup resolution.
+2. Machine record fields, `lf machine pickup`, `lf machine list --all` and `lf person list`, and pickup resolution.
 3. The `handover` column and marker. Ingest seeds the Workflow and steers.
    Arrival and move write the handoff. Run uses the handed-back edge and
    fast-forwards. Also `lf task handover` and `task list --available`.
@@ -467,9 +461,8 @@ This slice: 1.
   - A failed push leaves Jack's Task due for handover, with no handoff entry.
   - In a third Home that is Dustin's second, non-pickup Machine, the Task is not
     listed as available.
-  - Handing to public `studio-mini` lists it on that Machine only.
-  - Handing to a non-public Machine of someone else is refused, with the
-    public Machines listed.
+  - `lf task handover --to dustin-mini` from Jack's Home names no Machine of
+    Jack's and fails, suggesting Dustin by person.
 - `cargo test -p loopflow --lib task_ownership`: under a Linear test double, a
   handoff queues the recipient's Linear account as assignee, and a handback
   queues the owner's. A reassignment observed in Linear appends exactly one

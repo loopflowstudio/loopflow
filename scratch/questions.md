@@ -31,11 +31,13 @@
    committed design still using the `planning_user` UUID and
    `refs/loopflow/crons/<id>`. Assumption: if it lands that way, 878ecf's
    first slice converts both in place, with no dual reading.
-9. **Non-public Machines.** Assumption: `lf task handover --to <someone's
+9. **Non-public Machines.** DISSOLVED by Jack Heart (2026-10-21): Machines
+   stay private. There is no public flag; cross-person handovers address a
+   person, and only your own Machines can be named. (Was: Assumption: `lf task handover --to <someone's
    private Machine>` is refused at the sender, with the public Machines
    listed. The refusal exists only because Jack asked for "public". The
    flexible alternative hands to that Machine's person and lets their pickup
-   rule apply.
+   rule apply.)
 10. **Person derived from Machine records.** Assumption: there is no Person
     ref. A Person is Machine records grouped by key. Each person's own Machines
     publish their provider accounts and pickup flag.

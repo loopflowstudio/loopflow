@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: the demo (agent run, demo/review) and the gate checks.
+Remaining: concept review 6 (below), the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -60,6 +60,22 @@ unknown liveness here; operate it with `lf --machine <machine> --wave <wave>
 wave-operate`, or report it unknown naming the Machine; never `lf task run`,
 recover or complete it from this Machine. It lands under Stuck as unknown, or
 Moving with the remote pass's result. repo-operate unchanged; no code change.
+
+## Concept review 6 (2026-10-21): next implement direction
+
+Review 5's delegation can recurse. A pass on Machine A sends Task X (yours, on
+B) to `lf --machine B --wave <wave> wave-operate`. That whole-Wave pass sees
+your Task Y on A as "another Machine" and may delegate back to A. Each pass
+is allowed to delegate, so ping-pong has no bound. It also re-judges the whole
+Wave remotely when only X needed a step. The accepted unit is the one Task, and
+`task-operate` is its explicitly selected operator. So, in `wave_operate.md`
+**Yours**: operate it on its Machine with `lf --machine <machine>
+task-operate <issue>` and read its disposition, or report it unknown naming the
+Machine. That Task is local to B, so task-operate never delegates further. Put
+its result under Moving/Stuck as today. repo-operate's Machines paragraph keeps
+whole-Wave `lf --machine … wave-operate` for running a Wave on its Machine.
+That is a person's selection, not delegation within a pass. It is unchanged.
+No code change, and no guard terms touched.
 
 ## Problem
 

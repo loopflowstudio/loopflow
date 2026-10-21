@@ -532,10 +532,20 @@ output stops after compilation, inspect `events.jsonl` for the last started test
 without a matching end event. SwiftPM buffers console output, so silence alone
 does not establish that test execution never began.
 
-The Swift transport suite launches `target/debug/lf` against a temporary Machine.
-Build the current CLI before running it; an existing developer build can hide
+The Swift transport suite launches `target/debug/lf` against a temporary Machine,
+and `WorldReadTests` decodes every Desktop read against an `lf-world` build of
+`portfolio`. Build both before running it; an existing developer build can hide
 a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
 include this build.
+
+```bash
+cargo build -p loopflow --bin lf --bin lf-world
+scripts/test_desktop.sh --filter WorldReadTests -Xswiftc -gnone
+```
+
+`BuiltLf` owns finding and running those binaries in a private Machine, and
+`World.shared` builds each recipe once per test process. A new public
+`RegistryQuery` method needs a `WorldRead` row or a stated exclusion.
 
 Transport tests register `Process.terminationHandler` before launch and await
 its notification. Do not use `waitUntilExit()` after an async suspension: the
@@ -1508,19 +1518,6 @@ fixtures include that text in their Home paths to expose false positives.
 Changes to AgentProcess launch-mode recording also run the complete
 `session_record::runtime::tests` module: native refusal and headless cleanup
 fixtures must declare opposite launch modes, independent of Session defaults.
-
-### Portfolio CLI/Desktop round trip
-
-After building `target/debug/lf`, run the shared portfolio tests against it in a
-private temporary Machine. The test pins `LF_BIN` inside the network boundary;
-it never edits the installed portfolio.
-
-```bash
-LOOPFLOW_PORTFOLIO_TEST_BIN="$PWD/target/debug/lf" scripts/test_desktop.sh --filter PortfolioServiceTests -Xswiftc -gnone
-```
-
-Without the explicit binary, the CLI round-trip case is skipped; service and DTO
-cases still run. Rust's `portfolio_cli_tests` covers standalone command dispatch.
 
 ## Instruction decisions
 

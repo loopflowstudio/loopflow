@@ -103,3 +103,6 @@ LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).
   (`refs/loopflow/machines/<id>`, LOO-555, carries crons) is published only
   on opt-in. Assumption: visible is not addressable; handovers still name a
   person, pickup stays local. Both Tasks steered.
+- Refinement (Jack Heart, same day): the opt-in is per cron, not per
+  Machine (`lf cron publish`). No Machine records reach Git. LOO-555 and
+  878ecf steered.

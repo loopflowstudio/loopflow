@@ -1,3 +1,4 @@
+-- draft: task_ownership
 -- A Task is owned by (person, Machine) through an append-only log. Ownership
 -- replaces the write-once Started time, inherited Work placement, and the
 -- creating Machine's first-start admission.

@@ -452,6 +452,37 @@ Reap registered orphan providers and remove dead process receipts
 | `--json` | Emit the versioned prune report as JSON Default: false. |
 | `--help / -h` | Print help |
 
+## lf disk
+
+Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf disk clean
+
+Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
+| `--help / -h` | Print help |
+
+## lf disk rotate
+
+Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--quiet / -q` | Print nothing; removals are still logged to ~/.lf/logs/disk.log Default: false. |
+| `--help / -h` | Print help |
+
 ## lf :
 
 Run an inline prompt

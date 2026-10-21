@@ -424,7 +424,6 @@ const GITHUB_BRANCHES_PER_REQUEST: usize = 16;
 
 /// Why a remote gave no usable answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub(crate) enum RemoteFailure {
     /// `gh` needs a login (it exits 4), or the token was refused.
     Auth { detail: String },

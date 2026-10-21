@@ -14,8 +14,7 @@ use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
 use crate::naming::git_user;
 use crate::ops::branch_prune::{
-    clock as branch_prune_clock, prune_branches, BranchCopy, EntryStatus as BranchPruneStatus,
-    TaskBranches,
+    prune_branches, BranchCopy, EntryStatus as BranchPruneStatus, TaskBranches,
 };
 use crate::ops::OpsError;
 use crate::ops::{
@@ -2442,29 +2441,14 @@ fn wt_prune_branches(dry_run: bool) -> Result<()> {
             println!("{entry}");
         }
     }
-    let deleted = if dry_run {
-        BranchPruneStatus::WouldDelete
-    } else {
-        BranchPruneStatus::Deleted
-    };
-    let deleted_remote = report.count(BranchCopy::Remote, &deleted);
-    let deleted_local = report.count(BranchCopy::Local, &deleted);
-    println!(
-        "branches: {verb} {deleted_remote} remote, {deleted_local} local; retained {}; failed {}; GitHub GraphQL {}/{} left, resets {}",
-        report.retained(),
-        report.failed(),
-        report.budget.remaining,
-        report.budget.limit,
-        branch_prune_clock(report.budget.reset),
-        verb = if dry_run { "would delete" } else { "deleted" },
-    );
+    println!("{report}");
     record_ops_metric(
         &repo_root,
         serde_json::json!({
             "op": "wt.prune.branches",
             "dry_run": dry_run,
-            "deleted_remote": deleted_remote,
-            "deleted_local": deleted_local,
+            "deleted_remote": report.deleted(BranchCopy::Remote),
+            "deleted_local": report.deleted(BranchCopy::Local),
             "retained": report.retained(),
             "failed": report.failed(),
             "graphql_remaining": report.budget.remaining,

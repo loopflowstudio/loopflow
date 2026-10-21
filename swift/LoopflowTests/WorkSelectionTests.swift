@@ -25,17 +25,6 @@ struct WorkSelectionTests {
         #expect(restored == plan)
     }
 
-    @Test func droppingAnOccurrenceMovesItIntoTheTargetsPlace() {
-        let (a, b, c) = (WorkMemberRef(source: ["root"], work: WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")),
-                         WorkMemberRef(source: ["root"], work: WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")),
-                         WorkMemberRef(source: ["root"], work: WorkWorkspaceKey(repository: "repo", kind: .task, id: "c")))
-        let arrangement = WorkArrangement(order: [a, b, c], hidden: [b], mode: .auto)
-        // A move, not a swap, matching the repository Task order's drop.
-        #expect(arrangement.moving(c, to: a) == [c, a, b])
-        #expect(arrangement.moving(a, to: c) == [b, c, a])
-        #expect(arrangement.moving(a, to: a) == [a, b, c])
-    }
-
     @Test func queryPlansArriveWithTheSharedPlanningFrame() throws {
         let frames = try JSONDecoder().decode([WorkFrame].self, from: loadFixtureData("work_frame.json"))
         guard case .planning(let planning?) = frames[0].content else {

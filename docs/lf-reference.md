@@ -1118,12 +1118,14 @@ Replace a Dashboard's slot layout from JSON on stdin; `null` restores the defaul
 
 ## lf desktop order
 
-Move a Working Tasks member into another's place in the repository's Task order
+Move a member into another's place: the repository's Task order, or a Dashboard's with --query
 
 | Argument | What it does |
 |---|---|
-| `<task>` | task:<durable-id> to move |
-| `--to` | task:<durable-id> whose place it takes |
+| `<member>` | Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard |
+| `--to` | Member whose place it takes |
+| `--query` | Dashboard whose order to edit instead of the repository's Task order |
+| `--revision` | The Dashboard's last read revision; a stale one writes nothing |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

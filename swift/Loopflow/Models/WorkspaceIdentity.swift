@@ -39,6 +39,8 @@ public struct WorkWorkspaceKey: Codable, Hashable, Sendable {
         case .task: .task(id: id)
         }
     }
+    /// The `lf desktop` selector naming this Work.
+    public var selector: String { kind == .repository ? "repository" : kind.rawValue + ":" + id }
 }
 
 // Match Rust's case-only domains. Paths and native provider identities never use this.

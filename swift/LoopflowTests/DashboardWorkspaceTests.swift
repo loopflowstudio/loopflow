@@ -94,6 +94,41 @@ struct DashboardWorkspaceTests {
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
     }
 
+    @Test func droppingTileCOnAMovesItThroughTheSharedOrderCommand() async throws {
+        let repo = "repo_11111111111111111111111111111111"
+        func plan(_ order: [String], revision: Int, mode: String) throws -> String {
+            var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
+            let members = order.map { ["source": ["picked"], "work": ["repository": repo, "kind": "task", "id": $0]] }
+            json["saved_revision"] = revision
+            var resolution = try #require(json["resolution"] as? [String: Any])
+            resolution["members"] = members
+            json["resolution"] = resolution
+            json["arrangement"] = ["order": members, "hidden": [], "mode": mode]
+            json["projection"] = ["visible": members, "suppressed": []]
+            return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        }
+        let initial = try plan(["task_a", "task_b", "task_c"], revision: 3, mode: "auto")
+        let moved = try plan(["task_c", "task_a", "task_b"], revision: 4, mode: "touched")
+        let query = RegistryQuery { args, _ in
+            switch args {
+            // Rust applies the same move as the repository order and decides the mode.
+            case ["desktop", "order", "task:task_c", "--to", "task:task_a", "--query", "picked", "--revision", "3", "--json"]:
+                return String(decoding: try loadFixtureData("dashboard.json"), as: UTF8.self)
+            case ["desktop", "view", "query:picked", "--plan", "--json"]: return moved
+            default: throw RegistryQueryError("Unexpected command \(args)")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
+        let key = { WorkWorkspaceKey(repository: repo, kind: .task, id: $0) }
+        await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"), revision: 3)
+        #expect(model.dashboardError == nil)
+        let dashboard = try #require(model.dashboard("picked"))
+        #expect(dashboard.arrangement.order.map(\.work.id) == ["task_c", "task_a", "task_b"])
+        #expect(dashboard.arrangement.mode == .touched)
+        #expect(dashboard.savedRevision == 4)
+    }
+
     @Test func slotPagesHoldSevenTasksInOrder() {
         let members = (0..<9).map { WorkMemberRef(source: ["repo"], work: .init(repository: "repo", kind: .task, id: "t\($0)")) }
         let pages = Self.golden.pages(members)

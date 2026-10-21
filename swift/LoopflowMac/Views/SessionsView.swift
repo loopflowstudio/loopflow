@@ -1580,8 +1580,7 @@ extension SessionsWorkspace {
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil
         do {
-            let selector = key.kind == .repository ? "repository" : key.kind.rawValue + ":" + key.id
-            let saved = try await query.paneLayout(work: selector, repoPath: repo)
+            let saved = try await query.paneLayout(work: key.selector, repoPath: repo)
             let needsSave: Bool
             if let saved {
                 guard saved.work == key else { throw RegistryQueryError("Saved layout belongs to different Work; local edits retained.") }

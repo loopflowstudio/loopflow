@@ -4,9 +4,9 @@ use super::SqliteStore;
 use crate::durable::RepositoryId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::selection::{
-    Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
-    SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
-    WorkWorkspaceKind,
+    move_into_place, Arrangement, ArrangementMode, Dashboard, DashboardId, DashboardReading,
+    Selection, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
+    SelectionWork, SlotLayout, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -524,6 +524,7 @@ impl SqliteStore {
     }
 
     /// Compare-and-swap both authored values. A stale or invalid edit writes nothing.
+    /// The writer owns `mode`: a changed order touches the arrangement; hiding never does.
     pub fn save_dashboard(
         &self,
         repository: &RepositoryId,
@@ -542,16 +543,6 @@ impl SqliteStore {
         if prior.as_ref().map(|saved| saved.revision) != expected_revision {
             return Err(invalid("Dashboard changed; read it again before editing"));
         }
-        let saved = Dashboard {
-            repository: repository.to_string(),
-            id: id.clone(),
-            revision: expected_revision.unwrap_or(0) + 1,
-            name: prior.as_ref().and_then(|saved| saved.name.clone()),
-            pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
-            slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
-            selection: selection.clone(),
-            arrangement: arrangement.clone(),
-        };
         let work = work_in(&tx, repository)?;
         let mut definitions = definitions(&catalog);
         definitions.insert(id.clone(), selection.clone());
@@ -563,16 +554,34 @@ impl SqliteStore {
         let expression_key = selection.expression_key();
         let mut expected = arrangement_in(&tx, repository, id, &expression_key)?
             .map(|(_, arrangement)| arrangement)
-            .or_else(|| prior.map(|saved| saved.arrangement))
+            .or_else(|| prior.as_ref().map(|saved| saved.arrangement.clone()))
             .unwrap_or_else(|| Arrangement::automatic(&[]));
         expected.reconcile(&resolution);
         arrangement
             .validate(&expected.order)
             .map_err(StoreError::from)?;
+        let arrangement = Arrangement {
+            mode: if arrangement.order == expected.order {
+                expected.mode
+            } else {
+                ArrangementMode::Touched
+            },
+            ..arrangement.clone()
+        };
+        let saved = Dashboard {
+            repository: repository.to_string(),
+            id: id.clone(),
+            revision: expected_revision.unwrap_or(0) + 1,
+            name: prior.as_ref().and_then(|saved| saved.name.clone()),
+            pinned: prior.as_ref().is_some_and(|saved| saved.pinned),
+            slots: prior.as_ref().and_then(|saved| saved.slots.clone()),
+            selection: selection.clone(),
+            arrangement,
+        };
         tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
             params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
         tx.execute("INSERT INTO dashboard_arrangements(repository_id,dashboard_id,expression_key,selection_json,arrangement_json) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(repository_id,dashboard_id,expression_key) DO UPDATE SET selection_json=excluded.selection_json,arrangement_json=excluded.arrangement_json",
-            params![repository.as_str(),id.0,expression_key,serde_json::to_string(selection)?,serde_json::to_string(arrangement)?])?;
+            params![repository.as_str(),id.0,expression_key,serde_json::to_string(selection)?,serde_json::to_string(&saved.arrangement)?])?;
         tx.commit()?;
         Ok(saved)
     }
@@ -653,14 +662,40 @@ impl SqliteStore {
             .iter()
             .position(|id| id == to)
             .ok_or(StoreError::NotFound)?;
-        let moved = order.remove(from);
-        order.insert(target, moved);
+        move_into_place(&mut order, from, target);
         tx.execute(
             "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
             params![repository.as_str(), serde_json::to_string(&order)?],
         )?;
         tx.commit()?;
         Ok(order)
+    }
+
+    /// Move `work`'s visible occurrence into `to`'s place in a Dashboard's order,
+    /// under the same revision check as every Dashboard edit.
+    pub fn reorder_dashboard(
+        &self,
+        repository: &RepositoryId,
+        id: &DashboardId,
+        expected_revision: i64,
+        work: &WorkWorkspaceKey,
+        to: &WorkWorkspaceKey,
+    ) -> StoreResult<Dashboard> {
+        let reading = self
+            .read_dashboard(repository, id)?
+            .ok_or(StoreError::NotFound)?;
+        let mut arrangement = reading.arrangement;
+        let from = arrangement.winner(work).ok_or(StoreError::NotFound)?;
+        let target = arrangement.winner(to).ok_or(StoreError::NotFound)?;
+        move_into_place(&mut arrangement.order, from, target);
+        // A concurrent edit since this read advances the revision and is rejected there.
+        self.save_dashboard(
+            repository,
+            id,
+            Some(expected_revision),
+            &reading.saved.selection,
+            &arrangement,
+        )
     }
 
     pub fn delete_dashboard(
@@ -686,7 +721,8 @@ mod tests {
     use super::SqliteStore;
     use crate::durable::RepositoryId;
     use crate::work::selection::{
-        Arrangement, DashboardId, Selection, SelectionExpression, SelectionId, WorkWorkspaceKind,
+        Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
+        WorkWorkspaceKind,
     };
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -750,9 +786,7 @@ mod tests {
             .unwrap();
         let mut arranged = first.arrangement.clone();
         arranged.hide(&arranged.order[0].clone(), true).unwrap();
-        let mut reversed = arranged.order.clone();
-        reversed.reverse();
-        arranged.replace(reversed).unwrap();
+        arranged.order.reverse();
         let first = store
             .save_dashboard(
                 &repo,
@@ -774,7 +808,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(restored.selection, first.selection);
-        assert_eq!(restored.arrangement, arranged);
+        assert_eq!(restored.arrangement, first.arrangement);
+        assert_eq!(restored.arrangement.order, arranged.order);
         let revisions = store.revisions().unwrap();
         assert!(store
             .edit_dashboard(&repo, &id, "state:paused", Some(next.revision))
@@ -812,6 +847,54 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             2
+        );
+    }
+
+    #[test]
+    fn dashboard_order_moves_under_its_revision_and_only_reordering_touches() {
+        let (_dir, store, repo) = fixture();
+        let id = DashboardId("ordered".into());
+        let saved = store
+            .edit_dashboard(&repo, &id, "task:FIX-1 or task:FIX-2 or task:FIX-3", None)
+            .unwrap();
+        let [a, b, c] = [0, 1, 2].map(|i| saved.arrangement.order[i].clone());
+        assert_eq!(saved.arrangement.mode, ArrangementMode::Auto);
+
+        // Hiding and restoring keep the automatic order.
+        let mut hidden = saved.arrangement.clone();
+        hidden.hide(&b, true).unwrap();
+        let hidden = store
+            .save_dashboard(&repo, &id, Some(saved.revision), &saved.selection, &hidden)
+            .unwrap();
+        assert_eq!(hidden.arrangement.mode, ArrangementMode::Auto);
+        let mut restored = hidden.arrangement.clone();
+        restored.hide(&b, false).unwrap();
+        let restored = store
+            .save_dashboard(
+                &repo,
+                &id,
+                Some(hidden.revision),
+                &saved.selection,
+                &restored,
+            )
+            .unwrap();
+        assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
+
+        let moved = store
+            .reorder_dashboard(&repo, &id, restored.revision, &c.work, &a.work)
+            .unwrap();
+        assert_eq!(moved.arrangement.order, [c.clone(), a.clone(), b.clone()]);
+        assert_eq!(moved.arrangement.mode, ArrangementMode::Touched);
+        assert_eq!(moved.revision, restored.revision + 1);
+
+        let revisions = store.revisions().unwrap();
+        assert!(store
+            .reorder_dashboard(&repo, &id, restored.revision, &a.work, &c.work)
+            .is_err());
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert_eq!(
+            store.read_dashboard(&repo, &id).unwrap().unwrap().saved,
+            moved
         );
     }
 
@@ -1533,7 +1616,7 @@ mod tests {
         let original = first.arrangement.order.clone();
         let mut arrangement = first.arrangement.clone();
         arrangement.hide(&original[0], true).unwrap();
-        arrangement.replace(arrangement.order.clone()).unwrap();
+        arrangement.order.reverse();
         let touched = store
             .save_dashboard(
                 &repo,
@@ -1551,7 +1634,7 @@ mod tests {
                 Some(touched.revision),
             )
             .unwrap();
-        assert_eq!(&second.arrangement.order[..2], original);
+        assert_eq!(&second.arrangement.order[..2], arrangement.order);
         assert!(second.arrangement.hidden.contains(&original[0]));
         assert!(store
             .edit_dashboard(&repo, &id, "state:open", Some(first.revision))
@@ -1666,9 +1749,7 @@ mod tests {
         let loaded = reader.read_dashboard(&repo, &id).unwrap().unwrap();
         assert_eq!(loaded.saved, first);
         assert_eq!(loaded.arrangement, arrangement);
-        let mut edited = arrangement.order.clone();
-        edited.reverse();
-        arrangement.replace(edited).unwrap();
+        arrangement.order.reverse();
         let saved = store
             .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
             .unwrap();
@@ -1722,8 +1803,7 @@ mod tests {
         };
         let nested_id = DashboardId::new();
         let result = store.resolve_selection(&repo, &nested).unwrap();
-        let mut arrangement = Arrangement::automatic(&result.members);
-        arrangement.replace(arrangement.order.clone()).unwrap();
+        let arrangement = Arrangement::automatic(&result.members);
         store
             .save_dashboard(&repo, &nested_id, None, &nested, &arrangement)
             .unwrap();

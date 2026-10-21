@@ -1,7 +1,7 @@
 use super::selection::{
-    Arrangement, ArrangementMode, DashboardId, MemberRef, Selection, SelectionError,
-    SelectionExpression, SelectionId, SelectionResolution, SelectionState, SelectionWork,
-    WorkWorkspaceKey, WorkWorkspaceKind,
+    move_into_place, Arrangement, ArrangementMode, DashboardId, MemberRef, Selection,
+    SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
+    SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use crate::id::WaveId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -180,30 +180,41 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
 }
 
 #[test]
-fn replacement_must_permute_every_occurrence_including_hidden_ones() {
+fn an_order_must_permute_every_occurrence_including_hidden_ones() {
     let a = member("a", "task-a");
     let b = member("b", "task-b");
     let c = member("c", "task-c");
     let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone(), c.clone()]);
     arrangement.hide(&b, true).unwrap();
-    let before = arrangement.clone();
     for invalid in [
         vec![c.clone(), a.clone()],
         vec![c.clone(), a.clone(), a.clone()],
         vec![c.clone(), a.clone(), b.clone(), member("d", "task-d")],
     ] {
+        let edit = Arrangement {
+            order: invalid,
+            ..arrangement.clone()
+        };
         assert_eq!(
-            arrangement.replace(invalid),
+            edit.validate(&arrangement.order),
             Err(SelectionError::Membership)
         );
-        assert_eq!(arrangement, before);
     }
-    arrangement
-        .replace(vec![c.clone(), a.clone(), b.clone()])
-        .unwrap();
-    assert_eq!(arrangement.mode, ArrangementMode::Touched);
-    assert!(arrangement.hidden.contains(&b));
-    assert_eq!(arrangement.project().visible, [c, a]);
+    let edit = Arrangement {
+        order: vec![c.clone(), a.clone(), b.clone()],
+        ..arrangement.clone()
+    };
+    assert_eq!(edit.validate(&arrangement.order), Ok(()));
+    assert_eq!(edit.project().visible, [c, a]);
+}
+
+#[test]
+fn moving_into_place_is_a_move_not_a_swap() {
+    let mut order = vec!["a", "b", "c"];
+    move_into_place(&mut order, 2, 0);
+    assert_eq!(order, ["c", "a", "b"]);
+    move_into_place(&mut order, 1, 2);
+    assert_eq!(order, ["c", "b", "a"]);
 }
 
 #[test]
@@ -230,17 +241,17 @@ fn first_visible_occurrence_wins_and_hiding_it_promotes_the_duplicate() {
     assert_eq!(projection.visible, [b.clone(), later.clone()]);
     assert!(projection.suppressed.is_empty());
     arrangement.hide(&first, false).unwrap();
-    arrangement
-        .replace(vec![later.clone(), b, first.clone()])
-        .unwrap();
+    arrangement.order = vec![later.clone(), b, first.clone()];
     assert_eq!(arrangement.project().suppressed[0].winner, later);
 }
 
 #[test]
 fn incomplete_reads_keep_members_and_complete_departures_prune_the_order() {
     let [a, b, c] = ["a", "b", "c"].map(|id| member(id, id));
-    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone()]);
-    arrangement.replace(vec![b.clone(), a.clone()]).unwrap();
+    let mut arrangement = Arrangement {
+        mode: ArrangementMode::Touched,
+        ..Arrangement::automatic(&[b.clone(), a.clone()])
+    };
     arrangement.hide(&a, true).unwrap();
     arrangement.reconcile(&SelectionResolution {
         attention: Default::default(),
@@ -400,7 +411,7 @@ fn query_selection_edits_retain_source_ids_and_hidden_geometry() {
     let next = after.resolve("repo", &work, &BTreeMap::new()).unwrap();
     assert_eq!(old.members, next.members[1..]);
     let mut layout = Arrangement::automatic(&old.members);
-    layout.replace(layout.order.clone()).unwrap();
+    layout.mode = ArrangementMode::Touched;
     layout.hide(&old.members[0], true).unwrap();
     layout.reconcile(&next);
     assert_eq!(&layout.order[..2], old.members);
@@ -485,7 +496,8 @@ fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
     assert_eq!(layout.order, reading.members);
     let mut reversed = layout.order.clone();
     reversed.reverse();
-    layout.replace(reversed.clone()).unwrap();
+    layout.order = reversed.clone();
+    layout.mode = ArrangementMode::Touched;
     let wider = Selection::parse("kind:task or kind:wave", Some(&query)).unwrap();
     let wider = wider.resolve("repo", &work, &BTreeMap::new()).unwrap();
     let arrivals: Vec<_> = wider

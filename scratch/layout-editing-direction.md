@@ -3,8 +3,9 @@
 Historical design input. Jack Heart's October 17–18 corrections in `design.md`
 restrict compositions to Dashboards and preserve ordinary Console destinations.
 The default-selection rules below describe shared plans, not native repo/Wave UI.
-The retained-tree and lfdb mechanisms are implemented; their remaining acceptance
-and the unsaved-arrangement assumption live in `design.md`.
+The lfdb mechanism stands; the retained split tree below was replaced on October 21
+by ordered occurrences plus the slot layout (concept review in `design.md`). Remaining
+acceptance and the unsaved-arrangement assumption live in `design.md`.
 
 Jack Heart proposed representing arrangement as `v-split A, B, percentage` or `h-split A, B, percentage`. Hiding one side collapses the visible split to its sibling; showing the member again should fit this same model. Jack explicitly allowed changing the layout representation and suggested replacing a complete layout map as a viable baseline, while preferring simpler natural edits where useful. This refines the API design, not approval of the unfinished overall implementation plan.
 

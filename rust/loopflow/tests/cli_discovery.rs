@@ -1411,10 +1411,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         serde_json::from_slice(&arranged.stdout).unwrap();
     assert!(arranged.arrangement.project().visible.is_empty());
     assert_eq!(arranged.arrangement.order.len(), 1);
-    assert_eq!(
-        arranged.arrangement.mode,
-        loopflow::work::selection::ArrangementMode::Touched
-    );
+    // Hiding never changes whether the order is automatic.
+    assert_eq!(arranged.arrangement.mode, plan.arrangement.mode);
     let invalid = loopflow::work::selection::Arrangement::automatic(&[]);
     assert!(!invoke_input(
         &["desktop", "arrange", "backlog", "--revision", "4"],

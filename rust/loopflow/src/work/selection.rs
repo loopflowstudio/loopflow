@@ -409,6 +409,12 @@ pub enum ArrangementMode {
     Touched,
 }
 
+/// The one reorder gesture: the item at `from` takes `to`'s place.
+pub fn move_into_place<T>(order: &mut Vec<T>, from: usize, to: usize) {
+    let moved = order.remove(from);
+    order.insert(to, moved);
+}
+
 /// Occurrence order. Geometry belongs to the slot layout; members fill it in order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Arrangement {
@@ -452,15 +458,11 @@ impl Arrangement {
         Ok(())
     }
 
-    pub fn replace(&mut self, order: Vec<MemberRef>) -> Result<(), SelectionError> {
-        let replacement = Self {
-            order,
-            hidden: self.hidden.clone(),
-            mode: ArrangementMode::Touched,
-        };
-        replacement.validate(&self.order)?;
-        *self = replacement;
-        Ok(())
+    /// The first visible occurrence of `work`: the one its tile shows.
+    pub fn winner(&self, work: &WorkWorkspaceKey) -> Option<usize> {
+        self.order
+            .iter()
+            .position(|member| &member.work == work && !self.hidden.contains(member))
     }
 
     /// Hiding keeps the member's position, so restoring returns it there.

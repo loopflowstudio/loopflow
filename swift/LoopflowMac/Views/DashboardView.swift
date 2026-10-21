@@ -124,7 +124,7 @@ struct DashboardView: View {
                         Text("Hidden")
                         ForEach(plan.arrangement.hidden, id: \.self) { member in
                             Button {
-                                save(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
+                                arrange(plan, hidden: plan.arrangement.hidden.filter { $0 != member })
                             } label: {
                                 Text(model.task(id: member.work.id)?.task.task.name
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
@@ -170,7 +170,7 @@ struct DashboardView: View {
                 Button { zoom(member, plan: plan) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
                     .help("Open this Work in full")
                 if arrangeable {
-                    Button { save(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
+                    Button { arrange(plan, hidden: plan.arrangement.hidden + [member]) } label: { Image(systemName: "eye.slash") }
                         .help("Hide this occurrence").disabled(model.dashboardSaving)
                 }
             }.padding(8).background(palette.surface)
@@ -181,8 +181,9 @@ struct DashboardView: View {
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
                         Task { await model.reorderWorkingTask(task, to: member.work.id) }; return true
                     }
-                    guard arrangeable, !model.dashboardSaving, let other = plan.resolution.members.first(where: { $0.token == value }), other != member else { return false }
-                    save(plan, order: plan.arrangement.moving(other, to: member)); return true
+                    guard arrangeable, let id = plan.dashboardID, let revision = plan.savedRevision, !model.dashboardSaving,
+                          let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }
+                    Task { await model.reorderDashboard(id, member: other.work, to: member.work, revision: revision) }; return true
                 }
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
@@ -222,12 +223,12 @@ struct DashboardView: View {
         model.zoom(into: work, from: id)
     }
 
-    private func save(_ plan: WorkViewPlan, order: [WorkMemberRef]? = nil, hidden: [WorkMemberRef]? = nil) {
+    /// Hide or restore occurrences. Rust decides the mode; hiding never touches the order.
+    private func arrange(_ plan: WorkViewPlan, hidden: [WorkMemberRef]) {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else {
             model.dashboardError = "Save this Dashboard before arranging its Work."; return
         }
-        let arrangement = WorkArrangement(order: order ?? plan.arrangement.order, hidden: hidden ?? plan.arrangement.hidden,
-            mode: order == nil ? plan.arrangement.mode : .touched)
+        let arrangement = WorkArrangement(order: plan.arrangement.order, hidden: hidden, mode: plan.arrangement.mode)
         Task { await model.arrangeDashboard(id, arrangement: arrangement, revision: revision) }
     }
 }

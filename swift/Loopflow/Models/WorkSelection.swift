@@ -99,17 +99,6 @@ public struct WorkArrangement: Codable, Equatable, Sendable {
     }
 }
 
-extension WorkArrangement {
-    /// The order after dropping `member` on `target`: it takes the target's place,
-    /// as a drop does in the repository's Task order.
-    public func moving(_ member: WorkMemberRef, to target: WorkMemberRef) -> [WorkMemberRef] {
-        guard let from = order.firstIndex(of: member), let to = order.firstIndex(of: target) else { return order }
-        var order = order
-        order.insert(order.remove(at: from), at: to)
-        return order
-    }
-}
-
 public struct WorkArrangementProjection: Codable, Equatable, Sendable {
     public struct Suppressed: Codable, Equatable, Sendable {
         public let member: WorkMemberRef

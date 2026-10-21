@@ -61,13 +61,13 @@ errors. Neither is confirmed emptiness. `read_dashboard` returns saved intent,
 current evidence, and a reconciled arrangement without writing it. Incomplete
 reads keep earlier members; complete departures can prune them.
 
-`Arrangement::replace` requires every retained member exactly once, including
-hidden members. Hide/restore changes visibility, preserving edits to the current
-tree. Projection suppresses later occurrences of the same Work in traversal order;
-hiding a winner promotes the next. Automatic defaults put waiting Tasks first with twice the area, other Tasks next,
-then Waves. Incomplete observations preserve current geometry;
-structural edits mark them touched, preserving survivor geometry and appending
-arrivals. Focus, native surfaces and provider lifetime are outside this contract.
+A saved order holds every retained member exactly once, including hidden
+members; members fill the slot layout in that order. `save_dashboard` owns
+auto/touched: a changed order touches the arrangement, and hide/restore never
+does. An automatic order follows the query; a touched one keeps survivors in
+place and appends arrivals. Incomplete reads keep the current order. Projection
+suppresses later occurrences of the same Work, so hiding a winner promotes the
+next. Focus, native surfaces and provider lifetime are outside this contract.
 
 Dashboards atomically own their typed expression and portable arrangement.
 Pass the last saved revision when editing or deleting; stale writes fail without
@@ -83,6 +83,7 @@ belong to their existing native owners.
 lf desktop pin attention --revision 2
 lf desktop rename query:attention Available --revision 3
 lf desktop arrange attention --revision 4 < arrangement.json
+lf desktop order task:task_33333333333333333333333333333333 --to task:task_11111111111111111111111111111111 --query attention --revision 5
 lf desktop layout task:task_22222222222222222222222222222222 --json
 lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
 ```
@@ -97,9 +98,10 @@ Pin/unpin and Dashboard rename require the current Dashboard revision. Task rena
 `task:ID` and the Task's revision, writing through the existing Task edit owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
 
-`arrange` accepts a complete `Arrangement` JSON record, including hidden members,
-and marks it touched. `layout --save` accepts `WorkPaneLayout` JSON with revision
-zero on creation or the last returned revision on update. It preserves pane IDs,
+`arrange` accepts a complete `Arrangement` JSON record, including hidden members;
+its `mode` is ignored. `order --query` applies the repository order's move (the
+dragged member takes the target's place) to a Dashboard's visible occurrences.
+`layout --save` accepts `WorkPaneLayout` JSON with revision zero on creation or the last returned revision on update. It preserves pane IDs,
 content locations, focus, zoom, hidden panes and file drafts together. A draft
 carries its recorded Machine/checkout, relative path, base revision, base text and
 edited text. Saving intent never writes that file or launches a process. Native

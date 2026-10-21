@@ -657,13 +657,19 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Move a Working Tasks member into another's place in the repository's Task order
+    /// Move a member into another's place: the repository's Task order, or a Dashboard's with --query
     Order {
-        /// task:<durable-id> to move
-        task: String,
-        /// task:<durable-id> whose place it takes
+        /// Member to move: task:<durable-id>, or wave:<durable-id> on a Dashboard
+        member: String,
+        /// Member whose place it takes
         #[arg(long)]
         to: String,
+        /// Dashboard whose order to edit instead of the repository's Task order
+        #[arg(long, requires = "revision")]
+        query: Option<String>,
+        /// The Dashboard's last read revision; a stale one writes nothing
+        #[arg(long, requires = "query")]
+        revision: Option<i64>,
         #[arg(long)]
         json: bool,
     },

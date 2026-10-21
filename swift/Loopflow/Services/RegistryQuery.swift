@@ -80,6 +80,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "slots", id, "--revision", String(revision), "--json"], repoPath, input))
     }
 
+    /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
+    /// repository order's drop does; Rust applies the move and decides the mode.
+    public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64, repoPath: String) async throws -> Dashboard {
+        try Self.decode(Dashboard.self, from: await run(["desktop", "order", member.selector, "--to", target.selector,
+            "--query", id, "--revision", String(revision), "--json"], repoPath))
+    }
+
     /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await run(["desktop", "order", "task:" + task, "--to", "task:" + target, "--json"], repoPath))
@@ -90,9 +97,8 @@ public struct RegistryQuery: Sendable {
     }
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
-        let work = layout.work.kind == .repository ? "repository" : layout.work.kind.rawValue + ":" + layout.work.id
         let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", work, "--save", "--json"], repoPath, input))
+        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save", "--json"], repoPath, input))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {

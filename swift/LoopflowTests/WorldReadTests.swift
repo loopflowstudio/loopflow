@@ -340,7 +340,6 @@ private extension WorkFrame {
         case .planning(let body): body != nil
         case .peerPlanning(let body): body != nil
         case .sessions(let body): body != nil
-        case .selections(let body): body != nil
         case .task(let body): body != nil
         case .taskHistory(let body): body != nil
         case .wave(let body): body != nil

@@ -2487,6 +2487,18 @@ extension WorkModel {
         } catch { dashboardError = error.localizedDescription }
     }
 
+    /// A tile drop: the dragged Work takes the target's place in the Dashboard's order.
+    func reorderDashboard(_ id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, revision: Int64) async {
+        guard member != target, !dashboardSaving, let repoPath else { return }
+        dashboardSaving = true
+        dashboardError = nil
+        defer { dashboardSaving = false }
+        do {
+            _ = try await query.reorderDashboard(id: id, member: member, to: target, revision: revision, repoPath: repoPath)
+            try await refreshDashboard(id, repoPath: repoPath)
+        } catch { dashboardError = error.localizedDescription }
+    }
+
     func setDashboardSlots(_ id: String, slots: DashboardSlotLayout?, revision: Int64) async {
         guard !dashboardSaving, let repoPath else { return }
         dashboardSaving = true

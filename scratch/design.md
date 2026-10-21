@@ -167,8 +167,8 @@ Validation covers only the edited selection and its references.
 
 Separate Dashboard destinations, pinned discovery, Cmd K entries and name/query/
 pin editing consume Rust plans. Tiles reuse retained Task workspaces, show their
-primary Session or explicit zoom; unstarted Tasks offer Start (agreed-ux.md). Hide/restore
-and drag-to-move edit the full saved occurrence order; slot edits write `slots_json` (October 20).
+primary Session or explicit zoom; unstarted Tasks offer Start (agreed-ux.md). Slot edits
+write `slots_json` (October 20).
 Ordinary repository/Wave views retain the Console contract.
 
 Live `lf view EXPRESSION` opens the existing repository URL route; `--plan` stays
@@ -187,27 +187,22 @@ Linear LOO-497's acceptance body (October 19 05:41 revision) still lists scripti
 parity and `open` beside, which Jack Heart moved to LOO-519 and removed on October 18;
 rewrite it before review.
 
-## Remaining implementation, verification and transport
+## Remaining before publication
 
-- Demo checks (agreed-ux.md §5): golden geometry, focus growth, page turns, drag
-  reorder in sidebar and grid, slot editing, terminal behavior during animation, and the
-  October 20 golden-grid fixes (desktop-dashboard-demo.md).
+Jack Heart, October 21: ship now. Demo checks (agreed-ux.md §5, desktop-dashboard-demo.md)
+belong to review; scripting parity to LOO-519/LOO-453 (LOO-498 external hosts); cold
+Shell reattachment to LOO-416. Follow-up polish candidates: `questions.md`.
 
-- Demo preparation: #1612 draft-copy builds and `lf-world` fixtures are merged here;
-  the CLI↔native targeting gap remains ([desktop-dashboard-demo.md](desktop-dashboard-demo.md)).
-- Scripting parity: readback oracle, exit statuses and scoped context with LOO-519;
-  readiness/events and wait/run-wait with LOO-453; LOO-498 owns external hosts. Opening receipts report launch acceptance, not provider readiness or exit.
-- LOO-416 cold Shell attachment: native launches record no `lf_process_id` on the
-  Shell tab and restore has no admission handle, so restored shells stay unattached.
-  No provider launch, lifetime registry or saved attachment authority was added.
+## Concept reviews — October 21 (built)
 
-## Concept review — October 21 (implemented)
+First pass: `0b4028305d:scratch/design.md`. `WorkMachineControl` (Jack, October 19)
+reads the Task's `runtime.owner.machine` or `WaveSnapshot.machine` and writes
+`lf machine use` (“Run on <m>”). Edit Slots drag still exchanges geometry.
 
-Full text: `0b4028305d:scratch/design.md`. Arrangement is `{ order, hidden, mode }`;
-replacement permutes every occurrence. Dashboard tile drag moves an occurrence into the
-target's place, as `task_orders` does; Edit Slots drag still exchanges geometry.
-`WorkMachineControl` (Jack, October 19) reads the Task's `runtime.owner.machine` or the
-Wave's `WaveSnapshot.machine` and writes `lf machine use`, each choice “Run on <m>”.
+Second pass: tile drag calls `lf desktop order <member> --to <member> --query ID
+--revision N`, as sidebar drag calls it without `--query`; `move_into_place` is the
+one move. `arrange` stays the full-map baseline. `save_dashboard` alone sets
+`Touched`, exactly when the order differs from the stored one; hide/restore never does.
 
 ## Acceptance and review
 
@@ -226,7 +221,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → add a slot, focus B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 21): Rust `--lib selection selections desktop migrations` 196 passed, integration `dto_fixtures`+`cli_discovery` passed, clippy clean; Swift WorkSelection/Dashboard/DTOFixture/PaneControl/Retention/Destination/Theme/Opening/Navigation filters passed. Native and broader suites stay gate-owned.
+Check (October 21, second pass): `cargo test --lib selection selections desktop` 71 passed, 1 env failure (`public_local_plan_matches_desktop`: fixture build found no `aes-gcm`, gate-owned); integration `cli_discovery dto_fixtures cli_reference` 77 passed; clippy clean; Swift `DashboardWorkspaceTests|WorkSelectionTests` 17 passed.
 
 ## History
 

@@ -488,7 +488,7 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
 
 fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
-    use crate::work::selection::{Arrangement, ArrangementMode, DashboardId, WorkPaneLayout};
+    use crate::work::selection::{Arrangement, DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
@@ -577,9 +577,8 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
             let reading = store
                 .read_dashboard(&repository, &id)?
                 .ok_or(crate::store::StoreError::NotFound)?;
-            let mut arrangement: Arrangement = serde_json::from_reader(std::io::stdin().lock())?;
-            // The shared writer validates the full tree against current membership.
-            arrangement.mode = ArrangementMode::Touched;
+            // The shared writer validates the order against current membership and decides mode.
+            let arrangement: Arrangement = serde_json::from_reader(std::io::stdin().lock())?;
             serde_json::to_value(store.save_dashboard(
                 &repository,
                 &id,
@@ -600,11 +599,26 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 slots.as_ref(),
             )?)?
         }
-        DesktopCommand::Order { task, to, .. } => serde_json::to_value(store.reorder_task(
+        DesktopCommand::Order {
+            member,
+            to,
+            query: Some(query),
+            revision: Some(revision),
+            ..
+        } => serde_json::to_value(store.reorder_dashboard(
             &repository,
-            &work_key(&repository, task)?.id,
-            &work_key(&repository, to)?.id,
+            &dashboard_id(query),
+            *revision,
+            &work_key(&repository, member)?,
+            &work_key(&repository, to)?,
         )?)?,
+        DesktopCommand::Order { member, to, .. } => {
+            let (member, to) = (work_key(&repository, member)?, work_key(&repository, to)?);
+            if member.kind != WorkWorkspaceKind::Task || to.kind != WorkWorkspaceKind::Task {
+                bail!("the repository order holds Tasks; pass --query to order a Dashboard");
+            }
+            serde_json::to_value(store.reorder_task(&repository, &member.id, &to.id)?)?
+        }
         DesktopCommand::Layout {
             work, save: true, ..
         } => {

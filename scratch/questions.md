@@ -61,11 +61,7 @@ unarranged Dashboards follow it too. A drop puts the dragged Task in the target'
 Every saved Dashboard renders through slots; its visible occurrences fill them in
 order (October 21 concept review, design.md).
 
-Historical notes removed October 20 (full text at `f492be7f19:scratch/`): the October 16
-Arrange handoff (owners: LOO-416 Session retention, LOO-453 readiness/events, LOO-422/415
-status transport, LOO-414 remote launch, LOO-498 external multiplexers) and the October
-18 operator readback (PR #1580 demo-only; demo review in Session
-`session_421decfc3b31459fb10e4771e231a704`).
+Historical notes removed October 20: `f492be7f19:scratch/` (Arrange handoff owners, October 18 operator readback).
 
 October 21 sync onto main (#1610, Task ownership): main deleted placement, admission and
 `started_at`, so this branch's `lf task place`, `lf wave place` readback, `WorkMachine`
@@ -79,3 +75,9 @@ October 21 implementation assumptions: the Machine control appears only on start
 and Dashboard views have none. "This Mac" heads the choices; a Wave with no default
 reads as this Machine. Auto-mode Dashboards follow query order (the old 2:1 attention
 weighting sized nothing once slots owned geometry).
+
+October 21: Jack Heart said ship LOO-497 now; polish belongs to follow-up Tasks.
+Candidates, unbuilt: CLI↔native targeting parity for a separately identified preview;
+LOO-416 cold Shell reattachment; demo judgements on doubled tile/pane borders and
+terminal regrid during animation; dropping the ignored `mode` from `arrange` input;
+rewriting Linear LOO-497's acceptance body (scripting parity moved to LOO-519).

@@ -144,10 +144,10 @@ struct WorkSelectionTests {
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel(); continuation.finish() }
         let plans = [ViewPlan(owner: root, members: [member("a")])]
-        continuation.yield(WorkFrame(sequence: 1, answers: 100, home: "/fixture-home", revisions: nil,
+        continuation.yield(WorkFrame(sequence: 1, answers: 100, home: "/fixture-home", copy: nil, revisions: nil,
             unavailable: nil, content: .selections(.init(repo: repo, plans: plans)), wire: nil))
         try await eventually { model.selectionPlans.value == plans }
-        continuation.yield(WorkFrame(sequence: 2, answers: 100, home: "/fixture-home", revisions: nil,
+        continuation.yield(WorkFrame(sequence: 2, answers: 100, home: "/fixture-home", copy: nil, revisions: nil,
             unavailable: "read failed", content: .selections(nil), wire: nil))
         try await eventually { model.selectionPlans.errorMessage == "read failed" }
         #expect(model.selectionPlans.value == plans)

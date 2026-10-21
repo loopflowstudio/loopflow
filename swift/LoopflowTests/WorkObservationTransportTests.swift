@@ -189,7 +189,7 @@ struct WorkObservationTransportTests {
 
     /// One line shaped like the `task` entry of `work_frame.json`.
     private func frame(_ sequence: Int) -> String {
-        #"{"part":"task","sequence":\#(sequence),"answers":null,"home":"/fixture","# +
+        #"{"part":"task","sequence":\#(sequence),"answers":null,"home":"/fixture","copy":null,"# +
             #""revisions":{"planning":911,"sessions":403,"flows":88,"processes":5120,"usage":77},"# +
             #""unavailable":"Task LOO-1 is not registered","body":null}"# + "\n"
     }

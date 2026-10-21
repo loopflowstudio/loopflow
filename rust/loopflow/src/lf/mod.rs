@@ -2299,7 +2299,7 @@ pub enum WtCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Prune worktrees or completed build output
+    /// Prune worktrees, completed build output, or finished branches
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
@@ -2307,6 +2307,10 @@ pub enum WtCommand {
         /// Reclaim old generated output from completed Tasks; retain checkouts
         #[arg(long)]
         builds: bool,
+        /// Delete origin and local branches tied to merged or closed PRs,
+        /// finished Tasks, or published release candidates
+        #[arg(long, conflicts_with = "builds")]
+        branches: bool,
         /// Emit cleanup entries and allocated-byte receipts
         #[arg(long, requires = "builds")]
         json: bool,

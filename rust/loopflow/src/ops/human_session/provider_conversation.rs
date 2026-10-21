@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 
-use super::{local_capture_dir, lock_session_process, publish_prepared_input};
+use super::{append_input, local_capture_dir, lock_session_process, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
@@ -265,21 +265,46 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<LfSess
             created_at: crate::store::rows::now_unix(),
         })
         .await?;
-    let session = publish_prepared_input(
-        &store.sqlite,
+    let session = select(
+        store,
         &session,
-        crate::session_record::SessionFlowMembership::Independent,
-    )?;
+        conversation.provider,
+        id,
+        conversation.account.as_ref(),
+    )
+    .await?;
+    Ok(Some(session))
+}
+
+/// Make provider conversation `id` the one `session` resumes: give it a
+/// published input the way connecting does, then record the conversation.
+pub(crate) async fn select(
+    store: &SharedStore,
+    session: &LfSession,
+    provider: Provider,
+    id: &str,
+    account: Option<&ProviderAccountId>,
+) -> Result<LfSession> {
+    // A fresh Wave primary reserves no input until it connects.
+    let session = if session.captured.is_none() {
+        append_input(store, session.clone()).await?
+    } else {
+        publish_prepared_input(
+            &store.sqlite,
+            session,
+            crate::session_record::SessionFlowMembership::Independent,
+        )?
+    };
     let dir = local_capture_dir(session.input_key()?)
         .ok_or_else(|| anyhow!("Session {} has an invalid capture reference", session.id))?;
-    crate::session_record::write_provider_session(&dir, &id.into(), conversation.account.clone())?;
-    if let Some(account) = &conversation.account {
+    crate::session_record::write_provider_session(&dir, &id.into(), account.cloned())?;
+    if let Some(account) = account {
         // It resumes in the account home that holds its history.
         store
-            .pin_provider_session_route(conversation.provider, &id.into(), account, true)
+            .pin_provider_session_route(provider, &id.into(), account, true)
             .await?;
     }
-    Ok(Some(session))
+    Ok(session)
 }
 
 /// Every provider home holding a conversation with this id: each provider's

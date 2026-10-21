@@ -725,6 +725,8 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+A build with unreleased migration drafts names its preview copy in every frame;
+the breadcrumbs then end with a **Preview** chip whose tooltip gives the path.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds even while heartbeats arrive;

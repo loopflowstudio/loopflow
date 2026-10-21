@@ -1520,6 +1520,17 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    // Provider hooks keep the callbacks their launching lf wrote. A removed
+    // one must not fail: Claude treats exit 2 at Stop as "keep working".
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
@@ -2132,6 +2143,19 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    // Provider hooks name the stable installed entry, which an upgrade can
+    // replace under a running Session. An internal command this release no
+    // longer has came from a hook an older lf wrote; skip it rather than fail
+    // the provider's turn, since a Stop hook's error blocks stopping.
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf {}: skipped an internal hook this lf version no longer has; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     // Own direct conversations and Flows. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(

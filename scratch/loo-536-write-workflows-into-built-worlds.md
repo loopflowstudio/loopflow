@@ -186,3 +186,4 @@ refuses an edge with no Flow or into `end` (completion belongs to
 - Done-when 4 (Desktop demo by eye) and 5 (LOO-392/LOO-434 comments after merge).
 
 Check (realign, 2026-10-21): `cargo test -p loopflow --test integration world_recipes` — 5 passed after updating the stale six-step `pursue` assertion to #1611's eight steps; `cargo clippy --all-targets -- -D warnings` clean; gate owns affected suites.
+Concept review (2026-10-21): no change. `task_run`/`move_to` map 1:1 to `lf task run`/`lf task workflow move`; every main recipe Flow was Task-bound, so private `flow` loses no caller; `pursue` on a Task with no Workflow selects a plain Flow (`select_task_run`), so the 13 rebased recipes take up nothing. No open product choice.

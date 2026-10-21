@@ -1513,6 +1513,17 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    // Provider hooks keep the callbacks their launching lf wrote. A removed
+    // one must not fail: Claude treats exit 2 at Stop as "keep working".
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }

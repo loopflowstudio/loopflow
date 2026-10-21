@@ -2,8 +2,9 @@
 
 Status: implemented, gated and published as [#1621](https://github.com/loopflowstudio/loopflow/pull/1621)
 (2026-10-20); main merged at 52ed99b138 (#1622's `wave-backlog`, `task-review`, `wave-lifecycle`
-recipes adapted to `task(Option<&str>)` and dated `complete`). Remaining: CI on that head, review and
-merge; Task completion follows delivery. Jack Heart requested this as an
+recipes adapted to `task(Option<&str>)` and dated `complete`). #1621 now conflicts with main
+(2026-10-21): #1610 (LOO-523) removed `runtime.started` and regrouped the inventory as Owned/Unowned.
+Remaining: the **Main moved** slice below, then CI, review and merge; Task completion follows delivery. Jack Heart requested this as an
 autonomous follow-up to lf-world (#1612) on 2026-10-20.
 
 ## Problem
@@ -24,7 +25,7 @@ cd /tmp/lc/repo && env $(jq -r 'to_entries[]|"\(.key)=\(.value)"' ../env.json) l
 Completed and abandoned Tasks sit under LATER as `clear`, never `waiting`.
 The upstream-canceled Task keeps its started work current until someone
 disposes of it. Opening that world in Desktop (`live` mode, world env): the Wave's
-inventory lists only current Tasks under Started / Not started, with no
+inventory lists only current Tasks under Owned / Unowned, with no
 history control. Project history's filter admits two completions (7 Days),
 three at 30, four at 0; canceled and abandoned Tasks never appear. The paused Task carries its Paused
 label and is absent from the working sidebar; standalone Tasks appear without a
@@ -57,14 +58,14 @@ One Wave `release` with a KR, plus standalone Tasks. Times relative to build.
 | Shipped this week | checkout, Flow ok, complete @5d | Completed in 7d |
 | Shipped last fortnight | checkout, Flow ok, complete @12d, checkout removed | Completed in 30d only; missing checkout stays history |
 | Shipped last quarter | complete @40d | Completed only at 0 (all) |
-| Paused mid-flight | checkout, Session, Flow ok, pause | current, Paused, not in sidebar |
+| Paused mid-flight | checkout, Session, Flow ok, pause | current, Owned, Paused, not in sidebar |
 | Abandoned attempt | checkout, Flow failed, `task_abandon` | never in Completed or current |
 | Canceled upstream | checkout, Flow ok, planning state `canceled` | never in Completed; stays current (started local work is unresolved) |
 | Lost checkout | checkout, Session, worktree dir deleted | current, condition blocked/recovery |
-| In progress | checkout, Session, Flow ok @0.05d | current, Started |
-| Not started | created only | current, Not started |
-| Standalone idea | `task(None, …)` | standalone, unstarted |
-| Standalone fix | `task(None, …)`, checkout, Session | standalone, started |
+| In progress | checkout, Session, Flow ok @0.05d | current, Owned |
+| Not started | created only | current, Unowned |
+| Standalone idea | `task(None, …)` | standalone, unowned |
+| Standalone fix | `task(None, …)`, checkout, Session | standalone, owned |
 
 ## Approach
 
@@ -101,8 +102,10 @@ holds and the rung could not fire; an unstarted canceled Task is not modeled.
 ### Desktop fix
 
 Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks and `now`, it
-returns current Started / Not started Tasks by rank (`TaskHistoryFilter`'s
-default, completion off). `WaveTaskInventory` renders those groups with no
+returns current Owned / Unowned Tasks by rank (`TaskHistoryFilter`'s default,
+completion off; grouped on `runtime.owner != nil`, main's #1610 rule). The
+history filter stays necessary: completion and abandonment keep the last owner,
+so a done Task would otherwise sit under Owned. `WaveTaskInventory` renders those groups with no
 history control, keeping #1594's assertion; completed history stays behind
 Project history. Product memory: "A Wave pairs its conversation with all
 current planned and started Tasks".
@@ -142,8 +145,8 @@ it. The tension with the brief is recorded in `scratch/questions.md`.
    running `target/debug/lf` under the world env (the `WorkCLIFixture` pattern),
    and asserts:
    - `WaveTaskGroups`: completed/abandoned absent; paused, canceled
-     upstream, lost checkout and in-progress under Started; Not started holds the
-     unstarted Task;
+     upstream, lost checkout and in-progress under Owned; Unowned holds only the
+     never-checked-out Task;
    - `TaskHistoryFilter` over the settled world rows admits 7 → 2, 30 → 3,
      0 → 4 completions; never abandoned/canceled;
    - `visibleWork.standaloneTasks` holds both standalone Tasks;
@@ -195,6 +198,31 @@ by `WaveTaskGroups`, not kept beside it.
 
 ## Slices
 
+### Main moved — This slice (2026-10-21)
+
+Jack Heart's #1610 (LOO-523) is an accepted product decision: Task ownership
+(person, Machine) replaced write-once `started_at`; `RoadmapTaskRuntime.started`
+is gone and `WaveTaskInventory` groups Owned / Unowned. `lf task checkout`
+(the world's `checkout`) now claims an unowned Task.
+
+1. Merge `origin/main`. Only `WorkSurfaceView.swift` conflicts (git merge-tree);
+   resolve to main's labels on top of `WaveTaskGroups`.
+2. `WaveTaskGroups`: `started`/`notStarted` → `owned`/`unowned` on
+   `runtime?.owner != nil`; callers in `WorkSurfaceView`, `LifecycleWorldTests`
+   (lines asserting `current.started`/`notStarted`) follow. No `started` field
+   or Started label survives.
+3. Risk to settle first: the world's `checkout` claim writes `task_ownership`
+   with the caller's person and Machine under the world's `LF_HOME`. If the
+   claim fails or records no owner in a fresh world, give `World::new` the
+   identity through production writers (machine registration), never a raw
+   `task_ownership` insert.
+
+Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
+unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
+'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
+
+### Original order
+
 One PR. Order: (1) world API + recipe + Rust integration test, which fails on the
 `waiting` assertion; (2) Rust `derive_task_condition` fix; (3) `WaveTaskGroups` +
 inventory + Swift suite + CI build lines.
@@ -215,3 +243,4 @@ Gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `world_reci
 Gate: `scripts/test_desktop.sh -Xswiftc -gnone`: 615/616; `ProgramStatusTests` "later status event recovers an exited observer" missed its 5 s deadline by 2 ms under full-suite load, passed on rerun with `LifecycleWorldTests` (14/14). Untouched by this branch.
 Publish revision: inventory is current-only with no history control (#1594's assertion); completed ranges are proved on `TaskHistoryFilter` over world rows.
 Realign after main merge (2026-10-20): `cargo test -p loopflow --test integration world_recipes` 3/3 passed at 52ed99b138; Swift and full CI deferred to #1621's CI.
+Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one conflict, `WorkSurfaceView.swift`; branch code still reads removed `runtime.started`.

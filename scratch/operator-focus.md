@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: the demo (agent run, demo/review) and the gate checks.
+Remaining: concept review 4 (below), then the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -21,6 +21,20 @@ Remaining: the demo (agent run, demo/review) and the gate checks.
    ordinary disposition, dependency on the named date before it. `wave_operate.md`,
    `wave_session.md` and `docs/waves.md` agree. Both operators reply Available,
    Moving, Stuck, Others' work, then finished, due follow-ups, backlog.
+
+## Concept review 4 (2026-10-21): next implement direction
+
+Cleanup's ownership test disagrees with decision 2. "Clear old work state"
+scopes cleanup by PR authorship (`gh api user`) and branch naming, then offers
+`lf task abandon <issue>`, which retires the Task and closes its PR. A Task
+whose PR you authored but another person now owns (`lf task claim` takeover)
+passes the PR test, so the pass can abandon a teammate's Task. Implement: in
+`repo_operate.md` "Find stale work", a Task-linked branch, PR or worktree is
+cleanup scope only when its Task is yours by the operator rule (owner person
+is `lf config user` or names no person); another person's Task is listed as
+theirs, never abandoned or pruned; unknown ownership stays unresolved. PR
+authorship and branch naming keep scoping Task-less branches. `repo_session.md`
+inlines the body, so no second edit; no test asserts this prose.
 
 Checked and kept: started Tasks are owned. Checkout allocation claims the Task
 (`children.rs` `claim_in`), and the 0.14.12 backfill records person-less local

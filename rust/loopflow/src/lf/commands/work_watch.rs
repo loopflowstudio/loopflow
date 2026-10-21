@@ -358,7 +358,6 @@ fn lock(shared: &Shared) -> MutexGuard<'_, Mailbox> {
 #[derive(Debug, Clone)]
 struct Origin {
     home: String,
-    /// The preview copy directory, when this build's drafts run on one.
     copy: Option<String>,
 }
 

@@ -58,7 +58,7 @@ command -v codex
 command -v opencode
 test -f .lf/config.yaml && echo "repo config: present"
 test -f ~/.lf/config.yaml && echo "user config: present"
-find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
+find .lf/wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 ```
 
 Do not reconstruct distributed state from processes, worktrees, or provider
@@ -96,19 +96,19 @@ put a personal name in repo Loopflow configuration.
 On SSH, preserve the destination owner's preference; the caller's preference
 belongs on the originating Machine. In unattended work, leave an absent name unknown.
 
-At least one supported agent must be available: Claude Code, Codex, or
-OpenCode. If none is installed, stop with install commands and end with
+At least one supported agent must be available: Claude Code, Codex,
+OpenCode, or Pi. If none is installed, stop with install commands and end with
 `lf init` as the retry. Do not run a package manager.
 
 Installed harnesses are a capability of this Machine, not repository policy. One
-Machine may have Codex while another has Claude or OpenCode. Never rewrite
+Machine may have Codex while another has Claude, OpenCode or Pi. Never rewrite
 team-wide repo configuration merely to mirror `command -v` on this machine.
 
 Resolve repo agent configuration conservatively:
 
 - Preserve a valid existing `agent` override.
 - An absent `agent` is valid: Loopflow then uses the first of Codex, Claude,
-  and OpenCode installed on this Machine. Do not write `agent` to work around a
+  OpenCode and Pi installed on this Machine. Do not write `agent` to work around a
   missing harness.
 - Change `agent` or `supported_harnesses` only when the user explicitly wants
   a team-wide policy. Ask whether the choice is repo-wide or Machine-local before

@@ -25,7 +25,8 @@ A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
 empty or whitespace-only value falls through to personal configuration and Git.
 Steering comments prefer their recorded requester, then Linear's author name.
 Names describe people; they do not grant authority or establish who wrote an
-older request. Unattributed background Task and Wave work remains unattributed.
+older request. Task claims compare names, so give each person on a repository a
+distinct one: a claim with no name, or under yours, reads as yours. Unattributed background Task and Wave work remains unattributed.
 
 Persisted artifacts use the person's name; session replies use “you.” Stored
 transcripts retain their conversational wording.
@@ -579,7 +580,9 @@ Single Markdown files also work in `.lf/skills`, `.claude/commands`, and
 `.codex/prompts`. Supporting files inside a skill bundle are not separate skills.
 Namespaces use `/`, such as `lf help team/audit`.
 
-Repository sources win over personal sources, then embedded builtins. Within each
+Repository sources win over personal sources, then embedded builtins. A team's
+repository Skill changes everyone's process; to try your own variant, save it
+under a new name in `~/.lf/skills`. Within each
 scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
 `.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
 folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports

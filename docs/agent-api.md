@@ -52,7 +52,7 @@ A Wave directing a task is the internal case:
 lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
 lf task run INF-123                                  # start built-in Task automation
-lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
+lf comment INF-123 "take the smaller approach"    # post a Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf wait INF-123 --until terminal                # block until it settles
 ```
@@ -60,7 +60,7 @@ lf wait INF-123 --until terminal                # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its current Linear Project owns Tasks, KRs and targets.
+memory; its current Project owns Tasks, KRs and targets.
 A Task owns its checkout and its PR history, with one current PR. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
@@ -80,7 +80,7 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf -b task run INF-123                 # place an existing Linear issue, run its Flow, return when it ends
+lf -b task run INF-123                 # place an existing Task, run its Flow, return when it ends
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
@@ -109,7 +109,7 @@ lf --wave <wave> wave-operate "prioritize the parser"
 lf --wave <wave> wave-operate "reassess Project priorities"
 ```
 
-Save a Task comment locally, or comment in Linear when sync is configured.
+Save a Task comment locally; planning sync shares it, and Linear comments arrive as steers.
 Each associated Session receives acquired steers independently, including
 conversations associated through the checkout or `--task`. Repository and Wave
 steers apply downward through the Work tree; direct Session steers apply only
@@ -203,7 +203,7 @@ lf ps --json                # one OS-live process frame
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf wave show` joins the current Linear plan to that runtime truth.
+and `lf wave show` joins the current plan to that runtime truth.
 `lf history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.

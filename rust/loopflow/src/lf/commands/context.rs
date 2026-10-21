@@ -280,6 +280,9 @@ pub fn emit_block(
         return Ok(());
     }
     let delivery = load_delivery(delivery, &input)?;
+    if moment == crate::context_block::ContextMoment::Stop {
+        return acquire_planning(&delivery);
+    }
     emit_context(delivery, input, moment)
 }
 
@@ -350,7 +353,41 @@ fn emit_context(
         .ok()
         .map(|value| serde_json::from_str::<crate::steer::SteerAdapter>(&value))
         .transpose()?;
-    if let Some(adapter) = &adapter {
+    // Mark the check before reading pending steers, so one saved during it is
+    // newer and the next tool boundary checks again.
+    let seen = std::env::var_os(crate::steer::STEER_SEEN_ENV)
+        .map(std::path::PathBuf::from)
+        .filter(|_| adapter.is_some() && moment == crate::context_block::ContextMoment::Tool);
+    if let Some(seen) = &seen {
+        crate::steer::touch(seen)?;
+    }
+    let more = std::cell::Cell::new(false);
+    let result = deliver_steers(
+        &delivery,
+        &input,
+        event,
+        adapter.as_ref(),
+        &render,
+        &write,
+        &more,
+    );
+    // Steers left beyond this batch, or a failed delivery, need the next boundary.
+    if let Some(seen) = seen.filter(|_| result.is_err() || more.get()) {
+        let _ = std::fs::remove_file(seen);
+    }
+    result
+}
+
+fn deliver_steers(
+    delivery: &crate::context_block::ContextDelivery,
+    input: &serde_json::Value,
+    event: &str,
+    adapter: Option<&crate::steer::SteerAdapter>,
+    render: &dyn Fn(&str) -> crate::store::StoreResult<String>,
+    write: &dyn Fn(&str) -> crate::store::StoreResult<()>,
+    more: &std::cell::Cell<bool>,
+) -> Result<()> {
+    if let Some(adapter) = adapter {
         let thread = input["session_id"].as_str().ok_or_else(|| {
             anyhow::anyhow!("Provider context callback has no native conversation")
         })?;
@@ -379,8 +416,9 @@ fn emit_context(
                     thread,
                     &boundary,
                     |batch, steers, remaining| {
+                        more.set(remaining > 0);
                         let (prefix, excerpts) =
-                            render_steers(&delivery, &adapter.session, batch, steers, remaining)
+                            render_steers(delivery, &adapter.session, batch, steers, remaining)
                                 .map_err(|error| {
                                     crate::store::StoreError::InvalidData(error.to_string())
                                 })?;
@@ -404,8 +442,7 @@ fn emit_context(
 }
 
 /// Native turn hooks consume the same team freshness as CLI and watcher reads.
-pub fn check_planning(path: Option<&std::path::Path>) -> Result<()> {
-    let delivery = load_delivery(path, &read_callback()?)?;
+fn acquire_planning(delivery: &crate::context_block::ContextDelivery) -> Result<()> {
     let database = delivery.home.join("loopflow.db");
     if !database.exists() {
         return Ok(());

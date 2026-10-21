@@ -212,7 +212,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_flow() {
     // The gate's exec keeps the Flow's handoff: the step runs inside its owner.
     let redelegated: i64 = connection
         .query_row(
-            r#"SELECT count(*) FROM flow_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"transport","serve"%'"#,
+            r#"SELECT count(*) FROM flow_process_steps s JOIN processes c ON c.parent_lf_process_id=s.lf_process_id WHERE c.command LIKE '%"__transport-serve"%'"#,
             [],
             |row| row.get(0),
         )

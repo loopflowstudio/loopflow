@@ -310,11 +310,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
 /// Observe an early command without creating a Machine, migrating, or requiring Git.
 /// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
-    observe_process_within(command, receipt_wait());
-}
-
-/// Observe a latency-sensitive callback without ordinary admission's write wait.
-pub fn observe_process_within(command: &[String], wait: Duration) {
+    let wait = receipt_wait();
     // Failed early observation must not be retried at exit with a longer wait.
     static ATTEMPTED: AtomicBool = AtomicBool::new(false);
     if current_context().is_some() || ATTEMPTED.swap(true, Ordering::Relaxed) {

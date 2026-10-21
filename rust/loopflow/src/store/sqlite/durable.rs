@@ -4,14 +4,12 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, Placement, PlacementProvenance, ProjectId,
-    SteerComment, TaskExecutionSource, TaskId, TaskState, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, WorkMachine, WorkRef, WorkStatus,
+    AbandonReceipt, Author, Machine, MachineId, ProjectId, SteerComment, TaskId, TaskState,
+    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::edit::{Delegation, WorkEdit, WorkValue};
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 
@@ -73,11 +71,10 @@ impl SqliteStore {
         machine_id: &MachineId,
         target: &str,
         label: &str,
-        repo: &str,
     ) -> StoreResult<Machine> {
-        if target.is_empty() || target == "local" || label.trim().is_empty() || repo.is_empty() {
+        if target.is_empty() || target == "local" || label.trim().is_empty() {
             return Err(StoreError::InvalidData(
-                "machine target, label and repository must be nonempty; local is reserved".into(),
+                "machine target and label must be nonempty; local is reserved".into(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -89,11 +86,11 @@ impl SqliteStore {
         }
         let now = now_unix();
         tx.execute(
-            "INSERT INTO machines (id, route, label, repo, created_at, observed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+            "INSERT INTO machines (id, route, label, created_at, observed_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
              ON CONFLICT(id) DO UPDATE SET route=excluded.route, label=excluded.label,
-                repo=excluded.repo, observed_at=excluded.observed_at",
-            params![machine_id.as_str(), target, label, repo, now],
+                observed_at=excluded.observed_at",
+            params![machine_id.as_str(), target, label, now],
         ).map_err(|error| StoreError::InvalidData(format!("could not save machine: {error}; choose another label or remove the old connection")))?;
         let machine = map_machine_by_id(&tx, machine_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -103,7 +100,7 @@ impl SqliteStore {
     pub fn machines(&self) -> StoreResult<Vec<Machine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, route, created_at, observed_at, label, repo
+            "SELECT id, route, created_at, observed_at, label
              FROM machines WHERE label IS NOT NULL ORDER BY label",
         )?;
         let rows = stmt.query_map([], |row| Ok(map_machine_row(row)))?;
@@ -129,69 +126,10 @@ impl SqliteStore {
 
     pub fn remove_machine(&self, label: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE machines SET label=NULL, repo=NULL WHERE label=?1",
-            [label],
-        )? == 0
-        {
+        if conn.execute("UPDATE machines SET label=NULL WHERE label=?1", [label])? == 0 {
             return Err(StoreError::NotFound);
         }
         Ok(())
-    }
-
-    pub fn find_placement(&self, work: &WorkRef) -> StoreResult<Option<Placement>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        find_placement_in(&conn, work)
-    }
-
-    pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        placement_in(&snapshot, work)
-    }
-
-    pub(crate) fn place_work(
-        &self,
-        work: &WorkRef,
-        machine_id: &MachineId,
-    ) -> StoreResult<Placement> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        write_delegation_in(&tx, work, Some(machine_id))?;
-        let placement = placement_in(&tx, work)?;
-        tx.commit()?;
-        Ok(placement)
-    }
-
-    /// Place an unstarted Task on a Machine, or clear its override (`None`) so it
-    /// inherits again. A started Task stays on its recorded Machine; moving it is
-    /// explicit takeover, which placement never performs.
-    pub(crate) fn place_task_machine(
-        &self,
-        task: &TaskId,
-        machine_id: Option<&MachineId>,
-    ) -> StoreResult<WorkMachine> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = WorkRef::Task(task.clone());
-        require_ready_work(&tx, &work)?;
-        let (_, _, execution) = super::repositories::task_execution_in(&tx, task)?;
-        if execution != TaskExecutionSource::EffectiveDelegation {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Task {task} has started; it stays on its Machine and moving it is explicit takeover"
-            )));
-        }
-        write_delegation_in(&tx, &work, machine_id)?;
-        let machine = work_machine_in(&tx, &work)?;
-        tx.commit()?;
-        Ok(machine)
-    }
-
-    pub fn work_machine(&self, work: &WorkRef) -> StoreResult<WorkMachine> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        work_machine_in(&snapshot, work)
     }
 
     pub fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -467,7 +405,7 @@ impl SqliteStore {
 
 pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
+        "SELECT id, route, created_at, observed_at, label FROM machines WHERE route='local'",
         [],
         |row| Ok(map_machine_row(row)),
     )?
@@ -475,7 +413,7 @@ pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
 
 fn map_machine_by_id(conn: &Connection, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE id=?1",
+        "SELECT id, route, created_at, observed_at, label FROM machines WHERE id=?1",
         [machine_id.as_str()],
         |row| Ok(map_machine_row(row)),
     )
@@ -490,176 +428,7 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
         created_at: OffsetDateTime::from_unix_timestamp(row.get(2)?).map_err(invalid_durable)?,
         observed_at: OffsetDateTime::from_unix_timestamp(row.get(3)?).map_err(invalid_durable)?,
         label: row.get(4)?,
-        repo: row.get(5)?,
     })
-}
-
-pub(super) fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
-    let mut source = work.clone();
-    let mut visited = std::collections::HashSet::new();
-    loop {
-        if !visited.insert(source.clone()) {
-            return Err(StoreError::InvalidData(
-                "cycle in Work delegation ancestry".into(),
-            ));
-        }
-        let (parent, created_at) = match &source {
-            WorkRef::Task(id) => conn.query_row(
-                "SELECT project_id,created_at FROM tasks WHERE id=?1",
-                [id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?
-                            .map(ProjectId::from_raw)
-                            .map(WorkRef::Project),
-                        row.get::<_, i64>(1)?,
-                    ))
-                },
-            )?,
-            WorkRef::Project(id) => conn.query_row(
-                "SELECT wave_id,created_at FROM projects WHERE id=?1",
-                [id.as_str()],
-                |row| Ok((Some(WorkRef::Wave(row.get(0)?)), row.get(1)?)),
-            )?,
-            WorkRef::Wave(id) => conn.query_row(
-                "SELECT parent_wave_id,created_at FROM waves WHERE id=?1",
-                [id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<WaveId>>(0)?.map(WorkRef::Wave),
-                        row.get(1)?,
-                    ))
-                },
-            )?,
-        };
-        if let Some(mut placement) = find_placement_in(conn, &source)? {
-            placement.work = work.clone();
-            return Ok(placement);
-        }
-        match parent {
-            Some(parent) => source = parent,
-            None => {
-                return Ok(Placement {
-                    work: work.clone(),
-                    source,
-                    provenance: PlacementProvenance::LocalDefault,
-                    machine_id: map_local_machine(conn)?.id,
-                    placed_at: OffsetDateTime::from_unix_timestamp(created_at)
-                        .map_err(invalid_durable)?,
-                })
-            }
-        }
-    }
-}
-
-/// Write or clear (`None`) Work's own Machine assignment. The Machine must be
-/// known; reaffirming an explicit choice keeps its timestamp.
-fn write_delegation_in(
-    conn: &Connection,
-    work: &WorkRef,
-    machine_id: Option<&MachineId>,
-) -> StoreResult<()> {
-    if let Some(machine_id) = machine_id {
-        conn.query_row(
-            "SELECT 1 FROM machines WHERE id=?1",
-            [machine_id.as_str()],
-            |_| Ok(()),
-        )?;
-    }
-    let current = find_placement_in(conn, work)?;
-    let unchanged = match machine_id {
-        Some(machine_id) => current.as_ref().is_some_and(|assignment| {
-            assignment.machine_id == *machine_id
-                && assignment.provenance == PlacementProvenance::Explicit
-        }),
-        None => current.is_none(),
-    };
-    if unchanged {
-        return Ok(());
-    }
-    let assignment = machine_id.map(|machine_id| Delegation {
-        machine_id: machine_id.clone(),
-        placed_at: now_unix(),
-        provenance: PlacementProvenance::Explicit,
-    });
-    let change = match work {
-        WorkRef::Wave(_) => WorkValue::WaveDelegation(assignment),
-        WorkRef::Project(_) => WorkValue::ProjectDelegation(assignment),
-        WorkRef::Task(_) => WorkValue::TaskDelegation(assignment),
-    };
-    super::planning_write::local(
-        conn,
-        &[WorkEdit {
-            target: work.id().into(),
-            change,
-        }],
-    )?;
-    Ok(())
-}
-
-pub(super) fn work_machine_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkMachine> {
-    let placement = placement_in(conn, work)?;
-    let execution = match work {
-        WorkRef::Task(task) => Some(super::repositories::task_execution_in(conn, task)?),
-        _ => None,
-    };
-    let local = map_local_machine(conn)?;
-    let mut machines = vec![local.clone()];
-    let mut stmt = conn.prepare(
-        "SELECT id, route, created_at, observed_at, label, repo
-         FROM machines WHERE label IS NOT NULL AND route!='local' ORDER BY label",
-    )?;
-    for machine in stmt.query_map([], |row| Ok(map_machine_row(row)))? {
-        machines.push(machine??);
-    }
-    Ok(WorkMachine {
-        work: work.clone(),
-        machine_id: match &execution {
-            Some((_, machine_id, _)) => machine_id.clone(),
-            None => Some(placement.machine_id.clone()),
-        },
-        execution: execution.map(|(_, _, source)| source),
-        local_machine_id: local.id,
-        placement,
-        machines,
-    })
-}
-
-fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
-    let row = conn
-        .query_row(
-            &format!(
-                "SELECT machine_id, placed_at, provenance FROM work_placements WHERE {}_id=?1",
-                work.kind()
-            ),
-            [work.id()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    row.map(|(machine_id, placed_at, provenance)| {
-        Ok(Placement {
-            work: work.clone(),
-            source: work.clone(),
-            provenance: match provenance.as_str() {
-                "explicit" => PlacementProvenance::Explicit,
-                "legacy" => PlacementProvenance::Legacy,
-                other => {
-                    return Err(invalid_durable(format!(
-                        "unknown placement provenance {other}"
-                    )))
-                }
-            },
-            machine_id: MachineId::parse(&machine_id).map_err(invalid_durable)?,
-            placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
-        })
-    })
-    .transpose()
 }
 
 /// Completion and abandonment are durable; unfinished readiness follows the Workflow.
@@ -723,12 +492,12 @@ pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) ->
     let WorkRef::Task(task) = work else {
         return Ok(());
     };
-    let (project, started): (Option<String>, bool) = conn.query_row(
-        "SELECT project_id, started_at IS NOT NULL FROM tasks WHERE id=?1",
+    let project: Option<String> = conn.query_row(
+        "SELECT project_id FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    if started {
+    if super::task_ownership::owned_in(conn, task)? {
         return Ok(());
     }
     if let Some(project) = project {
@@ -845,7 +614,7 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{ProjectId, TaskId, WorkRef};
+    use crate::durable::{ProjectId, TaskId};
 
     use crate::id::WaveId;
     use crate::linear::{LinearIssueId, LinearProjectId};
@@ -986,334 +755,6 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn task_routing_pins_checkouts_while_delegating_unstarted_work() {
-        use crate::durable::TaskExecutionSource::{EffectiveDelegation, RecordedCheckout};
-        let (dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let wave = store
-            .get_wave(task.wave_id.as_ref().unwrap())
-            .unwrap()
-            .unwrap();
-        let repository = store.ensure_repository(wave.repo()).unwrap();
-        let local = store.local_machine().unwrap().id;
-        let remote = crate::durable::MachineId::new();
-        let saved_machine = store
-            .add_machine(&remote, "worker", "worker", "/saved/default")
-            .unwrap();
-        let work = WorkRef::Wave(task.wave_id.clone().unwrap());
-        store.place_work(&work, &remote).unwrap();
-        let route = store.task_execution_route(&task_id).unwrap();
-        assert_eq!(route.machine_id, local);
-        assert_eq!(route.repository_id, repository);
-        assert_eq!(route.source, RecordedCheckout);
-
-        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
-        store.seed_unplaced_task(&future);
-        assert_eq!(
-            store.task_execution_route(&future.id).unwrap().machine_id,
-            remote
-        );
-        assert_eq!(
-            store.task_execution_route(&future.id).unwrap().source,
-            EffectiveDelegation
-        );
-        // A retained checkout on a different Machine is execution evidence even
-        // when there is no running provider. Subsequent delegation cannot move it.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
-                rusqlite::params![task_id.as_str(), remote.as_str()],
-            )
-            .unwrap();
-        store.place_work(&work, &local).unwrap();
-        assert_eq!(
-            store.task_execution_route(&task_id).unwrap().machine_id,
-            remote
-        );
-        assert_eq!(
-            store.task_execution_route(&future.id).unwrap().machine_id,
-            local
-        );
-        assert_eq!(store.machine_by_id(&remote).unwrap(), Some(saved_machine));
-        assert!(!store.task_started(&future.id).unwrap());
-        assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
-        // Started evidence still pins a retired checkout, including provenance.
-        store
-            .create_session(
-                unpublished_conversation(Some(task_id.clone()), None, 1),
-                None,
-            )
-            .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET worktree=NULL WHERE id=?1",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        let route = store.task_execution_route(&task_id).unwrap();
-        assert_eq!(route.machine_id, remote);
-        assert_eq!(route.source, RecordedCheckout);
-
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET checkout_machine_id=NULL WHERE id=?1",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        assert!(store
-            .task_execution_route(&task_id)
-            .unwrap_err()
-            .to_string()
-            .contains("unknown execution Machine"));
-    }
-
-    #[test]
-    fn delegation_updates_existing_and_future_children_without_copying() {
-        use crate::durable::{MachineId, PlacementProvenance, WorkRef};
-        let (dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let work = WorkRef::Task(task_id.clone());
-        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
-        let project = WorkRef::Project(task.project_id.clone().unwrap());
-        let local = store.local_machine().unwrap().id;
-        let remote = MachineId::new();
-        store
-            .add_machine(&remote, "worker", "worker", "/other/repo")
-            .unwrap();
-        let initial = store.placement(&work).unwrap();
-        assert_eq!(initial.source, wave);
-        assert_eq!(initial.provenance, PlacementProvenance::LocalDefault);
-        store.place_work(&wave, &remote).unwrap();
-        let inherited = store.placement(&work).unwrap();
-        assert_eq!(inherited.work, work);
-        assert_eq!(inherited.source, wave);
-        assert_eq!(inherited.provenance, PlacementProvenance::Explicit);
-        assert_eq!(inherited.machine_id, remote);
-
-        // Even selecting the same Machine establishes a narrower override.
-        store.place_work(&project, &remote).unwrap();
-        store.place_work(&wave, &local).unwrap();
-        assert_eq!(store.placement(&work).unwrap().source, project);
-        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
-        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
-        store.seed_unplaced_task(&future);
-        let future_work = WorkRef::Task(future.id.clone());
-        assert_eq!(store.placement(&future_work).unwrap().machine_id, remote);
-        store.place_work(&work, &remote).unwrap();
-        store.place_work(&project, &local).unwrap();
-        assert_eq!(store.placement(&work).unwrap().source, work);
-        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
-        assert_eq!(store.placement(&future_work).unwrap().machine_id, local);
-        assert!(!store.task_started(&future.id).unwrap());
-        assert!(store.task(&future.id).unwrap().unwrap().worktree.is_none());
-    }
-
-    #[test]
-    fn unstarted_task_machine_overrides_and_inherits_while_started_task_stays() {
-        use crate::durable::{MachineId, TaskExecutionSource, WorkRef};
-        let (dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
-        let local = store.local_machine().unwrap().id;
-        let remote = MachineId::new();
-        store
-            .add_machine(&remote, "worker", "worker", "/other/repo")
-            .unwrap();
-        store.place_work(&wave, &remote).unwrap();
-        let (future, _) = unregistered_task(&store, &task_id, dir.path().join("future"));
-        store.seed_unplaced_task(&future);
-        let future_work = WorkRef::Task(future.id.clone());
-
-        let inherited = store.work_machine(&future_work).unwrap();
-        assert_eq!(inherited.machine_id, Some(remote.clone()));
-        assert_eq!(inherited.placement.source, wave);
-        assert_eq!(
-            inherited.execution,
-            Some(TaskExecutionSource::EffectiveDelegation)
-        );
-        assert_eq!(inherited.machines[0].id, local);
-        assert!(inherited
-            .machines
-            .iter()
-            .any(|machine| machine.id == remote));
-
-        let placed = store.place_task_machine(&future.id, Some(&local)).unwrap();
-        assert_eq!(placed.machine_id, Some(local.clone()));
-        assert_eq!(placed.placement.source, future_work);
-        let cleared = store.place_task_machine(&future.id, None).unwrap();
-        assert_eq!(cleared, inherited);
-
-        let started = WorkRef::Task(task_id.clone());
-        let before = store.work_machine(&started).unwrap();
-        assert_eq!(
-            before.execution,
-            Some(TaskExecutionSource::RecordedCheckout)
-        );
-        assert!(matches!(
-            store.place_task_machine(&task_id, Some(&local)),
-            Err(crate::store::StoreError::InvalidAuthority(_))
-        ));
-        assert_eq!(store.work_machine(&started).unwrap(), before);
-    }
-
-    #[test]
-    fn delegation_exchange_retains_checkout_and_does_not_echo_imports() {
-        use crate::durable::{MachineId, WorkRef};
-        use crate::planning_exchange::PlanningMutation;
-        use crate::work::edit::{WorkEdit, WorkValue};
-        let (_dir, store, task_id) = store_with_task();
-        store.ensure_repository("/repo").unwrap();
-        let before = store.task_execution_route(&task_id).unwrap();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let wave = WorkRef::Wave(task.wave_id.clone().unwrap());
-        let remote = MachineId::new();
-        store
-            .add_machine(&remote, "worker", "worker", "/repo")
-            .unwrap();
-        store.place_work(&wave, &remote).unwrap();
-        let binding = crate::planning_git::PlanningDestination::new(
-            "/tmp/unused-planning.git",
-            "refs/loopflow/planning/shared/test",
-        )
-        .unwrap();
-        let destination = store.bind_peer_planning("/repo", &binding).unwrap();
-        let mut snapshot = store.export_peer_planning("/repo", &destination).unwrap();
-
-        let parents = snapshot
-            .heads()
-            .filter(|(_, change)| {
-                change.edit.target == task.wave_id.as_ref().unwrap().as_str()
-                    && change.edit.change.field() == "wave_delegation"
-            })
-            .map(|(id, _)| id.to_owned())
-            .collect();
-        let clock = snapshot
-            .changes
-            .values()
-            .map(|change| change.clock)
-            .max()
-            .unwrap()
-            + 1;
-        snapshot.changes.insert(
-            "remote-reset".into(),
-            PlanningMutation {
-                edit: WorkEdit {
-                    target: task.wave_id.as_ref().unwrap().to_string(),
-                    change: WorkValue::WaveDelegation(None),
-                },
-                clock,
-                parents,
-            },
-        );
-        store
-            .import_peer_planning("/repo", &destination, "remote-revision", &snapshot)
-            .unwrap();
-        assert_eq!(
-            store.placement(&wave).unwrap().machine_id,
-            store.local_machine().unwrap().id
-        );
-        assert_eq!(store.task_execution_route(&task_id).unwrap(), before);
-        assert_eq!(
-            store.export_peer_planning("/repo", &destination).unwrap(),
-            snapshot
-        );
-    }
-
-    #[test]
-    fn delegation_preserves_legacy_provenance_until_explicitly_selected() {
-        use crate::durable::{MachineId, PlacementProvenance, WorkRef};
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let work = WorkRef::Task(task_id.clone());
-        let local = store.local_machine().unwrap().id;
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
-                rusqlite::params![task_id.as_str(), local.as_str()],
-            )
-            .unwrap();
-        let remote = MachineId::new();
-        store
-            .add_machine(&remote, "worker", "worker", "/repo")
-            .unwrap();
-        store
-            .place_work(&WorkRef::Wave(task.wave_id.clone().unwrap()), &remote)
-            .unwrap();
-        let legacy = store.placement(&work).unwrap();
-        assert_eq!(legacy.machine_id, local);
-        assert_eq!(legacy.source, work);
-        assert_eq!(legacy.provenance, PlacementProvenance::Legacy);
-        let selected = store.place_work(&work, &local).unwrap();
-        assert_eq!(selected.provenance, PlacementProvenance::Explicit);
-        assert_eq!(store.placement(&work).unwrap(), selected);
-    }
-
-    #[test]
-    fn delegation_follows_wave_ancestry_and_rejects_cycles() {
-        use crate::durable::{MachineId, WorkRef};
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let ancestor = WaveId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'parent','/repo',1)",
-                [ancestor.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
-                rusqlite::params![task.wave_id.as_ref().unwrap().as_str(), ancestor.as_str()],
-            )
-            .unwrap();
-        }
-        let work = WorkRef::Task(task_id);
-        let remote = MachineId::new();
-        store
-            .add_machine(&remote, "worker", "worker", "/repo")
-            .unwrap();
-        store
-            .place_work(&WorkRef::Wave(ancestor.clone()), &remote)
-            .unwrap();
-        assert_eq!(
-            store.placement(&work).unwrap().source,
-            WorkRef::Wave(ancestor.clone())
-        );
-        assert_eq!(store.placement(&work).unwrap().machine_id, remote);
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM work_placements WHERE wave_id=?1",
-                [ancestor.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE waves SET parent_wave_id=?2 WHERE id=?1",
-                rusqlite::params![ancestor.as_str(), task.wave_id.as_ref().unwrap().as_str()],
-            )
-            .unwrap();
-        }
-        assert!(store
-            .placement(&work)
-            .unwrap_err()
-            .to_string()
-            .contains("cycle"));
-        assert!(store.placement(&WorkRef::Task(TaskId::new())).is_err());
-    }
-
-    #[test]
     fn configured_project_admission_preserves_started_continuation() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
@@ -1327,14 +768,13 @@ mod durable_store_tests {
         other.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
+        // An unclaimed Task is new work again; the newly placed checkout claims its Task.
+        store.unclaim_task(&task_id).unwrap();
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
         store.seed_task(&new_task, &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
-        assert!(!store.task_started(&task_id).unwrap());
-        let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
-        input.cwd = new_task.worktree.as_ref().unwrap().clone();
-        store.create_session(input, None).unwrap();
-        assert!(store.task_started(&new_task.id).unwrap());
+        assert!(!store.task_owned(&task_id).unwrap());
+        assert!(store.task_owned(&new_task.id).unwrap());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
         crate::store::sqlite::project_selection::write_project_binding(
             &store,
@@ -1368,7 +808,7 @@ mod durable_store_tests {
             .is_none());
         assert!(store.task_prs(&rejected.id).unwrap().is_empty());
         assert!(store.require_task_launch(&task_id).is_err());
-        // An established start remains eligible after its Project becomes history.
+        // An owned Task remains eligible after its Project becomes history.
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1378,7 +818,7 @@ mod durable_store_tests {
             .unwrap();
         }
         store.require_task_launch(&new_task.id).unwrap();
-        assert!(store.task_started(&new_task.id).unwrap());
+        assert!(store.task_owned(&new_task.id).unwrap());
         assert_eq!(
             store.task(&task_id).unwrap().unwrap().worktree,
             task.worktree
@@ -1389,6 +829,8 @@ mod durable_store_tests {
     fn configured_project_admission_requires_a_selected_active_project() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        // Owned Tasks are exempt; an unowned one must be in the selected active Project.
+        store.unclaim_task(&task_id).unwrap();
         store
             .conn
             .lock()
@@ -1399,7 +841,7 @@ mod durable_store_tests {
             )
             .unwrap();
         assert!(store.require_task_launch(&task_id).is_err());
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(!store.task_owned(&task_id).unwrap());
         store
             .conn
             .lock()
@@ -1635,18 +1077,33 @@ mod durable_store_tests {
 
     #[test]
     fn chapter_evidence_marks_taskless_flows_started_in_their_checkout() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
-        // A Flow run from the checkout starts its Task without an explicit bind.
+        let (dir, store, existing) = store_with_task();
+        // A checkout recorded without an ownership entry, so only the Flow is evidence.
+        let (task, _) = unregistered_task(&store, &existing, dir.path().join("unclaimed"));
+        store.seed_unplaced_task(&task);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree=?2,checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
+                rusqlite::params![
+                    task.id.as_str(),
+                    task.worktree.as_ref().unwrap().to_str().unwrap()
+                ],
+            )
+            .unwrap();
+        assert!(!store.chapter_task_evidence(&task.id).unwrap().begun);
+        // A Flow run from the checkout begins its Task without an explicit bind.
         store.test_flow(
             "sync",
             &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("sync --plan", None)],
             None,
         );
-        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(store.task_started(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        // A Flow is evidence of work, not a claim.
+        assert!(!store.task_owned(&task.id).unwrap());
     }
 
     fn unregistered_task(
@@ -1698,7 +1155,8 @@ mod durable_store_tests {
             vec![task.id.clone()]
         );
         assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
-        assert!(!store.task_started(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
     }
 
     #[test]
@@ -1729,7 +1187,8 @@ mod durable_store_tests {
             vec![task.id.clone()]
         );
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-        assert!(!store.task_started(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
     }
 
     #[test]
@@ -1793,7 +1252,8 @@ mod durable_store_tests {
         let work = store.task_work(&task.id).unwrap();
         assert_eq!(work.sessions.len(), 1);
         assert_eq!(work.sessions[0].id, session.id.as_str());
-        assert!(!store.task_started(&task.id).unwrap());
+        // Allocating the checkout claims the Task; the earlier session does not.
+        assert!(store.task_owned(&task.id).unwrap());
         assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
 
@@ -1809,7 +1269,6 @@ mod durable_store_tests {
         assert_eq!(before.sessions.len(), 1);
         assert_eq!(before.sessions[0].id, session.id.as_str());
         assert_eq!(session.task_id, None);
-        assert!(!store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
 
         let successor = ProjectId::new();
@@ -1839,6 +1298,7 @@ mod durable_store_tests {
     fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.unclaim_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
         let session = store.create_session(conversation, None).unwrap();
@@ -1849,13 +1309,14 @@ mod durable_store_tests {
             .bind_session(&session.id, session.captured, &task_id)
             .is_err());
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(!store.task_owned(&task_id).unwrap());
         drop(exclusion);
         let bound = store
             .bind_session(&session.id, session.captured, &task_id)
             .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_started(&task_id).unwrap());
+        // Binding a session claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
     }
 
     #[test]
@@ -1887,6 +1348,7 @@ mod durable_store_tests {
     fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.unclaim_task(&task_id).unwrap();
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
@@ -1897,21 +1359,23 @@ mod durable_store_tests {
         conversation.cwd = dir.path().join("elsewhere");
         conversation.task_id = Some(task_id.clone());
         assert!(store.create_session(conversation.clone(), None).is_err());
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(!store.task_owned(&task_id).unwrap());
         drop(exclusion);
         let created = store.create_session(conversation, None).unwrap();
         assert_eq!(created.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_started(&task_id).unwrap());
+        // A session naming its Task claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
     }
 
     #[test]
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
+        store.unclaim_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().to_path_buf();
         let session = store.create_session(conversation, None).unwrap();
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(!store.task_owned(&task_id).unwrap());
 
         // Rotation can complete a predecessor after observing untouched backlog.
         store
@@ -1927,7 +1391,8 @@ mod durable_store_tests {
             .bind_session(&session.id, session.captured, &task_id)
             .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
-        assert!(store.task_started(&task_id).unwrap());
+        // Binding a session claims nothing.
+        assert!(!store.task_owned(&task_id).unwrap());
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, task.project_id);
         assert_eq!(retained.worktree, task.worktree);
@@ -1940,7 +1405,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn session_assignment_starts_tasks_once_and_rejects_reassignment_atomically() {
+    fn session_assignment_rejects_reassignment_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let mut conn = store.conn.lock().unwrap();
@@ -1988,25 +1453,14 @@ mod durable_store_tests {
         )
         .unwrap();
         tx.commit().unwrap();
-        let started = |conn: &rusqlite::Connection, id: &TaskId| -> Option<i64> {
+        let session_task = |conn: &rusqlite::Connection, id: &str| -> Option<String> {
             conn.query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
-                [id.as_str()],
+                "SELECT task_id FROM agent_sessions WHERE id=?1",
+                [id],
                 |row| row.get(0),
             )
             .unwrap()
         };
-        // Started is when the reserved input was captured.
-        let captured_at: i64 = conn
-            .query_row(
-                "SELECT observed_at FROM session_events WHERE seq=?1",
-                [reserved.captured.unwrap()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(started(&conn, &task_id), Some(captured_at));
-        assert_eq!(started(&conn, &bound_task), None);
-        let before_bind = crate::store::rows::now_unix();
         conn.execute(
             "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound' WHERE id=?1",
             rusqlite::params![
@@ -2016,39 +1470,11 @@ mod durable_store_tests {
             ],
         )
         .unwrap();
-        let bound_at = started(&conn, &bound_task).unwrap();
-        assert!((before_bind..=crate::store::rows::now_unix()).contains(&bound_at));
-        assert_ne!(bound_at, orphan.created_at);
         conn.execute(
             "UPDATE agent_sessions SET task_id=?2,work_source='bound' WHERE id=?1",
             rusqlite::params![wave_only.id.as_str(), bound_task.as_str()],
         )
         .unwrap();
-        for created_at in [0, bound_at + 1000] {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .unwrap();
-            reserve_session_in(
-                &tx,
-                unpublished_conversation(Some(bound_task.clone()), None, created_at),
-                None,
-            )
-            .unwrap();
-            let later_bind =
-                reserve_session_in(&tx, unpublished_conversation(None, None, created_at), None)
-                    .unwrap();
-            tx.execute(
-                "UPDATE agent_sessions SET task_id=?2,wave_id=?3 WHERE id=?1",
-                rusqlite::params![
-                    later_bind.id.as_str(),
-                    bound_task.as_str(),
-                    task.wave_id.as_ref().unwrap().as_str()
-                ],
-            )
-            .unwrap();
-            tx.commit().unwrap();
-            assert_eq!(started(&conn, &bound_task), Some(bound_at));
-        }
         for (id, new_task, new_wave) in [
             (
                 &orphan.id,
@@ -2073,48 +1499,23 @@ mod durable_store_tests {
                     rusqlite::params![id.as_str(), new_task, new_wave]
                 )
                 .is_err());
-            assert_eq!(started(&conn, &losing_task), None);
-            assert_eq!(started(&conn, &bound_task), Some(bound_at));
+            assert_eq!(
+                session_task(&conn, orphan.id.as_str()).as_deref(),
+                Some(bound_task.as_str())
+            );
+            assert_eq!(session_task(&conn, conflicting.id.as_str()), None);
         }
-        for timestamp in [None, Some(bound_at - 1), Some(bound_at + 1)] {
-            assert!(conn
-                .execute(
-                    "UPDATE tasks SET started_at=?2 WHERE id=?1",
-                    rusqlite::params![bound_task.as_str(), timestamp]
-                )
-                .is_err());
-        }
-        assert!(conn
-            .execute(
-                "UPDATE tasks SET started_at=1 WHERE id=?1",
-                [losing_task.as_str()]
-            )
-            .is_err());
         assert!(conn
             .execute(
                 "DELETE FROM agent_sessions WHERE id=?1",
                 [reserved.id.as_str()]
             )
             .is_err());
-        // Failed enclosing writes roll back both the reservation and Started.
-        {
-            let tx = conn
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .unwrap();
-            reserve_session_in(
-                &tx,
-                unpublished_conversation(Some(losing_task.clone()), None, 5),
-                None,
-            )
-            .unwrap();
-            assert!(started(&tx, &losing_task).is_some());
-        }
-        assert_eq!(started(&conn, &losing_task), None);
+        // Assignment claims nothing.
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM tasks t WHERE
-            (started_at IS NOT NULL) != EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=t.id)",
-                [],
+                "SELECT count(*) FROM task_ownership WHERE task_id IN (?1,?2)",
+                [bound_task.as_str(), losing_task.as_str()],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
@@ -2314,7 +1715,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn competing_session_assignments_start_only_the_winning_task() {
+    fn competing_session_assignments_bind_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
@@ -2357,16 +1758,14 @@ mod durable_store_tests {
         );
         let conn = store.conn.lock().unwrap();
         for (target, result) in results {
-            let (has_session, started): (bool, bool) = conn
+            let has_session: bool = conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1),started_at IS NOT NULL
-                 FROM tasks WHERE id=?1",
+                    "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)",
                     [target.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert_eq!(has_session, result.is_ok());
-            assert_eq!(started, result.is_ok());
             if let Err(error) = result {
                 assert!(error.to_string().contains("binding is permanent"));
             }

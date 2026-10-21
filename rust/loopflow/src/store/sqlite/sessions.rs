@@ -399,6 +399,20 @@ pub(super) fn session_summaries_in(
     rows.map(|row| row?).collect()
 }
 
+pub(super) fn complete_primary_session_in(
+    conn: &Connection,
+    scope: &PrimaryScope,
+) -> StoreResult<Option<LfSession>> {
+    let current = primary_session_in(conn, scope)?;
+    if let Some(current) = &current {
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
+            params![current.id, crate::store::rows::now_unix()],
+        )?;
+    }
+    Ok(current)
+}
+
 fn ensure_primary_session_in(
     conn: &Connection,
     scope: &PrimaryScope,
@@ -1034,6 +1048,19 @@ impl SqliteStore {
     pub(crate) fn primary_session(&self, scope: &PrimaryScope) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         primary_session_in(&conn, scope)
+    }
+
+    /// Complete the scope's primary here without a successor; the scope's
+    /// conversation now lives on another Machine.
+    pub(crate) fn complete_primary_session(
+        &self,
+        scope: &PrimaryScope,
+    ) -> StoreResult<Option<LfSession>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = complete_primary_session_in(&tx, scope)?;
+        tx.commit()?;
+        Ok(current)
     }
 
     /// Find the scope's uncompleted primary, or admit `session` as it. When the

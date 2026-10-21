@@ -875,9 +875,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
-            loopflow::lf::commands::placement::wave(repo, command)
-        }
+        WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -910,17 +908,25 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Admission {
-            issue,
-            claim,
-            request,
-            json,
-        } => {
-            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
+        TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
+            use loopflow::ops::task_ownership::{change, render, OwnershipChange};
+            let requested = match command {
+                TaskCommand::Claim { .. } => OwnershipChange::Claim,
+                _ => OwnershipChange::Unclaim,
+            };
+            let ownership = change(repo, issue, requested)?;
+            if *json {
+                println!("{}", serde_json::to_string(&ownership)?);
+            } else {
+                println!("{}", render(&ownership));
+            }
+            Ok(())
         }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
-        | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
+        | TaskCommand::Location { .. } => {
+            unreachable!("location reads precede repository commands")
+        }
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -1011,16 +1017,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::waves::list_tasks(repo, wave.as_deref(), *json)
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Place {
-            issue,
-            machine_id,
-            inherit,
-            json,
-        } => {
-            let change = (machine_id.is_some() || *inherit).then_some(machine_id.as_ref());
-            let machine = loopflow::ops::task::task_machine(issue, change)?;
-            loopflow::lf::commands::placement::print_machine(&machine, *json)
-        }
         TaskCommand::Pause { issue } | TaskCommand::Resume { issue } => {
             let paused = matches!(command, TaskCommand::Pause { .. });
             loopflow::ops::task::task_pause(issue, paused)?;
@@ -1099,8 +1095,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
+                    if let Some(ownership) = &status.ownership {
+                        println!("{}", loopflow::ops::task_ownership::render(ownership));
+                    }
                 } else {
-                    println!("No owned Task; retained observations do not establish ownership.");
+                    println!("No saved Task; retained observations are not Work.");
                 }
                 if let Some(at) = status.observed_at {
                     println!("Observed at: {at}");
@@ -1507,9 +1506,7 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. }
-                        | TaskCommand::WatchFiles { .. }
-                        | TaskCommand::Admission { claim: None, .. }
+                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
         if preview {
@@ -1551,6 +1548,17 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    // Provider hooks keep the callbacks their launching lf wrote. A removed
+    // one must not fail: Claude treats exit 2 at Stop as "keep working".
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
@@ -1605,9 +1613,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
-                | TaskCommand::WatchFiles { .. }
-                | TaskCommand::Admission { claim: None, .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
         })
     );
     let desktop_read = desktop_intent_read(&cli);
@@ -1660,23 +1666,6 @@ fn run() -> anyhow::Result<()> {
     }
     if desktop_read {
         return dispatch(cli, &args);
-    }
-    if let Some(Commands::Task {
-        cmd:
-            TaskCommand::Admission {
-                issue,
-                claim: None,
-                request,
-                json,
-            },
-    }) = &cli.command
-    {
-        return loopflow::ops::task_admission::command(
-            issue,
-            None,
-            request.as_deref(),
-            *json || cli.json,
-        );
     }
     if let Some(Commands::Task {
         cmd:
@@ -2187,6 +2176,19 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    // Provider hooks name the stable installed entry, which an upgrade can
+    // replace under a running Session. An internal command this release no
+    // longer has came from a hook an older lf wrote; skip it rather than fail
+    // the provider's turn, since a Stop hook's error blocks stopping.
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf {}: skipped an internal hook this lf version no longer has; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     // Own direct conversations and Flows. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
@@ -2503,6 +2505,11 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
+        Some(Commands::Machine {
+            cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
+        }) => in_directory_runtime(args, |repo| {
+            loopflow::lf::commands::machine_use::run(repo, cmd)
+        }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
             cmd:
@@ -2540,7 +2547,7 @@ fn execute_command(
         }
 
         Some(Commands::Wave {
-            cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Place { .. }),
+            cmd: cmd @ WaveCommand::Rename { .. },
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
             cmd: cmd @ WaveCommand::Workflow { .. },

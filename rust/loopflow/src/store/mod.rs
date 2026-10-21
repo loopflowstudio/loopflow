@@ -1514,7 +1514,8 @@ mod tests {
                 events[0].kind,
                 TaskEventKind::CheckoutInitializing { .. }
             ));
-            assert!(!store.task_started(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -1830,7 +1831,8 @@ mod tests {
             store.seed_inventory(snapshot, None).await.unwrap();
             place().await.unwrap();
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(!store.task_started(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -1957,7 +1959,8 @@ mod tests {
             assert_eq!(retried.branch, first.branch);
             assert_eq!(retried.base_commit, first.base_commit);
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap().len(), 1);
-            assert!(!store.task_started(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
             assert!(!directory.path().join("second").exists());
         }
     }
@@ -2101,7 +2104,8 @@ mod tests {
             assert_eq!(saved.worktree, task.worktree);
             assert_eq!(saved.id, task.id);
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-            assert!(!store.task_started(&task.id).await.unwrap());
+            // Allocating the checkout claims the Task.
+            assert!(store.task_owned(&task.id).await.unwrap());
         }
     }
 
@@ -2309,16 +2313,6 @@ mod tests {
         store.seed_inventory(old.clone(), None).await.unwrap();
         // The first refresh has fetched its response, then pauses.
         let delayed = old;
-        let predecessor_work = WorkRef::Project(predecessor.id.clone());
-        let next_home = crate::durable::MachineId::new();
-        store
-            .add_machine(&next_home, "ssh://fixture", "ssh://fixture", ".")
-            .await
-            .unwrap();
-        store
-            .place_work(&WorkRef::Wave(wave.id().clone()), &next_home)
-            .await
-            .unwrap();
         let mut newer = delayed.clone();
         newer.synced_at = 2;
         let mut successor = newer.snapshot.projects[0].clone();
@@ -2335,17 +2329,6 @@ mod tests {
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, Some(predecessor.id));
-        assert_eq!(
-            store.placement(&predecessor_work).await.unwrap().machine_id,
-            next_home
-        );
-        // A new Project inherits its Wave's assignment without allocating execution.
-        let inherited = store
-            .placement(&WorkRef::Project(transferred.project_id.clone().unwrap()))
-            .await
-            .unwrap();
-        assert_eq!(inherited.machine_id, next_home);
-        assert_eq!(inherited.source, WorkRef::Wave(wave.id().clone()));
         // A delayed response omits the now-known successor. Rejection must
         // preserve both normalized facts and the durable Task transfer.
         assert!(store.seed_inventory(delayed, None).await.is_err());
@@ -2946,10 +2929,6 @@ mod tests {
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
         let home = store.local_machine().await.unwrap().id;
-        store
-            .place_work(&WorkRef::Project(project.id.clone()), &home)
-            .await
-            .unwrap();
         let mut task = make_task(&store, &wave, &project);
         task.worktree = Some(directory.path().join("uncreated-child-worktree"));
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -2980,11 +2959,8 @@ mod tests {
             )
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
-        let placement = store
-            .placement(&WorkRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        assert_eq!(placement.machine_id, home);
+        let ownership = store.sqlite.task_ownership(&task.id).unwrap();
+        assert_eq!(ownership.owner.unwrap().machine.id, Some(home));
         let saved = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(saved.id, task.id);
         assert_eq!(saved.revision, task.revision);

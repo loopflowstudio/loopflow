@@ -1105,6 +1105,28 @@ Replace a Dashboard's retained arrangement from JSON on stdin
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf desktop slots
+
+Replace a Dashboard's slot layout from JSON on stdin; `null` restores the default
+
+| Argument | What it does |
+|---|---|
+| `<query>` | query |
+| `--revision` | revision |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop order
+
+Move a Working Tasks member into another's place in the repository's Task order
+
+| Argument | What it does |
+|---|---|
+| `<task>` | task:<durable-id> to move |
+| `--to` | task:<durable-id> whose place it takes |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf desktop layout
 
 Read portable pane intent, or save a complete revision-checked record from stdin
@@ -1317,7 +1339,6 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
-| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1338,6 +1359,21 @@ Check reachability and version without prompting
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine use
+
+Run work on a Machine: hand off a Task, or set a Wave's or this repository's default. Bare, it applies to the worktree's Task or Wave, else this repository
+
+| Argument | What it does |
+|---|---|
+| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
+| `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
+| `--task` | Hand this Task to the Machine; you stay its person |
+| `--repo` | Set this repository's default for its Session and Tasks with no Wave default Default: false. |
+| `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
+| `--tasks` | Set only where the scope's new Tasks run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1379,7 +1415,7 @@ Poll a configured channel and post each Session's final answer
 
 ## lf wave
 
-Manage Wave identity, placement and planning
+Manage Wave identity and planning
 
 | Argument | What it does |
 |---|---|
@@ -1548,7 +1584,7 @@ List installed loopflow cron jobs
 
 ## lf wave cron preflight
 
-Validate configured commands and Machine placement without installing jobs
+Validate configured commands and your Wave Machine without installing jobs
 
 | Argument | What it does |
 |---|---|
@@ -1624,17 +1660,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `--sync` | Refresh planning from Linear before reading Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave place
-
-Show or set the Machine for Wave schedules and newly created work
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<machine_id>` | Machine to place the Wave on; omit to show the current Machine |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf wave rename
 
 Rename or relocate an authored Wave and its provider mapping
@@ -1673,18 +1698,6 @@ List every Task in the selected repository
 | Argument | What it does |
 |---|---|
 | `--wave` | wave |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task place
-
-Show or set the Machine an unstarted Task will run on
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<machine_id>` | Machine to place the Task on; omit to show the current Machine |
-| `--inherit` | Clear the Task's own Machine so it inherits from its Wave again Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1845,15 +1858,23 @@ Create a planning Task without allocating a checkout or starting work
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task admission
+## lf task claim
 
-Inspect or reserve the Task's permanent first execution owner
+Claim the Task for you on this Machine
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--claim` | Request first execution on this Machine; an existing owner wins |
-| `--request` | Correlate a coordinator reply with this request |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task unclaim
+
+Unclaim the Task; it is unowned again, with its history intact
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1864,7 +1885,7 @@ Read recorded execution location without preparing or transferring Work
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--peers` | Observe added Machines as well as this one Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

@@ -117,20 +117,15 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_flow() {
         .unwrap()
         .contains("version = \"0.9.1\""));
 
-    for (command, args, version) in [
-        ("repo", vec!["release", "bump", "0.9.2"], "0.9.2"),
-        ("release", vec!["bump", "0.9.3"], "0.9.3"),
-    ] {
-        let captured = FlowCommand {
-            command: command.into(),
-            args: args.into_iter().map(str::to_string).collect(),
-        };
-        // A Flow runs the operation as its own command.
-        let argv = captured.argv();
-        let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
-        success(run(repo.path(), home.path(), &argv));
-        assert!(fs::read_to_string(repo.path().join("Cargo.toml"))
-            .unwrap()
-            .contains(&format!("version = \"{version}\"")));
-    }
+    let captured = FlowCommand {
+        command: "repo".into(),
+        args: ["release", "bump", "0.9.2"].map(str::to_string).to_vec(),
+    };
+    // A Flow runs the operation as its own command.
+    let argv = captured.argv();
+    let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+    success(run(repo.path(), home.path(), &argv));
+    assert!(fs::read_to_string(repo.path().join("Cargo.toml"))
+        .unwrap()
+        .contains("version = \"0.9.2\""));
 }

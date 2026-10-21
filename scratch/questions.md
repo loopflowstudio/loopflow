@@ -68,3 +68,9 @@ Arrange handoff (owners: LOO-416 Session retention, LOO-453 readiness/events, LO
 status transport, LOO-414 remote launch, LOO-498 external multiplexers) and the October
 18 operator readback (PR #1580 demo-only; demo review in Session
 `session_421decfc3b31459fb10e4771e231a704`).
+
+October 21 sync onto main (#1610, Task ownership): main deleted placement, admission and
+`started_at`, so this branch's `lf task place`, `lf wave place` readback, `WorkMachine`
+DTO and the Desktop breadcrumb Machine menu were removed rather than ported. "Started"
+for Working Tasks now means a current ownership-log owner or a published PR. Open: should
+the breadcrumb regain a Machine control that drives `lf machine use … --task`/`<wave>`?

@@ -198,14 +198,7 @@ fn assert_success(output: &Output) {
 #[test]
 fn remote_file_input_reaches_the_command_without_replacing_the_transport_script() {
     let fixture = Machines::new();
-    fixture.json(&[
-        "machine",
-        "add",
-        "mini",
-        "--repo",
-        "project's checkout",
-        "--json",
-    ]);
+    fixture.json(&["machine", "add", "mini", "--json"]);
     executable(
         &fixture.root.path().join("remote/.local/bin/lf"),
         "#!/bin/sh\ncat\n",
@@ -242,14 +235,7 @@ fn remote_file_input_reaches_the_command_without_replacing_the_transport_script(
 #[test]
 fn remote_session_open_returns_an_owner_pinned_terminal_command() {
     let fixture = Machines::new();
-    let machine = fixture.json(&[
-        "machine",
-        "add",
-        "mini",
-        "--repo",
-        "project's checkout",
-        "--json",
-    ]);
+    let machine = fixture.json(&["machine", "add", "mini", "--json"]);
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
     ))
@@ -327,31 +313,72 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
 }
 
 #[test]
+fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
+    let fixture = Machines::new();
+    let machine = fixture.json(&["machine", "add", "mini", "--json"]);
+    let repo = loopflow_test_support::TestRepo::new();
+    let path = repo.path().canonicalize().unwrap();
+    let identity = fixture
+        .command(&["repo", "identity"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&identity);
+    let repository = String::from_utf8(identity.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let set = fixture
+        .command(&["machine", "use", "mini", "--repo", "--session"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&set);
+    assert!(String::from_utf8_lossy(&set.stdout).contains("its Session runs on mini"));
+
+    let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    record["workspace"]["machine_id"] = machine["id"].clone();
+    let log = fixture.root.path().join("remote/arguments");
+    executable(
+        &fixture.root.path().join("remote/.local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\ncat <<'RECORD'\n{record}\nRECORD\n",
+            log.display()
+        ),
+    );
+    let opened = fixture
+        .command(&["connect", "--prepare", "--json"])
+        .current_dir(&path)
+        .output()
+        .unwrap();
+    assert_success(&opened);
+    let arguments = fs::read_to_string(&log).unwrap();
+    let arguments = arguments.lines().collect::<Vec<_>>();
+    let at = arguments
+        .iter()
+        .position(|arg| *arg == "--repository")
+        .unwrap();
+    assert_eq!(arguments[at + 1], repository);
+    assert!(arguments.contains(&"connect"), "{arguments:?}");
+}
+
+#[test]
 fn add_alias_rename_connect_and_remove_preserve_identity() {
     let fixture = Machines::new();
-    let added = fixture.json(&[
-        "machine",
-        "add",
-        "mini",
-        "--repo",
-        "project's checkout",
-        "--json",
-    ]);
+    let added = fixture.json(&["machine", "add", "mini", "--json"]);
     assert_eq!(added["label"], "mini");
     assert_eq!(added["route"], "mini");
-    assert_eq!(added["repo"], "project's checkout");
+    // A Machine is the person's, across repositories: it names no checkout.
+    assert!(added.get("repo").is_none());
     assert_eq!(
         fixture.json(&["machine", "list", "mini", "--json"])[0]["id"],
         added["id"]
     );
-    let repeated = fixture.json(&[
-        "machine",
-        "add",
-        "mini",
-        "--repo",
-        "project's checkout",
-        "--json",
-    ]);
+    let repeated = fixture.json(&["machine", "add", "mini", "--json"]);
     assert_eq!(added["id"], repeated["id"]);
     assert_eq!(added["created_at"], repeated["created_at"]);
     let statuses = fixture.json(&["machine", "status", "mini", "--json"]);
@@ -369,7 +396,6 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     assert_success(&connected);
     assert!(!String::from_utf8_lossy(&connected.stderr).contains("versions differ"));
     let text = String::from_utf8_lossy(&connected.stdout);
-    assert!(text.contains("project's checkout"), "{text}");
     assert!(text.contains("argument: session"), "{text}");
     assert_eq!(
         fixture.run(&["--machine", "builder", "fail"]).status.code(),
@@ -396,14 +422,14 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
         loopflow::build_info::BUILD_VERSION,
         "home_22222222222222222222222222222222",
     );
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
 }
 
 #[test]
 fn status_reports_version_mismatch_and_unreachable_without_prompting() {
     let fixture = Machines::new();
     fixture.remote("0.0.1", "home_11111111111111111111111111111111");
-    let output = fixture.run(&["machine", "add", "ssh://jack@mini:2222", "--repo", "."]);
+    let output = fixture.run(&["machine", "add", "ssh://jack@mini:2222"]);
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stderr).contains("versions differ"));
     let statuses = fixture.json(&["machine", "status", "mini", "--json"]);
@@ -440,7 +466,7 @@ fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identi
     let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
     assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     fixture.remote(
         loopflow::build_info::BUILD_VERSION,
         "home_22222222222222222222222222222222",
@@ -463,13 +489,13 @@ fn failures_name_the_recovery_without_prompting_or_registering() {
         ("connect to host mini port 22: Connection refused", "unreachable"),
     ] {
         let fixture = Machines::new();
-        assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+        assert_success(&fixture.run(&["machine", "add", "mini"]));
         executable(&fixture.root.path().join("bin/ssh"), &format!("#!/bin/sh\ncat >&2 <<'ERROR'\n{diagnostic}\nERROR\nexit 255\n"));
         let status = fixture.json(&["machine", "status", "--json"]);
         let error = status[0]["error"].as_str().unwrap();
         assert!(error.contains(category), "{error}");
         assert!(error.contains("ssh -o ControlPath=none -- 'mini'"), "{error}");
-        let add = fixture.run(&["machine", "add", "other", "--repo", "."]);
+        let add = fixture.run(&["machine", "add", "other"]);
         assert!(!add.status.success());
         assert!(String::from_utf8_lossy(&add.stderr).contains(category));
         assert_eq!(fixture.json(&["machine", "list", "--json"]).as_array().unwrap().len(), 1);
@@ -479,22 +505,19 @@ fn failures_name_the_recovery_without_prompting_or_registering() {
 #[test]
 fn missing_lf_never_installs_from_status_batch_json_or_nonterminal() {
     let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     fixture.missing_remote();
     let status = fixture.json(&["machine", "status", "--json"]);
     let error = status[0]["error"].as_str().unwrap();
     assert!(error.contains("no lf on the remote"), "{error}");
     assert!(error.contains("install.sh"), "{error}");
+    assert!(!fixture.run(&["machine", "add", "mini"]).status.success());
     assert!(!fixture
-        .run(&["machine", "add", "mini", "--repo", "."])
+        .terminal(&["-b", "machine", "add", "mini"], "\n")
         .status
         .success());
     assert!(!fixture
-        .terminal(&["-b", "machine", "add", "mini", "--repo", "."], "\n")
-        .status
-        .success());
-    assert!(!fixture
-        .terminal(&["machine", "add", "mini", "--repo", ".", "--json"], "\n")
+        .terminal(&["machine", "add", "mini", "--json"], "\n")
         .status
         .success());
     assert!(!fixture.root.path().join("installed").exists());
@@ -505,7 +528,7 @@ fn interactive_add_offers_install_defaults_yes_and_records_the_new_identity() {
     let fixture = Machines::new();
     fixture.missing_remote();
     assert!(!fixture
-        .terminal(&["machine", "add", "mini", "--repo", "."], "n\n")
+        .terminal(&["machine", "add", "mini"], "n\n")
         .status
         .success());
     assert!(!fixture.root.path().join("installed").exists());
@@ -513,12 +536,12 @@ fn interactive_add_offers_install_defaults_yes_and_records_the_new_identity() {
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
     );
-    assert_success(&fixture.terminal(&["machine", "add", "mini", "--repo", "."], "\n"));
+    assert_success(&fixture.terminal(&["machine", "add", "mini"], "\n"));
     assert!(fixture.root.path().join("installed").exists());
     let machines = fixture.json(&["machine", "list", "--json"]);
     assert_eq!(machines[0]["id"], "home_11111111111111111111111111111111");
     fs::remove_file(fixture.root.path().join("installed")).unwrap();
-    assert_success(&fixture.terminal(&["machine", "add", "mini", "--repo", "."], "\n"));
+    assert_success(&fixture.terminal(&["machine", "add", "mini"], "\n"));
     assert!(!fixture.root.path().join("installed").exists());
 }
 
@@ -529,14 +552,14 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
     let bin = fixture.root.path().join("remote/.local/bin");
     executable(&bin.join("lf"), "#!/bin/sh\nexit 127\n");
     assert!(!fixture
-        .terminal(&["machine", "add", "mini", "--repo", "."], "\n")
+        .terminal(&["machine", "add", "mini"], "\n")
         .status
         .success());
     assert!(!fixture.root.path().join("installed").exists());
     fs::remove_file(bin.join("lf")).unwrap();
     executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
     assert!(!fixture
-        .terminal(&["machine", "add", "mini", "--repo", "."], "y\n")
+        .terminal(&["machine", "add", "mini"], "y\n")
         .status
         .success());
     assert_eq!(
@@ -548,14 +571,7 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
 #[test]
 fn machine_selector_dispatches_before_local_help_and_placement() {
     let fixture = Machines::new();
-    let added = fixture.json(&[
-        "machine",
-        "add",
-        "mini",
-        "--repo",
-        "project's checkout",
-        "--json",
-    ]);
+    let added = fixture.json(&["machine", "add", "mini", "--json"]);
     for args in [
         vec![
             "--machine",
@@ -574,15 +590,7 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
         ],
         vec!["--machine", "mini", "--help"],
         vec!["--machine", added["id"].as_str().unwrap(), "--version"],
-        vec![
-            "machine",
-            "add",
-            "another",
-            "--machine",
-            "mini",
-            "--repo",
-            "~/code",
-        ],
+        vec!["machine", "add", "another", "--machine", "mini"],
         vec!["--machine", "mini", "install", "--help"],
         vec![
             "--machine",
@@ -627,7 +635,7 @@ fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
     use base64::prelude::*;
 
     let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     db.execute(
         "INSERT INTO provider_accounts (provider, account_id, login_email, credential_state, routing_state, created_at, updated_at) VALUES ('codex', 'person', 'person@example.com', 'connected', 'automatic', 0, 0)",
@@ -739,7 +747,7 @@ esac
 #[test]
 fn transport_options_require_machine_and_retired_commands_are_gone() {
     let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     for args in [
         vec!["--secret", "EXAMPLE", "status"],
         vec!["--machine", "mini", "--secret", "EXAMPLE", "status"],
@@ -762,7 +770,7 @@ fn transport_options_require_machine_and_retired_commands_are_gone() {
 #[test]
 fn remote_command_exit_is_retained_in_local_process_history() {
     let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     let output = fixture.run(&["--machine", "mini", "fail"]);
     assert_eq!(output.status.code(), Some(42));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Error:"));
@@ -793,19 +801,9 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
             loopflow::build_info::BUILD_VERSION
         ),
     );
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
-    let added = fixture.json(&[
-        "--machine",
-        "mini",
-        "machine",
-        "add",
-        "third",
-        "--repo",
-        "~/code",
-        "--json",
-    ]);
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    let added = fixture.json(&["--machine", "mini", "machine", "add", "third", "--json"]);
     assert_eq!(added["label"], "third");
-    assert_eq!(added["repo"], "~/code");
     let remote_machines = fixture.json(&["--machine", "mini", "machine", "list", "--json"]);
     assert_eq!(remote_machines.as_array().unwrap().len(), 1);
     assert_eq!(remote_machines[0]["id"], added["id"]);
@@ -828,7 +826,7 @@ fn preview_machines() -> Machines {
         ),
     );
     // Seed identity using the normal operation before taking the read baseline.
-    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
     for bin in [fixture.root.path().join("bin"), remote.join(".local/bin")] {
         for program in ["gh", "security", "doppler", "claude", "codex", "opencode"] {
             executable(
@@ -1245,286 +1243,517 @@ fn flow_context_preview_reads_selected_machine_graph_without_executing_steps() {
     assert!(!repo.join(".lf/tmp").exists());
 }
 
-#[test]
-fn imported_execution_location_survives_delegation_and_rejects_stale_peer_reads() {
-    use loopflow::durable::{RepositoryId, TaskId};
-    use loopflow::planning_git::PlanningDestination;
-    use loopflow::store::sqlite::SqliteStore;
-    use loopflow::work::task::NewTask;
+/// Two Homes share one repository plan through Git planning; ownership entries
+/// travel as marked comments and every append runs on the Task's writer.
+struct SharedPlan {
+    repository: loopflow::durable::RepositoryId,
+    local: loopflow::store::sqlite::SqliteStore,
+    remote: loopflow::store::sqlite::SqliteStore,
+    local_path: std::path::PathBuf,
+    remote_path: std::path::PathBuf,
+    destination: loopflow::planning_git::PlanningDestination,
+    _repos: [loopflow_test_support::TestRepo; 2],
+    _person: Person,
+}
 
-    let fixture = preview_machines();
-    let local_repo = loopflow_test_support::TestRepo::new();
-    let remote_repo = loopflow_test_support::TestRepo::new();
-    let local_path = local_repo.path().canonicalize().unwrap();
-    let remote_path = remote_repo.path().canonicalize().unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
-    let local = SqliteStore::new(&local_db).unwrap();
-    let remote = SqliteStore::new(&remote_db).unwrap();
-    let repository = RepositoryId::new();
-    local
-        .bind_repository(local_path.to_str().unwrap(), &repository)
-        .unwrap();
-    remote
-        .bind_repository(remote_path.to_str().unwrap(), &repository)
-        .unwrap();
-    let project = remote
-        .ensure_wave_project(remote_path.to_str().unwrap(), "location")
-        .unwrap();
-    let task = remote
-        .create_task(&NewTask {
-            repository_id: remote
-                .ensure_repository(remote_path.to_str().unwrap())
-                .unwrap(),
-            id: TaskId::new(),
-            project_id: Some(project.id),
-            title: "Retained elsewhere".into(),
-            description: String::new(),
-            due_date: None,
-        })
-        .unwrap();
-    let owner = remote.local_machine().unwrap().id;
-    // Execution is deliberately seeded, not imported or claimed by this proof.
-    support::record_flow(
-        &fixture.root.path().join("remote/store"),
-        &remote_path,
-        "prior",
-        "prior-step",
-        "succeeded",
-    );
-    let db = rusqlite::Connection::open(&remote_db).unwrap();
-    db.execute("UPDATE tasks SET worktree=?2,workspace_slug='retained',branch='main',base_commit=?3,checkout_machine_id=?4,started_at=1 WHERE id=?1",
-        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap(), remote_repo.head_sha(), owner.as_str()]).unwrap();
-    let destination =
-        PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/location")
+/// In-process writes name the same person as the fixture's `lf` commands,
+/// whose Git identity is the test repository's.
+struct Person(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+impl Person {
+    fn jack() -> Self {
+        let guard = loopflow_test_support::env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::env::set_var("LF_USER_NAME", "Jack");
+        Self(guard)
+    }
+}
+
+impl Drop for Person {
+    fn drop(&mut self) {
+        std::env::remove_var("LF_USER_NAME");
+    }
+}
+
+impl SharedPlan {
+    fn new(fixture: &Machines) -> Self {
+        use loopflow::durable::RepositoryId;
+        use loopflow::planning_git::PlanningDestination;
+        use loopflow::store::sqlite::SqliteStore;
+        let repos = [
+            loopflow_test_support::TestRepo::new(),
+            loopflow_test_support::TestRepo::new(),
+        ];
+        let local_path = repos[0].path().canonicalize().unwrap();
+        let remote_path = repos[1].path().canonicalize().unwrap();
+        let local = SqliteStore::new(&fixture.root.path().join("local/loopflow.db")).unwrap();
+        let remote =
+            SqliteStore::new(&fixture.root.path().join("remote/store/loopflow.db")).unwrap();
+        let repository = RepositoryId::new();
+        local
+            .bind_repository(local_path.to_str().unwrap(), &repository)
             .unwrap();
-    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-        store
-            .bind_peer_planning(path.to_str().unwrap(), &destination)
+        remote
+            .bind_repository(remote_path.to_str().unwrap(), &repository)
+            .unwrap();
+        let destination =
+            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
+                .unwrap();
+        for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
+            store
+                .bind_peer_planning(path.to_str().unwrap(), &destination)
+                .unwrap();
+        }
+        Self {
+            repository,
+            local,
+            remote,
+            local_path,
+            remote_path,
+            destination,
+            _repos: repos,
+            _person: Person::jack(),
+        }
+    }
+
+    fn to_local(&self) {
+        let journal = self
+            .remote
+            .export_peer_planning(self.remote_path.to_str().unwrap(), &self.destination.id())
+            .unwrap();
+        self.local
+            .import_peer_planning(
+                self.local_path.to_str().unwrap(),
+                &self.destination.id(),
+                &uuid::Uuid::new_v4().to_string(),
+                &journal,
+            )
             .unwrap();
     }
-    local
-        .import_peer_planning(
-            local_path.to_str().unwrap(),
-            &destination.id(),
-            "first",
-            &remote
-                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
-    let caller = local.local_machine().unwrap().id;
-    assert_success(&fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "wave",
-        "place",
-        task.wave_id.as_ref().unwrap().as_str(),
-        caller.as_str(),
-    ]));
-    remote
-        .import_peer_planning(
-            remote_path.to_str().unwrap(),
-            &destination.id(),
-            "delegated-back",
-            &local
-                .export_peer_planning(local_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
+
+    fn to_remote(&self) {
+        let journal = self
+            .local
+            .export_peer_planning(self.local_path.to_str().unwrap(), &self.destination.id())
+            .unwrap();
+        self.remote
+            .import_peer_planning(
+                self.remote_path.to_str().unwrap(),
+                &self.destination.id(),
+                &uuid::Uuid::new_v4().to_string(),
+                &journal,
+            )
+            .unwrap();
+    }
+
+    fn task(&self) -> loopflow::durable::TaskId {
+        let project = self
+            .remote
+            .ensure_wave_project(self.remote_path.to_str().unwrap(), "owners")
+            .unwrap();
+        self.remote
+            .create_task(&loopflow::work::task::NewTask {
+                repository_id: self
+                    .remote
+                    .ensure_repository(self.remote_path.to_str().unwrap())
+                    .unwrap(),
+                id: loopflow::durable::TaskId::new(),
+                project_id: Some(project.id),
+                title: "Ownership demo".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap()
+            .id
+    }
+}
+
+#[test]
+fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
+    use loopflow::durable::{OwnershipKind, TaskExecutionSource};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    plan.to_local();
+    // The laptop follows the claim; it routes to the owner, never allocating here.
+    let route = plan.local.task_execution_route(&task).unwrap();
     assert_eq!(
-        db.query_row(
-            "SELECT machine_id FROM work_placements WHERE wave_id=?1",
-            [task.wave_id.as_ref().unwrap().as_str()],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        caller.as_str()
+        (route.machine_id.clone(), route.source),
+        (mini.clone(), TaskExecutionSource::Owner)
     );
-    assert_eq!(
-        remote.task_execution_route(&task.id).unwrap().machine_id,
-        owner
-    );
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    let local_before = checkpoint_bytes(&local_db);
-    let remote_before = checkpoint_bytes(&remote_db);
-    let args = [
+    assert!(plan.local.claim_task(&task).is_err());
+
+    // Handoff from the laptop runs on mini, the writer, over `lf --machine`.
+    let handed = fixture.json(&[
         "--repository",
-        repository.as_str(),
-        "task",
-        "location",
-        task.id.as_str(),
-        "--peers",
+        plan.repository.as_str(),
+        "machine",
+        "use",
+        laptop.as_str(),
+        "--task",
+        task.as_str(),
         "--json",
-    ];
-    let reading = fixture.json(&args);
-    assert_eq!(reading[0]["location"]["state"], "unrecorded");
-    assert_eq!(reading[1]["location"]["state"], "recorded");
-    assert_eq!(reading[1]["machine_id"], owner.as_str());
-    assert_eq!(
-        reading[1]["location"]["checkout"],
-        remote_path.to_str().unwrap()
-    );
-    assert_eq!(checkpoint_bytes(&local_db), local_before);
-    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
-    let explain = |command: &[&str]| {
-        let mut args = vec![
-            "--repository",
-            repository.as_str(),
-            "--task",
-            task.id.as_str(),
-        ];
-        args.extend_from_slice(command);
-        args.extend(["--explain", "--json"]);
-        fixture.json(&args)
+    ]);
+    assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
+    let kinds = |store: &loopflow::store::sqlite::SqliteStore| {
+        store
+            .task_ownership(&task)
+            .unwrap()
+            .log
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>()
     };
-    // Every presentation uses the same observed owner and checkout provenance.
-    // Started history without a path is unavailable, not an unstarted Task or a
-    // reason to retain the previous checkout reading.
-    for checkout in [Some(remote_path.to_str().unwrap()), None] {
-        db.execute(
-            "UPDATE tasks SET worktree=?2 WHERE id=?1",
-            rusqlite::params![task.id.as_str(), checkout],
+    assert_eq!(
+        kinds(&plan.remote),
+        [OwnershipKind::Claim, OwnershipKind::Handoff]
+    );
+    plan.to_local();
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        laptop
+    );
+
+    // The laptop now writes; unclaim keeps the history and leaves it unowned.
+    let unclaimed = fixture.json(&[
+        "--repository",
+        plan.repository.as_str(),
+        "task",
+        "unclaim",
+        task.as_str(),
+        "--json",
+    ]);
+    assert!(unclaimed["owner"].is_null());
+    plan.to_remote();
+    for store in [&plan.local, &plan.remote] {
+        let ownership = store.task_ownership(&task).unwrap();
+        assert!(ownership.owner.is_none());
+        assert_eq!(
+            kinds(store),
+            [
+                OwnershipKind::Claim,
+                OwnershipKind::Handoff,
+                OwnershipKind::Unclaim
+            ]
+        );
+    }
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
+fn bare_machine_use_in_a_moved_tasks_worktree_hands_it_off_on_the_owner() {
+    use loopflow::durable::OwnershipKind;
+    use loopflow::work::task::{TaskPr, TaskPrId};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let now = time::OffsetDateTime::now_utc();
+    plan.local
+        .place_task(
+            &task,
+            &plan.local_path,
+            "ownership-demo",
+            &TaskPr {
+                id: TaskPrId::new(),
+                task_id: task.clone(),
+                sequence: 1,
+                slug: "ownership-demo".into(),
+                branch: "jack/ownership-demo".into(),
+                base_commit: "deadbeef".into(),
+                parent_pr_id: None,
+                publication: None,
+                merge_commit: None,
+                abandoned_at: None,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+                created_at: now,
+                updated_at: now,
+            },
         )
         .unwrap();
-        let remote_before = checkpoint_bytes(&remote_db);
-        let run = explain(&["task", "run"]);
+    plan.local.handoff_task(&task, &mini).unwrap();
+    plan.to_remote();
+
+    // The worktree stays here, but mini writes the Task: the bare form goes there.
+    let output = fixture
+        .command(&["machine", "use", laptop.as_str(), "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let handed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(handed["owner"]["machine"]["id"], laptop.as_str());
+    let kinds = plan
+        .remote
+        .task_ownership(&task)
+        .unwrap()
+        .log
+        .iter()
+        .map(|entry| entry.kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kinds,
+        [
+            OwnershipKind::Claim,
+            OwnershipKind::Handoff,
+            OwnershipKind::Handoff
+        ]
+    );
+}
+
+#[test]
+fn task_ownership_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    // No owning Machine is configured, so each Machine may claim for itself.
+    plan.remote.claim_task(&task).unwrap().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    plan.to_local();
+    let first = plan.remote.task_ownership(&task).unwrap();
+    assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
+    assert_eq!(
+        first.superseded_by.unwrap().machine.id,
+        Some(laptop.clone())
+    );
+    assert_eq!(
+        plan.remote.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    let steers = plan.remote.task_steers(&task).unwrap();
+    assert!(steers
+        .iter()
+        .any(|steer| steer.text.starts_with("Also claimed later by")));
+    let second = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
+    assert!(second.superseded_by.is_none());
+    // Exchange settles: neither Machine re-claims a log that shows a later claim.
+    plan.to_remote();
+    plan.to_local();
+    assert_eq!(plan.remote.task_ownership(&task).unwrap().log.len(), 2);
+}
+
+#[test]
+fn task_ownership_owner_reclaims_after_a_stale_unclaim_elsewhere() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    // A stale reading on mini treats the Task as its own and unclaims it there,
+    // delivering the unclaim as mini would: a marked comment in the journal.
+    let entry = serde_json::json!({
+        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
+        "task_id": task.as_str(), "kind": "unclaim", "person": "Kim",
+        "machine_id": mini.as_str(),
+        "at": time::OffsetDateTime::now_utc().unix_timestamp() + 5,
+    });
+    plan.remote
+        .append_task_comment(
+            &task,
+            &loopflow::work::task::comment::TaskComment {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: format!("Kim unclaimed this\n\n<!-- loopflow-ownership:{entry} -->"),
+                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: Some(
+                    (time::OffsetDateTime::now_utc() + time::Duration::seconds(5))
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap(),
+                ),
+            },
+        )
+        .unwrap();
+    plan.to_local();
+    // The laptop's claim stays open locally and it claims again in the journal.
+    let ownership = plan.local.task_ownership(&task).unwrap();
+    assert_eq!(
+        ownership.owner.unwrap().machine.id,
+        Some(plan.local.local_machine().unwrap().id)
+    );
+    assert_eq!(
+        ownership.log.last().unwrap().kind,
+        loopflow::durable::OwnershipKind::Claim
+    );
+}
+
+#[test]
+fn task_ownership_never_routes_to_another_persons_machine() {
+    use loopflow::durable::{OwningMachineSource, TaskExecutionSource};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    let mini = plan.remote.local_machine().unwrap().id;
+    // Kim claims on mini, a Machine this laptop also has registered.
+    let entry = serde_json::json!({
+        "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
+        "task_id": task.as_str(), "kind": "claim", "person": "Kim",
+        "machine_id": mini.as_str(),
+        "at": time::OffsetDateTime::now_utc().unix_timestamp(),
+    });
+    plan.remote
+        .append_task_comment(
+            &task,
+            &loopflow::work::task::comment::TaskComment {
+                id: uuid::Uuid::new_v4().to_string(),
+                body: format!("Kim claimed this\n\n<!-- loopflow-ownership:{entry} -->"),
+                author: loopflow::work::task::comment::TaskCommentAuthor::Integration,
+                created_at: Some(
+                    time::OffsetDateTime::now_utc()
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .unwrap(),
+                ),
+            },
+        )
+        .unwrap();
+    plan.to_local();
+    assert_eq!(
+        plan.local
+            .task_ownership(&task)
+            .unwrap()
+            .owner
+            .unwrap()
+            .person
+            .as_deref(),
+        Some("Kim")
+    );
+    // Someone else's claim stays theirs: no route to mini, no handoff or unclaim.
+    let route = plan.local.task_execution_route(&task).unwrap();
+    assert_eq!(
+        (route.machine_id, route.source),
+        (
+            plan.local.local_machine().unwrap().id,
+            TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
+        )
+    );
+    assert!(plan.local.unclaim_task(&task).is_err());
+    assert!(plan.local.handoff_task(&task, &mini).is_err());
+    // Claiming writes here; the later claim wins.
+    plan.local.claim_task(&task).unwrap().unwrap();
+    plan.to_remote();
+    // Kim's claim stays Kim's on mini, which now sees the later claim.
+    let later = plan
+        .remote
+        .task_ownership(&task)
+        .unwrap()
+        .superseded_by
+        .unwrap();
+    assert_eq!(
+        later.machine.id,
+        Some(plan.local.local_machine().unwrap().id)
+    );
+}
+
+#[test]
+fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
+    use loopflow::durable::{MachineSetting, OwningMachineSource};
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.task();
+    plan.to_local();
+    let mini = plan.remote.local_machine().unwrap().id;
+    let laptop = plan.local.local_machine().unwrap().id;
+    let repository = ["--repository", plan.repository.as_str()];
+    let mut wave = repository.to_vec();
+    wave.extend(["machine", "use", "mini", "owners"]);
+    let output = fixture.run(&wave);
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
+    // Bare, outside a Task or Wave worktree, it sets the repository's default.
+    let mut bare = repository.to_vec();
+    bare.extend(["machine", "use", "mini"]);
+    let output = fixture.run(&bare);
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("This repository:"));
+    // The Wave Session comes back to the laptop; its Tasks stay on mini.
+    let mut session = repository.to_vec();
+    session.extend(["machine", "use", laptop.as_str(), "owners", "--session"]);
+    let output = fixture.run(&session);
+    assert_success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners: its Session runs"));
+    for (store, path) in [
+        (&plan.local, &plan.local_path),
+        (&plan.remote, &plan.remote_path),
+    ] {
+        let wave = store
+            .ensure_wave_project(path.to_str().unwrap(), "owners")
+            .unwrap()
+            .wave_id;
         assert_eq!(
-            run["resolution"]["execution_machine"]["value"],
-            owner.as_str()
+            store
+                .wave_owning_machine(&wave, MachineSetting::Tasks)
+                .unwrap(),
+            (mini.clone(), OwningMachineSource::Wave("owners".into()))
         );
         assert_eq!(
-            run["resolution"]["execution_machine"]["source"],
-            "peer_recorded_checkout"
+            store
+                .wave_owning_machine(&wave, MachineSetting::Session)
+                .unwrap(),
+            (laptop.clone(), OwningMachineSource::Wave("owners".into()))
         );
-        match checkout {
-            Some(path) => assert_eq!(run["resolution"]["checkout"]["value"], path),
-            None => assert_eq!(run["resolution"]["checkout"]["state"], "unavailable"),
-        }
-        assert!(run["action"].is_null());
-        for command in [
-            vec!["task", "checkout"],
-            vec!["task", "workflow", "move", task.id.as_str(), "start"],
-        ] {
-            let report = explain(&command);
-            for fact in ["execution_machine", "checkout"] {
-                assert_eq!(report["resolution"][fact], run["resolution"][fact]);
-            }
-            assert!(report["action"].is_null());
-        }
-        // A Work address names neither Machine nor checkout; opening reads the
-        // execution owner when it runs and refuses a checkout it cannot reach.
-        if checkout.is_some() {
-            let link = &explain(&["open"])["links"][0];
-            let url = reqwest::Url::parse(link["url"].as_str().unwrap()).unwrap();
-            assert!(url.path().starts_with("/task/"), "{url}");
-            assert_eq!(url.query(), None);
-        } else {
-            let refused = fixture.run(&[
-                "--repository",
-                repository.as_str(),
-                "--task",
-                task.id.as_str(),
-                "open",
-                "--explain",
-                "--json",
-            ]);
-            assert!(!refused.status.success());
-            assert!(
-                String::from_utf8_lossy(&refused.stderr).contains("Recorded checkout unavailable")
+        for setting in [MachineSetting::Tasks, MachineSetting::Session] {
+            assert_eq!(
+                store
+                    .repository_owning_machine(&plan.repository, setting)
+                    .unwrap(),
+                (mini.clone(), OwningMachineSource::Repository)
             );
         }
-        assert_eq!(checkpoint_bytes(&local_db), local_before);
-        assert_eq!(checkpoint_bytes(&remote_db), remote_before);
     }
-    db.execute(
-        "UPDATE tasks SET worktree=?2 WHERE id=?1",
-        rusqlite::params![task.id.as_str(), remote_path.to_str().unwrap()],
-    )
-    .unwrap();
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-
-    let checkout = fixture.json(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--json",
-    ]);
-    assert_eq!(checkout["worktree"], remote_path.to_str().unwrap());
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-    let local_before = checkpoint_bytes(&local_db);
-    let remote_before = checkpoint_bytes(&remote_db);
-
-    // Replaying yesterday's successful reply cannot masquerade as a new reading.
-    let replay = fixture.root.path().join("replay.json");
-    fs::write(
-        &replay,
-        serde_json::to_vec(&vec![reading[1].clone()]).unwrap(),
-    )
-    .unwrap();
-    executable(
-        &fixture.root.path().join("bin/ssh"),
-        &format!("#!/bin/sh\ncat '{}'\n", replay.display()),
-    );
-    let stale = fixture.json(&args);
-    assert_eq!(stale[1]["location"]["state"], "unavailable");
-    assert!(stale[1]["location"]["reason"]
-        .as_str()
-        .unwrap()
-        .contains("stale or mismatched"));
-    for command in [vec!["task", "run"], vec!["task", "checkout"]] {
-        let report = explain(&command);
-        for fact in ["execution_machine", "checkout"] {
-            assert_eq!(report["resolution"][fact]["state"], "unavailable");
-        }
-        assert!(report["action"].is_null());
-        assert!(report["url"].is_null());
-    }
-    // Opening Work remains available without a usable execution location.
-    assert!(explain(&["open"])["links"][0]["url"]
-        .as_str()
-        .unwrap()
-        .starts_with("loopflow://"));
-
-    // A peer reply represents exactly one local observer, never a peer inventory.
-    for readings in [vec![], vec![reading[1].clone(); 2]] {
-        fs::write(&replay, serde_json::to_vec(&readings).unwrap()).unwrap();
-        let malformed = fixture.json(&args);
-        assert_eq!(malformed[1]["location"]["state"], "unavailable");
-        assert!(malformed[1]["location"]["reason"]
-            .as_str()
+    let listed = fixture.json(&["machine", "list", "--json"]);
+    let listing = |id: &str| {
+        listed
+            .as_array()
             .unwrap()
-            .contains("one local execution-location reading"));
-    }
-
-    executable(
-        &fixture.root.path().join("bin/ssh"),
-        "#!/bin/sh\necho unreachable >&2\nexit 255\n",
+            .iter()
+            .find(|listing| listing["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    let scopes = listing(mini.as_str())["defaults"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            format!(
+                "{} {}",
+                d["scope"]["kind"].as_str().unwrap(),
+                d["setting"].as_str().unwrap()
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listing(laptop.as_str())["defaults"][0]["setting"],
+        "session"
     );
-    let unreachable = fixture.json(&args);
-    assert_eq!(unreachable[1]["location"]["state"], "unavailable");
-    assert_eq!(checkpoint_bytes(&local_db), local_before);
-    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
-    // Actual preparation refuses before a local checkout or provider can appear.
-    let launch = fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--json",
-    ]);
-    assert!(!launch.status.success());
-    let error = String::from_utf8_lossy(&launch.stderr);
-    assert!(
-        error.contains("Machine command unavailable") && error.contains("unreachable"),
-        "{error}"
+    assert_eq!(
+        scopes,
+        ["wave tasks", "repository tasks", "repository session"]
     );
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
+    // The laptop routes the unowned Task to mini; mini claims it for itself.
+    assert_eq!(
+        plan.local.task_execution_route(&task).unwrap().machine_id,
+        mini
+    );
+    assert!(plan.local.claim_task(&task).is_err());
+    plan.remote.claim_task(&task).unwrap().unwrap();
 }
 
 #[test]
@@ -1650,146 +1879,5 @@ fn remote_companions_keep_the_recorded_owner_and_stream_file_changes() {
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
     assert!(changed);
-    assert!(!fixture.root.path().join("forbidden-effect").exists());
-}
-
-#[test]
-fn task_admission_crosses_machines_and_recovers_a_lost_reply_before_checkout() {
-    use loopflow::durable::TaskId;
-    use loopflow::planning_git::PlanningDestination;
-    use loopflow::store::sqlite::SqliteStore;
-    use loopflow::work::task::NewTask;
-
-    let fixture = preview_machines();
-    let local_repo = loopflow_test_support::TestRepo::new();
-    let remote_repo = loopflow_test_support::TestRepo::new();
-    let local_path = local_repo.path().canonicalize().unwrap();
-    let remote_path = remote_repo.path().canonicalize().unwrap();
-    let local_db = fixture.root.path().join("local/loopflow.db");
-    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
-    let local = SqliteStore::new(&local_db).unwrap();
-    let remote = SqliteStore::new(&remote_db).unwrap();
-    let repository = remote
-        .ensure_repository(remote_path.to_str().unwrap())
-        .unwrap();
-    local
-        .bind_repository(local_path.to_str().unwrap(), &repository)
-        .unwrap();
-    let project = remote
-        .ensure_wave_project(remote_path.to_str().unwrap(), "admission")
-        .unwrap();
-    let task = remote
-        .create_task(&NewTask {
-            repository_id: remote
-                .ensure_repository(remote_path.to_str().unwrap())
-                .unwrap(),
-            id: TaskId::new(),
-            project_id: Some(project.id),
-            title: "Admit once".into(),
-            description: String::new(),
-            due_date: None,
-        })
-        .unwrap();
-    let destination = PlanningDestination::new(
-        "/fixture/planning",
-        "refs/loopflow/planning/shared/admission",
-    )
-    .unwrap();
-    for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-        store
-            .bind_peer_planning(path.to_str().unwrap(), &destination)
-            .unwrap();
-    }
-    local
-        .import_peer_planning(
-            local_path.to_str().unwrap(),
-            &destination.id(),
-            "first",
-            &remote
-                .export_peer_planning(remote_path.to_str().unwrap(), &destination.id())
-                .unwrap(),
-        )
-        .unwrap();
-    let owner = local.local_machine().unwrap().id;
-    let args = [
-        "--repository",
-        repository.as_str(),
-        "task",
-        "admission",
-        task.id.as_str(),
-        "--json",
-    ];
-    let before = [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)];
-    let reading = fixture.json(&args);
-    assert!(reading["owner"].is_null());
-    assert_eq!(
-        reading["authority"]["machine_id"],
-        remote.local_machine().unwrap().id.as_str()
-    );
-    assert_eq!(
-        [checkpoint_bytes(&local_db), checkpoint_bytes(&remote_db)],
-        before
-    );
-
-    let ssh = fixture.root.path().join("bin/ssh");
-    let original = fs::read_to_string(&ssh).unwrap();
-    // Execute the real peer CLI, then lose its successful acknowledgement.
-    executable(
-        &ssh,
-        &(original.replace("exec env -i", "env -i") + "\nexit 42\n"),
-    );
-    let mut claim = args.to_vec();
-    claim.extend(["--claim", owner.as_str()]);
-    let lost = fixture.run(&claim);
-    assert!(!lost.status.success());
-    assert_eq!(
-        remote
-            .task_admission(&task.id, "receipt")
-            .unwrap()
-            .unwrap()
-            .owner,
-        Some(owner.clone())
-    );
-    assert!(local
-        .task_admission(&task.id, "local")
-        .unwrap()
-        .unwrap()
-        .owner
-        .is_none());
-    assert!(local.task(&task.id).unwrap().unwrap().worktree.is_none());
-    executable(&ssh, &original);
-    let retried = fixture.json(&claim);
-    assert_eq!(retried["owner"], owner.as_str());
-    assert_eq!(fixture.json(&args)["owner"], owner.as_str());
-    // The ordinary checkout operation consumes the same decision and records
-    // execution only on its admitted Machine.
-    let prepared = fixture.run(&[
-        "--repository",
-        repository.as_str(),
-        "task",
-        "checkout",
-        task.id.as_str(),
-        "--name",
-        "admitted-work",
-        "--json",
-    ]);
-    assert_success(&prepared);
-    assert!(local
-        .task(&task.id)
-        .unwrap()
-        .unwrap()
-        .worktree
-        .unwrap()
-        .join(".git")
-        .exists());
-    assert!(remote.task(&task.id).unwrap().unwrap().worktree.is_none());
-    assert_eq!(
-        local
-            .task_admission(&task.id, "retained")
-            .unwrap()
-            .unwrap()
-            .owner,
-        Some(owner)
-    );
     assert!(!fixture.root.path().join("forbidden-effect").exists());
 }

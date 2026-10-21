@@ -14,17 +14,6 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(TaskState.self, from: JSONEncoder().encode(state)) == state)
     }
 
-    @Test func workMachineNamesExecutionSourceAndChoices() throws {
-        let readings = try JSONDecoder().decode([WorkMachine].self, from: loadFixtureData("work_machine.json"))
-        #expect(readings[0].followsPlacement && !readings[0].placedHere)
-        #expect(readings[0].placement.source == .init(kind: "wave", id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
-        #expect(readings[0].name(of: readings[0].localMachineID) == "This Mac")
-        #expect(readings[0].name(of: readings[0].machineID!) == "mini")
-        #expect(readings[1].machineID == nil && !readings[1].followsPlacement)
-        #expect(readings[2].execution == nil && readings[2].followsPlacement)
-        #expect(try JSONDecoder().decode([WorkMachine].self, from: JSONEncoder().encode(readings)) == readings)
-    }
-
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
@@ -615,7 +604,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
-        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 
@@ -686,7 +674,7 @@ struct DTOFixtureTests {
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
-        #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
+        #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
         // The wire carries each Task once; Waves share them by the Task's Wave.
         #expect(roadmap.tasks.items.count == 4)
         #expect(roadmap.waves[1].tasks.items.isEmpty)

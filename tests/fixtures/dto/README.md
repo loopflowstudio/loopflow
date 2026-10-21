@@ -78,7 +78,7 @@ including hidden/suppressed occurrences. Window receipts own Task/Session outcom
 readiness proof.
 
 `task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
-selection and unavailable execution evidence. Explanation never grants admission.
+selection and unavailable execution evidence. Explanation never claims ownership.
 
 `session_connect_explanations.json` preserves connection intent, preparation versus
 takeover, shared legal actions and unavailable evidence without client acquisition.
@@ -94,7 +94,7 @@ append versus provider refresh, effects and explicit refused input.
 
 `task_locations.json` covers request-bound Machine observations, retained paths,
 pathless execution, local absence and unavailable peers. Negative readings grant
-no admission; execution locations never enter planning exchange.
+no ownership; execution locations never enter planning exchange.
 
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
 
@@ -111,8 +111,3 @@ members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
 base recovery. Shell identity is independent of its tool pane; saved intent never
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
-
-`work_machine.json` pins `lf task place --json` and `lf wave place --json`: the
-execution Machine, what fixes a Task there (placement, admission or its recorded
-checkout, which may predate Machine records), the placement unstarted work
-inherits, and the local-first Machine choices. Rust and Swift round-trip it.

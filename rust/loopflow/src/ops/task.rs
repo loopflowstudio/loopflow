@@ -915,7 +915,7 @@ fn prepare_task(
             .map_err(task_error)?;
         if destination.machine_id != store.local_machine().await.map_err(task_error)?.id {
             return Err(task_error(format!(
-                "Task {} executes on Machine {}; launch it through `lf --task {}` so the command reaches its recorded destination",
+                "Task {} is owned on Machine {}; launch it through `lf --task {}` so the command reaches its owner",
                 task.identifier, destination.machine_id, task.id,
             )));
         }
@@ -959,12 +959,13 @@ fn prepare_task(
                 .sqlite
                 .task_issue_branch(&task.id)
                 .map_err(task_error)?);
-            super::task_admission::ensure_local(&store.sqlite, &task.id)
-                .await
-                .map_err(task_error)?;
             let placement =
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
-            place_prepared_task(&store, &task.id, placement).await?
+            let task = place_prepared_task(&store, &task.id, placement).await?;
+            // The checkout claimed the Task; Linear learns who took it.
+            let repository = repository_for_task(&store, &task)?;
+            super::task_ownership::assert_assignee(&store.sqlite, &repository, &task.id).await;
+            task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
                 stack_existing_task(&store, &task, parent).await?;
@@ -3057,6 +3058,7 @@ pub struct TaskStatus {
     pub planning_stale: bool,
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
+    pub ownership: Option<crate::durable::TaskOwnership>,
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
@@ -3106,6 +3108,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             planning_stale: false,
             planning_state: crate::store::PlanningState::Unavailable,
             execution: None,
+            ownership: None,
         };
         if let Some(task) = task {
             let acquisition = store
@@ -3123,6 +3126,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     .map_err(task_error)?,
             );
             result.execution = Some(read_task_snapshot(&store, task.clone()).await?);
+            result.ownership = Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?);
             result.planning_state = acquisition.state;
             result.observed_at = acquisition.observed_at;
             result.task = Some(task);
@@ -3177,35 +3181,6 @@ pub fn task_pause(issue: &str, paused: bool) -> OpsResult<()> {
         let repo = repository_for_task(&store, &task)?;
         super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
         Ok(())
-    })
-}
-
-/// Read where a Task executes; with `Some(change)`, first place an unstarted
-/// Task on a Machine (`Some(id)`) or clear its override to inherit (`None`).
-pub fn task_machine(
-    issue: &str,
-    change: Option<Option<&crate::durable::MachineId>>,
-) -> OpsResult<crate::durable::WorkMachine> {
-    block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        let Some(machine_id) = change else {
-            return store
-                .sqlite
-                .work_machine(&crate::durable::WorkRef::Task(task.id.clone()))
-                .map_err(task_error);
-        };
-        let placed = store
-            .sqlite
-            .place_task_machine(&task.id, machine_id)
-            .map_err(task_error)?;
-        let repo = repository_for_task(&store, &task)?;
-        super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
-        Ok(placed)
     })
 }
 
@@ -5200,7 +5175,7 @@ mod tests {
     }
 
     #[test]
-    fn task_checkout_machine_survives_delegation_without_lifecycle_reconciliation() {
+    fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
@@ -5209,22 +5184,8 @@ mod tests {
         fixture
             .store
             .sqlite
-            .add_machine(&remote, "worker", "worker", "/repo")
+            .add_machine(&remote, "worker", "worker")
             .unwrap();
-        fixture
-            .store
-            .sqlite
-            .place_work(&fixture.work, &remote)
-            .unwrap();
-        assert_eq!(
-            fixture
-                .store
-                .sqlite
-                .placement(&fixture.work)
-                .unwrap()
-                .machine_id,
-            remote
-        );
         let mut pr = runtime
             .block_on(fixture.store.active_task_pr(&fixture.task.id))
             .unwrap()
@@ -5361,79 +5322,6 @@ mod tests {
     }
 
     #[test]
-    fn task_checkout_machine_requires_destination_and_retains_it_after_delegation() {
-        let repo = loopflow_test_support::TestRepo::new();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
-        let store = &fixture.store.sqlite;
-        let preparing_machine = store.local_machine().unwrap().id;
-        let assigned_machine = crate::durable::MachineId::new();
-        store
-            .add_machine(&assigned_machine, "assigned", "assigned", "/repo")
-            .unwrap();
-        store
-            .place_work(
-                &WorkRef::Project(fixture.task.project_id.clone().unwrap()),
-                &assigned_machine,
-            )
-            .unwrap();
-        let task = store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: fixture.task.repository_id.clone(),
-                due_date: None,
-                id: TaskId::new(),
-                project_id: fixture.task.project_id.clone(),
-                title: "Another Task".into(),
-                description: String::new(),
-            })
-            .unwrap();
-        assert!(!store
-            .task_checkouts()
-            .unwrap()
-            .iter()
-            .any(|row| row.task_id == task.id));
-        let worktree = repo.path().join("another-checkout");
-        let mut pr = store.active_task_pr(&fixture.task.id).unwrap().unwrap();
-        pr.id = TaskPrId::new();
-        pr.task_id = task.id.clone();
-        pr.branch = "another-branch".into();
-        assert!(store
-            .place_task(&task.id, &worktree, "another", &pr)
-            .is_err());
-        assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
-        store
-            .place_work(
-                &WorkRef::Project(task.project_id.clone().unwrap()),
-                &preparing_machine,
-            )
-            .unwrap();
-        let task = store
-            .place_task(&task.id, &worktree, "another", &pr)
-            .unwrap();
-        store
-            .place_work(
-                &WorkRef::Project(task.project_id.clone().unwrap()),
-                &assigned_machine,
-            )
-            .unwrap();
-        assert_eq!(
-            store
-                .placement(&WorkRef::Task(task.id.clone()))
-                .unwrap()
-                .machine_id,
-            assigned_machine
-        );
-        let checkout = store
-            .task_checkouts()
-            .unwrap()
-            .into_iter()
-            .find(|row| row.task_id == task.id)
-            .unwrap();
-        assert_eq!(checkout.machine_id, Some(preparing_machine));
-        assert_eq!(&checkout.worktree, task.worktree().unwrap());
-    }
-
-    #[test]
     fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -5443,7 +5331,7 @@ mod tests {
         fixture
             .store
             .sqlite
-            .add_machine(&remote, "remote", "remote", "/repo")
+            .add_machine(&remote, "remote", "remote")
             .unwrap();
         let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
         connection
@@ -5768,7 +5656,7 @@ mod tests {
         let peer = crate::durable::MachineId::new();
         fixture
             .store
-            .add_machine(&peer, "peer", "peer", "/repo")
+            .add_machine(&peer, "peer", "peer")
             .await
             .unwrap();
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
@@ -6160,6 +6048,12 @@ mod tests {
 
         next.branch = task.branch.clone();
         store.insert_task_pr(&next).await.unwrap();
+        // A new PR respects completion; only an explicit reopen uncompletes.
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+        store
+            .sqlite
+            .reopen_task(&task.id, Some("New delivery"))
+            .unwrap();
         store
             .sqlite
             .request_task_completion(&task.id, Some("New delivery"))

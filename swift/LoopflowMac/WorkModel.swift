@@ -1916,32 +1916,6 @@ final class WorkModel {
         }
     }
 
-    /// The Work the Machine control describes: the current Task, else the
-    /// selected Wave. Repository and Dashboard views have no execution Machine.
-    var machineTarget: WorkMachineTarget? {
-        if let task = breadcrumb?.task { return .task(issue: task.task.task.identifier) }
-        if let work = selection, work.kind == .wave, navigation.dashboardID == nil { return .wave(id: work.id) }
-        return nil
-    }
-
-    func workMachine(_ target: WorkMachineTarget) async throws -> WorkMachine {
-        try await query.workMachine(target, cwd: machineCwd(target))
-    }
-
-    /// Place the Wave or unstarted Task, then confirm the Work update so the
-    /// Task inventory and other windows read the same placement.
-    func placeWork(_ target: WorkMachineTarget, _ placement: WorkMachinePlacement) async throws -> WorkMachine {
-        let home = workDataDirectory
-        let machine = try await query.workMachine(target, place: placement, cwd: machineCwd(target))
-        try await confirmWorkUpdate(after: home)
-        return machine
-    }
-
-    private func machineCwd(_ target: WorkMachineTarget) -> String? {
-        if case .task = target, let task = breadcrumb?.task { return WaveOrigin.resolve(task.task.task.repo) }
-        return repoPath
-    }
-
     /// Put the Task at a node of its Workflow, then confirm its subscription
     /// update. A refusal is kept on that Task's draft.
     func moveTask(to node: String, task: RoadmapTask) async {

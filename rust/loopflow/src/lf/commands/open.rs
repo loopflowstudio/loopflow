@@ -155,6 +155,9 @@ struct Resolved {
     session_cwd: Option<PathBuf>,
     /// The Work's current primary conversation, read without admitting one.
     primary: Option<String>,
+    /// The other Machine of yours whose store holds this Work's primary; the
+    /// routed connect reads and reuses it there.
+    primary_machine: Option<String>,
     execution_machine: Option<String>,
     /// Why the Task's execution owner could not be read; opening refuses.
     execution_unavailable: Option<String>,
@@ -276,7 +279,12 @@ impl Resolved {
             Some(_) => (ConversationRelation::OtherConversation, None),
             None => (
                 ConversationRelation::OtherConversation,
-                Some("This Work has no conversation yet; opening starts its primary".into()),
+                Some(match &self.primary_machine {
+                    Some(machine) => format!(
+                        "This Work's conversation runs on Machine {machine}; opening connects there"
+                    ),
+                    None => "This Work has no conversation yet; opening starts its primary".into(),
+                }),
             ),
         }
     }
@@ -342,11 +350,7 @@ fn work_context(
         if let Some(store) = crate::store::read_existing_registry()? {
             // The shared reader retains failures in the explanation; opening
             // refuses unavailable execution without losing the other Work facts.
-            let _ = tokio::runtime::Runtime::new()?.block_on(crate::ops::task_location::explain(
-                &store.sqlite,
-                &task,
-                &mut resolution,
-            ));
+            let _ = crate::ops::task_location::explain(&store.sqlite, &task, &mut resolution);
         }
     }
     if let Some(session) = session.filter(|_| task.is_some()) {
@@ -424,13 +428,8 @@ fn describe(
             Some(_),
             ContextFact::Bound { value: owner, .. },
             ContextFact::Bound { value: local, .. },
-        ) if owner != local => {
-            anyhow::ensure!(
-                matches!(&context.checkout, ContextFact::Bound { .. }),
-                "Recorded checkout unavailable on Machine {owner}; nothing was opened."
-            );
-            Some(owner.clone())
-        }
+            // The owner creates its checkout when the routed connect arrives.
+        ) if owner != local => Some(owner.clone()),
         (Some(_), ContextFact::Unavailable { reason }, _) if session.is_some() || diff => {
             bail!("Task execution location unavailable: {reason}. Nothing was opened.");
         }
@@ -467,7 +466,7 @@ fn describe(
         url.session = session.clone();
         url.diff = diff;
     }
-    let primary = match store {
+    let (primary, primary_machine) = match store {
         Some(store) => {
             let scope = match (&task, &context.wave) {
                 (Some(task), _) => PrimaryScope::Task(task.id.clone()),
@@ -478,12 +477,41 @@ fn describe(
                     &repository_path,
                 )?),
             };
-            store
-                .sqlite
-                .primary_session(&scope)?
-                .map(|session| session.id.into())
+            // A Task's primary follows its claim; a Wave's or repository's
+            // follows your Session Machine for it.
+            let setting = crate::durable::MachineSetting::Session;
+            let local = store.sqlite.local_machine()?.id;
+            let remote = |machine: crate::durable::MachineId| {
+                (machine != local).then(|| machine.to_string())
+            };
+            let machine = match (&scope, &repository_id) {
+                (PrimaryScope::Task(_), _) => execution_machine.clone(),
+                (PrimaryScope::Wave(wave), _) => {
+                    remote(store.sqlite.wave_owning_machine(wave, setting)?.0)
+                }
+                (PrimaryScope::Repository(_), Some(repository)) => remote(
+                    store
+                        .sqlite
+                        .repository_owning_machine(
+                            &crate::durable::RepositoryId::from_raw(repository.clone()),
+                            setting,
+                        )?
+                        .0,
+                ),
+                (PrimaryScope::Repository(_), None) => None,
+            };
+            match machine {
+                Some(machine) => (None, Some(machine)),
+                None => (
+                    store
+                        .sqlite
+                        .primary_session(&scope)?
+                        .map(|session| session.id.into()),
+                    None,
+                ),
+            }
         }
-        None => None,
+        None => (None, None),
     };
     let standing = match (store, &task) {
         (Some(store), Some(task)) => crate::terminal_title::standing(
@@ -508,6 +536,7 @@ fn describe(
         session,
         session_cwd,
         primary,
+        primary_machine,
         execution_machine,
         execution_unavailable,
         standing,

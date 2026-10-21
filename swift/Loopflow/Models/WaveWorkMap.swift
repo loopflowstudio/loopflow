@@ -142,14 +142,34 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let updatedAt: String
     public let provider: String
-    /// Durable evidence that work began; `false` means none is recorded.
-    public let started: Bool
+    /// Who owns the Task on which Machine; absent when it is unowned.
+    public let owner: TaskOwner?
 
     enum CodingKeys: String, CodingKey {
-        case status, reason, provider, started
+        case status, reason, provider, owner
         case workId = "work_id"
         case completionPending = "completion_pending"
         case updatedAt = "updated_at"
+    }
+}
+
+/// A Machine for display. A missing id is an unknown Machine.
+public struct MachineRef: Decodable, Sendable, Hashable {
+    public let id: String?
+    public let label: String?
+}
+
+/// The person and Machine that own a Task.
+public struct TaskOwner: Decodable, Sendable, Hashable {
+    public let person: String?
+    public let machine: MachineRef
+
+    /// "Jack Heart on mini"; "Machine unknown" when the Machine was never recorded.
+    public var summary: String {
+        let person = person ?? "Someone"
+        if let label = machine.label, !label.isEmpty { return "\(person) on \(label)" }
+        if let id = machine.id { return "\(person) on \(id)" }
+        return "\(person) · Machine unknown"
     }
 }
 

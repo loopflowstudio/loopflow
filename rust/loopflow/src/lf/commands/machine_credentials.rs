@@ -809,7 +809,6 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             id: crate::durable::MachineId::new(),
             route: "mini".into(),
             label: Some("mini".into()),
-            repo: Some("~/src/project".into()),
             created_at: time::OffsetDateTime::UNIX_EPOCH,
             observed_at: time::OffsetDateTime::UNIX_EPOCH,
         };

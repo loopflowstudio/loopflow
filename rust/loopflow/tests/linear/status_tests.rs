@@ -869,7 +869,7 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
 }
 
 #[test]
-fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
+fn reserved_session_does_not_claim_task_in_status_and_roadmap() {
     let home = tempfile::tempdir().unwrap();
     seed_persisted_merge_request_without_copy(home.path());
     let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
@@ -878,6 +878,7 @@ fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
         .execute("DELETE FROM task_prs WHERE task_id=?1", [PERSISTED_TASK_ID])
         .unwrap();
 
+    let mut owners = Vec::new();
     for assigned in [false, true] {
         if assigned {
             connection
@@ -913,9 +914,14 @@ fn reserved_session_starts_task_in_status_and_roadmap_without_publication() {
         let roadmap = roadmap_json(home.path(), "product");
         for task in [&status["tasks"]["items"][0], &roadmap["tasks"]["items"][0]] {
             assert_eq!(task["task"]["identifier"], "PRD-52");
-            assert_eq!(task["runtime"]["started"], assigned);
+            owners.push(task["runtime"]["owner"].clone());
         }
     }
+    // A bound conversation is not a claim; it leaves the recorded owner as it was.
+    assert!(
+        owners.windows(2).all(|pair| pair[0] == pair[1]),
+        "{owners:?}"
+    );
     assert!(
         !home.path().join("runs").exists(),
         "no provider was launched"
@@ -1017,7 +1023,8 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
         assert!(tasks[0]["pr"].is_null());
         if identifier == "W2-127" {
             assert_eq!(tasks[0]["runtime"]["work_id"], PERSISTED_TASK_ID);
-            assert_eq!(tasks[0]["runtime"]["started"], false);
+            // The seeded checkout claimed the Task; reading the roadmap leaves it owned.
+            assert!(tasks[0]["runtime"]["owner"].is_object());
             assert_eq!(
                 tasks[0]["task"]["name"],
                 "Preserve historical architecture evidence"
@@ -1137,7 +1144,7 @@ fn ordinary_task_due_date_is_visible_before_checkout() {
         .iter()
         .find(|row| row["task"]["linear_id"] == child.id)
         .unwrap();
-    assert_eq!(row["runtime"]["started"], false);
+    assert!(row["runtime"]["owner"].is_null());
     assert!(row["reference"]["workspace"].is_null());
     assert!(row["pr"].is_null());
     assert_eq!(

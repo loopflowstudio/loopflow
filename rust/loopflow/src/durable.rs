@@ -126,7 +126,8 @@ pub enum TaskLocation {
     },
 }
 
-/// A launch destination read from planning and recorded execution, not a claim.
+/// Where a Task's commands execute: its owner's Machine, or the Machine that
+/// may claim it when it is unowned or its owner's Machine is unknown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskExecutionRoute {
     pub task_id: TaskId,
@@ -136,81 +137,137 @@ pub struct TaskExecutionRoute {
     pub source: TaskExecutionSource,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskExecutionSource {
+    Owner,
+    OwningMachine(OwningMachineSource),
+}
+
+/// Where your Machine for an unowned Task or a scope's Session came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
+pub enum OwningMachineSource {
+    /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
+    Wave(String),
+    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    Repository,
+    /// No default is set: the Machine running the command.
+    ThisMachine,
+}
+
+/// Where a person sets a default above a single Task. A Task's own Machine is
+/// its ownership claim, not a default. Resolution walks Wave → parent Waves →
+/// repository → the setting's fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum DefaultScope {
+    Wave(crate::id::WaveId),
+    Repository(RepositoryId),
+}
+
+/// Which part of a Wave or repository a Machine default places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MachineSetting {
+    /// Where the scope's new Tasks run.
+    Tasks,
+    /// Where the scope's primary Session runs.
+    Session,
+}
+
+/// One of your Machine defaults, with the scope's name on this Machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineDefault {
+    pub scope: DefaultScope,
+    /// The Wave's name, or the repository's path on this Machine.
+    pub name: String,
+    pub setting: MachineSetting,
+    pub machine_id: MachineId,
+}
+
+prefixed_uuid_id!(
+    OwnershipEntryId,
+    "own_",
+    DurableDataError,
+    DurableDataError::InvalidId
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskExecutionSource {
-    RecordedCheckout,
-    Admission,
-    EffectiveDelegation,
+pub enum OwnershipKind {
+    Claim,
+    /// Moves the claim to `machine_id`, keeping the person.
+    Handoff,
+    Unclaim,
+    /// What a Machine knew before ownership existed; never delivered.
+    Recorded,
 }
 
-/// Immutable first-start coordinator, carried with the Task's planning identity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskAdmissionAuthority {
-    pub machine_id: MachineId,
-    pub repository_id: RepositoryId,
+impl OwnershipKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claim => "claim",
+            Self::Handoff => "handoff",
+            Self::Unclaim => "unclaim",
+            Self::Recorded => "recorded",
+        }
+    }
 }
 
-/// A request-bound reading from the coordinator. A positive owner never expires.
+/// One immutable entry in a Task's ownership log. `machine_id` names the
+/// claimant, the handoff target, or the unclaiming Machine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskAdmission {
-    pub request: String,
+pub struct TaskOwnershipEntry {
+    pub id: OwnershipEntryId,
     pub task_id: TaskId,
-    pub authority: TaskAdmissionAuthority,
-    pub owner: Option<MachineId>,
+    pub kind: OwnershipKind,
+    pub person: Option<String>,
+    pub machine_id: Option<MachineId>,
+    pub at: i64,
+}
+
+/// A Machine for display; a missing id reads as "Machine unknown".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineRef {
+    pub id: Option<MachineId>,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOwner {
+    pub person: Option<String>,
+    pub machine: MachineRef,
+}
+
+impl std::fmt::Display for TaskOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let person = self.person.as_deref().unwrap_or("Someone");
+        match (&self.machine.label, &self.machine.id) {
+            (Some(label), _) => write!(f, "{person} on {label}"),
+            (None, Some(id)) => write!(f, "{person} on {id}"),
+            (None, None) => write!(f, "{person} (Machine unknown)"),
+        }
+    }
+}
+
+/// This Machine's reading of a Task's ownership. `superseded_by` names a later
+/// claim that every other Machine follows while this Machine keeps its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskOwnership {
+    pub owner: Option<TaskOwner>,
+    pub superseded_by: Option<TaskOwner>,
+    pub log: Vec<TaskOwnershipEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Machine {
     pub label: Option<String>,
-    pub repo: Option<String>,
     pub id: MachineId,
     pub route: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub observed_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Placement {
-    pub work: WorkRef,
-    /// The ancestor (or Work itself) supplying this assignment.
-    pub source: WorkRef,
-    pub provenance: PlacementProvenance,
-    pub machine_id: MachineId,
-    #[serde(with = "time::serde::rfc3339")]
-    pub placed_at: OffsetDateTime,
-}
-
-/// Where Work executes and why, with the Machines placement may choose.
-/// Wire type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkMachine {
-    pub work: WorkRef,
-    /// The execution Machine. Absent only for a Task that started before its
-    /// Machine was recorded.
-    pub machine_id: Option<MachineId>,
-    /// What fixes a Task's Machine; absent for Waves and Projects. Only
-    /// `effective_delegation` follows placement: a started or admitted Task
-    /// stays where it is, and moving it is explicit takeover.
-    pub execution: Option<TaskExecutionSource>,
-    /// The assignment unstarted and future work inherits.
-    pub placement: Placement,
-    pub local_machine_id: MachineId,
-    /// The local Machine, then saved Machines by label.
-    pub machines: Vec<Machine>,
-}
-
-/// How the source assignment was established; inheritance is `source != work`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlacementProvenance {
-    Explicit,
-    /// Released rows cannot distinguish an explicit choice from a copied parent.
-    Legacy,
-    /// No authored assignment exists in the ancestry.
-    LocalDefault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

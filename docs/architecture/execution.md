@@ -71,7 +71,7 @@ Process completion records the observed command result, end time and known exit
 code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
 commands must reach their exact-store authority checks before any logging-induced
 store open; unavailable-store coverage is reported explicitly. An inspection
-Process does not reserve agent work or mark a Task Started.
+Process does not reserve agent work or claim a Task.
 
 The source cut is incomplete: optional/unattributed launches still need conversion.
 Captured Claude and native restarts reserve a fresh AgentProcess and update the

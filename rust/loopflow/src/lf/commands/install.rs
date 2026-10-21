@@ -358,9 +358,7 @@ fn _read_executable_references(
     let mut statement = conn.prepare(
         "SELECT 'wave', w.id, 'wave/operate', w.repo
          FROM waves w
-         LEFT JOIN work_placements placement ON w.id=placement.wave_id
-         WHERE COALESCE(placement.enabled,1)=1
-           AND w.work_state='ready'
+         WHERE w.work_state='ready'
            AND w.retired_at IS NULL
          ORDER BY 1, 2, 3, 4",
     )?;
@@ -779,22 +777,19 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn executable_references_include_waves_without_copied_assignments() {
+    fn executable_references_include_ready_unretired_waves() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE waves(id TEXT,name TEXT,repo TEXT,work_state TEXT,retired_at INTEGER);
-            CREATE TABLE work_placements(wave_id TEXT,enabled INTEGER);
-            INSERT INTO waves VALUES('inherited','inherited','/repo','ready',NULL),
-                ('disabled','disabled','/repo','ready',NULL),
-                ('retired','retired','/repo','ready',1);
-            INSERT INTO work_placements VALUES('disabled',0);",
+            INSERT INTO waves VALUES('ready','ready','/repo','ready',NULL),
+                ('retired','retired','/repo','ready',1);",
         )
         .unwrap();
         assert_eq!(
             super::_read_executable_references(&conn).unwrap(),
             vec![(
                 "wave".into(),
-                "inherited".into(),
+                "ready".into(),
                 "wave/operate".into(),
                 "/repo".into()
             )]
@@ -802,32 +797,21 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn a_placed_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
+    fn a_ref_whose_catalog_root_is_gone_does_not_block_promotion() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
         crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
 
-        // A placed, ready wave whose repo (its catalog root) was deleted: the
+        // A ready wave whose repo (its catalog root) was deleted: the
         // durable row outlived the checkout. Before the fix this failed the whole
         // promotion with "catalog root does not exist"; it must not, because the
         // ref can never execute again regardless of which binary is installed.
         let conn = rusqlite::Connection::open(&store).unwrap();
-        let machine_id: String = conn
-            .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
         let gone = directory.path().join("deleted-worktree");
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, work_state)
              VALUES ('w-gone', 'gone', ?1, 0, 'ready')",
             [gone.to_str().unwrap()],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO work_placements (wave_id, machine_id, enabled, placed_at)
-             VALUES ('w-gone', ?1, 1, 0)",
-            [machine_id],
         )
         .unwrap();
         // Fold the write into the main db file so the backup-API copy sees it.

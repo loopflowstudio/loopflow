@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::durable::{Machine, MachineId};
+use crate::durable::{DefaultScope, Machine, MachineDefault, MachineId, MachineSetting};
 use crate::lf::MachineCommand;
 use crate::store::Store;
 
@@ -53,21 +53,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Add {
             target,
             label,
-            repo,
             json,
         } => {
             let label = label.clone().unwrap_or_else(|| default_label(target));
-            let repo = match repo {
-                Some(repo) => repo.clone(),
-                None => crate::machine_route::resolve_home_relative_repo(
-                    &crate::lf::commands::util::find_repo_root().context(
-                        "use --repo to name the remote repository outside a local checkout",
-                    )?,
-                )
-                .map_err(anyhow::Error::msg)?,
-            };
-            if label.trim().is_empty() || repo.trim().is_empty() {
-                return Err(anyhow!("label and repository must be nonempty"));
+            if label.trim().is_empty() {
+                return Err(anyhow!("label must be nonempty"));
             }
             let probe = match probe(target, false).await {
                 Err(error)
@@ -93,19 +83,47 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 target
             };
-            let machine = store.add_machine(&probe.id?, route, &label, &repo).await?;
+            let machine = store.add_machine(&probe.id?, route, &label).await?;
             print_machine(&machine, *json)?;
         }
         MachineCommand::List { label, json } => {
-            let machines = match label {
+            let mut machines = match label {
                 Some(label) => vec![find_machine(&store, label).await?],
                 None => store.machines().await?,
             };
+            let defaults = store.sqlite.machine_defaults()?;
+            // This Machine is listed only when one of your defaults names it.
+            let local = store.local_machine().await?;
+            if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
+                machines.insert(0, local);
+            }
+            let listings = machines
+                .into_iter()
+                .map(|machine| MachineListing {
+                    defaults: defaults
+                        .iter()
+                        .filter(|d| d.machine_id == machine.id)
+                        .cloned()
+                        .collect(),
+                    machine,
+                })
+                .collect::<Vec<_>>();
             if *json {
-                println!("{}", serde_json::to_string(&machines)?);
+                println!("{}", serde_json::to_string(&listings)?);
             } else {
-                for machine in &machines {
-                    print_machine(machine, false)?;
+                for listing in &listings {
+                    print_machine(&listing.machine, false)?;
+                    for default in &listing.defaults {
+                        let scope = match &default.scope {
+                            DefaultScope::Wave(_) => "Wave",
+                            DefaultScope::Repository(_) => "repository",
+                        };
+                        let part = match default.setting {
+                            MachineSetting::Tasks => "Tasks",
+                            MachineSetting::Session => "Session",
+                        };
+                        println!("  {scope} {} {part}", default.name);
+                    }
                 }
             }
         }
@@ -164,6 +182,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Connect { .. } | MachineCommand::Credentials { .. } => {
             unreachable!("credential commands dispatch before opening the store")
         }
+        MachineCommand::Use { .. } => unreachable!("machine use dispatches with its repository"),
     }
     Ok(())
 }
@@ -172,13 +191,15 @@ fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string(machine)?);
     } else {
-        println!(
-            "{}  {}  {}  {}",
-            machine.label.as_deref().unwrap_or(""),
-            machine.route,
-            machine.repo.as_deref().unwrap_or(""),
-            machine.id
-        );
+        let label = match (&machine.label, machine.route.as_str()) {
+            (Some(label), _) => label.clone(),
+            (None, "local") => format!(
+                "{} (this Machine)",
+                crate::store::sqlite::task_ownership::local_label()
+            ),
+            (None, _) => String::new(),
+        };
+        println!("{label}  {}  {}", machine.route, machine.id);
     }
     Ok(())
 }
@@ -194,6 +215,14 @@ pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Resul
         .ok_or_else(|| {
             anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
         })
+}
+
+/// A Machine with your Wave and repository defaults that name it.
+#[derive(Debug, Serialize)]
+struct MachineListing {
+    #[serde(flatten)]
+    machine: Machine,
+    defaults: Vec<MachineDefault>,
 }
 
 #[derive(Debug, Serialize)]

@@ -1067,7 +1067,7 @@ struct SessionsContentView: View {
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
         !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
-            && (currentKey.kind != .task || fileTask?.task.runtime?.started == true || workspace.presentation.content == .terminals)
+            && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
     }
     /// Shell, Files and new terminals wait until an unstarted Task starts.
     private var taskTools: Bool {
@@ -1224,7 +1224,7 @@ struct SessionsContentView: View {
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
-        let terminals = key.kind != .task || task?.task.runtime?.started == true || entry.presentation.content == .terminals
+        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {

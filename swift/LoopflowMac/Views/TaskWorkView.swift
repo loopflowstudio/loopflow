@@ -230,7 +230,7 @@ struct TaskHeading: View {
     var state: String {
         if let label = task.task.terminalLabel { return label }
         if task.runtime?.status == .paused { return "Paused" }
-        return task.runtime?.started == true ? "Started" : "Unstarted"
+        return task.runtime?.owner != nil ? "Started" : "Unstarted"
     }
 
     var body: some View {
@@ -247,7 +247,7 @@ struct TaskHeading: View {
 
 extension RoadmapTask {
     /// Not yet started and still open: its Session slot offers Start.
-    var awaitsStart: Bool { runtime?.started != true && !task.isTerminal }
+    var awaitsStart: Bool { runtime?.owner == nil && !task.isTerminal }
 }
 
 /// An unstarted Task's Session slot. Showing it starts nothing; Start runs the

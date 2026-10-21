@@ -969,7 +969,7 @@ mod tests {
         }
         let graph = crate::flow::graph::FlowGraph::new("proof", &[]);
         for id in &flows {
-            store.record_flow_process(id, &graph, None).unwrap();
+            store.record_flow_process(id, &graph).unwrap();
         }
         let latest = store.latest_task_flows().unwrap();
         for id in [&task, &sibling, &idle] {
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_checkout_machine_keeps_session_filters_after_delegation() {
+    async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
         let repo = loopflow_test_support::TestRepo::new();
         let other = loopflow_test_support::TestRepo::new();
         let dir = tempfile::tempdir().unwrap();
@@ -1186,11 +1186,6 @@ mod tests {
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,worktree,created_at,checkout_machine_id) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Retained Task',?3,1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
-            conn.execute(
-                "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
-                params![task.as_str(), home.as_str()],
-            )
-            .unwrap();
             for (id, path, scope) in [
                 ("a-alias", alias.join("sub"), None),
                 ("b-subdir", repo.path().join("sub"), None),
@@ -1208,11 +1203,7 @@ mod tests {
         let remote = crate::durable::MachineId::new();
         store
             .sqlite
-            .add_machine(&remote, "worker", "worker", "/repo")
-            .unwrap();
-        store
-            .sqlite
-            .place_work(&crate::durable::WorkRef::Task(task.clone()), &remote)
+            .add_machine(&remote, "worker", "worker")
             .unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),

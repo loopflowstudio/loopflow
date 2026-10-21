@@ -27,15 +27,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A Task is started by its first Run, an unpublished reservation included.
-    pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        task_started_in(&conn, task)
-    }
-
     pub fn task_started_or_published(&self, task: &TaskId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        task_started_or_published_in(&conn, task)
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        task_started_or_published_in(&snapshot, task)
     }
 
     pub fn chapter_task_evidence(&self, task: &TaskId) -> StoreResult<TaskStartEvidence> {
@@ -43,9 +38,9 @@ impl SqliteStore {
         let conn = connection.savepoint()?;
         let begun: bool = conn.query_row(
             // Checkout membership is preservation evidence even when a
-            // conversation has no explicit Task binding or Started timestamp.
+            // conversation has no explicit Task binding or ownership entry.
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
+                "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})
@@ -74,25 +69,17 @@ impl SqliteStore {
     }
 }
 
-/// The one definition of a started Task that Work surfaces show: recorded Task
-/// work, or a published PR on its current delivery.
+/// The one definition of a started Task that Work surfaces show: a current
+/// owner, or a published PR on its current delivery.
 pub(super) fn task_started_or_published_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)
-             OR EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1 AND historical=0
+    Ok(super::task_ownership::owned_in(conn, task)?
+        || conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1 AND historical=0
                 AND publication_requested_at IS NOT NULL)",
-        [task.as_str()],
-        |row| row.get(0),
-    )?)
-}
-
-pub(super) fn task_started_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND started_at IS NOT NULL)",
-        [task.as_str()],
-        |row| row.get(0),
-    )?)
+            [task.as_str()],
+            |row| row.get(0),
+        )?)
 }

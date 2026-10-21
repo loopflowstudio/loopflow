@@ -35,7 +35,7 @@ struct TaskHistoryFilterTests {
             return row
         }
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
-            rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
+            rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
             var condition = try #require(rows[index]["condition"] as? [String: Any])
             condition["unresolved_execution"] = true
             rows[index]["condition"] = condition
@@ -54,7 +54,7 @@ struct TaskHistoryFilterTests {
         plan["completed_at"] = date.map { $0 as Any } ?? NSNull()
         row["task"] = plan
         if let runtime {
-            row["runtime"] = ["work_id": "task", "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
+            row["runtime"] = ["work_id": "task", "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
         }
         row["condition"] = ["state": missing ? "blocked" : "clear", "reason": "historical checkout", "observed_at": "2026-10-02T12:00:00Z", "evidence_age_secs": 0,
             "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"],

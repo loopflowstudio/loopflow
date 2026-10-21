@@ -89,10 +89,6 @@ fn wave_detail_preserves_flow_and_machine() {
         Some("mini")
     );
     assert_eq!(
-        snapshot.wave.machine.as_ref().unwrap().repo.as_deref(),
-        Some("src/project")
-    );
-    assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
@@ -399,6 +395,22 @@ fn task_status_preserves_canonical_work_and_acquisition_evidence() {
     assert!(!status.planning_stale);
     assert!(status.planning_error.is_none());
     assert!(status.execution.is_none());
+    let ownership = status.ownership.as_ref().unwrap();
+    assert_eq!(
+        ownership.owner.as_ref().unwrap().to_string(),
+        "Jack Heart on mini"
+    );
+    assert_eq!(
+        ownership
+            .log
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        [
+            loopflow::durable::OwnershipKind::Claim,
+            loopflow::durable::OwnershipKind::Handoff
+        ]
+    );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(status).unwrap(), value);
     let mut missing = value;
@@ -1184,23 +1196,5 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     assert_eq!(
         serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),
         reading
-    );
-}
-
-#[test]
-fn work_machine_names_execution_source_and_placement_choices() {
-    use loopflow::durable::{TaskExecutionSource, WorkMachine};
-    let input = include_str!("../../../tests/fixtures/dto/work_machine.json");
-    let readings: Vec<WorkMachine> = serde_json::from_str(input).unwrap();
-    assert_eq!(
-        readings[0].execution,
-        Some(TaskExecutionSource::EffectiveDelegation)
-    );
-    assert_eq!(readings[0].machines[0].id, readings[0].local_machine_id);
-    assert_eq!(readings[1].machine_id, None);
-    assert_eq!(readings[2].execution, None);
-    assert_eq!(
-        serde_json::to_value(&readings).unwrap(),
-        serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
 }

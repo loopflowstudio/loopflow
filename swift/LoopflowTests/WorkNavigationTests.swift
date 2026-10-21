@@ -123,33 +123,6 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The Machine control names the current Work's Machine and its source; started Tasks offer no move")
-    func machineControl() async throws {
-        let model = try model()
-        await model.refresh()
-        model.select(.task(id: "issue-review"))
-        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
-        #expect(model.machineTarget == .task(issue: "W2-131"))
-        model.select(.wave(id: "wave-1"))
-        #expect(model.machineTarget == .wave(id: "wave-1"))
-        model.select(nil)
-        #expect(model.machineTarget == nil)
-
-        let readings = try JSONDecoder().decode([WorkMachine].self, from: loadFixtureData("work_machine.json"))
-        var placed: [WorkMachinePlacement] = []
-        let inherited = WorkMachineMenu(reading: readings[0], error: nil, parent: "Product",
-                                        waveName: { $0 == readings[0].placement.source.id ? "Product" : nil }) { placed.append($0) }
-        #expect(inherited.title == "mini" && inherited.origin == "· from Product")
-        try inherited.inspect().find(viewWithAccessibilityIdentifier: "work-machine-" + readings[0].localMachineID).button().tap()
-        try inherited.inspect().find(viewWithAccessibilityIdentifier: "work-machine-inherit").button().tap()
-        #expect(placed == [.machine(readings[0].localMachineID), .inherit])
-
-        let started = WorkMachineMenu(reading: readings[1], error: nil, parent: nil, waveName: { _ in nil }) { placed.append($0) }
-        #expect(started.title == "Unrecorded Machine" && started.origin == "· started there")
-        #expect(throws: (any Error).self) { try started.inspect().find(viewWithAccessibilityIdentifier: "work-machine-inherit") }
-        _ = try started.inspect().find(text: "Started on Unrecorded Machine; moving it is explicit takeover")
-    }
-
     @Test("The heading's started state is durable Task evidence, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
         let snapshot = try roadmap()

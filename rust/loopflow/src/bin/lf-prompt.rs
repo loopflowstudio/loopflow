@@ -5,6 +5,7 @@ use clap::Parser;
 use loopflow::prompt::drop_duplicate_docs;
 use loopflow::prompt::format_prompt;
 use loopflow::prompt::gather_context;
+use loopflow::prompt::ClipboardContext;
 use loopflow::prompt::GatherContextOpts;
 use loopflow::prompt::Surface;
 
@@ -70,7 +71,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         files: Vec::new(),
         include_diff: args.diff,
         include_diff_files: args.diff_files,
-        include_clipboard: args.clipboard,
+        clipboard: if args.clipboard {
+            ClipboardContext::Required
+        } else {
+            ClipboardContext::Off
+        },
         wave,
         related_repos: Vec::new(),
     };

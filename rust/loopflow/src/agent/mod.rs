@@ -1639,7 +1639,7 @@ pub fn missing_agent_message(cli: &str) -> String {
         }
         "pi" => "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",
         "opencode" => "Install it with `npm install -g opencode-ai`.",
-        _ => "Install it, or choose another agent with `-m claude` or `-m codex`.",
+        _ => "Install it, or choose another agent with `-a claude` or `-a codex`.",
     };
     format!("'{cli}' is not installed. {hint}")
 }

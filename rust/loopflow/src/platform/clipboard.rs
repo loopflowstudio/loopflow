@@ -1,52 +1,140 @@
-use std::io::Write;
-use std::process::{Command, Stdio};
+//! Clipboard text for `lf -c`.
+//!
+//! Sources are tried in order until one yields text. On Linux the display
+//! clipboards come first; the tmux paste buffer follows, because over SSH it
+//! is where a person's copy lands and no display clipboard is reachable.
 
-/// Read text from the system clipboard.
-///
-/// Returns `None` if the clipboard is empty or no clipboard tool is available.
-pub fn read() -> Option<String> {
-    let output = if cfg!(target_os = "macos") {
-        Command::new("pbpaste").output().ok()?
-    } else {
-        try_command("xclip", &["-selection", "clipboard", "-o"])
-            .or_else(|| try_command("xsel", &["--clipboard", "--output"]))
-            .or_else(|| try_command("wl-paste", &[]))?
-    };
+use std::process::Command;
 
-    if output.status.success() {
-        let text = String::from_utf8_lossy(&output.stdout).to_string();
-        if !text.trim().is_empty() {
-            return Some(text);
+/// One command that prints clipboard text on stdout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Source {
+    program: String,
+    args: Vec<String>,
+}
+
+impl Source {
+    fn new(program: &str, args: &[&str]) -> Self {
+        Self {
+            program: program.to_string(),
+            args: args.iter().map(|arg| arg.to_string()).collect(),
         }
     }
-    None
 }
 
-/// Write text to the system clipboard.
-pub fn write(text: &str) -> Result<(), std::io::Error> {
+/// No source produced clipboard text; each attempt says why.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no clipboard text ({})", .attempts.join("; "))]
+pub struct ClipboardUnavailable {
+    pub attempts: Vec<String>,
+}
+
+/// Read text from the first clipboard source that has some.
+///
+/// # Errors
+///
+/// Returns every attempted source and why it produced no text.
+pub fn read() -> Result<String, ClipboardUnavailable> {
+    read_from(&sources())
+}
+
+fn sources() -> Vec<Source> {
     if cfg!(target_os = "macos") {
-        write_via("pbcopy", &[], text)
-    } else {
-        write_via("xclip", &["-selection", "clipboard"], text)
-            .or_else(|_| write_via("xsel", &["--clipboard", "--input"], text))
-            .or_else(|_| write_via("wl-copy", &[], text))
+        return vec![Source::new("pbpaste", &[])];
     }
+    let mut sources = vec![
+        Source::new("xclip", &["-selection", "clipboard", "-o"]),
+        Source::new("xsel", &["--clipboard", "--output"]),
+        Source::new("wl-paste", &["--no-newline"]),
+    ];
+    if std::env::var_os("TMUX").is_some() {
+        sources.push(Source::new("tmux", &["save-buffer", "-"]));
+    }
+    sources
 }
 
-fn try_command(cmd: &str, args: &[&str]) -> Option<std::process::Output> {
-    Command::new(cmd).args(args).output().ok()
+fn read_from(sources: &[Source]) -> Result<String, ClipboardUnavailable> {
+    let mut attempts = Vec::new();
+    for source in sources {
+        let name = &source.program;
+        match Command::new(name).args(&source.args).output() {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                attempts.push(format!("{name}: not installed"));
+            }
+            Err(err) => attempts.push(format!("{name}: {err}")),
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let reason = stderr.lines().next().unwrap_or("").trim();
+                attempts.push(if reason.is_empty() {
+                    format!("{name}: {}", output.status)
+                } else {
+                    format!("{name}: {reason}")
+                });
+            }
+            Ok(output) => {
+                let text = String::from_utf8_lossy(&output.stdout).into_owned();
+                if !text.trim().is_empty() {
+                    return Ok(text);
+                }
+                attempts.push(format!("{name}: empty"));
+            }
+        }
+    }
+    Err(ClipboardUnavailable { attempts })
 }
 
-fn write_via(cmd: &str, args: &[&str], text: &str) -> Result<(), std::io::Error> {
-    let mut child = Command::new(cmd).args(args).stdin(Stdio::piped()).spawn()?;
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{read_from, Source};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
-    if let Some(ref mut stdin) = child.stdin {
-        stdin.write_all(text.as_bytes())?;
+    fn stub(dir: &Path, name: &str, body: &str) -> Source {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Source::new(path.to_str().unwrap(), &[])
     }
 
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(std::io::Error::other(format!("{cmd} exited with {status}")));
+    #[test]
+    fn failing_display_tool_falls_through_to_tmux_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let sources = [
+            stub(
+                dir.path(),
+                "xclip",
+                "echo 'Error: Can'\"'\"'t open display: (null)' >&2; exit 1",
+            ),
+            Source::new("/nonexistent/xsel", &[]),
+            stub(dir.path(), "wl-paste", "exit 0"),
+            stub(
+                dir.path(),
+                "tmux",
+                "printf 'copied 漢字 ✓\\n\\tline two\\n'",
+            ),
+        ];
+
+        assert_eq!(read_from(&sources).unwrap(), "copied 漢字 ✓\n\tline two\n");
     }
-    Ok(())
+
+    #[test]
+    fn no_text_names_every_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let sources = [
+            stub(
+                dir.path(),
+                "xclip",
+                "echo 'Error: Can'\"'\"'t open display: (null)' >&2; exit 1",
+            ),
+            Source::new("/nonexistent/xsel", &[]),
+            stub(dir.path(), "tmux", "printf '  \\n'"),
+        ];
+
+        let attempts = read_from(&sources).unwrap_err().attempts;
+
+        assert_eq!(attempts.len(), 3);
+        assert!(attempts[0].ends_with("xclip: Error: Can't open display: (null)"));
+        assert_eq!(attempts[1], "/nonexistent/xsel: not installed");
+        assert!(attempts[2].ends_with("tmux: empty"));
+    }
 }

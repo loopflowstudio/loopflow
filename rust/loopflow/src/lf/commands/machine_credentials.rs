@@ -587,12 +587,16 @@ pub(super) async fn prepare_launch(
                 }
         )
     );
-    if requested.is_empty() && launching {
+    // Pi owns its models and credentials, so its harness names no lf account.
+    let launch_provider = if requested.is_empty() && launching {
         let repo = super::util::find_repo_root().ok();
         let config = crate::config::load_config_or_default(repo.as_deref());
         let agent = cli.agent.as_deref().unwrap_or_else(|| config.agent());
-        let (harness, _) = crate::config::parse_agent(agent);
-        let provider = harness.parse::<Provider>()?;
+        crate::config::parse_agent(agent).0.parse::<Provider>().ok()
+    } else {
+        None
+    };
+    if let Some(provider) = launch_provider {
         let repo_id = crate::provider_account::current_repo_id()?;
         if let Some(accounts) = crate::provider_account::inspect_provider_route(
             Some(&store),
@@ -830,6 +834,27 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             .unwrap_err();
         assert!(error.to_string().contains("foreground terminal"));
         assert_eq!(store.list_provider_accounts(None).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn remote_pi_launch_prepares_no_account() {
+        let _lock = crate::journal::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let _environment = Environment::isolate(root.path());
+        let machine = crate::durable::Machine {
+            id: crate::durable::MachineId::new(),
+            route: "mini".into(),
+            label: Some("mini".into()),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        };
+        let selection = crate::provider_account::selection::AccountSelection::default();
+        let cli = crate::lf::Cli::try_parse_from(["lf", "-a", "pi"]).unwrap();
+        let prepared = super::prepare_launch(&machine, &selection, &cli)
+            .await
+            .unwrap();
+        assert!(prepared.is_default());
     }
 
     #[tokio::test]

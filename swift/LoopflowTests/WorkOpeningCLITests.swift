@@ -4,7 +4,6 @@ import Loopflow
 @testable import LoopflowMac
 
 /// The built CLI resolves Work addresses; production Swift routing consumes them.
-/// Uses `LOOPFLOW_TEST_LF` or `target/debug/lf`; the swift gate suite builds it first.
 @Suite("Work addresses from the built CLI", .serialized)
 @MainActor
 struct WorkOpeningCLITests {
@@ -81,24 +80,15 @@ struct WorkOpeningCLITests {
 
     private struct Fixture {
         let root: URL
-        let home: URL
-        let binary: String
-        let query: RegistryQuery
+        let lf: BuiltLf
+        var query: RegistryQuery { lf.query }
 
         init() throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("work-open-\(UUID().uuidString)")
                 .resolvingSymlinksInPath()
-            home = root.appendingPathComponent("home")
-            let binary = ProcessInfo.processInfo.environment["LOOPFLOW_TEST_LF"]
-                ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-                    .deletingLastPathComponent().appendingPathComponent("target/debug/lf").path
-            try #require(FileManager.default.isExecutableFile(atPath: binary), "Build the source CLI with cargo build -p loopflow --bin lf")
-            self.binary = binary
+            let home = root.appendingPathComponent("home")
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-            let home = home
-            query = RegistryQuery { args, cwd in
-                try await Self.run(binary, args, cwd: URL(fileURLWithPath: cwd ?? home.path), home: home)
-            }
+            lf = try BuiltLf(home: home)
         }
 
         func remove() { try? FileManager.default.removeItem(at: root) }
@@ -117,35 +107,7 @@ struct WorkOpeningCLITests {
         }
 
         func json<T: Decodable & Sendable>(_ args: [String], cwd: URL, as type: T.Type) async throws -> T {
-            let output = try await Self.run(binary, args, cwd: cwd, home: home)
-            return try JSONDecoder().decode(type, from: Data(output.utf8))
-        }
-
-        private static func run(_ binary: String, _ args: [String], cwd: URL, home: URL) async throws -> String {
-            try await Task.detached {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = args
-                process.currentDirectoryURL = cwd
-                // Nothing from the launching agent, installed Machine or host terminal is inherited.
-                process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": home.path,
-                                       "LF_HOME": home.path, "LF_BIN": binary, "LF_USER_NAME": "Fixture Person",
-                                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-                                       "GIT_ALLOW_PROTOCOL": "file", "GIT_TERMINAL_PROMPT": "0"]
-                process.standardInput = FileHandle.nullDevice
-                let output = Pipe()
-                let errors = Pipe()
-                process.standardOutput = output
-                process.standardError = errors
-                try process.run()
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                let diagnostics = errors.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else {
-                    throw RegistryQueryError(String(decoding: diagnostics, as: UTF8.self))
-                }
-                return String(decoding: data, as: UTF8.self)
-            }.value
+            try JSONDecoder().decode(type, from: Data(try await lf.run(args, cwd: cwd).utf8))
         }
 
         private static func git(_ args: [String], in directory: URL) throws {

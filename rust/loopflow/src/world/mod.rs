@@ -36,6 +36,9 @@ pub use crate::work::wave::metrics::Threshold;
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
 
+/// The person whose Machine a World is: their config and their commits.
+const PERSON: &str = "Demo";
+
 /// Directories Desktop prepends to a child's `PATH` when absent
 /// (`GUIProcessEnvironment.enrichedPath` in
 /// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
@@ -224,6 +227,10 @@ impl World {
         }
         write_executable(&dir, "claude", STUB_CLAUDE)?;
         write_executable(&dir, "gh", GH)?;
+        std::fs::write(
+            env.lf_home.join("config.yaml"),
+            format!("user:\n  name: {PERSON}\n"),
+        )?;
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
@@ -425,8 +432,9 @@ impl World {
     }
 
     /// Write a Claude conversation of alternating turns and admit it as a
-    /// Session, bound to `task` when given. It resumes in the Task's checkout
-    /// when it has one.
+    /// Session. It resumes in the Task's checkout when it has one. A Task's
+    /// Session is bound and then takes its next input, so its history is the
+    /// Task's: binding attributes only work after it.
     pub fn session(
         &self,
         task: Option<&Task>,
@@ -445,12 +453,29 @@ impl World {
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {
-            self.runtime
-                .block_on(store.bind_session(&session_id, session.captured, &task.id))?;
+            let bound = self.runtime.block_on(store.bind_session(
+                &session_id,
+                session.captured,
+                &task.id,
+            ))?;
+            let next = self
+                .runtime
+                .block_on(crate::ops::human_session::append_input(&store, bound))?;
+            // The provider observed that input resuming this conversation, so
+            // connecting resumes it rather than starting a new one.
+            let dir = crate::ops::human_session::local_capture_dir(next.input_key()?)
+                .ok_or_else(|| anyhow!("Session {session_id} has an invalid capture reference"))?;
+            crate::session_record::write_provider_session(&dir, &id.as_str().into(), None)?;
         }
         self.runtime
             .block_on(store.rename_session(&session_id, title, TitleSource::Human))?;
         Ok(session_id)
+    }
+
+    /// Comment on a Task the way `lf task comment` does.
+    pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
+        crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
+        Ok(())
     }
 
     /// Open `wave`'s ongoing conversation the way `lf wave session` does and
@@ -878,7 +903,8 @@ fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String> {
         command.current_dir(cwd);
     }
     let output = command
-        .args(["-c", "user.name=Demo", "-c", "user.email=demo@example.com"])
+        .args(["-c", &format!("user.name={PERSON}")])
+        .args(["-c", "user.email=demo@example.com"])
         .args(args)
         .output()
         .with_context(|| format!("run git {}", args.join(" ")))?;

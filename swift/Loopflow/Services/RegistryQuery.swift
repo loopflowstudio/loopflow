@@ -983,7 +983,7 @@ public struct ProjectRotationPreview: Decodable, Sendable {
     public struct Issue: Decodable, Sendable {
         public let id: String
         public let identifier: String
-        public let name: String
+        public let title: String
     }
 }
 

@@ -206,6 +206,17 @@ fn portfolio(world: &World) -> Result<()> {
         15,
         "succeeded",
     )?;
+    world.uncommitted(
+        &running,
+        &[(
+            "README.md",
+            "# Demo project\n\nOpening a Task paints its last turns first.\n",
+        )],
+    )?;
+    world.comment(
+        &running,
+        "Paint the last twenty turns first; load the rest behind them.",
+    )?;
 
     let failed = world.task(
         "systems",

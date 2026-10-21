@@ -13,16 +13,15 @@ retry; `agent_settled` ends the Loopflow turn. Cumulative usage must retain unkn
 fields and rejoin its capture counter on recovery. Shared attachment fences and
 stable CLI dispatch own control and callbacks.
 
-Pi owns internal retries; final failure requires explicit subsequent input. Only a
-nonblank terminal answer completes headless work. Automatic compaction can skip
+Pi owns internal retries; final failure needs explicit later input. Only a nonblank
+terminal answer completes headless work. Automatic compaction can skip
 before_agent_start, so context projects at the model-request boundary. Native
 assistant checkpoints retain partial usage without completing the turn. Public
 steers use shared callback receipts; queued or emitted is not model incorporation.
 
 Six real-Pi/local-model probes cover failure, empty answers, overflow refresh,
-native resume, Unicode PTY input and public steering. Managed Task/Flow fixtures
-cover JSON routing and nested Work/cwd. These prove neither authenticated Loopflow
-execution nor visual acceptance. Direct Pi account access passed separately;
+native resume, Unicode PTY input and public steering; Task/Flow fixtures cover JSON
+routing and nested Work/cwd. Neither proves authenticated execution or visuals. Direct Pi account access passed separately;
 account preference grants no product restriction. Remaining gate/demo boundaries
 stay in the Task plan. Release's entry-point lesson still applies.
 
@@ -37,17 +36,16 @@ client; ordinary connect recovers it after an uncertain reply. Preparation launc
 no provider; explanation admits nothing.
 
 Clap aliases canonicalize before routing. Desktop reset preserves concurrent
-updates without restoring predecessor snapshots. Release's
-entry-point lesson applies to CLI, Desktop and remote callers: store/stand-in
-proofs establish no installed continuity. LOO-475 retains installed acceptance;
-LOO-415's retained transport and attachment fences remain intact. Publication and
-the full affected gate remain unproved.
+updates without restoring predecessor snapshots. Store/stand-in proofs establish
+no installed continuity for CLI, Desktop or remote callers; LOO-475 retains
+installed acceptance and LOO-415's transport and attachment fences stay intact.
+Publication and the full affected gate remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
 Jack Heart requires no elapsed-time termination or synthetic reruns in
-wait-and-fix supervision/repair. Source removes the outer, operation, admission
-and check-page cutoffs plus pending-CI timeout policy. Preserve real provider
+wait-and-fix supervision/repair; source removes outer, operation, admission and
+check-page cutoffs and pending-CI timeouts. Preserve real provider
 failures, explicit cancellation, exact-head intent and incident reservations.
 A repair can expose its new head before exiting; landing-wide worker liveness
 prevents duplicate admission and a false checkout-busy exit.
@@ -91,11 +89,9 @@ remain open; Release's entry-point lesson applies.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
-Jack Heart selected OpenCode 2 repair/delivery;
-automatic crash continuation is deferred. Candidate deterministic-native
-tool/context/Flow and configured-account launch/tool/resume passed.
-[PR #1590](https://github.com/loopflowstudio/loopflow/pull/1590) records verification
-and remaining native acceptance.
+Jack Heart selected OpenCode 2 repair/delivery; automatic crash continuation is
+deferred. Candidate deterministic-native tool/context/Flow and configured-account
+launch/tool/resume passed; PR #1590 records verification and remaining acceptance.
 
 No parent IDs or replayable events; steer/queue share idle.
 Readmission can emit empty success; managed recovery injects synthetic guidance
@@ -452,10 +448,9 @@ communication.
 Jack Heart removed client-file compatibility (`5228ab69`); launches record an
 AgentProcess before exec. Unknown grants no Waiting or cleanup. Terminals follow
 attachment; completion outranks sockets. Inputs follow the latest turn's LfProcess,
-not an ended creator; native outcomes remain history. Jack approved #1523 and
-shipping (`5df94b2c`). Materialized Rust/Swift proofs include
-Work-watch detecting OS death without writes, not configured kill/reconnect or
-installed acceptance.
+not an ended creator; native outcomes remain history. Jack approved shipping #1523
+(`5df94b2c`). Proofs include Work-watch detecting OS death without writes, not
+configured kill/reconnect or installed acceptance.
 
 ## Execution vocabulary (LOO-441/442/446, 2026-10-10)
 
@@ -465,9 +460,8 @@ requested; after #1519 merged he asked for it to land (`dc87102b`). LfProcess
 identity is `id`, references `<role>_lf_process_id`; AgentProcess references
 `agent_process_id`. The attached lf and Flow process retain distinct roles;
 FlowRunner executes ordinary command steps. `processes` holds both kinds.
-Superseded migration/receipt cutover details and prior proof references remain at
-`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
-Five Python gate cases await CI; installation remains unproved.
+Superseded cutover and proof details: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Five Python gate cases await CI; installation remains unproved.
 
 ## Terminal conversation recovery (curated 2026-10-18)
 
@@ -1118,42 +1112,39 @@ never proves provider exit.
 ## macOS CI evidence (lf-ddf2d53, 2026-10-13)
 
 Jack Heart authorized CI delivery. lf-12be237 retains ten consecutive typical-code
-PRs under five minutes and separate queue/push-to-merged proof. #1543 merged;
-queue 38452715134 remains 6:24 (6:25 updatedAt).
+PRs under five minutes and queue/push-to-merged proof. #1543 merged; queue
+38452715134 remains 6:24.
 
-Miss overlap is implemented; hits use Xcode. Mixed trials, attribution limits
-and rejected alternatives: `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Miss overlap is implemented; hits use Xcode. Trials and rejected alternatives:
+`72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 Twelve signed builds passed; `loopflow` compiled once per miss, zero per hit.
-Process groups left a compiler alive; scoped cancellation passed. Toolchain/SDK/deployment and
-source/target must match. Signature removal alone leaves Mach-O padding;
-identical re-signing of disposable copies proved bytes equal.
+Scoped cancellation stops the compiler process groups left alive. Toolchain/SDK/
+deployment and source/target must match. Identical re-signing of disposable
+copies proved bytes equal; signature removal alone leaves Mach-O padding.
 
-Hosted benefit and cleanup cost remain unsettled. Full Swift/installation/network
-proof remains; Release's lesson separates local proof from delivery.
+Hosted benefit, cleanup cost and Swift/installation/network proof remain open.
 Preserve copy/sign, development/validation-only authority and disposable
 OS accounts for installation. No paid runners, test removal, cache relaxation or
 retries.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart requested landing #1505 on October 8, superseding review-only Flow feedback.
-Keep the Task open for outstanding cold-cache verification.
-Git retains the dated measurements and rejected patches. Provider-probe removal, absent-Wave
-resolution and directory reuse have matched evidence; capture-store reuse and
-ancestor-probe deferral did not and were removed. The last rejection meets
-the stopping condition, not exhaustion.
-Claude reconnect's native median worsens; the later handoff gain cannot repair it.
+Jack Heart requested landing #1505 on October 8, superseding review-only Flow
+feedback; the Task stays open for cold-cache verification. Provider-probe removal,
+absent-Wave resolution and directory reuse matched evidence; capture-store reuse
+and ancestor-probe deferral did not and were removed (git keeps measurements),
+meeting the stopping condition, not exhaustion.
+Claude reconnect's native median worsens; the later handoff gain can't repair it.
 
-Readiness requires unsubmitted text echoed by the raw-mode application. Codex
-reconnect needs a seed turn outside timing. Fresh Homes are not cold OS caches.
-LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache
-control/native login; the report records the limitation and reset method. SVG readability awaits review. Neither gap is waived.
+Readiness requires raw-mode echo of unsubmitted text; Codex reconnect needs an
+untimed seed turn. Fresh Homes are not cold OS caches.
+LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache control
+and native login, reporting the limitation and reset method. SVG readability awaits review. Neither gap is waived.
 Wall stacks include shutdown, not CPU accounting.
 
-Copied databases retain absolute provider-home paths. Strip routes before launch;
-connect only benchmark-created Sessions. Early excluded probes reached those
-paths without a write audit; isolation remains unproved. Fixtures prove no
-installed gain or managed-account continuity. The network-isolated CI smoke
-bounds launch work and preserves identity, context and history; nested-directory
-launch retains the repository root. Hosted success remains unproved.
+Copied databases keep absolute provider-home paths: strip routes before launch,
+connect only benchmark Sessions; early probes reached them unaudited (isolation
+unproved). The network-isolated CI smoke bounds launch work and
+preserves identity, context, history and the repository root from nested
+directories. Installed gain, account continuity and hosted success are unproved.

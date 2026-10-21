@@ -496,17 +496,6 @@ pub fn push_with_upstream(
     Ok(())
 }
 
-pub fn delete_remote_branch(repo: &Path, remote: &str, branch: &str) -> Result<(), GitError> {
-    let output = run_git(repo, &["push", remote, "--delete", branch])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git push {} --delete {}", remote, branch),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    Ok(())
-}
-
 pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
     delete_local_branch_inheriting(repo, branch, &|_| {})
 }

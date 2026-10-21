@@ -117,13 +117,6 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub chrome: Option<BrowserMode>,
 
-    /// Exact cron receipt attribution for mechanical release execution
-    #[arg(long = "__cron-receipt", hide = true, requires = "cron_lock_fd")]
-    pub cron_receipt: Option<String>,
-
-    #[arg(long = "__cron-lock-fd", hide = true, requires = "cron_receipt")]
-    pub cron_lock_fd: Option<i32>,
-
     /// Select changed-code context; omission inherits configuration
     #[arg(long, value_enum)]
     pub diff: Option<DiffContext>,
@@ -170,7 +163,8 @@ impl Cli {
         match &self.command {
             None
             | Some(Commands::External(_) | Commands::Inline { .. })
-            | Some(Commands::Skill { .. } | Commands::Discord { .. }) => true,
+            | Some(Commands::Discord { .. }) => true,
+            Some(Commands::Skill { cmd }) => matches!(cmd, SkillCommand::External(_)),
             Some(Commands::Flow { cmd }) => matches!(cmd, FlowCommand::External(_)),
             Some(Commands::History {
                 cmd: Some(commands::history::HistoryCommand::Replay { .. }),
@@ -317,8 +311,6 @@ impl Cli {
 
     pub fn process_options(&self) -> Self {
         Self {
-            cron_receipt: self.cron_receipt.clone(),
-            cron_lock_fd: self.cron_lock_fd,
             command: None,
             context: self.context,
             explain: self.explain,
@@ -386,11 +378,6 @@ pub enum ScratchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Retain command execution independently of terminal viewers
-    Transport {
-        #[command(subcommand)]
-        cmd: crate::transport::TransportCommand,
-    },
     /// Create and use an offline, isolated development data clone (macOS)
     Clone {
         #[command(subcommand)]
@@ -437,25 +424,36 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<commands::monitor::MonitorCommand>,
     },
+    /// Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+    #[command(args_conflicts_with_subcommands = true)]
+    Disk {
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        cmd: Option<commands::disk::DiskCommand>,
+    },
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal conversation context for native startup/compaction hooks.
+    /// Internal detached owner for an execution, launched by its delegating command.
+    #[command(name = "__transport-serve", hide = true)]
+    TransportServe {
+        #[arg(long)]
+        terminal: bool,
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
+    /// Internal provider turn-boundary hook: context at startup and compaction,
+    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
-    },
-    /// Internal end-of-turn planning acquisition and pending delivery.
-    #[command(name = "__planning-check", hide = true)]
-    PlanningCheck {
-        #[arg(long)]
-        delivery: Option<std::path::PathBuf>,
     },
     /// Owned Pi native lifecycle callback.
     #[command(name = "__pi-event", hide = true)]
@@ -466,12 +464,6 @@ pub enum Commands {
         path: std::path::PathBuf,
         #[arg(long)]
         provider_pid: u32,
-    },
-    /// Native provider naming callback.
-    #[command(name = "__session-title", hide = true)]
-    SessionTitle {
-        #[arg(value_parser = ["claude", "codex"])]
-        provider: String,
     },
     /// Inspect and continue Sessions
     Session {
@@ -794,6 +786,9 @@ pub enum DesktopCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
+    /// Print the repository file that defines a skill, creating
+    /// it from the builtin when the repository has none
+    Customize { name: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1754,9 +1749,6 @@ pub enum PrCommand {
     Submit {
         #[arg(long)]
         strict: bool,
-        // Accepted for existing scripts; submit always creates a PR when needed.
-        #[arg(short = 'p', long = "create-pr", hide = true)]
-        create_pr: bool,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -2374,7 +2366,7 @@ pub enum WtCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Prune worktrees or completed build output
+    /// Prune worktrees, completed build output, or finished branches
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
@@ -2382,6 +2374,10 @@ pub enum WtCommand {
         /// Reclaim old generated output from completed Tasks; retain checkouts
         #[arg(long)]
         builds: bool,
+        /// Delete origin and local branches tied to merged or closed PRs,
+        /// finished Tasks, or published release candidates
+        #[arg(long, conflicts_with = "builds")]
+        branches: bool,
         /// Emit cleanup entries and allocated-byte receipts
         #[arg(long, requires = "builds")]
         json: bool,

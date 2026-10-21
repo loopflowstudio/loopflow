@@ -538,6 +538,11 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     assert_eq!(serde_json::to_value(&frames).unwrap(), source);
     assert!(matches!(frames[0].content, WorkContent::Planning(Some(_))));
     assert_eq!(frames[0].answers, None);
+    assert_eq!(frames[0].copy, None);
+    assert_eq!(
+        frames[6].copy.as_deref(),
+        Some("/Users/fixture/.lf/copies/3f2a9c1b")
+    );
     assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());

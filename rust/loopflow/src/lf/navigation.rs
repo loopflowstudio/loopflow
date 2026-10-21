@@ -8,7 +8,7 @@ use clap::{Command, CommandFactory, Parser};
 use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::flow::Step;
 use crate::flow::XorPath;
-use crate::lf::{Cli, Commands, FlowCommand};
+use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
 
 pub fn command_tree() -> Command {
     let mut command = Cli::command();
@@ -288,6 +288,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                     | FlowCommand::Show { .. }
                     | FlowCommand::Customize { .. }
             }
+            | Commands::Skill {
+                cmd: SkillCommand::Customize { .. }
+            }
     ) {
         return None;
     }
@@ -328,6 +331,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             Commands::Flow {
                 cmd: FlowCommand::Customize { name },
             } => println!("{}", crate::flow::customize(name, &repo)?.display()),
+            Commands::Skill {
+                cmd: SkillCommand::Customize { name },
+            } => println!("{}", crate::skills::customize(name, &repo)?.display()),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())

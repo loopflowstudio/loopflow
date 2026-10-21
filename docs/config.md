@@ -74,6 +74,7 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | `--yolo` | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
+| [`~/.lf` disk budget](troubleshooting.md#disk-space) | — | global-only `disk_budget: 20G` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
 ## Scratch lifecycle

@@ -141,6 +141,11 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     sqlite::read_nonterminal_task_worktrees(path)
 }
 
+/// Every branch a Task names, and whether that Task is still open.
+pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
+    sqlite::read_task_branches(path)
+}
+
 fn default_lf_home_dir() -> PathBuf {
     machine_home_dir().join(".lf")
 }

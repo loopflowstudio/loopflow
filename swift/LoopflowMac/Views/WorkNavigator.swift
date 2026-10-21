@@ -210,9 +210,17 @@ struct WorkBreadcrumbs: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            trail(showWave: true).fixedSize(horizontal: true, vertical: false)
-            trail(showWave: false)
+        HStack(spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                trail(showWave: true).fixedSize(horizontal: true, vertical: false)
+                trail(showWave: false)
+            }
+            if let copy = model.previewCopy {
+                WorkChip(text: "Preview", tone: .warning)
+                    .fixedSize()
+                    .help("Preview copy: \((copy as NSString).abbreviatingWithTildeInPath) — work here is not in the shared store")
+                    .accessibilityIdentifier("preview-copy")
+            }
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))

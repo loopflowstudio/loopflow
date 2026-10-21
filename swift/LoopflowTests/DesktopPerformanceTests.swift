@@ -1156,7 +1156,7 @@ private final class PerformanceReader {
 
     private func send(_ part: String, _ answers: Int, _ body: String) {
         sequence += 1
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
     }

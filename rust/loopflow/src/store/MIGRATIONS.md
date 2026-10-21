@@ -38,6 +38,14 @@ a new copy; removing the directory refreshes it. The copy shares captures and
 account homes, so agents run on real credentials, but it cannot push, call
 GitHub or reach Linear, and it never signals the shared store's processes.
 
+First use blocks the command that makes the copy. On 2026-10-20 a release build
+with one `CREATE TABLE` draft took 265 s against an 8.8 GB store with 910k
+`processes` rows. A timed rerun (336 s) split it into: snapshot 0.01 s,
+`apply_set` and the draft SQL under 0.1 s, `validate_foreign_keys` 49 s,
+`validate_persisted_json` 0.6 s, and 284 s to forget the shared store's process
+identity, an `UPDATE` across every `processes` row that fires its per-row
+triggers. Later commands on the same copy pay none of it.
+
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical

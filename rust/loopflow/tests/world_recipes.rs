@@ -94,6 +94,41 @@ impl Built {
             .cloned()
             .collect()
     }
+
+    fn issue_named(&self, name: &str) -> String {
+        self.lf(&["task", "list", "--json"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| &entry["task"])
+            .find(|task| task["name"] == name)
+            .unwrap_or_else(|| panic!("no Task {name:?}"))["identifier"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn workflow(&self, issue: &str) -> Value {
+        self.lf(&["task", "status", issue, "--json"])["execution"]["work"]["workflow"].clone()
+    }
+
+    /// The steps of the Task's latest Flow `name`.
+    fn flow_steps(&self, issue: &str, name: &str) -> Vec<Value> {
+        let flows = self.lf(&["flow", "list", "--processes", "--for-task", issue, "--json"]);
+        let id = flows["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rfind(|flow| flow["name"] == name)
+            .unwrap_or_else(|| panic!("{issue} ran no {name}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        self.lf(&["flow", "show", "--processes", &id, "--json"])["steps"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
 }
 
 /// Builds every listed recipe once, checks that `lf` reads it, then checks
@@ -325,4 +360,65 @@ fn wave_lifecycle(built: &Built) {
     let archive = built.wave_tasks("archive");
     assert!(!archive.is_empty());
     assert!(archive.iter().all(|item| item["task"]["completed"] == true));
+}
+
+#[test]
+fn one_task_waits_at_demo_after_a_six_step_pursue() {
+    let built = Built::new("one-task");
+    let issue = built.issue_named("Search Session transcripts");
+    let workflow = built.workflow(&issue);
+    assert_eq!(workflow["name"], "feature");
+    assert_eq!(workflow["position"]["node"], "demo");
+    let moves: Vec<&str> = workflow["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|step| step["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(moves, ["took_up", "chose", "arrived", "chose", "arrived"]);
+
+    let steps = built.flow_steps(&issue, "pursue");
+    let nodes: Vec<(u64, &str)> = steps
+        .iter()
+        .map(|step| {
+            (
+                step["key"].as_u64().unwrap(),
+                step["label"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        nodes,
+        [
+            (0, "implement"),
+            (1, "compress"),
+            (2, "sync"),
+            (3, "realign"),
+            (4, "loop-or-next"),
+            (5, "pr-publish"),
+        ]
+    );
+}
+
+#[test]
+fn portfolio_has_a_stopped_edge_and_a_hand_moved_workflow() {
+    let built = Built::new("portfolio");
+
+    let stopped = built.issue_named("Record a reader floor per migration");
+    let workflow = built.workflow(&stopped);
+    assert_eq!(workflow["position"]["kind"], "edge");
+    assert_eq!(workflow["position"]["running"], false);
+    let steps = built.flow_steps(&stopped, "pursue");
+    let outcomes: Vec<&str> = steps
+        .iter()
+        .map(|step| step["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(outcomes, ["succeeded", "succeeded", "failed"]);
+    assert_eq!(steps[2]["label"], "sync");
+
+    let workflow = built.workflow(&built.issue_named("Open conversations faster"));
+    assert_eq!(workflow["position"]["node"], "demo");
+    let last = workflow["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["kind"], "set");
+    assert_eq!(last["note"], "Built in the Session");
 }

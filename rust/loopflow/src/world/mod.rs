@@ -21,9 +21,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
 use crate::flow::graph::FlowGraph;
-use crate::flow::{ConcreteSkill, ConcreteStep, Skill};
+use crate::flow::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
+use crate::ops::task::TaskRunSelection;
 use crate::process::{LfProcess, ProcessKind};
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
@@ -33,6 +34,7 @@ use crate::work::project::ProjectKR;
 use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
 pub use crate::work::wave::metrics::Threshold;
+use crate::workflow::END;
 
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
@@ -144,6 +146,22 @@ while IFS= read -r input; do
   echo "reply $id: $input"
 done
 "#;
+
+/// How a recorded Flow ended: every step succeeded, or the step at this
+/// index failed and nothing after it ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Succeeded,
+    FailedAt(usize),
+}
+
+impl Outcome {
+    fn complete(self, process: &mut LfProcess) {
+        let succeeded = self == Self::Succeeded;
+        process.outcome = Some(if succeeded { "succeeded" } else { "failed" }.to_string());
+        process.exit_code = Some(i32::from(!succeeded));
+    }
+}
 
 /// The environment a World's commands run under, written as `env.json`.
 #[derive(Debug, Clone, Serialize)]
@@ -438,63 +456,171 @@ impl World {
         Ok(())
     }
 
-    /// Record a finished Flow run in `task`'s checkout (the repository when
-    /// absent), one step Process per skill, each lasting `minutes` and the last
-    /// ending `ended_days_ago`. A Flow in a checkout starts its Task.
-    pub fn flow(
+    /// Run `requested` for `task` the way `lf task run` does: take up a
+    /// Workflow it names (or the Wave or repository default), set out on the
+    /// edge it selects and record that edge's Flow, each step lasting
+    /// `minutes` and the last ending `ended_days_ago`. A Flow that succeeds
+    /// puts the Task at the edge's target; one that fails leaves it stopped on
+    /// the edge. A requested Flow that is no edge runs off any Workflow.
+    pub fn task_run(
         &self,
-        task: Option<&Task>,
-        name: &str,
-        skills: &[&str],
+        task: &Task,
+        requested: &str,
         ended_days_ago: f64,
         minutes: i64,
-        outcome: &str,
+        outcome: Outcome,
     ) -> Result<LfProcessId> {
         let store = self.store()?;
-        let steps: Vec<ConcreteStep> = skills
-            .iter()
-            .map(|skill| {
-                ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named(skill),
-                    id: None,
-                    human: false,
-                    returns: None,
-                    sources: Vec::new(),
-                })
-            })
-            .collect();
-        let graph = FlowGraph::new(name, &steps);
+        let checkout = task.worktree()?.clone();
+        let selection =
+            crate::ops::task::select_task_run(&store, task, &checkout, Some(requested))?;
         let trace = TraceId::new();
+        let issue = task.identifier.as_str();
+        let argv = vec!["lf", "task", "run", issue, requested];
+        let (flow, edge) = match selection {
+            TaskRunSelection::Flow(flow) => (flow, None),
+            TaskRunSelection::Edge {
+                workflow,
+                index,
+                take_up,
+            } => {
+                // Only an edge into `end` may name no Flow.
+                let edge = &workflow.definition.edges[index as usize];
+                let flow = match &edge.flow {
+                    Some(flow) if edge.to != END => flow.clone(),
+                    _ => bail!("{requested} enters {END}; complete the Task instead"),
+                };
+                (flow, Some((workflow, index, take_up)))
+            }
+        };
+        let (name, steps) = crate::ops::task::load_task_flow(&checkout, &flow)?;
+        let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
+        // The Task run starts its Flow, which starts the first step.
+        let mut run = self.process(&trace, None, &checkout, argv, started - 2);
+        run.completed_at = Some(ended);
+        outcome.complete(&mut run);
+        store.sqlite.record_process(&run)?;
+        if let Some((workflow, index, take_up)) = edge {
+            if take_up {
+                store
+                    .sqlite
+                    .take_up_workflow(&task.id, &workflow.definition, &run.id, None)?;
+            }
+            if !store
+                .sqlite
+                .choose_workflow_edge(&task.id, &workflow, index, &run.id, None)?
+            {
+                bail!("Task {issue} moved while choosing {flow}");
+            }
+        }
+        let argv = vec!["lf", "--task", issue, "flow", "--", &name];
+        self.flow(
+            &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
+        )?;
+        if outcome == Outcome::Succeeded {
+            store.sqlite.arrive_workflow_edge(&task.id, &run.id)?;
+        }
+        Ok(run.id)
+    }
+
+    /// Put `task` at `node` of its Workflow, as `lf task workflow move` does.
+    pub fn move_to(&self, task: &Task, node: &str, note: &str) -> Result<()> {
+        if node == END {
+            bail!("moving to {END} completes the Task; call complete instead");
+        }
+        let store = self.store()?;
+        let issue = task.identifier.as_str();
+        let workflow = store.sqlite.workflow(&task.id)?;
+        crate::ops::task::validate_workflow_move(workflow.as_ref(), issue, node)?;
+        let mut mover = self.process(
+            &TraceId::new(),
+            None,
+            task.worktree()?,
+            vec!["lf", "task", "workflow", "move", issue, node],
+            self.now,
+        );
+        mover.completed_at = Some(self.now);
+        Outcome::Succeeded.complete(&mut mover);
+        store.sqlite.record_process(&mover)?;
+        store
+            .sqlite
+            .set_workflow_node(&task.id, node, &mover.id, Some(note))?;
+        Ok(())
+    }
+
+    fn span(
+        &self,
+        steps: &[ConcreteStep],
+        ended_days_ago: f64,
+        minutes: i64,
+        outcome: Outcome,
+    ) -> Result<(i64, i64)> {
+        let recorded = match outcome {
+            Outcome::Succeeded => steps.len(),
+            Outcome::FailedAt(step) if step < steps.len() => step + 1,
+            Outcome::FailedAt(step) => bail!("the Flow has no step {step}"),
+        };
         let ended = self.days_ago(ended_days_ago);
-        let started = ended - minutes * 60 * skills.len() as i64;
-        let cwd = self.cwd(task)?;
-        let flow = LfProcessId::new();
-        let mut flow_process = self.process(&trace, None, &cwd, vec!["lf", "flow", name], started);
-        flow_process.id = flow.clone();
-        flow_process.completed_at = Some(ended);
-        flow_process.outcome = Some(outcome.to_string());
-        flow_process.exit_code = Some(i32::from(outcome != "succeeded"));
-        store.sqlite.record_process(&flow_process)?;
-        store.sqlite.record_flow_process(&flow, &graph)?;
-        for (index, skill) in skills.iter().enumerate() {
-            let begin = started + minutes * 60 * index as i64;
-            let mut step = self.process(
-                &trace,
-                Some(&flow),
-                &cwd,
-                vec!["lf", "-b", "skill", skill],
+        Ok((ended - minutes * 60 * recorded as i64, ended))
+    }
+
+    /// Record one finished pass of a compiled Flow under `parent`: one step
+    /// Process per top-level node, stopping at a failed step.
+    #[allow(clippy::too_many_arguments)]
+    fn flow(
+        &self,
+        store: &SharedStore,
+        trace: &TraceId,
+        parent: &LfProcessId,
+        cwd: &Path,
+        argv: Vec<&str>,
+        name: &str,
+        steps: &[ConcreteStep],
+        started: i64,
+        minutes: i64,
+        outcome: Outcome,
+    ) -> Result<()> {
+        let graph = FlowGraph::new(name, steps);
+        let mut flow = self.process(trace, Some(parent), cwd, argv, started - 1);
+        let mut begin = started;
+        let mut records = Vec::new();
+        for (step, node) in steps.iter().zip(&graph.steps) {
+            let argv = match step {
+                ConcreteStep::Skill(_) => ["lf", "-b", "skill", node.label.as_str()]
+                    .map(str::to_string)
+                    .to_vec(),
+                ConcreteStep::Command(command) => command.item.argv(),
+                ConcreteStep::Xor(_) => {
+                    bail!("Flow {name} branches; worlds record single-path Flows")
+                }
+            };
+            let mut process = self.process(
+                trace,
+                Some(&flow.id),
+                cwd,
+                argv.iter().map(String::as_str).collect(),
                 begin,
             );
-            step.completed_at = Some(begin + minutes * 60);
-            let last = index + 1 == skills.len();
-            step.outcome = Some(if last { outcome } else { "succeeded" }.to_string());
-            step.exit_code = Some(i32::from(last && outcome != "succeeded"));
-            store.sqlite.record_process(&step)?;
+            begin += minutes * 60;
+            process.completed_at = Some(begin);
+            let failed = outcome == Outcome::FailedAt(records.len());
+            if failed { outcome } else { Outcome::Succeeded }.complete(&mut process);
+            records.push((process, node.key));
+            if failed {
+                break;
+            }
+        }
+        flow.completed_at = Some(begin);
+        outcome.complete(&mut flow);
+        store.sqlite.record_process(&flow)?;
+        store.sqlite.record_flow_process(&flow.id, &graph)?;
+        for (process, key) in records {
+            store.sqlite.record_process(&process)?;
             store
                 .sqlite
-                .record_flow_step(&flow, &step.id, index as u32, &[Vec::new()])?;
+                .record_flow_step(&flow.id, &process.id, key, &[Vec::new()])?;
         }
-        Ok(flow)
+        Ok(())
     }
 
     /// Write a Claude conversation of alternating turns and admit it as a

@@ -93,15 +93,11 @@ def main() -> None:
         help="persist Cargo target and registry on a native Linux filesystem",
     )
     parser.add_argument(
-        "--native-titles", action="store_true", help="prove published title hook installation"
-    )
-    parser.add_argument(
         "--repository-upgrade",
         action="store_true",
         help="prove populated released repository upgrade",
     )
     args = parser.parse_args()
-    published_proof = args.native_titles or args.repository_upgrade
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
     try:
@@ -185,13 +181,13 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         '
 """
         prepare = "nice -n 10 cargo build -p loopflow --bin lf"
-        if not published_proof:
+        if not args.repository_upgrade:
             # Integration targets build the CLI too. A library-only selection
             # still needs an explicit build before entering network isolation.
             build_tests = f"nice -n 10 cargo test -p loopflow --lib {targets} --no-run"
             prepare = build_tests if targets else f"{build_tests}\n{prepare}"
         command = command.replace("PREPARE", prepare)
-        if published_proof:
+        if args.repository_upgrade:
             command = command.replace(
                 "LOOPFLOW_BUILD_PROVENANCE=development",
                 "LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published",
@@ -228,12 +224,6 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
             optional_task_pr_preserves_placement_and_freezes_prior_delivery
         CHECKS'
 """.replace("CHECKS", checks)
-        if args.native_titles:
-            isolated = (
-                "cd /source && PYTHONPATH=scripts python3 -c "
-                "'from test_network import _probe; _probe()' && "
-                "python3 tests/e2e/native_title_install.py /source/target/debug/lf"
-            )
         if args.repository_upgrade:
             isolated = (
                 "cd /source && PYTHONPATH=scripts python3 -c "

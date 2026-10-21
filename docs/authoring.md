@@ -26,6 +26,13 @@ lf audit                               # run it
 lf audit: focus on auth                # {args} in the file receives "focus on auth"
 ```
 
+```bash
+lf skill customize pr-message          # copy the builtin into .lf/skills/ and print its path
+```
+
+A repository skill replaces the builtin with the same name. Customize copies the
+builtin once, then keeps printing the existing local file.
+
 Write skills direct and imperative — state what to do, not what the skill
 is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
@@ -369,8 +376,16 @@ Every Wave uses the repository Team and binds only its Initiative. Select the
 synchronization transport with `planning.provider`; a Team binding selects Linear
 when that choice is omitted.
 
-Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
-Placement does not edit the goal, launch work or stop existing conversations.
+Which Machine runs your work for a Wave is your choice, never repository content:
+
+```bash
+lf machine use mini product  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo   # this repository's default
+lf machine list              # each Machine with the defaults naming it
+```
+
+It does not edit the goal or launch work. It moves your Wave Session to the new
+Machine and leaves existing Tasks where they are.
 
 ### Writing KRs
 

@@ -76,6 +76,10 @@ pub(crate) fn spawn(
             crate::steer::PROVIDER_CONTEXT_ENV,
             serde_json::to_string(&capability)?,
         );
+        command.env(
+            crate::steer::STEER_SEEN_ENV,
+            crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
+        );
         let program = command
             .as_std()
             .get_program()
@@ -109,6 +113,10 @@ pub(crate) fn spawn_native(
     command.env(
         crate::steer::PROVIDER_CONTEXT_ENV,
         serde_json::to_string(&capability)?,
+    );
+    command.env(
+        crate::steer::STEER_SEEN_ENV,
+        crate::steer::seen_marker(&crate::store::lf_home_dir(), &capability.agent_process_id),
     );
     store
         .with_session_attachment(session, attachment, || {

@@ -299,6 +299,25 @@ impl SqliteStore {
                 )?;
             }
         }
+        // Ownership entries ride on marked comments. An owner whose open claim
+        // the exchanged log no longer shows claims again.
+        let mut touched = std::collections::HashSet::new();
+        for &(table, target) in grouped.keys() {
+            if table != "task_comments" || conflicts.contains_key(&(table, target)) {
+                continue;
+            }
+            let (task, body, created_at): (String, String, Option<String>) = tx.query_row(
+                "SELECT task_id,body,created_at FROM task_comments WHERE id=?1",
+                [target],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            let task = crate::durable::TaskId::from_raw(task);
+            super::task_ownership::ingest_marker_in(&tx, &task, &body, created_at.as_deref())?;
+            touched.insert(task);
+        }
+        for task in &touched {
+            super::task_ownership::reassert_in(&tx, task)?;
+        }
 
         tx.execute(
             "UPDATE planning_peer_conflicts SET active=0 WHERE repo=?1",

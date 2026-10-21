@@ -3,7 +3,7 @@
 //! only planning columns and captures local mutations in that same transaction.
 use crate::planning_exchange::PlanningMutation;
 use crate::store::{StoreError, StoreResult};
-use crate::work::edit::{CommentContent, Delegation, Disposition, WorkEdit, WorkValue};
+use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,13 +19,11 @@ const WORK_TABLES: [&str; 4] = ["waves", "projects", "tasks", "task_comments"];
 // variant and target, without another public object/kind model.
 pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
-        WorkValue::WaveDelegation(_)
-        | WorkValue::WaveName(_)
+        WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
         | WorkValue::WaveProject(_)
         | WorkValue::WaveWorkflow(_) => "waves",
-        WorkValue::ProjectDelegation(_)
-        | WorkValue::ProjectWave(_)
+        WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
         | WorkValue::ProjectName(_)
@@ -38,9 +36,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::HistoricalProjectWorkflow(_)
         | WorkValue::Krs(_)
         | WorkValue::MetricTargets(_) => "projects",
-        WorkValue::TaskDelegation(_)
-        | WorkValue::TaskAdmissionAuthority(_)
-        | WorkValue::TaskProject(_)
+        WorkValue::TaskProject(_)
         | WorkValue::TaskLinearId(_)
         | WorkValue::TaskIdentifier(_)
         | WorkValue::TaskTitle(_)
@@ -60,10 +56,6 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
 
 fn column(value: &WorkValue) -> &'static str {
     match value {
-        WorkValue::WaveDelegation(_)
-        | WorkValue::ProjectDelegation(_)
-        | WorkValue::TaskDelegation(_) => "delegation",
-        WorkValue::TaskAdmissionAuthority(_) => "admission_authority",
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveProject(_) => "current_project_id",
@@ -176,32 +168,6 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             |row| row.get(0),
         )?));
     }
-    // The planning draft seeds before the placement draft; seed again when
-    // authored assignment provenance and admission authority are installed.
-    if table != "task_comments" && conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('work_placements') WHERE name='provenance')",
-        [], |row| row.get::<_, bool>(0),
-    )? {
-        let owner = placement_column(table);
-        let assignment: Option<String> = conn.query_row(
-            &format!("SELECT json_object('machine_id',machine_id,'placed_at',placed_at,'provenance',provenance) FROM work_placements WHERE {owner}=?1"),
-            [id], |row| row.get(0),
-        ).optional()?;
-        let assignment: Option<Delegation> = assignment.map(|v| serde_json::from_str(&v)).transpose()?;
-        values.push(match table {
-            "waves" => WorkValue::WaveDelegation(assignment),
-            "projects" => WorkValue::ProjectDelegation(assignment),
-            "tasks" => WorkValue::TaskDelegation(assignment),
-            _ => unreachable!("validated Work table"),
-        });
-    }
-    if table == "tasks" && conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='admission_authority')",
-        [], |row| row.get::<_, bool>(0),
-    )? {
-        let authority: Option<String> = conn.query_row("SELECT admission_authority FROM tasks WHERE id=?1", [id], |row| row.get(0))?;
-        values.push(WorkValue::TaskAdmissionAuthority(authority.map(|v| serde_json::from_str(&v)).transpose()?));
-    }
     // Released migrations seed this writer before the Wave default column exists.
     if table == "waves"
         && conn.query_row(
@@ -220,15 +186,6 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         value.validate()?;
     }
     Ok(values)
-}
-
-fn placement_column(table: &str) -> &'static str {
-    match table {
-        "waves" => "wave_id",
-        "projects" => "project_id",
-        "tasks" => "task_id",
-        _ => unreachable!("only Work scopes have delegation"),
-    }
 }
 
 fn read_record(
@@ -251,7 +208,6 @@ fn write_record(
 ) -> StoreResult<bool> {
     let before = read(conn, table, id)?;
     let mut columns = BTreeMap::new();
-    let mut delegated = false;
     for edit in edits {
         let edit = &edit.change;
         if matches!(edit, WorkValue::HistoricalProjectWorkflow(_)) {
@@ -273,31 +229,8 @@ fn write_record(
         if before.contains(edit) {
             continue;
         }
-        if matches!(edit, WorkValue::TaskAdmissionAuthority(_))
-            && before
-                .iter()
-                .any(|v| matches!(v, WorkValue::TaskAdmissionAuthority(Some(_))))
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task admission authority is immutable".into(),
-            ));
-        }
         let value = edit.value()?;
         match edit {
-            WorkValue::WaveDelegation(assignment)
-            | WorkValue::ProjectDelegation(assignment)
-            | WorkValue::TaskDelegation(assignment) => {
-                let owner = placement_column(table);
-                if let Some(assignment) = assignment {
-                    conn.execute(&format!("INSERT INTO work_placements({owner},machine_id,placed_at,provenance) VALUES(?1,?2,?3,?4) ON CONFLICT({owner}) DO UPDATE SET machine_id=excluded.machine_id,placed_at=excluded.placed_at,provenance=excluded.provenance"), params![id, assignment.machine_id.as_str(), assignment.placed_at, serde_json::to_value(assignment.provenance)?.as_str()])?;
-                } else {
-                    conn.execute(
-                        &format!("DELETE FROM work_placements WHERE {owner}=?1"),
-                        [id],
-                    )?;
-                }
-                delegated = true;
-            }
             WorkValue::Disposition(_) | WorkValue::CommentContent(_) => {
                 columns.extend(value.as_object().expect("typed fields").clone());
             }
@@ -339,7 +272,7 @@ fn write_record(
         // Initial rows and every subsequent write use this same typed snapshot.
         capture(conn, table, id)?;
     }
-    Ok(changed || delegated)
+    Ok(changed)
 }
 
 pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResult<()> {
@@ -656,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn standalone_task_exchange_preserves_membership_comments_and_admission() {
+    fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
         let left = tempfile::tempdir().unwrap();
         let right = tempfile::tempdir().unwrap();
         let a = SqliteStore::open_ephemeral(&left.path().join("db")).unwrap();
@@ -689,6 +622,7 @@ mod tests {
             },
         )
         .unwrap();
+        let claim = a.claim_task(&task.id).unwrap().unwrap();
         let journal = a.export_peer_planning(path, &route.id()).unwrap();
         b.import_peer_planning(path, &route.id(), "first", &journal)
             .unwrap();
@@ -701,11 +635,12 @@ mod tests {
                 .as_deref(),
             Some(path)
         );
+        // The claim travels as a marked comment; the other Machine follows it.
+        let ownership = b.task_ownership(&task.id).unwrap();
+        assert_eq!(ownership.log, vec![claim.clone()]);
         assert_eq!(
-            crate::store::sqlite::task_admission::authority_in(&a.conn.lock().unwrap(), &task.id)
-                .unwrap(),
-            crate::store::sqlite::task_admission::authority_in(&b.conn.lock().unwrap(), &task.id)
-                .unwrap()
+            ownership.owner.unwrap().machine.id,
+            Some(a.local_machine().unwrap().id)
         );
         let project = b.ensure_wave_project(path, "product").unwrap();
         b.move_task(&task.id, None, Some(&project.id)).unwrap();

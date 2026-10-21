@@ -725,6 +725,8 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
+A build with unreleased migration drafts names its preview copy in every frame;
+the breadcrumbs then end with a **Preview** chip whose tooltip gives the path.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds even while heartbeats arrive;
@@ -875,4 +877,4 @@ working-output lifetime. A current Available result shows its source age. Missin
 stale or disconnected evidence shows a labeled Task summary. Codex currently
 supplies turn-qualified excerpts; providers without that evidence use the summary.
 Repository and Wave navigation displays retained conversation entry without
-starting a provider. Waves show their full Started and Not started inventory.
+starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".

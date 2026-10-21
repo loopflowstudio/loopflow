@@ -198,22 +198,12 @@ impl SqliteStore {
         &self,
         flow_process: &LfProcessId,
         graph: &FlowGraph,
-        task: Option<&TaskId>,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        tx.execute(
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
             "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,?2,?3)",
             params![flow_process, graph.name, serde_json::to_string(graph)?],
         )?;
-        let associated = super::task_work::task_of_process(&tx, flow_process)?;
-        if let Some(task) = task.map(TaskId::as_str).or(associated.as_deref()) {
-            tx.execute(
-                "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
-                params![task, crate::store::rows::now_unix()],
-            )?;
-        }
-        tx.commit()?;
         Ok(())
     }
 
@@ -265,7 +255,7 @@ impl SqliteStore {
     }
 
     /// The conversation, captured input and its event a process opened last.
-    /// A process that delegated to `lf transport serve` captures through the
+    /// A process that delegated to its transport owner captures through the
     /// command that transport serves, so the delegation chain counts as itself.
     pub(crate) fn process_input(
         &self,
@@ -276,12 +266,12 @@ impl SqliteStore {
             .query_row(
                 // Agent Processes record a bare executable name, not an argv array.
                 "WITH RECURSIVE delegated(id,serves) AS (
-                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='transport' AND json_extract(command,'$[2]')='serve' END
+                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='__transport-serve' END
                      FROM processes WHERE id=?1
                      UNION
-                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END
+                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END
                      FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END))
+                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END))
                  SELECT session_id,receipt_key,seq FROM session_events
                  WHERE kind='captured' AND lf_process_id IN (SELECT id FROM delegated)
                  ORDER BY seq DESC LIMIT 1",
@@ -346,7 +336,7 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_flow_process(&flow_process, &FlowGraph::new(name, &compiled), None)
+        self.record_flow_process(&flow_process, &FlowGraph::new(name, &compiled))
             .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = LfProcessId::new();
@@ -367,52 +357,6 @@ mod tests {
     use crate::durable::FlowProcessFilter;
     use crate::session::FlowProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
-
-    #[test]
-    fn failed_task_start_records_no_flow() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
-        let task = crate::durable::TaskId::new();
-        let project = crate::durable::ProjectId::new();
-        let wave = crate::id::WaveId::new();
-        let flow_process = crate::id::LfProcessId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
-                [&wave],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", rusqlite::params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo/task',1)",rusqlite::params![task.as_str(),project.as_str()]).unwrap();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/caller',1)",
-                rusqlite::params![flow_process, crate::id::TraceId::new()],
-            )
-            .unwrap();
-        }
-        let graph = crate::flow::graph::FlowGraph::new("proof", &[]);
-        let error = store
-            .record_flow_process(&flow_process, &graph, Some(&task))
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("Started requires recorded Task work"),
-            "{error}"
-        );
-        assert!(store.flow_process(flow_process.as_str()).unwrap().is_none());
-        let conn = store.conn.lock().unwrap();
-        let started: Option<i64> = conn
-            .query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(started, None);
-    }
 
     #[test]
     fn step_input_is_read_through_transport_delegation() {
@@ -436,7 +380,7 @@ mod tests {
             process(
                 &transport,
                 Some(&step),
-                &["lf", "transport", "serve", "--", "lf"],
+                &["lf", "__transport-serve", "--", "lf"],
             );
             process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
             // A command the agent ran is not the step's own capture.

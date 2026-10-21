@@ -1,19 +1,9 @@
 import Loopflow
 import SwiftUI
 
-extension TaskWorktreeSnapshot {
-    func sidebarMachine(localMachineId: String?) -> String? {
-        guard let machineId, let localMachineId else { return "Machine unknown" }
-        guard machineId != localMachineId else { return nil }
-        guard let machineLabel, !machineLabel.isEmpty else { return "Remote · name unavailable" }
-        return ProgramStatusReport.displaySafe(machineLabel)
-    }
-}
-
 struct TaskRowMetadata: View {
     let task: RoadmapTask
     let status: SessionProgramStatus
-    let localMachineId: String?
     var selected = false
     var slotHint: String?
     var sourceAge: String?
@@ -41,15 +31,8 @@ struct TaskRowMetadata: View {
             if let pr = task.pr?.publication?.github {
                 destination("#\(pr.number)", url: pr.url, kind: "pr")
             }
-            // Only recorded checkout ownership is shown; assignment is not execution.
-            if let workspace = task.reference.workspace {
-                if let machine = workspace.sidebarMachine(localMachineId: localMachineId) {
-                    Text(verbatim: machine).help(Text(verbatim: "Recorded checkout Machine · \(machine)"))
-                        .accessibilityIdentifier("work-machine-\(task.id)")
-                }
-            } else if task.runtime?.started == true {
-                Text("Machine unknown").accessibilityIdentifier("work-machine-\(task.id)")
-            }
+            Text(verbatim: ProgramStatusReport.displaySafe(task.runtime?.owner?.summary ?? "Unowned"))
+                .accessibilityIdentifier("work-owner-\(task.id)")
             Spacer(minLength: 0)
             // Reserve the shortcut glyph's height even when only an age (or nothing) is shown.
             Text("⌘9").hidden().frame(width: 28, alignment: .trailing)

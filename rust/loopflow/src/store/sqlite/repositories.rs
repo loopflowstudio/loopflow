@@ -2,10 +2,7 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::{Path, PathBuf};
 
-use crate::durable::{
-    MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskExecutionSource, TaskId,
-    WorkRef,
-};
+use crate::durable::{RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -139,14 +136,6 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 
 /// Routing and transactional preparation use the same sharing boundary.
 /// Shared mutation routes are planning evidence, never an execution reservation.
-pub(super) fn task_is_shared_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM planning_peer_changes c JOIN planning_peer_routes r ON r.mutation_id=c.id WHERE c.record_table='tasks' AND c.object_id=?1)",
-        [task.as_str()],
-        |row| row.get(0),
-    )?)
-}
-
 impl SqliteStore {
     /// Move current addresses together. Captures, Process rows and provider
     /// history retain the paths at which they were recorded.
@@ -235,13 +224,12 @@ impl SqliteStore {
             )?;
             let id = super::children::resolve_task_id_in(&tx, task.as_str(), Some(&repo))?
                 .ok_or(StoreError::NotFound)?;
-            let (checkout, owner, started): (Option<String>, Option<String>, Option<i64>) = tx
-                .query_row(
-                    "SELECT worktree,checkout_machine_id,started_at FROM tasks WHERE id=?1",
-                    [id.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )?;
-            if checkout.is_none() && started.is_none() {
+            let (checkout, owner): (Option<String>, Option<String>) = tx.query_row(
+                "SELECT worktree,checkout_machine_id FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            if checkout.is_none() && !super::task_ownership::owned_in(&tx, &id)? {
                 return Ok(TaskLocation::Unrecorded);
             }
             if owner.as_deref() != Some(machine.as_str()) {
@@ -268,48 +256,19 @@ impl SqliteStore {
         })
     }
 
-    pub fn task_is_shared(&self, task: &TaskId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        task_is_shared_in(&conn, task)
-    }
-
     pub fn task_execution_route(&self, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let (repo, checkout, machine, started): (
-            String,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-        ) = tx.query_row(
-            "SELECT w.repo,t.worktree,t.checkout_machine_id,t.started_at
-             FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
+        let tx = conn.savepoint()?;
+        let (repo, checkout): (String, Option<String>) = tx.query_row(
+            "SELECT w.repo,t.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              WHERE t.id=?1",
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
-        let (machine_id, source) = if checkout.as_deref().is_some_and(|path| !path.is_empty())
-            || started.is_some()
-        {
-            let machine = machine.ok_or_else(|| StoreError::InvalidData(format!(
-                "Task {task} has unknown execution Machine; delegation cannot relocate existing work"
-            )))?;
-            (
-                MachineId::parse(&machine)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                TaskExecutionSource::RecordedCheckout,
-            )
-        } else if let Some(owner) = super::task_admission::owner_in(&tx, task)? {
-            (owner, TaskExecutionSource::Admission)
-        } else {
-            (
-                super::durable::placement_in(&tx, &WorkRef::Task(task.clone()))?.machine_id,
-                TaskExecutionSource::EffectiveDelegation,
-            )
-        };
+        let (machine_id, source) = super::task_ownership::writer_in(&tx, task)?;
         Ok(TaskExecutionRoute {
             task_id: task.clone(),
             checkout,
@@ -424,6 +383,7 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
+    use crate::durable::{MachineId, TaskId};
 
     #[test]
     fn relocation_rolls_back_and_retains_nested_task_processes() {
@@ -498,68 +458,95 @@ mod tests {
     }
 
     #[test]
-    fn two_machine_routing_uses_one_plan_and_keeps_execution_local() {
-        use crate::durable::{ProjectId, TaskId, WorkRef};
-        use crate::id::WaveId;
-        let a = tempfile::tempdir().unwrap();
-        let b = tempfile::tempdir().unwrap();
-        let first = SqliteStore::open_ephemeral(&a.path().join("db")).unwrap();
-        let second = SqliteStore::open_ephemeral(&b.path().join("db")).unwrap();
-        let repository = first.ensure_repository("/first/repo").unwrap();
-        second.bind_repository("/second/repo", &repository).unwrap();
-        let destination = second.local_machine().unwrap().id;
-        let connection = first
-            .add_machine(&destination, "second", "second", "/unrelated/default")
-            .unwrap();
-        let wave = WaveId::new();
-        let project = ProjectId::new();
-        let task = TaskId::new();
-        for (store, repo) in [(&first, "/first/repo"), (&second, "/second/repo")] {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'work',?2,1)",
-                rusqlite::params![wave.as_str(), repo],
+    fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
+        use crate::durable::{
+            DefaultScope, MachineSetting, OwningMachineSource, TaskExecutionSource,
+        };
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().canonicalize().unwrap();
+        let repo = repo.to_str().unwrap();
+        let (mini, worker) = (MachineId::new(), MachineId::new());
+        let project = store.ensure_wave_project(repo, "work").unwrap();
+        let wave = project.wave_id.clone();
+        let repository = store.ensure_repository(repo).unwrap();
+        let new_task = |title: &str| {
+            store
+                .create_task(&crate::work::task::NewTask {
+                    repository_id: repository.clone(),
+                    id: TaskId::new(),
+                    project_id: Some(project.id.clone()),
+                    title: title.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+        };
+        // Unset: this Machine takes the Task, and the claim is captured.
+        let local = store.local_machine().unwrap().id;
+        let claimed = new_task("Claimed here");
+        store.claim_task(&claimed.id).unwrap().unwrap();
+
+        store
+            .set_machine_default(
+                &DefaultScope::Repository(repository.clone()),
+                MachineSetting::Tasks,
+                &worker,
             )
             .unwrap();
-            conn.execute(
-                "INSERT INTO projects(id,wave_id,created_at) VALUES(?1,?2,1)",
-                rusqlite::params![project.as_str(), wave.as_str()],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'WORK-1','Shared Task','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
-        }
-        first
-            .place_work(&WorkRef::Wave(wave.clone()), &destination)
-            .unwrap();
-        // Routing uses the read-only owner, not an initializing Store or a
-        // second connection to establish the observing Machine.
-        let observer = SqliteStore::open_read_only(&a.path().join("db")).unwrap();
+        let task = new_task("Routed");
+        let route = store.task_execution_route(&task.id).unwrap();
         assert_eq!(
-            observer.task_execution_route(&task).unwrap(),
-            second.task_execution_route(&task).unwrap()
-        );
-        assert_ne!(observer.local_machine().unwrap().id, destination);
-        // Only the destination records its checkout; planning identity is shared,
-        // not the filesystem path or runtime state.
-        second
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET worktree='/second/repo.task',checkout_machine_id=?2 WHERE id=?1",
-                rusqlite::params![task.as_str(), destination.as_str()],
+            (route.machine_id, route.source),
+            (
+                worker.clone(),
+                TaskExecutionSource::OwningMachine(OwningMachineSource::Repository)
             )
-            .unwrap();
-        second
-            .place_work(&WorkRef::Wave(wave), &destination)
+        );
+        // The Wave's Session Machine places no Task.
+        store
+            .set_machine_default(
+                &DefaultScope::Wave(wave.clone()),
+                MachineSetting::Session,
+                &local,
+            )
             .unwrap();
         assert_eq!(
-            second.task_execution_route(&task).unwrap().machine_id,
-            destination
+            store.task_execution_route(&task.id).unwrap().machine_id,
+            worker
         );
-        assert!(first.task(&task).unwrap().unwrap().worktree.is_none());
-        assert_eq!(first.machine_by_id(&destination).unwrap(), Some(connection));
+        assert_eq!(
+            store
+                .wave_owning_machine(&wave, MachineSetting::Session)
+                .unwrap(),
+            (local.clone(), OwningMachineSource::Wave("work".into()))
+        );
+        // The Wave's default outranks the repository's.
+        store
+            .set_machine_default(
+                &DefaultScope::Wave(wave.clone()),
+                MachineSetting::Tasks,
+                &mini,
+            )
+            .unwrap();
+        let route = store.task_execution_route(&task.id).unwrap();
+        assert_eq!(
+            (route.machine_id, route.source),
+            (
+                mini,
+                TaskExecutionSource::OwningMachine(OwningMachineSource::Wave("work".into()))
+            )
+        );
+        // Only your Machine for the Wave claims; this one refuses without writing.
+        assert!(store.claim_task(&task.id).is_err());
+        assert!(store.task_ownership(&task.id).unwrap().log.is_empty());
+        // Captured, not inherited: a later default moves no claimed Task.
+        let route = store.task_execution_route(&claimed.id).unwrap();
+        assert_eq!(
+            (route.machine_id, route.source),
+            (local, TaskExecutionSource::Owner)
+        );
+        assert_eq!(store.machine_defaults().unwrap().len(), 3);
     }
 
     #[test]

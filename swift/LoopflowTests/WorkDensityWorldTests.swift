@@ -23,7 +23,7 @@ struct WorkDensityWorldTests {
         #expect(roadmaps.map(\.wave.name).sorted() == ["infrastructure", "intelligence", "product"])
         #expect(roadmaps.allSatisfy { $0.tasks.items.count == 50 })
         let product = try #require(roadmaps.first { $0.wave.name == "product" })
-        let started = product.tasks.items.filter { $0.runtime?.started == true }
+        let started = product.tasks.items.filter { $0.runtime?.owner != nil }
         #expect(started.count == 8)
         #expect(model.projection.unmatchedSessions.count == 4)
         let orphans = model.projection.unmatchedSessions.map(\.id)

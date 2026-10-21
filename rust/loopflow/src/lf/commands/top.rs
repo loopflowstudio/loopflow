@@ -214,6 +214,22 @@ fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceip
     stale_process_receipt_pids
 }
 
+/// Remove receipts of finished Processes whose OS process is gone; a dry run
+/// counts the receipts of dead PIDs instead.
+pub(crate) fn prune_dead_process_receipts(lf_home: &Path, dry_run: bool) -> Result<u32> {
+    let processes = OsProcess::sample(OffsetDateTime::now_utc().unix_timestamp())?;
+    let receipts = read_process_receipts_at(lf_home).context("failed to read Process receipts")?;
+    let stale = stale_process_receipt_pids(&processes, &receipts);
+    if dry_run {
+        let count = receipts
+            .iter()
+            .filter(|receipt| stale.binary_search(&receipt.pid).is_ok())
+            .count();
+        return Ok(u32::try_from(count).unwrap_or(u32::MAX));
+    }
+    Ok(prune_process_receipts_at(lf_home, &stale)?)
+}
+
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let home = crate::store::lf_home_dir();

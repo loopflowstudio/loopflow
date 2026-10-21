@@ -117,7 +117,7 @@ struct DesktopPerformanceTests {
         }
         // The outline lists started Tasks only, so the renamed Task is one of those.
         let current = model.projection.waves.flatMap { wave in wave.tasks.map { (wave.roadmap.wave.id, $0) } }
-        guard let (wave, listed) = current.first(where: { $0.1.task.runtime?.started == true && !$0.1.task.task.isTerminal }) else {
+        guard let (wave, listed) = current.first(where: { $0.1.task.runtime?.owner != nil && !$0.1.task.task.isTerminal }) else {
             try journal.write(["event": "setup", "outcome": "unavailable",
                                "reason": "No started Task in \(repo) to rename and model a new one on"])
             throw PerformanceFailure("unavailable", "No started Task in this repository")
@@ -986,7 +986,7 @@ struct DesktopPerformanceTests {
             task["reference"] = reference
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "perf-work-\(index)"
-            runtime["started"] = true
+            runtime["owner"] = ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
         }
@@ -1154,7 +1154,7 @@ private final class PerformanceReader {
 
     private func send(_ part: String, _ answers: Int, _ body: String) {
         sequence += 1
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
     }

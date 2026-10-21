@@ -297,7 +297,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert_eq!(saved.pending_sync.len(), 1);
             let id = saved.pending_sync[0].clone();
             assert!(provider.lock().await.posted.is_empty());
-            assert!(!store.task_started(&task.id).await.unwrap());
+            assert!(!store.task_owned(&task.id).await.unwrap());
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             assert_eq!(store.sqlite.pending_task_comments(&task.id).unwrap().len(), 1);
             let saved_steers = store.task_steers(&task.id).await.unwrap();
@@ -370,7 +370,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 crate::work::task::LinearWritebackState::Pending {
                     operation: crate::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));
-            assert!(!store.task_started(&task.id).await.unwrap());
+            assert!(!store.task_owned(&task.id).await.unwrap());
 
         })
         .await;

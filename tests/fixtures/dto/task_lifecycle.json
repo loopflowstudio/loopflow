@@ -83,7 +83,7 @@
                       "completion_pending": null,
                       "provider": "codex",
                       "reason": "No Task Flow has run; independent Sessions may still be active",
-                      "started": false,
+                      "owner": null,
                       "status": "not_ready",
                       "updated_at": "2026-10-08T23:28:31Z",
                       "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
@@ -293,7 +293,13 @@
                       "completion_pending": null,
                       "provider": "codex",
                       "reason": "done",
-                      "started": true,
+                      "owner": {
+                        "person": "Jack Heart",
+                        "machine": {
+                          "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                          "label": "mini"
+                        }
+                      },
                       "status": "done",
                       "updated_at": "2026-10-08T23:28:31Z",
                       "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -402,7 +408,7 @@
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "No Task Flow has run; independent Sessions may still be active",
-                  "started": false,
+                  "owner": null,
                   "status": "not_ready",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
@@ -612,7 +618,13 @@
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "done",
-                  "started": true,
+                  "owner": {
+                    "person": "Jack Heart",
+                    "machine": {
+                      "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                      "label": "mini"
+                    }
+                  },
                   "status": "done",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -675,6 +687,7 @@
         ]
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "planning",
       "revisions": {
         "flows": 3,
@@ -862,7 +875,13 @@
         "completion_pending": null,
         "provider": "codex",
         "reason": "done",
-        "started": true,
+        "owner": {
+          "person": "Jack Heart",
+          "machine": {
+            "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+            "label": "mini"
+          }
+        },
         "status": "done",
         "updated_at": "2026-10-08T23:28:31Z",
         "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -1859,6 +1878,7 @@
         }
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "task",
       "revisions": {
         "flows": 3,
@@ -1955,7 +1975,7 @@
                       "completion_pending": null,
                       "provider": "codex",
                       "reason": "No Task Flow has run; independent Sessions may still be active",
-                      "started": false,
+                      "owner": null,
                       "status": "not_ready",
                       "updated_at": "2026-10-08T23:28:31Z",
                       "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
@@ -2150,7 +2170,13 @@
                       "completion_pending": null,
                       "provider": "codex",
                       "reason": "done",
-                      "started": true,
+                      "owner": {
+                        "person": "Jack Heart",
+                        "machine": {
+                          "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                          "label": "mini"
+                        }
+                      },
                       "status": "done",
                       "updated_at": "2026-10-08T23:28:31Z",
                       "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -2259,7 +2285,7 @@
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "No Task Flow has run; independent Sessions may still be active",
-                  "started": false,
+                  "owner": null,
                   "status": "not_ready",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_e1d59e9bbca2470e8cd28742946bf876"
@@ -2454,7 +2480,13 @@
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "done",
-                  "started": true,
+                  "owner": {
+                    "person": "Jack Heart",
+                    "machine": {
+                      "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                      "label": "mini"
+                    }
+                  },
                   "status": "done",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -2517,6 +2549,7 @@
         ]
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "planning",
       "revisions": {
         "flows": 2,
@@ -2689,7 +2722,13 @@
         "completion_pending": null,
         "provider": "codex",
         "reason": "done",
-        "started": true,
+        "owner": {
+          "person": "Jack Heart",
+          "machine": {
+            "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+            "label": "mini"
+          }
+        },
         "status": "done",
         "updated_at": "2026-10-08T23:28:31Z",
         "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -3483,6 +3522,7 @@
         }
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "task",
       "revisions": {
         "flows": 2,
@@ -3697,7 +3737,13 @@
                       "completion_pending": null,
                       "provider": "codex",
                       "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
-                      "started": true,
+                      "owner": {
+                        "person": "Jack Heart",
+                        "machine": {
+                          "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                          "label": "mini"
+                        }
+                      },
                       "status": "active",
                       "updated_at": "2026-10-08T23:28:31Z",
                       "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -3924,7 +3970,13 @@
                   "completion_pending": null,
                   "provider": "codex",
                   "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
-                  "started": true,
+                  "owner": {
+                    "person": "Jack Heart",
+                    "machine": {
+                      "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+                      "label": "mini"
+                    }
+                  },
                   "status": "active",
                   "updated_at": "2026-10-08T23:28:31Z",
                   "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -3987,6 +4039,7 @@
         ]
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "planning",
       "revisions": {
         "flows": 2,
@@ -4159,7 +4212,13 @@
         "completion_pending": null,
         "provider": "codex",
         "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
-        "started": true,
+        "owner": {
+          "person": "Jack Heart",
+          "machine": {
+            "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+            "label": "mini"
+          }
+        },
         "status": "active",
         "updated_at": "2026-10-08T23:28:31Z",
         "work_id": "task_2bf8aab6a1c1455d84665ba72ef2fc8a"
@@ -4829,6 +4888,7 @@
         }
       },
       "home": "/tmp/.tmpFOdnl9",
+      "copy": null,
       "part": "task",
       "revisions": {
         "flows": 2,

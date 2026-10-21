@@ -133,8 +133,7 @@ struct WorkNavigator: View {
                         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                         .help(preview.help).allowsHitTesting(false)
                     if let task = found?.task {
-                        TaskRowMetadata(task: task, status: status,
-                            localMachineId: model.observingMachineId, selected: selected,
+                        TaskRowMetadata(task: task, status: status, selected: selected,
                             slotHint: (model.navigation.showsSlotHints || hoveredTask == id)
                                 ? model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil } : nil,
                             sourceAge: preview.age)
@@ -187,9 +186,17 @@ struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            trail(showWave: true).fixedSize(horizontal: true, vertical: false)
-            trail(showWave: false)
+        HStack(spacing: 8) {
+            ViewThatFits(in: .horizontal) {
+                trail(showWave: true).fixedSize(horizontal: true, vertical: false)
+                trail(showWave: false)
+            }
+            if let copy = model.previewCopy {
+                WorkChip(text: "Preview", tone: .warning)
+                    .fixedSize()
+                    .help("Preview copy: \((copy as NSString).abbreviatingWithTildeInPath) — work here is not in the shared store")
+                    .accessibilityIdentifier("preview-copy")
+            }
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))

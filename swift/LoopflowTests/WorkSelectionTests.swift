@@ -144,10 +144,10 @@ struct WorkSelectionTests {
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel(); continuation.finish() }
         let plans = [ViewPlan(owner: root, members: [member("a")])]
-        continuation.yield(WorkFrame(sequence: 1, answers: 100, home: "/fixture-home", revisions: nil,
+        continuation.yield(WorkFrame(sequence: 1, answers: 100, home: "/fixture-home", copy: nil, revisions: nil,
             unavailable: nil, content: .selections(.init(repo: repo, plans: plans)), wire: nil))
         try await eventually { model.selectionPlans.value == plans }
-        continuation.yield(WorkFrame(sequence: 2, answers: 100, home: "/fixture-home", revisions: nil,
+        continuation.yield(WorkFrame(sequence: 2, answers: 100, home: "/fixture-home", copy: nil, revisions: nil,
             unavailable: "read failed", content: .selections(nil), wire: nil))
         try await eventually { model.selectionPlans.errorMessage == "read failed" }
         #expect(model.selectionPlans.value == plans)
@@ -216,7 +216,7 @@ struct WorkSelectionTests {
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
-        let task = try #require(roadmap.tasks.items.first { $0.runtime?.started != true })
+        let task = try #require(roadmap.tasks.items.first { $0.runtime?.owner == nil })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Navigation cannot execute") },
                               repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])

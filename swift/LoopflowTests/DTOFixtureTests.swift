@@ -603,7 +603,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
-        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 
@@ -674,7 +673,7 @@ struct DTOFixtureTests {
         #expect(tasks[2].reference.issueUrl == nil)
         #expect(tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         // Start evidence is required: a prepared checkout is not started work.
-        #expect(tasks.map { $0.runtime?.started } == [false, true, nil, true])
+        #expect(tasks.map { $0.runtime.map { $0.owner != nil } } == [false, true, nil, true])
         #expect(roadmap.waves[1].tasks.unavailableReason?.contains("lf repo refresh") == true)
 
     }
@@ -926,6 +925,8 @@ struct DTOFixtureTests {
         }
         #expect(selections.plans[0].members[0].title == "Retained work")
         #expect(frames[0].answers == nil)
+        #expect(frames[0].copy == nil)
+        #expect(frames[6].copy == "/Users/fixture/.lf/copies/3f2a9c1b")
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
         #expect(frames[4].revisions == nil)
@@ -962,10 +963,12 @@ struct DTOFixtureTests {
         let page = try #require(frames[1].wire?.sessionPage)
         #expect(try RegistryQuery.decode(SessionPage.self, from: page).next == nil)
 
-        var missing = lines[0]
-        missing.removeValue(forKey: "answers")
-        #expect(throws: (any Error).self) {
-            try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+        for field in ["answers", "copy"] {
+            var missing = lines[0]
+            missing.removeValue(forKey: field)
+            #expect(throws: (any Error).self) {
+                try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+            }
         }
     }
 

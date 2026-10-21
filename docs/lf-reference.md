@@ -74,44 +74,6 @@ Open Loopflow or run its CLI
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
-## lf transport
-
-Retain command execution independently of terminal viewers
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf transport start
-
-Start an independently owned command and print its Process identity
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport serve
-
-Own a command's transport until it exits (normally launched by start)
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport attach
-
-Attach to an existing execution; Ctrl+] detaches without stopping it
-
-| Argument | What it does |
-|---|---|
-| `<process>` | process |
-| `--observe` | observe Default: false. |
-| `--help / -h` | Print help |
-
 ## lf clone
 
 Create and use an offline, isolated development data clone (macOS)
@@ -328,12 +290,13 @@ Report how long `lf wt list` has taken on this machine
 
 ## lf wt prune
 
-Prune worktrees or completed build output
+Prune worktrees, completed build output, or finished branches
 
 | Argument | What it does |
 |---|---|
 | `--dry-run` | Show what would be pruned without removing anything Default: false. |
 | `--builds` | Reclaim old generated output from completed Tasks; retain checkouts Default: false. |
+| `--branches` | Delete origin and local branches tied to merged or closed PRs, finished Tasks, or published release candidates Default: false. |
 | `--json` | Emit cleanup entries and allocated-byte receipts Default: false. |
 | `--retention-hours` | Keep output modified within this many hours Default: 24. |
 | `--maximum-roots` | Maximum generated roots removed per invocation Default: 8. |
@@ -449,6 +412,37 @@ Reap registered orphan providers and remove dead process receipts
 |---|---|
 | `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf disk
+
+Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf disk clean
+
+Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
+| `--help / -h` | Print help |
+
+## lf disk rotate
+
+Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--quiet / -q` | Print nothing; removals are still logged to ~/.lf/logs/disk.log Default: false. |
 | `--help / -h` | Print help |
 
 ## lf :
@@ -1244,7 +1238,6 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
-| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1265,6 +1258,21 @@ Check reachability and version without prompting
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine use
+
+Run work on a Machine: hand off a Task, or set a Wave's or this repository's default. Bare, it applies to the worktree's Task or Wave, else this repository
+
+| Argument | What it does |
+|---|---|
+| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
+| `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
+| `--task` | Hand this Task to the Machine; you stay its person |
+| `--repo` | Set this repository's default for its Session and Tasks with no Wave default Default: false. |
+| `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
+| `--tasks` | Set only where the scope's new Tasks run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1306,7 +1314,7 @@ Poll a configured channel and post each Session's final answer
 
 ## lf wave
 
-Manage Wave identity, placement and planning
+Manage Wave identity and planning
 
 | Argument | What it does |
 |---|---|
@@ -1475,7 +1483,7 @@ List installed loopflow cron jobs
 
 ## lf wave cron preflight
 
-Validate configured commands and Machine placement without installing jobs
+Validate configured commands and your Wave Machine without installing jobs
 
 | Argument | What it does |
 |---|---|
@@ -1549,17 +1557,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
 | `--sync` | Refresh planning from Linear before reading Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave place
-
-Set the Machine for Wave schedules and newly created work
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<machine_id>` | machine id |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename
@@ -1760,15 +1757,23 @@ Create a planning Task without allocating a checkout or starting work
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task admission
+## lf task claim
 
-Inspect or reserve the Task's permanent first execution owner
+Claim the Task for you on this Machine
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--claim` | Request first execution on this Machine; an existing owner wins |
-| `--request` | Correlate a coordinator reply with this request |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task unclaim
+
+Unclaim the Task; it is unowned again, with its history intact
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1779,7 +1784,7 @@ Read recorded execution location without preparing or transferring Work
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--peers` | Observe added Machines as well as this one Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -2113,4 +2118,13 @@ Run a skill explicitly
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf skill customize
+
+Print the repository file that defines a skill, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |

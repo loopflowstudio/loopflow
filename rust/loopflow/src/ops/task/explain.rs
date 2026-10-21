@@ -100,7 +100,7 @@ async fn read_task_run(
 ) -> anyhow::Result<()> {
     let task = read_local_task(store, &mut report.resolution).await?;
     if task.worktree.is_none() {
-        report.unavailable.push("Future checkout and peer-exclusive first-start admission are not observed; definitions are read from the local repository before preparation".into());
+        report.unavailable.push("Future checkout is not observed; definitions are read from the local repository before preparation".into());
     }
     // The launch owner's read-only check includes planning validity, current
     // chapter, completion and cancellation, rather than a status approximation.
@@ -294,7 +294,7 @@ pub(super) async fn read_local_task(
         .get_task(&id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Task {id} is missing"))?;
-    let route = crate::ops::task_location::explain(&store.sqlite, &id, resolution).await?;
+    let route = crate::ops::task_location::explain(&store.sqlite, &id, resolution)?;
     let local_machine = store.local_machine().await?.id;
     if route.machine_id != local_machine {
         anyhow::bail!(

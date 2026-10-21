@@ -56,7 +56,7 @@ pub(crate) fn default_plans(store: &SqliteStore, repo: &str) -> Result<Vec<ViewP
     tasks.sort_by(|a, b| (a.rank, a.id.as_str()).cmp(&(b.rank, b.id.as_str())));
     let mut members = Vec::new();
     for task in tasks {
-        if !store.task_started(&task.id)? || store.task_state(&task.id)?.is_terminal() {
+        if !store.task_owned(&task.id)? || store.task_state(&task.id)?.is_terminal() {
             continue;
         }
         members.push((
@@ -165,7 +165,7 @@ mod tests {
         .unwrap();
         for id in [&ids[0], &ids[1], &ids[3], &ids[4]] {
             conn.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',1)", [id.as_str()]).unwrap();
-            conn.execute("UPDATE tasks SET started_at=1 WHERE id=?1", [id.as_str()])
+            conn.execute("INSERT INTO task_ownership(id,task_id,kind,at,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',1,1)", [id.as_str()])
                 .unwrap();
         }
         conn.execute("UPDATE tasks SET paused=1 WHERE id=?1", [ids[1].as_str()])

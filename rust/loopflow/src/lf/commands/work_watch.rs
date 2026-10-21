@@ -59,6 +59,9 @@ pub struct WorkFrame {
     pub sequence: u64,
     pub answers: Option<u64>,
     pub home: String,
+    /// The preview copy directory this build's drafts run on; `null` on the
+    /// shared store.
+    pub copy: Option<String>,
     /// The store revisions this frame was read at; `null` before a store exists.
     pub revisions: Option<StoreRevisions>,
     /// Why this part could not be read. Its body is then `null`.
@@ -351,10 +354,17 @@ fn lock(shared: &Shared) -> MutexGuard<'_, Mailbox> {
     shared.0.lock().expect("work reader mailbox poisoned")
 }
 
+/// Where this reader's data lives; every frame names it.
+#[derive(Debug, Clone)]
+struct Origin {
+    home: String,
+    copy: Option<String>,
+}
+
 fn enqueue(
     mailbox: &mut Mailbox,
     key: &'static str,
-    home: &str,
+    origin: &Origin,
     unavailable: Option<String>,
     content: WorkContent,
 ) {
@@ -362,7 +372,8 @@ fn enqueue(
     let frame = WorkFrame {
         sequence: mailbox.sequence,
         answers: mailbox.answers,
-        home: home.to_owned(),
+        home: origin.home.clone(),
+        copy: origin.copy.clone(),
         // Activity uses a separate OS/process reader, outside the Work snapshot.
         revisions: if matches!(content, WorkContent::Activity(_)) {
             None
@@ -919,11 +930,20 @@ fn settle(shared: &Shared) {
 pub(super) fn run(watch: bool) -> Result<()> {
     let database = crate::store::database_path_from_env()?;
     let home = crate::store::lf_home_dir();
-    let home = home
-        .canonicalize()
-        .unwrap_or(home)
-        .to_string_lossy()
-        .into_owned();
+    let origin = Origin {
+        home: home
+            .canonicalize()
+            .unwrap_or(home)
+            .to_string_lossy()
+            .into_owned(),
+        copy: crate::store::copy::selected().map(|database| {
+            database
+                .parent()
+                .expect("copy database has a directory")
+                .to_string_lossy()
+                .into_owned()
+        }),
+    };
     if watch {
         // Every reading asks Git the same questions about the same checkouts.
         crate::git::retain_reads();
@@ -961,7 +981,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             }
         });
         let heartbeat = shared.clone();
-        let heartbeat_home = home.clone();
+        let heartbeat_origin = origin.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(HEARTBEAT);
             let mut mailbox = lock(&heartbeat);
@@ -972,7 +992,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             enqueue(
                 &mut mailbox,
                 "heartbeat",
-                &heartbeat_home,
+                &heartbeat_origin,
                 None,
                 WorkContent::Heartbeat(Heartbeat { projections }),
             );
@@ -1082,7 +1102,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     state.last = Some((reason.clone(), content.clone()));
                     state.replay = false;
                     let mut mailbox = lock(&shared);
-                    enqueue(&mut mailbox, part.name(), &home, reason, content);
+                    enqueue(&mut mailbox, part.name(), &origin, reason, content);
                     shared.1.notify_all();
                 }
             }
@@ -1094,7 +1114,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                         enqueue(
                             &mut mailbox,
                             part.name(),
-                            &home,
+                            &origin,
                             reason.clone(),
                             content.clone(),
                         );
@@ -1117,7 +1137,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                     enqueue(
                         &mut mailbox,
                         "checkpoint",
-                        &home,
+                        &origin,
                         reason,
                         WorkContent::Checkpoint,
                     );

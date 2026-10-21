@@ -14,7 +14,7 @@ The launch prompt identifies the reviewer.
   user explicitly chooses them.
 - **Parent reviewer:** inspect the same state, but make only repo-scoped,
   reversible changes through the review protocol with the Task. Never guess a
-  user preference. OAuth, personal config, placement, and external object
+  user preference. OAuth, personal config, Wave Machines, and external object
   creation require the present User. When absent, report the exact blocker and
   next commands; do not manufacture a session.
 
@@ -269,20 +269,37 @@ lf machine list --json
 lf --machine <machine-id> account --cached
 lf --machine <machine-id> account route
 lf wave list --json
-lf wave place <wave-id> <machine-id>
 lf wave status <wave> --json
 lf --machine <machine-id> --wave <wave> wave-operate
 ```
 
+Pick the user's Machine for a Wave's or the repository's new Tasks. It is their
+personal choice, never committed repository content:
+
+```bash
+lf machine use <machine-label> <wave>        # this Wave's default, copied to their other Machines
+lf machine use <machine-label> --repo        # this repository's default
+lf machine use <machine-label> --task <issue> # hand one Task to that Machine
+lf machine list                              # each Machine with the defaults naming it
+```
+
+Bare `lf machine use <machine-label>` applies to the worktree's Task, else its
+Wave, else the repository. Resolution for a new Task is Wave → parent Waves →
+repository → the Machine running the command, so one Machine needs no setup.
+An unreachable Machine gets a warning; rerun later. Setting a default moves the
+user's Wave or repository Session to that Machine with fresh context; `lf cron`
+installs the Wave's crons for that Machine. Existing Tasks stay on the Machine
+in their claim until handed off.
+
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. Connect required logins with `lf machine connect` in a foreground
 terminal. Remote processes use credentials installed on their Machine. Before
-placement, use remote reads to verify that the remote has `lf`, the repository,
+setting a Wave Machine, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf machine add` discovers the identity
-and records its label, repository and SSH route. Placement is allowed only while
-no execution is live. `lf --wave <wave> wave-operate` makes a finite pass locally; prefix it with
+and records its label, repository and SSH route. `lf --wave <wave> wave-operate` makes a finite pass locally; prefix it with
 `lf --machine <machine-id>` to run on the remote Machine. Adding a machine,
-changing placement, and starting a Wave each change durable execution state.
+setting a Wave Machine, handing off a Task and starting a Wave each change durable
+execution state.
 
 ## 6. Prove the result
 
@@ -297,7 +314,7 @@ lf wave list --json
 ```
 
 For a selected Wave, also run `lf wave status <wave> --json` and
-`lf wave show <wave> --json`. After placement, use
+`lf wave show <wave> --json`. After setting a Wave Machine, use
 `lf wave status <wave> --json`. For a selected Task, run
 `lf task status <ISSUE-ID> --json`. Do not run the machine-wide roadmap or
 doctor as routine setup: both can be large, and doctor can surface unrelated

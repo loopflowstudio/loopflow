@@ -13,6 +13,9 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
 use crate::naming::git_user;
+use crate::ops::branch_prune::{
+    prune_branches, BranchCopy, EntryStatus as BranchPruneStatus, TaskBranches,
+};
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_sync_after_authorization, abort_sync_for_resolution, arm,
@@ -75,7 +78,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
         }
         Some(PrCommand::Submit {
             strict,
-            create_pr: _,
             worktree,
             message,
             title,
@@ -1517,13 +1519,10 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
                 None,
             )
             .await?;
-            let placement = store
-                .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+            let (owning_machine, _) = store
+                .wave_owning_machine(wave.id(), crate::durable::MachineSetting::Tasks)
                 .await?;
-            (
-                main_repo_root(Path::new(wave.repo()))?,
-                placement.machine_id,
-            )
+            (main_repo_root(Path::new(wave.repo()))?, owning_machine)
         };
         let path_env = std::env::var("PATH").map_err(|_| {
             anyhow!("PATH is absent; cannot install an unattended cron environment")
@@ -1567,7 +1566,7 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
+        "Wave {wave} is owned by Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
         authority.placed_machine,
         authority.local_machine,
         authority.placed_machine,
@@ -1730,31 +1729,6 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// `repo release run` under a cron firing: the release is accounted to the
-/// receipt its launcher named.
-pub fn run_cron_release(
-    version_input: Option<&str>,
-    target_name: Option<&str>,
-    cli: &crate::lf::Cli,
-) -> Result<()> {
-    let cron = cli
-        .cron_receipt
-        .as_ref()
-        .zip(cli.cron_lock_fd)
-        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
-            receipt_id: id.clone(),
-            lock_fd: fd,
-        });
-    crate::ops::release_run_with_cron(
-        &find_repo_root()?,
-        version_input.unwrap_or("patch"),
-        target_name,
-        &CliProgress,
-        cron.as_ref(),
-    )?;
-    Ok(())
-}
-
 fn release_run_cmd(
     version_input: Option<&str>,
     target_name: Option<&str>,
@@ -1762,6 +1736,11 @@ fn release_run_cmd(
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
+    // A cron firing accounts the release to the receipt its launcher named.
+    if let Some(cron) = crate::ops::cron::accounting::CronExecution::from_env() {
+        crate::ops::release_run_with_cron(&repo_root, input, target_name, progress, Some(&cron))?;
+        return Ok(());
+    }
     match release_run(&repo_root, input, target_name, progress)? {
         crate::ops::ReleaseRunOutcome::NoChanges {
             target, latest_tag, ..
@@ -1925,6 +1904,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Prune {
             dry_run,
             builds,
+            branches,
             json,
             retention_hours,
             maximum_roots,
@@ -1938,6 +1918,8 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
                     *maximum_roots,
                     *maximum_bytes,
                 )
+            } else if *branches {
+                wt_prune_branches(*dry_run)
             } else {
                 wt_prune(*dry_run)
             }
@@ -2322,17 +2304,7 @@ fn wt_prune_builds(
 ) -> Result<()> {
     let repo = find_repo_root()?;
     let main = main_repo_root(&repo)?;
-    // This path never opens a registry for writes or advances its frontier.
-    let selected = crate::store::default_db_path();
-    let production = crate::store::production_database_path();
-    // A missing or unreadable selected registry is unknown, not permission
-    // to rely exclusively on another Home's completed ownership.
-    let mut registries = vec![selected.clone()];
-    if production != selected
-        && !matches!(std::fs::metadata(&production), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
-    {
-        registries.push(production);
-    }
+    let registries = build_cleanup_registries();
     let retention = std::time::Duration::from_secs(
         retention_hours
             .checked_mul(3600)
@@ -2372,20 +2344,46 @@ fn wt_prune_builds(
     Ok(())
 }
 
-fn wt_prune(dry_run: bool) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let main_repo = main_repo_root(&repo_root)?;
-    if !dry_run {
-        crate::ops::checkout::refresh_main(&main_repo, &CliProgress)?;
+/// Registries whose completed Task ownership authorizes build-output cleanup.
+/// This path never opens a registry for writes or advances its frontier.
+pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
+    let selected = crate::store::default_db_path();
+    let production = crate::store::production_database_path();
+    // A missing or unreadable selected registry is unknown, not permission
+    // to rely exclusively on another Home's completed ownership.
+    let mut registries = vec![selected.clone()];
+    if production != selected
+        && !matches!(std::fs::metadata(&production), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        registries.push(production);
     }
-    let protected_paths = protected_worktree_paths()?;
-    let report = prune_worktrees(
-        &main_repo,
-        &repo_root,
+    registries
+}
+
+/// Remove clean worktrees whose branch merged, closed, lost its remote or went
+/// stale, retaining every unfinished Task's checkout and any process's cwd.
+pub(crate) fn prune_repo_worktrees(
+    main_repo: &Path,
+    current: &Path,
+    dry_run: bool,
+) -> Result<crate::git::worktrees::WorktreePruneReport> {
+    if !dry_run {
+        crate::ops::checkout::refresh_main(main_repo, &CliProgress)?;
+    }
+    let protected_paths = task_ownership()?.paths;
+    Ok(prune_worktrees(
+        main_repo,
+        current,
         &protected_paths,
         WorktreePrunePolicy::manual(),
         dry_run,
-    )?;
+    )?)
+}
+
+fn wt_prune(dry_run: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let main_repo = main_repo_root(&repo_root)?;
+    let report = prune_repo_worktrees(&main_repo, &repo_root, dry_run)?;
 
     if report.candidates.is_empty() {
         println!("No prunable worktrees.");
@@ -2423,14 +2421,65 @@ fn wt_prune(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
-    let mut protected = crate::git::build_cleanup::running_paths()?;
+fn wt_prune_branches(dry_run: bool) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    let tasks = task_ownership()?.branches;
+    let report = prune_branches(&repo_root, tasks, dry_run).map_err(|stop| {
+        record_ops_metric(
+            &repo_root,
+            serde_json::json!({"op": "wt.prune.branches", "exit_status": "stopped", "reason": stop.to_string()}),
+        );
+        anyhow!("{stop}")
+    })?;
+    for entry in &report.entries {
+        if matches!(entry.status, BranchPruneStatus::Failed(_)) {
+            eprintln!("{entry}");
+        } else {
+            println!("{entry}");
+        }
+    }
+    println!("{report}");
+    record_ops_metric(
+        &repo_root,
+        serde_json::json!({
+            "op": "wt.prune.branches",
+            "dry_run": dry_run,
+            "deleted_remote": report.deleted(BranchCopy::Remote),
+            "deleted_local": report.deleted(BranchCopy::Local),
+            "retained": report.retained(),
+            "failed": report.failed(),
+            "graphql_remaining": report.budget.remaining,
+            "exit_status": if report.failed() == 0 { "ok" } else { "failed" },
+        }),
+    );
+    if report.failed() > 0 {
+        return Err(anyhow!(
+            "failed to delete {} branch copies",
+            report.failed()
+        ));
+    }
+    Ok(())
+}
+
+/// What this machine's Task registries say about checkouts and branches.
+struct TaskOwnership {
+    /// Checkouts of unfinished Tasks.
+    paths: HashSet<PathBuf>,
+    branches: TaskBranches,
+}
+
+/// Read Task ownership from the selected registry and, without migrations,
+/// the release registry. Pruning mutates machine-wide state, so an
+/// unreadable registry stops it.
+fn task_ownership() -> Result<TaskOwnership> {
+    let mut paths = crate::git::build_cleanup::running_paths()?;
+    let mut named = Vec::new();
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let tasks = runtime.block_on(store.list_tasks(None)).map_err(|error| {
-                anyhow!("cannot verify Task worktree ownership before pruning: {error}")
-            })?;
+            let tasks = runtime
+                .block_on(store.list_tasks(None))
+                .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
             for task in tasks {
                 let work = runtime
                     .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
@@ -2438,43 +2487,54 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                 let status = runtime
                     .block_on(store.work_status(&work))
                     .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
-                if !matches!(
+                let open = !matches!(
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
-                ) {
-                    protected.extend(task.worktree);
+                );
+                let prs = runtime
+                    .block_on(store.task_prs(&task.id))
+                    .map_err(|error| anyhow!("cannot read Task PRs: {error}"))?;
+                named.push((task.branch, open));
+                named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
+                if open {
+                    paths.extend(task.worktree);
                 }
             }
         }
         Err(RegistryUnavailable::MissingFile { .. }) => {}
         Err(RegistryUnavailable::Unresolved { error }) => {
             return Err(anyhow!(
-                "cannot verify Task worktree ownership before pruning: {error}"
+                "cannot verify Task ownership before pruning: {error}"
             ));
         }
         Err(RegistryUnavailable::Incompatible { path, error }) => {
             return Err(anyhow!(
-                "cannot verify Task worktree ownership from {} before pruning: {error}",
+                "cannot verify Task ownership from {} before pruning: {error}",
                 path.display()
             ));
         }
     }
 
     // An explicit experiment owns its own registry, but pruning is
-    // machine-wide filesystem mutation. Read the release registry without
-    // migrations so `cargo run -- lf wt prune` cannot erase release-owned Tasks.
+    // machine-wide mutation. Read the release registry without migrations so
+    // `cargo run -- lf wt prune` cannot erase release-owned Tasks' work.
     let production = crate::store::production_database_path();
     if production.exists() {
-        protected.extend(
-            crate::store::read_nonterminal_task_worktrees(&production).map_err(|error| {
-                anyhow!(
-                    "cannot verify Task worktree ownership from {} before pruning: {error}",
-                    production.display()
-                )
-            })?,
+        let unreadable = |error: crate::store::StoreError| {
+            anyhow!(
+                "cannot verify Task ownership from {} before pruning: {error}",
+                production.display()
+            )
+        };
+        paths.extend(
+            crate::store::read_nonterminal_task_worktrees(&production).map_err(unreadable)?,
         );
+        named.extend(crate::store::read_task_branches(&production).map_err(unreadable)?);
     }
-    Ok(protected)
+    Ok(TaskOwnership {
+        paths,
+        branches: named.into_iter().collect(),
+    })
 }
 
 fn pr_checks(watch: bool, logs: bool, required: bool) -> Result<()> {

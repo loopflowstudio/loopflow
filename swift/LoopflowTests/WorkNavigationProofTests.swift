@@ -34,7 +34,7 @@ struct WorkNavigationProofTests {
             task["task"] = planning
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "scroll-work-\(index)"
-            runtime["started"] = true
+            runtime["owner"] = ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
         }

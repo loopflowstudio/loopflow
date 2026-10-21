@@ -5,12 +5,12 @@ lf session attach SESSION
 lf session attach SESSION --if-free
 lf session attach SESSION --observe
 lf --machine build session attach SESSION
-lf transport start --terminal -- /bin/bash -l
-lf transport attach PROCESS
 ```
 
 Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
-program. Closing a terminal leaves execution, provider requests and capture
+program. A Task step's live controls (`/status`, `/interrupt`, `/detach`,
+messages) are shown to each controlling viewer as it attaches; headless output
+and observers never see them. Closing a terminal leaves execution, provider requests and capture
 settlement with the detached owner. Observing takes no input claim; a controlling
 attachment revokes the previous viewer's input token. `--if-free` refuses when
 another viewer controls input. Desktop uses it for restoration; it never displaces
@@ -48,8 +48,9 @@ both screen buffers are not supported. Headless observation retains a bounded ou
 tail and preserves stdout/stderr on delivery. Slow viewers disconnect; execution
 continues draining.
 
-`transport serve` owns a command's PTY or pipes and is normally launched by `start`.
-It records an ordinary Process. Session rows name that Process; viewer tokens and
+An execution command delegates to a detached owner, which holds its PTY or pipes
+and records an ordinary Process. Loopflow launches that owner itself; it has no
+public command. Session rows name that Process; viewer tokens and
 terminal bytes remain in memory. Native clients retain their original provider
 channels, including pending request identities. Flow steps share their Flow's
 terminal owner through explicit child handoff, retaining their own Process results.

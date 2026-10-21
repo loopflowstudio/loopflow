@@ -46,6 +46,22 @@ enum Vendor {
     Codex,
 }
 
+/// Copy a builtin skill only when the repository has no local definition.
+pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    let local = SkillCatalog::load(Some(repo), None, false)?;
+    if let Some(path) = local.resolve(name)?.and_then(|source| source.path.clone()) {
+        return Ok(path);
+    }
+    let name = crate::builtins::resolve_builtin_skill(name)
+        .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
+    let content = crate::builtins::get_builtin_skill(name)
+        .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
+    let path = repo.join(format!(".lf/skills/{name}.md"));
+    fs::create_dir_all(path.parent().expect("definition has a parent"))?;
+    fs::write(&path, content)?;
+    Ok(path)
+}
+
 /// Export global or repository definitions without replacing third-party bundles.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
     let home = options.global_home.clone().or_else(dirs::home_dir);
@@ -459,7 +475,7 @@ fn prune_empty_skill_dir(skill_file: &Path, target_root: &Path) -> Result<(), Lo
 
 #[cfg(test)]
 mod tests {
-    use super::{sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
+    use super::{customize, sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
     use crate::builtins;
     use crate::flow::split_frontmatter;
     use std::fs;
@@ -471,6 +487,20 @@ mod tests {
             global_home: Some(home.path().to_path_buf()),
             repo: None,
         }
+    }
+
+    #[test]
+    fn customize_copies_a_builtin_once_then_returns_the_repository_file() {
+        let repo = TempDir::new().unwrap();
+        let path = customize("pr-message", repo.path()).unwrap();
+        assert_eq!(path, repo.path().join(".lf/skills/pr-message.md"));
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            builtins::get_builtin_skill("pr-message").unwrap()
+        );
+        fs::write(&path, "Repository copy.").unwrap();
+        assert_eq!(customize("pr-message", repo.path()).unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "Repository copy.");
     }
 
     #[cfg(unix)]
@@ -939,9 +969,9 @@ mod tests {
             assert!(!root.join("loopflow/SKILL.md").exists());
             assert!(!root.join("review-open-work/SKILL.md").exists());
             let control = fs::read_to_string(root.join("repo-operate/SKILL.md")).unwrap();
-            assert!(control.contains("lf wave place"));
+            assert!(control.contains("lf machine use"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
-            assert!(!implement.contains("lf wave place"));
+            assert!(!implement.contains("lf machine use"));
         }
     }
 

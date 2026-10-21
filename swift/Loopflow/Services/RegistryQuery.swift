@@ -599,14 +599,13 @@ public struct RegistryQuery: Sendable {
 /// Durable execution authority and its mutable observed route.
 public struct Machine: Decodable, Sendable, Hashable {
     public let label: String?
-    public let repo: String?
     public let id: String
     public let route: String
     public let createdAt: String
     public let observedAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, route, label, repo
+        case id, route, label
         case createdAt = "created_at"
         case observedAt = "observed_at"
     }

@@ -798,7 +798,7 @@ final class WorkModel {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
                 if let task = roadmap.value?.tasks.items.first(where: { $0.id == selection.id || $0.runtime?.workId == selection.id }) {
                     navigation.selectedTaskEvidence = (roadmap.value?.waves.first { $0.wave.id == task.task.waveId }, task)
-                    if task.runtime?.started == true, task.runtime?.status != .paused {
+                    if task.runtime?.owner != nil, task.runtime?.status != .paused {
                         navigation.retainWorkingTask(task.id, aliases: [task.runtime?.workId].compactMap { $0 })
                         cache?.saveWorkingTasks(navigation.workingTaskIDs, repo: repo)
                     }
@@ -882,6 +882,8 @@ final class WorkModel {
     @ObservationIgnored private var workObservation: WorkObservation?
     private var workMachine: String?
     private var workDataDirectory: String?
+    /// The preview copy the local lf reads, when this build carries unreleased drafts.
+    private(set) var previewCopy: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -1228,20 +1230,23 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
+        previewCopy = frame.copy
+        // A preview copy is where the data lives, so it is the data identity.
+        let dataDirectory = frame.copy ?? frame.home
         if case .heartbeat = frame.content {
             // Heartbeats can carry a stored-definition commit whose planning
             // body stayed equal. They do not establish a new Machine identity.
-            if workDataDirectory == frame.home { await observeDefinitions(frame.revisions?.planning) }
+            if workDataDirectory == dataDirectory { await observeDefinitions(frame.revisions?.planning) }
             return
         }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
-        if let workDataDirectory, workDataDirectory != frame.home {
+        if let workDataDirectory, workDataDirectory != dataDirectory {
             // The stream names its data directory, not the opaque Machine ID
             // returned by machine id and used by Session locations.
             dropMachineContent()
             finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
         }
-        workDataDirectory = frame.home
+        workDataDirectory = dataDirectory
         let answers = frame.answers ?? 0
         let reason = frame.unavailable ?? "Work reader returned no \(part) reading"
         switch frame.content {
@@ -1622,7 +1627,7 @@ final class WorkModel {
     private func retainWorkingTask(_ reference: WorkReference?) {
         guard let reference, reference.kind == .task else { return }
         let found = task(id: reference.id)?.task
-        let started = found?.runtime?.started ?? selectionPlans.value?.contains { plan in
+        let started = found?.runtime.map { $0.owner != nil } ?? selectionPlans.value?.contains { plan in
             plan.members.contains { $0.work.reference == reference }
         } ?? false
         guard started, found?.runtime?.status != .paused else { return }

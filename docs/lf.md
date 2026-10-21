@@ -71,13 +71,12 @@ from its saved conversation history. Missing history leaves the Session unchange
 
 ```bash
 lf -i -a claude graph my-graph
-lf -b -a claude graph my-graph # run every step headlessly
 ```
 
 Each skill opens in the native agent conversation. Exit the conversation
 successfully to advance to the next step; an interrupted or failed step stops
-the Graph. Without either flag, an attached terminal selects interactive mode,
-just like a standalone skill. Task Graph launches preserve the same choice.
+the Graph. Without `-i`, every step runs headlessly, even from a terminal.
+Task Graph launches follow the same rule.
 
 ## Select where work happens
 

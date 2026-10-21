@@ -21,11 +21,7 @@ struct WorkCLISubscriptionTests {
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
         _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName, "--file",
                                    fixture.root.appendingPathComponent("proof.yaml").path])
-        let query = RegistryQuery(watchWork: {
-            try LocalWorkObservation.start(
-                process: fixture.process(["monitor", "work", "--watch", "--json"]),
-                configurationChanged: { false })
-        }) { args, _ in try await fixture.run(args) }
+        let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
@@ -137,9 +133,7 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--no-wave", "--title", "Before filing", "--json"])
         let id = try #require(created["id"] as? String)
         _ = try await fixture.run(["checkout", id, "--json"])
-        let query = RegistryQuery(watchWork: {
-            try LocalWorkObservation.start(process: fixture.process(["monitor", "work", "--watch", "--json"]), configurationChanged: { false })
-        }) { args, _ in try await fixture.run(args) }
+        let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
@@ -185,7 +179,7 @@ struct WorkCLISubscriptionTests {
         let id = try #require(created["id"] as? String)
         let current = try await fixture.run(["task", "location", id, "--json"])
         let reading = try #require(try JSONDecoder().decode([TaskLocationObservation].self, from: Data(current.utf8)).first)
-        let query = RegistryQuery { args, _ in try await fixture.run(args) }
+        let query = fixture.lf.query
 
         // Desktop's CLI transport sends every identity uppercased; Rust owns ingress.
         let observed = try await query.taskLocation(task: id.uppercased(),
@@ -213,16 +207,13 @@ struct WorkCLISubscriptionTests {
 private struct WorkCLIFixture: Sendable {
     let root: URL
     let repo: URL
-    let binary: URL
+    let lf: BuiltLf
 
     init() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("work-cli-\(UUID().uuidString)")
             .resolvingSymlinksInPath()
         repo = root.appendingPathComponent("repo")
-        binary = ProcessInfo.processInfo.environment["LOOPFLOW_TEST_LF"].map(URL.init(fileURLWithPath:))
-            ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent().appendingPathComponent("target/debug/lf")
-        try #require(FileManager.default.isExecutableFile(atPath: binary.path), "Build the source CLI with cargo build -p loopflow --bin lf")
+        lf = try BuiltLf(home: root, cwd: repo)
         try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
     }
 
@@ -241,56 +232,13 @@ private struct WorkCLIFixture: Sendable {
         _ = try await run(["remote", "add", "origin", remote], executable: "/usr/bin/git")
     }
 
-    func process(_ args: [String], executable: String? = nil) -> Process {
-        let process = Process()
-        process.executableURL = executable.map(URL.init(fileURLWithPath:)) ?? binary
-        process.arguments = args
-        process.currentDirectoryURL = repo
-        // Nothing from the launching agent, installed Machine, provider or account is inherited.
-        process.environment = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": root.path,
-                               "LF_HOME": root.path, "LF_BIN": binary.path, "LF_USER_NAME": "Fixture Person",
-                               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
-                               "GIT_ALLOW_PROTOCOL": "file", "GIT_TERMINAL_PROMPT": "0"]
-        process.standardInput = FileHandle.nullDevice
-        return process
-    }
-
     @MainActor
     func json(_ args: [String]) async throws -> [String: Any] {
         try #require(JSONSerialization.jsonObject(with: Data(try await run(args).utf8)) as? [String: Any])
     }
 
     func run(_ args: [String], executable: String? = nil) async throws -> String {
-        try await Task.detached {
-            let output = root.appendingPathComponent("output-\(UUID().uuidString)")
-            let errors = output.appendingPathExtension("stderr")
-            try Data().write(to: output)
-            try Data().write(to: errors)
-            let handle = try FileHandle(forWritingTo: output)
-            let diagnostics = try FileHandle(forWritingTo: errors)
-            defer {
-                try? handle.close(); try? diagnostics.close()
-                try? FileManager.default.removeItem(at: output)
-                try? FileManager.default.removeItem(at: errors)
-            }
-            let child = process(args, executable: executable)
-            child.standardOutput = handle
-            child.standardError = diagnostics
-            try child.run()
-            let deadline = ContinuousClock.now + .seconds(30)
-            while child.isRunning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
-            if child.isRunning {
-                child.terminate()
-                try await Task.sleep(for: .milliseconds(100))
-                if child.isRunning { kill(child.processIdentifier, SIGKILL) }
-                child.waitUntilExit()
-                throw RegistryQueryError("CLI fixture timed out: \(args)")
-            }
-            guard child.terminationStatus == 0 else {
-                throw RegistryQueryError("CLI fixture \(args): \(try String(contentsOf: errors, encoding: .utf8))")
-            }
-            return try String(contentsOf: output, encoding: .utf8)
-        }.value
+        try await lf.run(args, executable: executable)
     }
 }
 #endif

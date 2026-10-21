@@ -38,8 +38,8 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. Graph steps inherit that choice;
-`-i` requests interactive conversations and `-b` runs headlessly. Define the inputs
+Direct launch from a TTY runs interactively. Graph steps run headlessly unless
+the caller passes `-i`. Define the inputs
 and useful change independently of the caller. When judgment is unavailable, make supported
 corrections and leave consequential choices explicit. Use a reviewer protocol
 only when the caller supplies one.

@@ -910,7 +910,7 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
 }
 
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
-async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
+pub(crate) async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
     next.artifact_key = Some(crate::session_record::new_artifact_key());
     next.input_published = false;

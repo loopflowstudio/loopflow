@@ -5,36 +5,11 @@ import Loopflow
 
 @MainActor
 struct PortfolioServiceTests {
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_PORTFOLIO_TEST_BIN"] != nil))
-    func desktopWritesReadBackThroughCLI() async throws {
-        let binary = try #require(ProcessInfo.processInfo.environment["LOOPFLOW_PORTFOLIO_TEST_BIN"])
+    @Test func desktopWritesReadBackThroughCLI() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("portfolio-cli-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: home) }
-        let query = RegistryQuery { args, _ in
-            try await Task.detached {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = args
-                process.currentDirectoryURL = home
-                var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("LF_") }
-                environment["LF_HOME"] = home.path
-                environment["LF_BIN"] = binary
-                process.environment = environment
-                process.standardInput = FileHandle.nullDevice
-                let output = Pipe()
-                let errors = Pipe()
-                process.standardOutput = output
-                process.standardError = errors
-                try process.run()
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                guard process.terminationStatus == 0 else {
-                    throw RegistryQueryError(String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
-                }
-                return String(decoding: data, as: UTF8.self)
-            }.value
-        }
+        let query = try BuiltLf(home: home).query
         let service = PortfolioService(query: query)
         await service.refresh()
         #expect(service.selection?.configured == false)

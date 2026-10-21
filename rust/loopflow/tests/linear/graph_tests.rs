@@ -813,7 +813,6 @@ fn interactive_graph_keeps_input_and_advances_only_after_each_provider_exits() {
     for (flags, stop) in [
         (vec!["-i", "graph", "conversation"], false),
         (vec!["graph", "conversation", "-i"], false),
-        (vec!["graph", "conversation"], false),
         (vec!["-i", "graph", "conversation"], true),
     ] {
         let repo = loopflow_test_support::TestRepo::new();

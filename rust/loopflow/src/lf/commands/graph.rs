@@ -172,14 +172,9 @@ pub fn run_for_task(cli: &Cli, issue: &str, graph: &str, checkout: &Path) -> Res
     }
 }
 
-/// The Graph child a Task run starts. A person takes part at the Workflow's
-/// nodes, in the Task conversation, so an edge's Graph runs headless even from
-/// a terminal unless the caller asks for `-i`.
+/// The Graph child a Task run starts.
 fn task_run_args(cli: &Cli, issue: &str, owner: &str, graph: &str) -> Vec<String> {
     let mut args = cli.step_args();
-    if !cli.interactive && !cli.batch {
-        args.push("--batch".to_owned());
-    }
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
@@ -655,7 +650,6 @@ impl SkillExecutor for &RunningGraph<'_> {
             },
         )?;
         step_cli.skill_input = Some(input.path().to_path_buf());
-        // Each ordinary skill keeps the caller's mode and inherited terminal.
         let mut args = step_cli.step_args();
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {
@@ -919,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_runs_its_edge_headless_unless_asked_for_a_terminal() {
+    fn graph_steps_run_headless_unless_asked_for_a_terminal() {
         use clap::Parser;
         let mode = |argv: &[&str]| {
             let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
@@ -935,5 +929,7 @@ mod tests {
         assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
+        let ship = crate::lf::Cli::try_parse_from(["lf", "ship"]).unwrap();
+        assert!(ship.step_args().contains(&"--batch".to_owned()));
     }
 }

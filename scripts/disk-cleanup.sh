@@ -142,9 +142,9 @@ uv_cache() {
   kib="$(du -sk "$dir" 2>/dev/null | awk '{print $1}')"
   echo "uv cache $(human "${kib:-0}") at $dir"
   if [ "${kib:-0}" -gt $((uv_clean_over_gib * 1024 * 1024)) ] && ! pgrep -x uv >/dev/null; then
-    uv cache clean
+    UV_LOCK_TIMEOUT=5 uv cache clean
   else
-    uv cache prune
+    UV_LOCK_TIMEOUT=5 uv cache prune
   fi
 }
 

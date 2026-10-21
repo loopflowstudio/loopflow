@@ -356,6 +356,16 @@ impl World {
         )?)
     }
 
+    /// Claim a Task for this Machine's person the way `lf task claim` does.
+    pub fn claim(&self, task: &Task) -> Result<()> {
+        crate::ops::task_ownership::change(
+            &self.repo,
+            &task.identifier,
+            crate::ops::task_ownership::OwnershipChange::Claim,
+        )?;
+        Ok(())
+    }
+
     /// Complete a Task the way `lf task complete` does.
     pub fn complete(&self, task: &Task, note: &str) -> Result<Task> {
         Ok(crate::ops::task::task_complete(

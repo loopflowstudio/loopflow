@@ -391,7 +391,18 @@ def _website_commands(_changed: list[str]) -> list[Command]:
 def _swift_commands(_changed: list[str]) -> list[Command]:
     return [
         Command(
-            ["cargo", "build", "-p", "loopflow", "--bin", "lf", "--jobs", str(MAX_PARALLEL_JOBS)],
+            [
+                "cargo",
+                "build",
+                "-p",
+                "loopflow",
+                "--bin",
+                "lf",
+                "--bin",
+                "lf-world",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+            ],
             REPO_ROOT,
             "swift-cli",
         ),

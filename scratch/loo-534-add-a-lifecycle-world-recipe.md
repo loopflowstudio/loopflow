@@ -252,8 +252,8 @@ inventory + Swift suite + CI build lines.
 ## Done when
 
 `lf-world build lifecycle` yields a world where `lf wave show` never calls a
-settled Task waiting. Desktop's Wave inventory shows only current Tasks by
-default and completed history by range. Both are proved headlessly against
+settled Task waiting. Desktop's Wave inventory shows only current Tasks, and
+Project history admits completions by range. Both are proved headlessly against
 the built world, not hand-written rows.
 
 ## Checks
@@ -273,3 +273,4 @@ Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks
 Implement (2026-10-21): `isCurrent` named once; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Compress (2026-10-21): tests use `isCurrent` for settled rows and share `LifecycleWorld.model()`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Realign (2026-10-21): `isCurrent` slice already landed; plan prose updated to match; origin/main unchanged; no checks rerun. fmt/clippy and full Swift: gate/CI.
+Concept review (2026-10-21): no design change, no open choice; "Done when" now names Project history as the range owner. Prose only, no checks.

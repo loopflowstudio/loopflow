@@ -248,6 +248,23 @@ transaction, after the network step.
    Uncommitted files do not travel. The command proceeds and appends "N
    uncommitted files stayed on <machine>" to the note rather than committing
    someone's work in progress.
+7. **Reassignment in the provider.** Jack Heart (2026-10-21): reassigning in
+   Linear gives the Task to the new person without stopping the existing
+   holder's work.
+   - Linear observe sees the assignee change to an account that is not the
+     holder's. It resolves the account to a person key through Machine
+     records' `accounts`, falling back to the Linear user's email.
+   - It appends `handoff{person, handover{node, returns_to: None, head: None,
+     note: "<actor> reassigned in Linear"}}`. The entry ID derives from the
+     Linear history event, so every Machine that observes it writes the same
+     entry once.
+   - The previous holder keeps running: live Flows and Sessions continue,
+     nothing is cancelled or unclaimed. Their Sessions get a steer, and the
+     ledger shows "Dustin took this in Linear". What they do with their
+     in-flight work is their call.
+   - The recipient opens the Task at whatever its recorded branch has on
+     `origin`, since nobody pushed for this handover.
+   - Loopflow's own assignee writes match the holder and produce no entry.
 
 Concurrency keeps today's rule: the latest entry in provider order wins. An
 owner who reclaims while the Task is with Dustin supersedes Dustin's hold, and
@@ -345,9 +362,9 @@ the assignee, so a Machine never needs a credential for anyone else.
   no provider can hold a Machine, pickup or public flag, and Git-only planning
   has no users at all. Provider accounts appear as fields on a record, never as
   the source of who exists.
-- **Read the Linear assignee as a handover.** If someone reassigns in Linear's
-  UI, the assignee and the ownership log disagree. Kept one-way: the log is
-  authoritative, and the assignee mirrors it. Open question 7.
+- **Keep the Linear assignee one-way.** Rejected by Jack (question 7): a
+  reassignment in Linear is a handover. The log stays authoritative because
+  observation writes the reassignment into it.
 - **Reviewer runs the next edge on their own Machine.** That is a takeover. It
   stays available as a manual handover.
 - **Auto-run the handed-back edge on import.** This breaks "imports create no
@@ -453,7 +470,9 @@ This slice: 1.
     public Machines listed.
 - `cargo test -p loopflow --lib task_ownership`: under a Linear test double, a
   handoff queues the recipient's Linear account as assignee, and a handback
-  queues the owner's.
+  queues the owner's. A reassignment observed in Linear appends exactly one
+  handoff to the new person across two observing Machines, and the previous
+  holder's running Flow keeps running with a steer.
 - `swift test --package-path swift --filter WorkModelTests`: a Task picked up
   here with no Session appears under Available, and a Task held by someone else
   does not.

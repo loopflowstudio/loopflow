@@ -18,11 +18,13 @@
 6. **Notifying.** Resolved by Jack on 2026-10-21: no GitHub review request.
    Notification is provider assignment (Linear now, Asana with LOO-520), or
    nothing.
-7. **Linear assignee edited by hand.** Assumption: the assignee is one-way. The
+7. **Linear assignee edited by hand.** DECIDED by Jack Heart (2026-10-21): a
+   Linear reassignment hands the Task to the new person; the previous
+   holder's work is not stopped, they get a steer and a ledger entry. (Was: The
    ownership log is authoritative, and the assignee mirrors the holder. The
    alternative reads someone reassigning in Linear's UI as a manual handover,
    which would make Linear handovers work without lf on the sender side, at
-   the cost of a second authority over who holds the Task.
+   the cost of a second authority over who holds the Task.)
 8. **LOO-555 landing shape.** On 2026-10-21 LOO-555 was at `implement`, with a
    committed design still using the `planning_user` UUID and
    `refs/loopflow/crons/<id>`. Assumption: if it lands that way, 878ecf's

@@ -35,6 +35,13 @@ pub(super) fn ingest_task_comment(
         }
     }
     let comment = &comment;
+    // Provider order for ownership entries is the comment's Linear createdAt.
+    super::task_ownership::ingest_marker_in(
+        conn,
+        task,
+        &comment.body,
+        comment.created_at.as_deref(),
+    )?;
     let existing: Option<(String, Option<String>)> = conn
         .query_row(
             "SELECT task_id,provider_revision FROM task_comments WHERE id=?1",
@@ -122,7 +129,7 @@ fn write_comment(conn: &Connection, task: &TaskId, comment: &TaskComment) -> Sto
 }
 
 // Local and acquired comments share the field writer; only local saves enqueue delivery.
-fn insert_authored_comment(
+pub(super) fn insert_authored_comment(
     conn: &Connection,
     task: &TaskId,
     comment: &TaskComment,

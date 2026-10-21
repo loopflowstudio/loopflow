@@ -22,8 +22,8 @@ reports unavailable instead of creating a seemingly usable snapshot.
 canonical migrations and drafts to the destination, removes credential tokens and
 provider routes, clears copied process PIDs/endpoints/attachment tokens, and gives
 the clone a fresh Machine identity. Copied Machine connections lose their routes.
-Historical IDs, planning relationships and Task-primary selection remain. Existing
-Task admissions are history; they do not authorize execution on the new Machine.
+Historical IDs, planning relationships and Task-primary selection remain. Ownership
+entries are history: they name the original Machine, so the clone owns none of those Tasks.
 
 The manifest lists retained capture files and Codex/Claude JSONL history counts,
 alongside omissions and changed files. Credentials, provider configuration, live

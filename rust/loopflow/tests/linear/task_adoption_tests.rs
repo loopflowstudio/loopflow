@@ -163,7 +163,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             assert_eq!(tasks.len(), 1);
             assert!(tasks[0].worktree.is_none());
             assert!(store.task_prs(&tasks[0].id).await.unwrap().is_empty());
-            assert!(!store.task_started(&tasks[0].id).await.unwrap());
+            assert!(!store.task_owned(&tasks[0].id).await.unwrap());
             tasks[0].id.clone()
         });
         let bin = home.path().join("bin");

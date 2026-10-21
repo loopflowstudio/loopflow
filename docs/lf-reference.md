@@ -1238,7 +1238,6 @@ Discover a remote machine and save its SSH destination
 |---|---|
 | `<target>` | target |
 | `--label` | label |
-| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1259,6 +1258,21 @@ Check reachability and version without prompting
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine use
+
+Run work on a Machine: hand off a Task, or set a Wave's or this repository's default. Bare, it applies to the worktree's Task or Wave, else this repository
+
+| Argument | What it does |
+|---|---|
+| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
+| `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
+| `--task` | Hand this Task to the Machine; you stay its person |
+| `--repo` | Set this repository's default for its Session and Tasks with no Wave default Default: false. |
+| `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
+| `--tasks` | Set only where the scope's new Tasks run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1300,7 +1314,7 @@ Poll a configured channel and post each Session's final answer
 
 ## lf wave
 
-Manage Wave identity, placement and planning
+Manage Wave identity and planning
 
 | Argument | What it does |
 |---|---|
@@ -1469,7 +1483,7 @@ List installed loopflow cron jobs
 
 ## lf wave cron preflight
 
-Validate configured commands and Machine placement without installing jobs
+Validate configured commands and your Wave Machine without installing jobs
 
 | Argument | What it does |
 |---|---|
@@ -1543,17 +1557,6 @@ Show one Wave's current plan, Task details, and execution evidence
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
 | `--sync` | Refresh planning from Linear before reading Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave place
-
-Set the Machine for Wave schedules and newly created work
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<machine_id>` | machine id |
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename
@@ -1754,15 +1757,23 @@ Create a planning Task without allocating a checkout or starting work
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf task admission
+## lf task claim
 
-Inspect or reserve the Task's permanent first execution owner
+Claim the Task for you on this Machine
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--claim` | Request first execution on this Machine; an existing owner wins |
-| `--request` | Correlate a coordinator reply with this request |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task unclaim
+
+Unclaim the Task; it is unowned again, with its history intact
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1773,7 +1784,7 @@ Read recorded execution location without preparing or transferring Work
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--peers` | Observe added Machines as well as this one; never reserve first start Default: false. |
+| `--peers` | Observe added Machines as well as this one Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

@@ -526,7 +526,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DiscordCommand,
     },
-    /// Manage Wave identity, placement and planning
+    /// Manage Wave identity and planning
     Wave {
         #[command(subcommand)]
         cmd: WaveCommand,
@@ -1106,13 +1106,6 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Set the Machine for Wave schedules and newly created work
-    Place {
-        name: String,
-        machine_id: crate::durable::MachineId,
-        #[arg(long)]
-        json: bool,
-    },
     /// Rename or relocate an authored Wave and its provider mapping
     Rename {
         wave: String,
@@ -1271,22 +1264,22 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect or reserve the Task's permanent first execution owner
-    Admission {
+    /// Claim the Task for you on this Machine
+    Claim {
         issue: String,
-        /// Request first execution on this Machine; an existing owner wins
         #[arg(long)]
-        claim: Option<crate::durable::MachineId>,
-        /// Correlate a coordinator reply with this request
-        #[arg(long)]
-        request: Option<String>,
+        json: bool,
+    },
+    /// Unclaim the Task; it is unowned again, with its history intact
+    Unclaim {
+        issue: String,
         #[arg(long)]
         json: bool,
     },
     /// Read recorded execution location without preparing or transferring Work
     Location {
         issue: String,
-        /// Observe added Machines as well as this one; never reserve first start
+        /// Observe added Machines as well as this one
         #[arg(long)]
         peers: bool,
         #[arg(long, hide = true)]
@@ -1463,7 +1456,8 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
-            | Self::Admission { issue, .. }
+            | Self::Claim { issue, .. }
+            | Self::Unclaim { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1504,7 +1498,8 @@ impl TaskCommand {
             Self::Shell { issue, .. }
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
-            | Self::Admission { issue, .. }
+            | Self::Claim { issue, .. }
+            | Self::Unclaim { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
@@ -1741,7 +1736,7 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate configured commands and Machine placement without installing jobs
+    /// Validate configured commands and your Wave Machine without installing jobs
     Preflight {
         /// Only commands with this --wave selector
         #[arg(short = 'w', long)]
@@ -2025,9 +2020,6 @@ pub enum MachineCommand {
         target: String,
         #[arg(long)]
         label: Option<String>,
-        /// Remote repository path; defaults to this checkout's home-relative path
-        #[arg(long)]
-        repo: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -2040,6 +2032,33 @@ pub enum MachineCommand {
     /// Check reachability and version without prompting
     Status {
         label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run work on a Machine: hand off a Task, or set a Wave's or this
+    /// repository's default. Bare, it applies to the worktree's Task or Wave,
+    /// else this repository.
+    Use {
+        /// A registered Machine label, this Machine's hostname, or a Machine id
+        machine: String,
+        /// Set this Wave's default for new Tasks and its Wave Session
+        #[arg(conflicts_with_all = ["task", "repo"])]
+        wave: Option<String>,
+        /// Hand this Task to the Machine; you stay its person
+        #[arg(long, conflicts_with_all = ["repo", "session", "tasks"])]
+        task: Option<String>,
+        /// Set this repository's default for its Session and Tasks with no Wave default
+        #[arg(long)]
+        repo: bool,
+        /// Set only where the scope's primary Session runs, and move it there
+        #[arg(long, conflicts_with = "tasks")]
+        session: bool,
+        /// Set only where the scope's new Tasks run
+        #[arg(long)]
+        tasks: bool,
+        /// Apply on this Machine only; set by the copy to your other Machines
+        #[arg(long, hide = true)]
+        here: bool,
         #[arg(long)]
         json: bool,
     },
@@ -2372,6 +2391,17 @@ mod tests {
         }
         assert!(Cli::try_parse_from(["lf", "repo", "webhook", "serve"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "serve", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "place", "product", "mini"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "admission", "LOO-1"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "wave", "machine", "product", "mini"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "handoff", "LOO-1", "mini"]).is_err());
+        assert!(
+            Cli::try_parse_from(["lf", "machine", "use", "mini", "product", "--repo"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["lf", "machine", "use", "mini", "--task", "LOO-1", "--repo"])
+                .is_err()
+        );
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
@@ -2379,13 +2409,10 @@ mod tests {
             vec!["lf", "repo", "refresh", "product"],
             vec!["lf", "repo", "refresh", "--all"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
-            vec![
-                "lf",
-                "wave",
-                "place",
-                "product",
-                "home_00000000000000000000000000000001",
-            ],
+            vec!["lf", "machine", "use", "mini"],
+            vec!["lf", "machine", "use", "mini", "product"],
+            vec!["lf", "machine", "use", "mini", "--repo"],
+            vec!["lf", "machine", "use", "mini", "--task", "LOO-1"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],

@@ -112,7 +112,7 @@ retain their explicit executable. Failed launch diagnostics survive retry.
 Store copies preserve data, not live process authority, and do not synchronize
 private writes back to the installation.
 
-## Attribution and Started
+## Attribution and ownership
 
 Typed ancestry belongs to LfSession and Process. Tasks require repository identity
 and have optional Project membership, which determines their optional Wave.
@@ -125,11 +125,12 @@ Same-target assignment is idempotent; reassignment and clearing are unavailable.
 The exact target is explicit and the transaction rejects competing assignment,
 attachment replacement or incompatible Flow membership. Prospective usage attribution
 and its limits are in the
-[contract](../architecture-reference.md#attribution-binding-and-started).
+[contract](../architecture-reference.md#attribution-binding-and-ownership).
 
-Actual work reservation, including first bind, sets Task Started once. Merely
-recording an inspection Process does not. Later launch, chapter transfer or
-conversion cannot move or erase an existing timestamp.
+Actual work reservation, when `lf task run` or `lf task checkout` allocates a
+checkout, claims an unowned Task in its append-only `task_ownership` log. Merely
+recording an inspection Process does not, nor does bind. Entries are never updated
+or deleted; completion, abandonment, reopening and chapter transfer write none.
 
 ## Reads and cutover
 

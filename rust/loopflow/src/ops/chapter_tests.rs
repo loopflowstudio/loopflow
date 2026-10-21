@@ -408,15 +408,14 @@ async fn local_started_task(
         "0000000000000000000000000000000000000000",
     )
     .await;
-    assert!(!context.store.task_started(&task.id).await.unwrap());
-    // A Flow process from the checkout is the Task's first recorded work.
+    // Allocating the checkout claimed the Task; a Flow in it is its work.
+    assert!(context.store.task_owned(&task.id).await.unwrap());
     context.store.sqlite.test_flow(
         "captured",
         &repo.to_string_lossy(),
         &[("commit -m work", Some("succeeded"))],
         None,
     );
-    assert!(context.store.task_started(&task.id).await.unwrap());
     let flows = context.store.sqlite.task_flows(&task.id).unwrap();
     assert_eq!(flows.len(), 1);
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);

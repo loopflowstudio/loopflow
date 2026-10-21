@@ -51,6 +51,17 @@ wave-proof:
     wave: desktop
     width: 1440
 
+  - name: density-wide
+    mode: live
+    world: density
+    wave: product
+    width: 1440
+  - name: density-narrow
+    mode: live
+    world: density
+    wave: product
+    width: 1100
+
   - name: control-room-loading-narrow
     mode: mock-waves
     detail_state: loading

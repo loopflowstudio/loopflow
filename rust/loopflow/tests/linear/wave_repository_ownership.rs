@@ -6,7 +6,7 @@ use support::planning;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{MachineId, WorkRef, WorkStatus};
+use loopflow::durable::{WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::StorageConfig;
@@ -341,42 +341,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
 
-    let alpha_placement = store
-        .placement(&WorkRef::Wave(alpha.id().clone()))
-        .await
-        .unwrap();
-    let foreign_home = MachineId::new();
-    store
-        .add_machine(
-            &foreign_home,
-            "ssh://operator@foreign-home",
-            "ssh://operator@foreign-home",
-            ".",
-        )
-        .await
-        .unwrap();
-    let foreign_place = lf_command(
-        &home,
-        &repo_b,
-        &[
-            "wave",
-            "place",
-            alpha.id().as_str(),
-            foreign_home.as_str(),
-            "--json",
-        ],
-    );
-    assert!(!foreign_place.status.success());
-    assert!(String::from_utf8_lossy(&foreign_place.stderr).contains("not invoking repository"));
-    assert_eq!(
-        store
-            .placement(&WorkRef::Wave(alpha.id().clone()))
-            .await
-            .unwrap()
-            .machine_id,
-        alpha_placement.machine_id
-    );
-
     store
         .seed_inventory(
             InventoryFixture {
@@ -414,7 +378,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         )
         .await
         .unwrap();
-    let placement = alpha_placement;
     let overlap = relocate_wave(
         &store,
         alpha.id(),
@@ -590,14 +553,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         )
         .unwrap(),
         "initiative-alpha"
-    );
-    assert_eq!(
-        store
-            .placement(&WorkRef::Wave(alpha.id().clone()))
-            .await
-            .unwrap()
-            .machine_id,
-        placement.machine_id
     );
     assert_eq!(
         store

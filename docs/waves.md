@@ -131,8 +131,8 @@ rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
 Project ensure needs neither a chapter nor KRs. Creation and activation save locally
 in both connection modes, retaining identity and pending delivery during outages.
 
-The preview lists each successor and Task disposition. Started unfinished Tasks
-keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
+The preview lists each successor and Task disposition. Unfinished Tasks with
+any ownership entry keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
 stays with the predecessor until explicit disposition, alongside completed Tasks.
 Missing checkout, provider or execution evidence remains unresolved.
 
@@ -190,7 +190,8 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Work placement records the owning Machine. Use `lf cron`
+`lf machine use <machine> <wave>` picks your Machine for the Wave; it is personal,
+never committed. Use `lf cron`
 for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
@@ -307,23 +308,34 @@ to bring relevant findings into the parent's memory.
 lf id
 lf machine add jack@mini.local --label mini
 lf machine list --json
-lf wave place <wave-id> <machine-id>
 lf --machine <machine-id> --wave shipper wave-operate
 lf --machine <machine-id> wave status shipper --json
 ```
 
-A Machine is a stable machine identity with a replaceable route. Placement records
-where Work belongs; it does not start a process or confer signal authority.
-New Project or Task Work inherits its parent's recorded Machine once. Readers
-operate on the selected Machine; they never silently aggregate other Machines.
+```bash
+lf machine use mini shipper                 # this Wave's new Tasks and its Session
+lf machine use laptop shipper --session     # only the Wave Session
+lf machine use mini --repo                  # this repository's default
+lf machine list              # each Machine with the defaults naming it
+```
+
+A Machine is a stable machine identity with a replaceable route. Your Wave Machine
+is your own choice, stored locally and copied to your other added Machines; an
+unreachable one gets a warning, so rerun later. An unowned Task resolves through its
+Wave, its parent Waves, its repository, then the Machine running the command. Your Machine
+for the Wave's Tasks runs its crons and receives your unowned Tasks; your Session Machine
+hosts your Wave Session (`--tasks` or `--session` sets one, neither sets both). Setting
+the Session Machine completes the old Machine's Wave primary and admits a fresh one there, leaving native
+history behind. Existing Tasks keep the Machine in their claim; `lf machine use <machine> --task <task>`
+moves one. It does not start a process or confer signal authority. Readers operate on the selected Machine;
+they never silently aggregate other Machines.
 
 ```bash
 lf wave rename <wave-id> --name platform
 lf wave rename <wave-id> --repo ../moved-repository
 ```
 
-Relocation preserves the Wave UUID, Linear projection, authored files, Work and
-Machine placement. It protects unmerged authored work and uses a receipt to finish
+Relocation preserves the Wave UUID, Linear projection, authored files and Work. It protects unmerged authored work and uses a receipt to finish
 filesystem cleanup after the locator commits. It does not move historical Wave
 journals or Machine-local execution history. Source and target PM Teams must match; use
 `lf repo reteam` for a provider ownership change.

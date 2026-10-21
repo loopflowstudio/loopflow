@@ -618,10 +618,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, "/not/a/local/checkout".into()).await;
         let peer = crate::durable::MachineId::new();
-        store
-            .add_machine(&peer, "peer", "peer", "/default")
-            .await
-            .unwrap();
+        store.add_machine(&peer, "peer", "peer").await.unwrap();
         let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
         for machine in [Some(peer.as_str()), None] {
             conn.execute(

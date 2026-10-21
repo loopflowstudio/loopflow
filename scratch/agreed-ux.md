@@ -72,9 +72,10 @@ that Wave's built-in plan — its uncompleted Tasks (started and unstarted) plus
 Waves — with a back control to the repository. Explicitly paused Tasks now stay in
 Working Tasks: they are started and not completed.
 
-“By you”: lfdb records no starter; it is one person's store, so every Task started
-in it counts as Jack's. Other Machines' starts count once this store records them
-(`tasks.started_at`); peer-only readings are not merged. See questions.md.
+“By you”: lfdb records no starter; it is one person's store, so every started Task
+in it counts as Jack's. Since the October 21 sync onto main (#1610 deleted
+`tasks.started_at`), “started” means a current ownership-log owner or a published PR
+(questions.md).
 
 ## 5. The default Dashboard is Working Tasks as a grid of slots (October 20)
 

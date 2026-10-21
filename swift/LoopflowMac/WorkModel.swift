@@ -667,21 +667,18 @@ final class WorkModel {
     /// Attach a Task's primary conversation in its retained workspace without
     /// navigating: a Dashboard tile shows it in place and the Dashboard stays.
     func attachTaskConversation(_ id: String, in workspace: SessionsWorkspace) async {
-        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository,
-              !workspace.openingConversation else { return }
-        let request = UUID()
-        workspace.conversationRequest = request
-        workspace.conversationError = nil
-        defer { if workspace.conversationRequest == request { workspace.conversationRequest = nil } }
-        do {
+        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository else { return }
+        await workspace.openConversation {
             let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
                                                             cwd: found.task.task.repo)
-            sessions = .available([record] + (sessions.value ?? []).filter { $0.id != record.id })
+            // One opened Session updates its own reading; an unrelated inventory failure stays.
+            let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+            sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
             let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
             store.reconcile([record])
             store.adoptPreparation(record)
             _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
-        } catch { workspace.conversationError = error.localizedDescription }
+        }
     }
 
     func openPaletteWave(_ id: String) {

@@ -115,14 +115,19 @@ final class SessionsWorkspace {
     var conversationError: String?
     private var didPrepareTaskPanes = false
 
-    /// Populate this retained Work even if navigation changes while lf prepares it.
-    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+    /// Run one conversation opening against this workspace's progress and error.
+    func openConversation(_ open: () async throws -> Void) async {
         guard !openingConversation else { return }
         let request = UUID()
         conversationRequest = request
         conversationError = nil
         defer { if conversationRequest == request { conversationRequest = nil } }
-        do {
+        do { try await open() } catch { conversationError = error.localizedDescription }
+    }
+
+    /// Populate this retained Work even if navigation changes while lf prepares it.
+    func openPrimaryConversation(wave: String? = nil, store: SessionsStore, registry: SessionsWorkspaceRegistry) async {
+        await openConversation {
             let record = try await store.query.ensurePrimarySession(wave: wave, cwd: store.repoPath)
             store.reconcile([record])
             store.adoptPreparation(record)
@@ -130,7 +135,7 @@ final class SessionsWorkspace {
             presentation.content = .terminals
             presentation.selectedSessionId = record.id
             await store.select(record.id)
-        } catch { conversationError = error.localizedDescription }
+        }
     }
 
     func toggleFocus(_ paneId: String) {

@@ -43,11 +43,10 @@ its deletion belongs to that header's owner. Machine control choices beyond Jack
 Heart's direction (local “This Mac” label, no reachability, no control on repository
 or Dashboard views) are flagged in agreed-ux.md §3.
 
-October 20 assumptions (agreed-ux.md §4): lfdb records no starter, so every Task
-this store records as started (any Machine, via `tasks.started_at`) counts as
-Jack's. Paused Tasks stay in Working Tasks, superseding the October 17 Console
-rule. The Wave sidebar/built-in plan lists uncompleted Tasks, unstarted included,
-plus child Waves. Flag for demo: plan order (waiting first) moves ⌘1–9 positions.
+October 20 assumptions (agreed-ux.md §4): paused Tasks stay in Working Tasks,
+superseding the October 17 Console rule. The Wave sidebar/built-in plan lists
+uncompleted Tasks, unstarted included, plus child Waves. Flag for demo: plan order
+(waiting first) moves ⌘1–9 positions. “Started” is defined by the October 21 note below.
 
 October 20 assumptions (agreed-ux.md §5): binary Dashboard splits apply the focus rule per
 split (one sibling gets 38.2%); the default layout is n-ary data so the bottom band is one

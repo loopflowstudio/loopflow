@@ -218,7 +218,7 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → add a slot, focus B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 20): Rust `cargo test --lib -- store::sqlite::selections work::selection lf::commands::desktop store::migrations` 162 passed, `dto_fixtures` 44, clippy clean; Swift `swift test --filter 'DashboardWorkspaceTests|WorkspacePanesTests|SessionsPolishTests|TaskRowMetadataTests|WorkNavigationTests|WorkSelectionTests|…'` 78 passed; after e40d9553a9 the Dashboard/Panes/Polish filter 18 passed. Native and broader suites stay gate-owned.
+Check (October 20): Rust selections/selection/desktop/migrations lib tests 162 passed, `dto_fixtures` 44, clippy clean; Swift Dashboard/Panes/Polish/Navigation/Selection filters passed; October 21 `swift test --filter WorkDestinationTests` 54 passed after the shared `SessionsWorkspace.openConversation` refactor. Native and broader suites stay gate-owned.
 
 ## History
 

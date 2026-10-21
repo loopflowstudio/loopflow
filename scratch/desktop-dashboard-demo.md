@@ -34,22 +34,11 @@ frame at once, so a terminal regrids once per change; demo judges whether that f
 
 ## Golden-grid re-demo — October 21, 2026 (a5af466979, store copy, Jack Heart)
 
-8. Jack: “scrolling speed seems pretty slow.” `GhosttyTerminalView.scrollWheel` forwards
-   raw `scrollingDeltaX/Y`; Ghostty's own macOS view doubles precise (trackpad) deltas
-   before `ghostty_surface_mouse_scroll`. Match Ghostty: ×2 when precise. Applies to every
-   terminal, not only Dashboard tiles. Jack: “its not just slow its also choppy movement.”
-   Ghostty's view also packs the momentum phase into the scroll mods (`momentum << 1`);
-   ours sends only the precise bit, so inertial scrolling arrives as plain events. Match
-   both, then check whether SwiftUI work per scroll event (tile re-render) adds stutter.
-   Fixed: ×2 precise deltas and `momentum << 1` in the mods. The scroll path writes no
-   observed state (no scrollbar callback is handled), so tiles do not re-render per event;
-   demo judges the feel.
-9. Jack: “Opening a conversation opens the conversation in a focused mode, i want it to
-   open inline in the dashboard.” Dashboard tile **Open conversation** calls
-   `openTaskConversation`, which runs `openTaskDestination` and sets `.terminals`, leaving
-   the Dashboard. From a tile it must attach the Task's conversation in that tile and stay
-   on the Dashboard; the zoom control remains the explicit way into the Task.
-   Fixed: `DashboardConversationOffer` calls `attachTaskConversation`, which prepares the
-   primary Session and places it in the tile's retained workspace without selecting;
-   the tile shows any attached Session pane before the plan names it primary.
-   `dashboardTileOpensConversationInPlace` passes.
+8. Jack: “scrolling speed seems pretty slow … also choppy.” Fixed as Ghostty's own view
+   does: ×2 precise deltas and the momentum phase in the scroll mods (`momentum << 1`).
+   The scroll path writes no observed state, so tiles do not re-render per event; demo
+   judges the feel. Applies to every terminal.
+9. Jack: “i want it to open inline in the dashboard.” Fixed: tile **Open conversation**
+   calls `attachTaskConversation`, placing the primary Session in the tile's retained
+   workspace without navigating; the zoom control stays the way into the Task.
+   `dashboardTileOpensConversationInPlace` covers it.

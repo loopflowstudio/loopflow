@@ -16,26 +16,14 @@ badge, live Session/shell continuity (LOO-416), duplicate promotion, stale-write
 conflict, anonymous-query arrangement, candidate CLI↔native parity (control targets
 `com.loopflow.mac`).
 
-## Jack Heart's walkthrough decisions
+## Jack Heart's open walkthrough items (October 18)
 
-- Golden-ratio defaults: Jack prefers them (“group A : group B is a golden ratio”)
-  but called the fixed equal-column default “ok i guess”. Unadopted, unrejected.
-- Tile fill defect fixed (tiles fill and top-align; secondary “No primary Session”).
-- “make the headers stil lthe same regardless of single or dashboard view” and
-  “need to be able to "zoom in" to a taks”: implemented as shared `TaskHeading` and
-  `Destination.zoomed(dashboard:work:)`; trail goes through the Dashboard (`64efb5f7bf`).
-  Open: a `lf desktop` equivalent for zoom, and whether inspection reports it.
-- Hidden chips show the Task name only (`0d750ee778`).
-
-## Jack Heart's release notes on 0.14.7 (October 18, later afternoon)
-
-1–2. “Updating...” stuck and “no working tests found”: one failure — the first
-   machine-wide planning frame (8.2 MB, 1,233 Tasks) exceeded Desktop's 10 s reader
-   timeout. Jack: “Ok, this needs a performance test” / “and needs to be optimized”.
-3. Repo chevron: resolved by the agreed jump bar ([agreed-ux.md](agreed-ux.md)).
-4. Unstarted Task with no Session view: resolved by the agreed Start offer.
-5. Open: “queries have two purposes: what shows in teh sidebar and waht shows in
-   the main pane” / “probably need to look more at the sidebar version first?”
+Resolved since (golden layout, tile fill, shared `TaskHeading`/zoom, chips, jump bar,
+Start offer): see `08253c4dda:scratch/dashboard-continuity-review.md`. Open: a
+`lf desktop` equivalent for zoom; Jack's 0.14.7 “this needs a performance test” for
+the first planning frame (below); and “queries have two purposes: what shows in teh
+sidebar and waht shows in the main pane” / “probably need to look more at the sidebar
+version first?”
 
 ## Planning frame performance — October 19
 

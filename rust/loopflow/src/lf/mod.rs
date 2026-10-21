@@ -639,7 +639,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace a Dashboard's retained arrangement from JSON on stdin
+    /// Replace a Dashboard's occurrence order and hidden members from JSON on stdin
     Arrange {
         query: String,
         #[arg(long)]

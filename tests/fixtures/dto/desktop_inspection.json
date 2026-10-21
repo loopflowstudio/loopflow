@@ -119,15 +119,14 @@
         ]
       },
       "opening": null,
-      "layout": {
-        "kind": "workspace",
-        "work": {
+      "view": null,
+      "open_work": [
+        {
           "repository": "repo_22222222222222222222222222222222",
           "kind": "task",
           "id": "task_44444444444444444444444444444444"
         }
-      },
-      "view": null
+      ]
     },
     {
       "repository": "repo_other",
@@ -163,8 +162,8 @@
       },
       "session": null,
       "opening": null,
-      "layout": null,
-      "view": null
+      "view": null,
+      "open_work": []
     }
   ]
 }

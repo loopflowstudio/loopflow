@@ -151,7 +151,7 @@ struct DashboardWorkspaceTests {
         model.applySelectionPlans([plan], reason: "")
         let id = try #require(plan.dashboardID)
         model.selectDashboard(id)
-        let member = try #require(plan.projection.visible?.firstWork)
+        let member = try #require(plan.projection.visible.first?.work)
         let workspace = try #require(registry.retained(member))
         let files = workspace.files(issue: member.id, cwd: "/task")
         files.document("draft.md").editor.string = "Retained draft"
@@ -190,13 +190,11 @@ struct DashboardWorkspaceTests {
         let a = WorkWorkspaceKey(repository: "repo", kind: .task, id: "a")
         let b = WorkWorkspaceKey(repository: "repo", kind: .task, id: "b")
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
-        let tree = WorkArrangementTree.split(axis: .vertical, ratio: 0.7,
-            first: .member(members[0]), second: .member(members[1]))
         let plan = WorkViewPlan(name: "Review", pinned: false, dashboardID: "review", repository: "repo",
             observedAt: 0, selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
-            arrangement: WorkArrangement(tree: tree, hidden: [], mode: .touched),
-            projection: WorkArrangementProjection(visible: tree, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
+            arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
+            projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
             contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
@@ -213,8 +211,7 @@ struct DashboardWorkspaceTests {
         #expect(state.selectionKind == "dashboard")
         #expect(state.view == plan)
         #expect(registry.selectedWork == b)
-        #expect(state.layout == .split(axis: .vertical, ratio: 0.7,
-            first: .workspace(work: a), second: .workspace(work: b)))
+        #expect(state.openWork == [a, b])
         #expect(try JSONDecoder().decode(DesktopWindowInspection.self, from: JSONEncoder().encode(state)) == state)
         #expect(registry.inspect().allSatisfy { $0.layout.surface == nil })
         model.select(a.reference)
@@ -374,11 +371,6 @@ private actor IntentReading {
         if advance { saved = saved.revised(saved.revision + 1) }
         continuation?.resume(returning: String(decoding: data, as: UTF8.self))
         continuation = nil
-    }
-}
-private extension WorkArrangementTree {
-    var firstWork: WorkWorkspaceKey {
-        switch self { case .member(let member): member.work; case .split(_, _, let first, _): first.firstWork }
     }
 }
 private extension WorkPaneLayout {

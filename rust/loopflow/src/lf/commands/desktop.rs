@@ -27,24 +27,11 @@ pub struct DesktopWindowInspection {
     pub session: Option<DesktopSessionInspection>,
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
-    pub layout: Option<DesktopWorkLayoutInspection>,
+    /// Work shown in this window, in slot fill order; retained workspaces outside it
+    /// remain inspectable.
+    pub open_work: Vec<WorkWorkspaceKey>,
     pub view: Option<crate::work::selection::ViewPlan>,
     pub opening: Option<DesktopOpening>,
-}
-
-/// Actual outer geometry; retained workspaces outside this tree remain inspectable.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum DesktopWorkLayoutInspection {
-    Workspace {
-        work: WorkWorkspaceKey,
-    },
-    Split {
-        axis: DesktopSplitAxis,
-        ratio: f64,
-        first: Box<Self>,
-        second: Box<Self>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -283,9 +270,10 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
     {
         ["desktop", "state"] => Some(schema::<DesktopInspection>()),
         ["desktop", "view"] => Some(schema::<DesktopViewResult<'_>>()),
-        ["desktop", "query" | "pin" | "unpin" | "arrange"] => {
+        ["desktop", "query" | "pin" | "unpin" | "arrange" | "slots"] => {
             Some(schema::<crate::work::selection::Dashboard>())
         }
+        ["desktop", "order"] => Some(schema::<Vec<String>>()),
         ["desktop", "layout"] => Some(schema::<Option<crate::work::selection::WorkPaneLayout>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "read"] => Some(schema::<DesktopTextReading>()),

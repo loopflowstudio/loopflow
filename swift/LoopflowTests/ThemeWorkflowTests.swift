@@ -161,12 +161,12 @@ struct ThemeWorkflowTests {
         #expect(appearance.library.yours.isEmpty)
         try exerciseNavigation()
         model.select(.wave(id: wave.wave.id))
-        let outerLayout = registry.layout
+        let outerLayout = registry.openWork
         try theme.preview(in: appearance)
         let focusBeforeApply = work.multiplexer.focusedPaneId
         appearance.apply()
         #expect(work.multiplexer.focusedPaneId == focusBeforeApply)
-        #expect(registry.layout == outerLayout)
+        #expect(registry.openWork == outerLayout)
         #expect(registry.selectedWork == waveKey)
         #expect(registry.openWork == [waveKey])
         #expect(appearance.effectiveTheme.terminal == candidate.terminal)

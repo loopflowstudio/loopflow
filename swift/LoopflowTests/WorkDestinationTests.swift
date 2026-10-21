@@ -1632,7 +1632,7 @@ struct WorkDestinationTests {
     private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], layout: nil, view: nil, opening: nil)
+            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], openWork: [], view: nil, opening: nil)
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

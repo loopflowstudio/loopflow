@@ -1,7 +1,7 @@
 use super::selection::{
-    Arrangement, ArrangementAxis, ArrangementTree, DashboardId, MemberRef, Selection,
-    SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
-    SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
+    Arrangement, ArrangementMode, DashboardId, MemberRef, Selection, SelectionError,
+    SelectionExpression, SelectionId, SelectionResolution, SelectionState, SelectionWork,
+    WorkWorkspaceKey, WorkWorkspaceKind,
 };
 use crate::id::WaveId;
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,20 +25,6 @@ fn member(source: &str, id: &str) -> MemberRef {
         work: key(id, WorkWorkspaceKind::Task),
     }
 }
-fn split(first: ArrangementTree, second: ArrangementTree, ratio: f64) -> ArrangementTree {
-    ArrangementTree::Split {
-        axis: ArrangementAxis::Vertical,
-        ratio,
-        first: Box::new(first),
-        second: Box::new(second),
-    }
-}
-fn leaf(member: &MemberRef) -> ArrangementTree {
-    ArrangementTree::Member {
-        member: member.clone(),
-    }
-}
-
 #[test]
 fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_filters() {
     let root = WaveId::new();
@@ -194,66 +180,81 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
 }
 
 #[test]
-fn hidden_members_survive_complete_edits_and_first_wins_promotes_in_tree_order() {
-    let a = member("first", "task-a");
+fn replacement_must_permute_every_occurrence_including_hidden_ones() {
+    let a = member("a", "task-a");
     let b = member("b", "task-b");
-    let duplicate = member("later", "task-a");
-    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone(), duplicate.clone()]);
-    assert_eq!(arrangement.project().suppressed[0].winner, a);
-    arrangement.hide(&a, true).unwrap();
-    assert!(arrangement.project().suppressed.is_empty());
+    let c = member("c", "task-c");
+    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone(), c.clone()]);
+    arrangement.hide(&b, true).unwrap();
     let before = arrangement.clone();
-    assert_eq!(
-        arrangement.replace(Some(leaf(&b))),
-        Err(SelectionError::Membership)
-    );
-    assert_eq!(arrangement, before);
-    assert_eq!(
-        arrangement.replace(Some(split(
-            leaf(&a),
-            split(leaf(&b), leaf(&duplicate), 0.7),
-            f64::NAN
-        ))),
-        Err(SelectionError::Ratio)
-    );
-    assert_eq!(arrangement, before);
-    let edited = split(leaf(&duplicate), split(leaf(&b), leaf(&a), 0.7), 0.65);
-    arrangement.replace(Some(edited.clone())).unwrap();
-    arrangement.hide(&a, false).unwrap();
-    assert_eq!(arrangement.tree, Some(edited));
-    assert_eq!(arrangement.project().suppressed[0].winner, duplicate);
-    arrangement.hide(&duplicate, true).unwrap();
-    assert!(arrangement
-        .project()
-        .visible
-        .unwrap()
-        .members()
-        .contains(&a));
+    for invalid in [
+        vec![c.clone(), a.clone()],
+        vec![c.clone(), a.clone(), a.clone()],
+        vec![c.clone(), a.clone(), b.clone(), member("d", "task-d")],
+    ] {
+        assert_eq!(
+            arrangement.replace(invalid),
+            Err(SelectionError::Membership)
+        );
+        assert_eq!(arrangement, before);
+    }
+    arrangement
+        .replace(vec![c.clone(), a.clone(), b.clone()])
+        .unwrap();
+    assert_eq!(arrangement.mode, ArrangementMode::Touched);
+    assert!(arrangement.hidden.contains(&b));
+    assert_eq!(arrangement.project().visible, [c, a]);
 }
 
 #[test]
-fn incomplete_reads_keep_members_and_complete_departures_prune_current_geometry() {
-    let a = member("a", "a");
-    let b = member("b", "b");
-    let c = member("c", "c");
-    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone()]);
+fn hiding_in_the_middle_keeps_position_for_restore() {
+    let [a, b, c] = ["a", "b", "c"].map(|id| member(id, id));
+    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone(), c.clone()]);
+    arrangement.hide(&b, true).unwrap();
+    assert_eq!(arrangement.project().visible, [a.clone(), c.clone()]);
+    arrangement.hide(&b, false).unwrap();
+    assert_eq!(arrangement.project().visible, [a, b, c]);
+}
+
+#[test]
+fn first_visible_occurrence_wins_and_hiding_it_promotes_the_duplicate() {
+    let first = member("first", "task-a");
+    let b = member("b", "task-b");
+    let later = member("later", "task-a");
+    let mut arrangement = Arrangement::automatic(&[first.clone(), b.clone(), later.clone()]);
+    let projection = arrangement.project();
+    assert_eq!(projection.visible, [first.clone(), b.clone()]);
+    assert_eq!(projection.suppressed[0].winner, first);
+    arrangement.hide(&first, true).unwrap();
+    let projection = arrangement.project();
+    assert_eq!(projection.visible, [b.clone(), later.clone()]);
+    assert!(projection.suppressed.is_empty());
+    arrangement.hide(&first, false).unwrap();
     arrangement
-        .replace(Some(split(leaf(&a), leaf(&b), 0.7)))
+        .replace(vec![later.clone(), b, first.clone()])
         .unwrap();
+    assert_eq!(arrangement.project().suppressed[0].winner, later);
+}
+
+#[test]
+fn incomplete_reads_keep_members_and_complete_departures_prune_the_order() {
+    let [a, b, c] = ["a", "b", "c"].map(|id| member(id, id));
+    let mut arrangement = Arrangement::automatic(&[a.clone(), b.clone()]);
+    arrangement.replace(vec![b.clone(), a.clone()]).unwrap();
     arrangement.hide(&a, true).unwrap();
     arrangement.reconcile(&SelectionResolution {
         attention: Default::default(),
         members: vec![b.clone(), c.clone()],
         unavailable: vec!["offline".into()],
     });
-    assert_eq!(arrangement.members(), [a.clone(), b.clone(), c.clone()]);
+    assert_eq!(arrangement.order, [b.clone(), a.clone(), c.clone()]);
     assert!(arrangement.hidden.contains(&a));
     arrangement.reconcile(&SelectionResolution {
         attention: Default::default(),
-        members: vec![b.clone(), c.clone()],
+        members: vec![c.clone(), b.clone()],
         unavailable: vec![],
     });
-    assert_eq!(arrangement.members(), [b, c]);
+    assert_eq!(arrangement.order, [b, c]);
     assert!(arrangement.hidden.is_empty());
 }
 
@@ -267,7 +268,7 @@ fn incomplete_auto_refresh_does_not_promote_a_duplicate_past_the_retained_winner
         members: vec![second],
         unavailable: vec!["first source unavailable".into()],
     });
-    assert_eq!(arrangement.project().visible.unwrap().members(), [first]);
+    assert_eq!(arrangement.project().visible, [first]);
 }
 
 #[test]
@@ -399,15 +400,12 @@ fn query_selection_edits_retain_source_ids_and_hidden_geometry() {
     let next = after.resolve("repo", &work, &BTreeMap::new()).unwrap();
     assert_eq!(old.members, next.members[1..]);
     let mut layout = Arrangement::automatic(&old.members);
-    layout.replace(layout.tree.clone()).unwrap();
+    layout.replace(layout.order.clone()).unwrap();
     layout.hide(&old.members[0], true).unwrap();
     layout.reconcile(&next);
-    assert_eq!(&layout.members()[..2], old.members);
+    assert_eq!(&layout.order[..2], old.members);
     assert!(layout.hidden.contains(&old.members[0]));
-    assert_eq!(
-        layout.project().visible.unwrap().members()[0],
-        old.members[1]
-    );
+    assert_eq!(layout.project().visible[0], old.members[1]);
 }
 
 #[test]
@@ -478,38 +476,28 @@ fn dashboard_wire_keeps_identity_separate_from_its_query() {
 }
 
 #[test]
-fn query_selection_attention_weights_auto_tiles_until_arrangement_is_touched() {
-    let mut work = query_work();
-    let duplicate = Selection::parse("kind:task or task:FIX-1", None).unwrap();
-    let mut duplicated = Arrangement::automatic(&[]);
-    duplicated.reconcile(&duplicate.resolve("repo", &work, &BTreeMap::new()).unwrap());
-    let ArrangementTree::Split { ratio, .. } = duplicated.project().visible.unwrap() else {
-        panic!("expected two visible tiles")
-    };
-    assert!((ratio - 2.0 / 3.0).abs() < 0.001);
+fn auto_order_follows_the_query_until_touched_then_arrivals_append() {
+    let work = query_work();
     let query = Selection::parse("kind:task", None).unwrap();
+    let reading = query.resolve("repo", &work, &BTreeMap::new()).unwrap();
     let mut layout = Arrangement::automatic(&[]);
-    layout.reconcile(&query.resolve("repo", &work, &BTreeMap::new()).unwrap());
-    let ArrangementTree::Split { ratio, .. } = layout.tree.as_ref().unwrap() else {
-        panic!("expected two tiles")
-    };
-    assert!((*ratio - 2.0 / 3.0).abs() < 0.001);
-    let weighted = layout.tree.clone();
-    let mut partial = query.resolve("repo", &work, &BTreeMap::new()).unwrap();
-    partial.attention.clear();
-    partial
-        .unavailable
-        .push("provider observation unavailable".into());
-    layout.reconcile(&partial);
-    assert_eq!(layout.tree, weighted);
-    layout.replace(layout.tree.clone()).unwrap();
-    let retained = layout.tree.clone();
-    work[1].states.clear();
-    work[2]
-        .states
-        .insert(super::selection::SelectionState::Available);
-    layout.reconcile(&query.resolve("repo", &work, &BTreeMap::new()).unwrap());
-    assert_eq!(layout.tree, retained);
+    layout.reconcile(&reading);
+    assert_eq!(layout.order, reading.members);
+    let mut reversed = layout.order.clone();
+    reversed.reverse();
+    layout.replace(reversed.clone()).unwrap();
+    let wider = Selection::parse("kind:task or kind:wave", Some(&query)).unwrap();
+    let wider = wider.resolve("repo", &work, &BTreeMap::new()).unwrap();
+    let arrivals: Vec<_> = wider
+        .members
+        .iter()
+        .filter(|member| !reversed.contains(member))
+        .cloned()
+        .collect();
+    assert!(!arrivals.is_empty());
+    layout.reconcile(&wider);
+    assert_eq!(&layout.order[..reversed.len()], reversed);
+    assert_eq!(&layout.order[reversed.len()..], arrivals);
 }
 
 #[test]

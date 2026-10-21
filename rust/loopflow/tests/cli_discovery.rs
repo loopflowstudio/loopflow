@@ -1395,7 +1395,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
         child.wait_with_output().unwrap()
     };
     let mut arrangement = plan.arrangement.clone();
-    arrangement.hide(&arrangement.members()[0], true).unwrap();
+    arrangement
+        .hide(&arrangement.order[0].clone(), true)
+        .unwrap();
     let arranged = invoke_input(
         &["desktop", "arrange", "backlog", "--revision", "3"],
         &serde_json::to_string(&arrangement).unwrap(),
@@ -1407,8 +1409,8 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     );
     let arranged: loopflow::work::selection::Dashboard =
         serde_json::from_slice(&arranged.stdout).unwrap();
-    assert!(arranged.arrangement.project().visible.is_none());
-    assert_eq!(arranged.arrangement.members().len(), 1);
+    assert!(arranged.arrangement.project().visible.is_empty());
+    assert_eq!(arranged.arrangement.order.len(), 1);
     assert_eq!(
         arranged.arrangement.mode,
         loopflow::work::selection::ArrangementMode::Touched

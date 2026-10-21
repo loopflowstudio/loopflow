@@ -76,7 +76,7 @@ struct WorkOpeningCLITests {
     private static func inspection(_ repository: String, _ window: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: repository, window: window.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
-            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], layout: nil, view: nil, opening: nil)
+            task: nil, session: nil, supportedOperations: ["state"], workspaces: [], openWork: [], view: nil, opening: nil)
     }
 
     private struct Fixture {

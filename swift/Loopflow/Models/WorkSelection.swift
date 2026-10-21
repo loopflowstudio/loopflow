@@ -88,39 +88,25 @@ public struct WorkSelectionResolution: Codable, Equatable, Sendable {
     public let unavailable: [String]
 }
 
-public indirect enum WorkArrangementTree: Codable, Equatable, Sendable {
-    case member(WorkMemberRef)
-    case split(axis: SplitAxis, ratio: Double, first: WorkArrangementTree, second: WorkArrangementTree)
-    private enum Keys: String, CodingKey { case kind, member, axis, ratio, first, second }
-    private enum Kind: String, Codable { case member, split }
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: Keys.self)
-        switch try c.decode(Kind.self, forKey: .kind) {
-        case .member: self = .member(try c.decode(WorkMemberRef.self, forKey: .member))
-        case .split: self = .split(axis: try c.decode(SplitAxis.self, forKey: .axis),
-            ratio: try c.decode(Double.self, forKey: .ratio),
-            first: try c.decode(Self.self, forKey: .first), second: try c.decode(Self.self, forKey: .second))
-        }
-    }
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: Keys.self)
-        switch self {
-        case .member(let member):
-            try c.encode(Kind.member, forKey: .kind); try c.encode(member, forKey: .member)
-        case .split(let axis, let ratio, let first, let second):
-            try c.encode(Kind.split, forKey: .kind); try c.encode(axis, forKey: .axis)
-            try c.encode(ratio, forKey: .ratio); try c.encode(first, forKey: .first); try c.encode(second, forKey: .second)
-        }
+/// Occurrence order; the slot layout owns geometry and members fill it in order.
+public struct WorkArrangement: Codable, Equatable, Sendable {
+    public enum Mode: String, Codable, Sendable { case auto, touched }
+    public let order: [WorkMemberRef]
+    public let hidden: [WorkMemberRef]
+    public let mode: Mode
+    public init(order: [WorkMemberRef], hidden: [WorkMemberRef], mode: Mode) {
+        self.order = order; self.hidden = hidden; self.mode = mode
     }
 }
 
-public struct WorkArrangement: Codable, Equatable, Sendable {
-    public enum Mode: String, Codable, Sendable { case auto, touched }
-    public let tree: WorkArrangementTree?
-    public let hidden: [WorkMemberRef]
-    public let mode: Mode
-    public init(tree: WorkArrangementTree?, hidden: [WorkMemberRef], mode: Mode) {
-        self.tree = tree; self.hidden = hidden; self.mode = mode
+extension WorkArrangement {
+    /// The order after dropping `member` on `target`: it takes the target's place,
+    /// as a drop does in the repository's Task order.
+    public func moving(_ member: WorkMemberRef, to target: WorkMemberRef) -> [WorkMemberRef] {
+        guard let from = order.firstIndex(of: member), let to = order.firstIndex(of: target) else { return order }
+        var order = order
+        order.insert(order.remove(at: from), at: to)
+        return order
     }
 }
 
@@ -129,7 +115,7 @@ public struct WorkArrangementProjection: Codable, Equatable, Sendable {
         public let member: WorkMemberRef
         public let winner: WorkMemberRef
     }
-    public let visible: WorkArrangementTree?
+    public let visible: [WorkMemberRef]
     public let suppressed: [Suppressed]
 }
 

@@ -39,53 +39,23 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
     public let view: WorkViewPlan?
-    public let layout: DesktopWorkLayoutInspection?
+    /// Work shown in this window, in slot fill order.
+    public let openWork: [WorkWorkspaceKey]
     public let opening: DesktopOpening?
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
-                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layout: DesktopWorkLayoutInspection?, view: WorkViewPlan?, opening: DesktopOpening?) {
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layout = layout; self.view = view; self.opening = opening
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, task, session, workspaces, layout, view, opening
+        case repository, window, path, reading, reason, task, session, workspaces, view, opening
+        case openWork = "open_work"
         case selectionKind = "selection_kind", selectionId = "selection_id"
         case supportedOperations = "supported_operations"
-    }
-}
-
-public indirect enum DesktopWorkLayoutInspection: Codable, Sendable, Equatable {
-    case workspace(work: WorkWorkspaceKey)
-    case split(axis: SplitAxis, ratio: Double, first: Self, second: Self)
-
-    private enum Keys: String, CodingKey { case kind, work, axis, ratio, first, second }
-    private enum Kind: String, Codable { case workspace, split }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: Keys.self)
-        switch try c.decode(Kind.self, forKey: .kind) {
-        case .workspace: self = .workspace(work: try c.decode(WorkWorkspaceKey.self, forKey: .work))
-        case .split:
-            self = .split(axis: try c.decode(SplitAxis.self, forKey: .axis),
-                ratio: try c.decode(Double.self, forKey: .ratio),
-                first: try c.decode(Self.self, forKey: .first), second: try c.decode(Self.self, forKey: .second))
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: Keys.self)
-        switch self {
-        case .workspace(let work):
-            try c.encode(Kind.workspace, forKey: .kind)
-            try c.encode(work, forKey: .work)
-        case .split(let axis, let ratio, let first, let second):
-            try c.encode(Kind.split, forKey: .kind)
-            try c.encode(axis, forKey: .axis); try c.encode(ratio, forKey: .ratio)
-            try c.encode(first, forKey: .first); try c.encode(second, forKey: .second)
-        }
     }
 }
 

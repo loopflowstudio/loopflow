@@ -249,9 +249,9 @@ fn plan_in(
     );
     arrangement.reconcile(&resolution);
     let selected: BTreeSet<_> = arrangement
-        .members()
-        .into_iter()
-        .map(|member| member.work)
+        .order
+        .iter()
+        .map(|member| member.work.clone())
         .collect();
     let mut contents = Vec::new();
     for key in selected {
@@ -567,7 +567,7 @@ impl SqliteStore {
             .unwrap_or_else(|| Arrangement::automatic(&[]));
         expected.reconcile(&resolution);
         arrangement
-            .validate(&expected.members())
+            .validate(&expected.order)
             .map_err(StoreError::from)?;
         tx.execute("INSERT INTO dashboards(repository_id,id,revision,expression_key,name,pinned) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(repository_id,id) DO UPDATE SET revision=excluded.revision,expression_key=excluded.expression_key",
             params![repository.as_str(),id.0,saved.revision,expression_key,saved.name,saved.pinned])?;
@@ -686,8 +686,7 @@ mod tests {
     use super::SqliteStore;
     use crate::durable::RepositoryId;
     use crate::work::selection::{
-        Arrangement, ArrangementTree, DashboardId, Selection, SelectionExpression, SelectionId,
-        WorkWorkspaceKind,
+        Arrangement, DashboardId, Selection, SelectionExpression, SelectionId, WorkWorkspaceKind,
     };
 
     fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -731,7 +730,7 @@ mod tests {
         let independent = store
             .edit_dashboard(&repo, &DashboardId("backlog".into()), "state:backlog", None)
             .unwrap();
-        assert_eq!(independent.arrangement.members().len(), 1);
+        assert_eq!(independent.arrangement.order.len(), 1);
         let repaired = store
             .edit_dashboard(&repo, &id, "task:FIX-1", Some(saved.revision))
             .unwrap();
@@ -750,11 +749,10 @@ mod tests {
             .edit_dashboard(&repo, &id, "state:open or state:backlog", None)
             .unwrap();
         let mut arranged = first.arrangement.clone();
-        arranged.hide(&arranged.members()[0], true).unwrap();
-        if let Some(ArrangementTree::Split { ratio, .. }) = &mut arranged.tree {
-            *ratio = 0.27;
-        }
-        arranged.replace(arranged.tree.clone()).unwrap();
+        arranged.hide(&arranged.order[0].clone(), true).unwrap();
+        let mut reversed = arranged.order.clone();
+        reversed.reverse();
+        arranged.replace(reversed).unwrap();
         let first = store
             .save_dashboard(
                 &repo,
@@ -875,7 +873,7 @@ mod tests {
 
     #[test]
     fn dashboard_slots_round_trip_survive_query_edits_and_reject_invalid_layouts() {
-        use crate::work::selection::{ArrangementAxis, SlotLayout, SlotNode};
+        use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
         let (_dir, store, repo) = fixture();
         assert_eq!(
             store.view_plan(&repo, None).unwrap().slots,
@@ -895,7 +893,7 @@ mod tests {
 
         let two = SlotLayout {
             root: SlotNode::Split {
-                axis: ArrangementAxis::Vertical,
+                axis: SplitAxis::Vertical,
                 weights: vec![2.0, 1.0],
                 children: vec![SlotNode::Slot { slot: 1 }, SlotNode::Slot { slot: 0 }],
             },
@@ -913,7 +911,7 @@ mod tests {
         let revisions = store.revisions().unwrap();
         let duplicate = SlotLayout {
             root: SlotNode::Split {
-                axis: ArrangementAxis::Vertical,
+                axis: SplitAxis::Vertical,
                 weights: vec![1.0, 1.0],
                 children: vec![SlotNode::Slot { slot: 0 }, SlotNode::Slot { slot: 0 }],
             },
@@ -1148,7 +1146,7 @@ mod tests {
         for tool in [shell, files] {
             let mut invalid = saved.clone();
             invalid.tree = Some(PaneTree::Split {
-                axis: crate::work::selection::ArrangementAxis::Vertical,
+                axis: crate::work::selection::SplitAxis::Vertical,
                 ratio: 0.5,
                 first: Box::new(invalid.tree.take().unwrap()),
                 second: Box::new(PaneTree::Pane {
@@ -1242,7 +1240,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let mut hidden = first.arrangement;
-        hidden.hide(&hidden.members()[0], true).unwrap();
+        hidden.hide(&hidden.order[0].clone(), true).unwrap();
         store
             .save_dashboard(
                 &repo,
@@ -1256,8 +1254,8 @@ mod tests {
         let reader = SqliteStore::open_read_only(&dir.path().join("db")).unwrap();
         let first = reader.view_plan(&repo, Some("query:first")).unwrap();
         let second = reader.view_plan(&repo, Some("query:second")).unwrap();
-        assert!(first.projection.visible.is_none());
-        assert!(second.projection.visible.is_some());
+        assert!(first.projection.visible.is_empty());
+        assert!(!second.projection.visible.is_empty());
         assert_ne!(first.dashboard_id, second.dashboard_id);
         assert_eq!(first.contents, second.contents);
         assert_eq!(first.contents[0].pane_revision, Some(saved.revision));
@@ -1334,7 +1332,7 @@ mod tests {
                 first.saved_revision,
             )
             .unwrap();
-        assert_eq!(edited.arrangement.members()[0], first.resolution.members[0]);
+        assert_eq!(edited.arrangement.order[0], first.resolution.members[0]);
     }
 
     #[test]
@@ -1424,7 +1422,7 @@ mod tests {
             .unwrap();
         let ended = store.read_dashboard(&repo, &id).unwrap().unwrap();
         assert!(ended.resolution.unavailable.is_empty());
-        assert!(ended.arrangement.members().is_empty());
+        assert!(ended.arrangement.order.is_empty());
         // The same Task is still open; only its current attention departed.
         assert_eq!(
             store
@@ -1532,10 +1530,10 @@ mod tests {
         let first = store
             .edit_dashboard(&repo, &id, "task:FIX-1 or task:FIX-2", None)
             .unwrap();
-        let original = first.arrangement.members();
+        let original = first.arrangement.order.clone();
         let mut arrangement = first.arrangement.clone();
         arrangement.hide(&original[0], true).unwrap();
-        arrangement.replace(arrangement.tree.clone()).unwrap();
+        arrangement.replace(arrangement.order.clone()).unwrap();
         let touched = store
             .save_dashboard(
                 &repo,
@@ -1553,7 +1551,7 @@ mod tests {
                 Some(touched.revision),
             )
             .unwrap();
-        assert_eq!(&second.arrangement.members()[..2], original);
+        assert_eq!(&second.arrangement.order[..2], original);
         assert!(second.arrangement.hidden.contains(&original[0]));
         assert!(store
             .edit_dashboard(&repo, &id, "state:open", Some(first.revision))
@@ -1668,11 +1666,9 @@ mod tests {
         let loaded = reader.read_dashboard(&repo, &id).unwrap().unwrap();
         assert_eq!(loaded.saved, first);
         assert_eq!(loaded.arrangement, arrangement);
-        let mut edited = arrangement.tree.clone().unwrap();
-        if let ArrangementTree::Split { ratio, .. } = &mut edited {
-            *ratio = 0.7;
-        }
-        arrangement.replace(Some(edited)).unwrap();
+        let mut edited = arrangement.order.clone();
+        edited.reverse();
+        arrangement.replace(edited).unwrap();
         let saved = store
             .save_dashboard(&repo, &id, Some(first.revision), &selection, &arrangement)
             .unwrap();
@@ -1690,7 +1686,7 @@ mod tests {
             .unwrap()
             .arrangement;
         restored.hide(&hidden, false).unwrap();
-        assert_eq!(restored.tree, arrangement.tree);
+        assert_eq!(restored.order, arrangement.order);
         let conn = store.conn.lock().unwrap();
         for table in ["agent_sessions", "processes", "flow_processes"] {
             assert_eq!(
@@ -1727,7 +1723,7 @@ mod tests {
         let nested_id = DashboardId::new();
         let result = store.resolve_selection(&repo, &nested).unwrap();
         let mut arrangement = Arrangement::automatic(&result.members);
-        arrangement.replace(arrangement.tree.clone()).unwrap();
+        arrangement.replace(arrangement.order.clone()).unwrap();
         store
             .save_dashboard(&repo, &nested_id, None, &nested, &arrangement)
             .unwrap();
@@ -1777,8 +1773,8 @@ mod tests {
             .unwrap();
         let current = store.read_dashboard(&repo, &nested_id).unwrap().unwrap();
         assert!(current.resolution.unavailable.is_empty());
-        assert_eq!(current.arrangement.members().len(), 3);
-        assert_eq!(current.saved.arrangement.members().len(), 4); // Reading does not write.
+        assert_eq!(current.arrangement.order.len(), 3);
+        assert_eq!(current.saved.arrangement.order.len(), 4); // Reading does not write.
     }
 
     #[test]

@@ -1,5 +1,5 @@
 //! Portable pane intent. Native incarnations, attachments and liveness stay in the host.
-use super::{ArrangementAxis, ViewLocation, WorkWorkspaceKey, WorkWorkspaceKind};
+use super::{SplitAxis, ViewLocation, WorkWorkspaceKey, WorkWorkspaceKind};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -23,7 +23,7 @@ pub enum PaneTree {
         content: PaneIntent,
     },
     Split {
-        axis: ArrangementAxis,
+        axis: SplitAxis,
         ratio: f64,
         first: Box<Self>,
         second: Box<Self>,

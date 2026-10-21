@@ -245,7 +245,7 @@ struct DTOFixtureTests {
         }
         let window = try #require(report.windows.first)
         #expect(window.reading == "unavailable")
-        #expect(window.layout == .workspace(work: try #require(window.workspaces.first).work))
+        #expect(window.openWork == [try #require(window.workspaces.first).work])
         #expect(window.task?.actions == nil)
         #expect(window.task?.roadmapGeneratedAt == "2026-10-08T19:00:00Z")
         #expect(window.task?.conditionObservedAt == "2026-10-08T18:59:58Z")

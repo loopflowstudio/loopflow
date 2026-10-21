@@ -34,12 +34,12 @@ struct DesktopPaneControlTests {
             DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
                 selectionKind: "repository", selectionId: repository, reading: "current", reason: nil,
                 task: nil, session: nil, supportedOperations: ["state"], workspaces: registry.inspect(),
-                layout: registry.layout, view: nil, opening: nil)
+                openWork: registry.openWork, view: nil, opening: nil)
         }, controlPane: { _ in throw RegistryQueryError("No mutation expected") },
         readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
         let window = try #require(router.inspect().windows.first)
         #expect(window.repository == plan)
-        #expect(window.layout == .workspace(work: key))
+        #expect(window.openWork == [key])
         #expect(window.workspaces.first?.work.repository == plan)
         #expect(window.path != window.repository)
     }
@@ -120,7 +120,7 @@ struct DesktopPaneControlTests {
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["state", "hide", "restore", "focus", "move", "resize", "zoom"],
-                    workspaces: registry.inspect(), layout: registry.layout, view: nil, opening: nil)
+                    workspaces: registry.inspect(), openWork: registry.openWork, view: nil, opening: nil)
             }, controlPane: { try registry.controlPane($0, model: model) }, readText: { try registry.readText($0) }) { _ in }
     }
 

@@ -736,7 +736,7 @@ final class WorkModel {
             selectionId: navigation.showsSelection ? navigation.dashboardID : workspaces.selectedWork?.id,
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
-            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), layout: workspaces.layout, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            supportedOperations: ["state", "view", "query", "arrange", "layout", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log", "read", "text", "key"], workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
     }
 
     private func inspectSelectedTask() -> DesktopTaskInspection? {

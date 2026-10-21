@@ -106,7 +106,7 @@ struct WorkspaceRetentionTests {
             .document("notes.md")
         draft.editor.string = "Unsubmitted text"
         let before = registry.inspect()
-        let layout = registry.layout
+        let layout = registry.openWork
         let started = AsyncStream<Void>.makeStream()
         let release = AsyncStream<Void>.makeStream()
         let resolution = Task {
@@ -131,7 +131,7 @@ struct WorkspaceRetentionTests {
         #expect(content.model.navigation.selectedSessionId == "session")
         #expect(sessions.workspaces === registry)
         #expect(registry.inspect() == before)
-        #expect(registry.layout == layout)
+        #expect(registry.openWork == layout)
         #expect(draft.editor.string == "Unsubmitted text")
 
         release.continuation.finish()
@@ -155,7 +155,7 @@ struct WorkspaceRetentionTests {
         try banner.button(1).tap()
         #expect(retries == 1)
         #expect(registry.inspect() == before)
-        #expect(registry.layout == layout)
+        #expect(registry.openWork == layout)
         #expect(draft.editor.string == "Unsubmitted text")
         #expect(router.retainedWorkspace("another") == nil)
     }
@@ -181,7 +181,7 @@ struct WorkspaceRetentionTests {
         weak var retainedRegistry: SessionsWorkspaceRegistry?
         var workspaces: [SessionsWorkspace] = []
         let before: [DesktopWorkspaceInspection]
-        let arrangement: DesktopWorkLayoutInspection?
+        let arrangement: [WorkWorkspaceKey]
         let selected: WorkWorkspaceKey?
         do {
             let window = WorkModel(query: query, repoPath: "/repo")
@@ -207,7 +207,7 @@ struct WorkspaceRetentionTests {
                 workspaces.append(workspace)
             }
             before = registry.inspect()
-            arrangement = registry.layout
+            arrangement = registry.openWork
             selected = registry.selectedWork
         }
         #expect(closedWindow == nil)
@@ -217,7 +217,7 @@ struct WorkspaceRetentionTests {
         let nextWindow = WorkModel(query: query, repoPath: "/different-locator")
         nextWindow.bindWorkspaces(reopened, repository: "repo")
         #expect(reopened === retainedRegistry)
-        #expect(reopened.layout == arrangement)
+        #expect(reopened.openWork == arrangement)
         #expect(reopened.inspect() == before)
         #expect(nextWindow.selection == selected?.reference)
         #expect(nextWindow.navigation.selectedSessionId == "session-11")

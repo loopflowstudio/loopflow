@@ -200,8 +200,6 @@ pub enum SelectionError {
         "arrangement must contain every selected member exactly once, including hidden members"
     )]
     Membership,
-    #[error("split ratio must be finite and between 0.1 and 0.9")]
-    Ratio,
     #[error("slot layout: {0}")]
     Slots(String),
 }
@@ -396,126 +394,12 @@ impl Selection {
     }
 }
 
+/// `vertical` places children side by side; `horizontal` stacks them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ArrangementAxis {
+pub enum SplitAxis {
     Horizontal,
     Vertical,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ArrangementTree {
-    Member {
-        member: MemberRef,
-    },
-    Split {
-        axis: ArrangementAxis,
-        ratio: f64,
-        first: Box<Self>,
-        second: Box<Self>,
-    },
-}
-
-impl ArrangementTree {
-    pub fn members(&self) -> Vec<MemberRef> {
-        fn collect(tree: &ArrangementTree, members: &mut Vec<MemberRef>) {
-            match tree {
-                ArrangementTree::Member { member } => members.push(member.clone()),
-                ArrangementTree::Split { first, second, .. } => {
-                    collect(first, members);
-                    collect(second, members);
-                }
-            }
-        }
-        let mut members = Vec::new();
-        collect(self, &mut members);
-        members
-    }
-
-    fn validate(&self) -> Result<(), SelectionError> {
-        if let Self::Split {
-            ratio,
-            first,
-            second,
-            ..
-        } = self
-        {
-            if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
-                return Err(SelectionError::Ratio);
-            }
-            first.validate()?;
-            second.validate()?;
-        }
-        Ok(())
-    }
-
-    fn retaining(&self, keep: &mut impl FnMut(&MemberRef) -> bool) -> Option<Self> {
-        match self {
-            Self::Member { member } => keep(member).then(|| self.clone()),
-            Self::Split {
-                axis,
-                ratio,
-                first,
-                second,
-            } => match (first.retaining(keep), second.retaining(keep)) {
-                (Some(first), Some(second)) => Some(Self::Split {
-                    axis: *axis,
-                    ratio: *ratio,
-                    first: Box::new(first),
-                    second: Box::new(second),
-                }),
-                (first, second) => first.or(second),
-            },
-        }
-    }
-
-    fn tiled(members: &[MemberRef], attention: &BTreeSet<WorkWorkspaceKey>) -> Option<Self> {
-        fn build(members: &[MemberRef], weights: &[f64]) -> Option<ArrangementTree> {
-            match members {
-                [] => None,
-                [member] => Some(ArrangementTree::Member {
-                    member: member.clone(),
-                }),
-                _ => {
-                    let mid = members.len() / 2;
-                    let first = weights[..mid].iter().sum::<f64>();
-                    let second = weights[mid..].iter().sum::<f64>();
-                    // A suppressed subtree keeps a restorable slot, but gets no
-                    // share in the ratios of ancestors with two visible children.
-                    let ratio = if first > 0.0 && second > 0.0 {
-                        (first / (first + second)).clamp(0.1, 0.9)
-                    } else {
-                        0.5
-                    };
-                    Some(ArrangementTree::Split {
-                        axis: ArrangementAxis::Vertical,
-                        ratio,
-                        first: Box::new(
-                            build(&members[..mid], &weights[..mid]).expect("nonempty first half"),
-                        ),
-                        second: Box::new(
-                            build(&members[mid..], &weights[mid..]).expect("nonempty second half"),
-                        ),
-                    })
-                }
-            }
-        }
-        let mut seen = BTreeSet::new();
-        let weights: Vec<_> = members
-            .iter()
-            .map(|member| {
-                if !seen.insert(&member.work) {
-                    0.0
-                } else if attention.contains(&member.work) {
-                    2.0
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        build(members, &weights)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -525,16 +409,17 @@ pub enum ArrangementMode {
     Touched,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+/// Occurrence order. Geometry belongs to the slot layout; members fill it in order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Arrangement {
-    pub tree: Option<ArrangementTree>,
+    pub order: Vec<MemberRef>,
     pub hidden: BTreeSet<MemberRef>,
     pub mode: ArrangementMode,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArrangementProjection {
-    pub visible: Option<ArrangementTree>,
+    pub visible: Vec<MemberRef>,
     pub suppressed: Vec<SuppressedMember>,
 }
 
@@ -547,26 +432,17 @@ pub struct SuppressedMember {
 impl Arrangement {
     pub fn automatic(members: &[MemberRef]) -> Self {
         Self {
-            tree: ArrangementTree::tiled(members, &BTreeSet::new()),
+            order: members.to_vec(),
             hidden: BTreeSet::new(),
             mode: ArrangementMode::Auto,
         }
     }
 
-    pub fn members(&self) -> Vec<MemberRef> {
-        self.tree
-            .as_ref()
-            .map_or_else(Vec::new, ArrangementTree::members)
-    }
-
+    /// The order is a permutation of `members`; hidden members are among them.
     pub fn validate(&self, members: &[MemberRef]) -> Result<(), SelectionError> {
-        if let Some(tree) = &self.tree {
-            tree.validate()?;
-        }
-        let actual = self.members();
-        let set: BTreeSet<_> = actual.iter().collect();
+        let set: BTreeSet<_> = self.order.iter().collect();
         let expected: BTreeSet<_> = members.iter().collect();
-        if actual.len() != set.len()
+        if self.order.len() != set.len()
             || members.len() != expected.len()
             || set != expected
             || !self.hidden.iter().all(|member| set.contains(member))
@@ -576,19 +452,20 @@ impl Arrangement {
         Ok(())
     }
 
-    pub fn replace(&mut self, tree: Option<ArrangementTree>) -> Result<(), SelectionError> {
+    pub fn replace(&mut self, order: Vec<MemberRef>) -> Result<(), SelectionError> {
         let replacement = Self {
-            tree,
+            order,
             hidden: self.hidden.clone(),
             mode: ArrangementMode::Touched,
         };
-        replacement.validate(&self.members())?;
+        replacement.validate(&self.order)?;
         *self = replacement;
         Ok(())
     }
 
+    /// Hiding keeps the member's position, so restoring returns it there.
     pub fn hide(&mut self, member: &MemberRef, hidden: bool) -> Result<(), SelectionError> {
-        if !self.members().contains(member) {
+        if !self.order.contains(member) {
             return Err(SelectionError::Membership);
         }
         if hidden {
@@ -599,41 +476,37 @@ impl Arrangement {
         Ok(())
     }
 
+    /// The first visible occurrence of each Work wins; later ones are suppressed.
     pub fn project(&self) -> ArrangementProjection {
-        let mut winners: BTreeMap<WorkWorkspaceKey, MemberRef> = BTreeMap::new();
-        let mut suppressed = Vec::new();
-        let visible = self.tree.as_ref().and_then(|tree| {
-            tree.retaining(&mut |member| {
-                if self.hidden.contains(member) {
-                    return false;
-                }
-                if let Some(winner) = winners.get(&member.work) {
-                    suppressed.push(SuppressedMember {
-                        member: member.clone(),
-                        winner: winner.clone(),
-                    });
-                    false
-                } else {
-                    winners.insert(member.work.clone(), member.clone());
-                    true
-                }
-            })
-        });
-        ArrangementProjection {
-            visible,
-            suppressed,
+        let mut winners: BTreeMap<&WorkWorkspaceKey, &MemberRef> = BTreeMap::new();
+        let mut projection = ArrangementProjection {
+            visible: Vec::new(),
+            suppressed: Vec::new(),
+        };
+        for member in self.order.iter().filter(|m| !self.hidden.contains(m)) {
+            if let Some(winner) = winners.get(&member.work) {
+                projection.suppressed.push(SuppressedMember {
+                    member: member.clone(),
+                    winner: (*winner).clone(),
+                });
+            } else {
+                winners.insert(&member.work, member);
+                projection.visible.push(member.clone());
+            }
         }
+        projection
     }
 
     /// Incomplete reads can add evidence, but can never erase retained intent.
     pub fn reconcile(&mut self, resolution: &SelectionResolution) {
-        let mut members = if resolution.unavailable.is_empty() {
+        let complete = resolution.unavailable.is_empty();
+        let mut members = if complete {
             resolution.members.clone()
         } else {
-            self.members()
+            self.order.clone()
         };
         let mut selected: BTreeSet<_> = members.iter().cloned().collect();
-        if !resolution.unavailable.is_empty() {
+        if !complete {
             for member in &resolution.members {
                 if selected.insert(member.clone()) {
                     members.push(member.clone());
@@ -641,30 +514,17 @@ impl Arrangement {
             }
         }
         self.hidden.retain(|member| selected.contains(member));
-        if self.mode == ArrangementMode::Auto && resolution.unavailable.is_empty() {
-            self.tree = ArrangementTree::tiled(&members, &resolution.attention);
-        } else {
-            self.tree = self
-                .tree
-                .as_ref()
-                .and_then(|tree| tree.retaining(&mut |member| selected.contains(member)));
-            let retained: BTreeSet<_> = self.members().into_iter().collect();
-            let arrivals: Vec<_> = members
-                .into_iter()
-                .filter(|member| !retained.contains(member))
-                .collect();
-            if let Some(new) = ArrangementTree::tiled(&arrivals, &resolution.attention) {
-                self.tree = Some(match self.tree.take() {
-                    Some(old) => ArrangementTree::Split {
-                        axis: ArrangementAxis::Vertical,
-                        ratio: 0.5,
-                        first: Box::new(old),
-                        second: Box::new(new),
-                    },
-                    None => new,
-                });
-            }
+        if self.mode == ArrangementMode::Auto && complete {
+            self.order = members;
+            return;
         }
+        self.order.retain(|member| selected.contains(member));
+        let retained: BTreeSet<_> = self.order.iter().cloned().collect();
+        self.order.extend(
+            members
+                .into_iter()
+                .filter(|member| !retained.contains(member)),
+        );
     }
 }
 
@@ -681,9 +541,8 @@ pub enum SlotNode {
     Slot {
         slot: usize,
     },
-    /// `vertical` places children side by side; `horizontal` stacks them.
     Split {
-        axis: ArrangementAxis,
+        axis: SplitAxis,
         weights: Vec<f64>,
         children: Vec<SlotNode>,
     },
@@ -697,23 +556,23 @@ impl SlotLayout {
         let slot = |slot| SlotNode::Slot { slot };
         Self {
             root: SlotNode::Split {
-                axis: ArrangementAxis::Horizontal,
+                axis: SplitAxis::Horizontal,
                 weights: vec![GOLDEN, 1.0 - GOLDEN],
                 children: vec![
                     SlotNode::Split {
-                        axis: ArrangementAxis::Vertical,
+                        axis: SplitAxis::Vertical,
                         weights: vec![GOLDEN, 1.0 - GOLDEN],
                         children: vec![
                             slot(0),
                             SlotNode::Split {
-                                axis: ArrangementAxis::Vertical,
+                                axis: SplitAxis::Vertical,
                                 weights: vec![1.0, 1.0],
                                 children: vec![slot(1), slot(2)],
                             },
                         ],
                     },
                     SlotNode::Split {
-                        axis: ArrangementAxis::Vertical,
+                        axis: SplitAxis::Vertical,
                         weights: vec![1.0; 4],
                         children: (3..7).map(slot).collect(),
                     },

@@ -381,27 +381,20 @@ final class SessionsWorkspaceRegistry {
 
     func clearPresentation() {
         surfaces.clearFocus()
-        layout = nil
+        openWork = []
         selectedWork = nil
     }
 
     func present(_ plan: WorkViewPlan) {
-        func tree(_ node: WorkArrangementTree) -> DesktopWorkLayoutInspection {
-            switch node {
-            case .member(let member): return .workspace(work: member.work)
-            case .split(let axis, let ratio, let first, let second):
-                return .split(axis: axis, ratio: ratio, first: tree(first), second: tree(second))
-            }
-        }
-        layout = plan.projection.visible.map(tree)
+        openWork = plan.projection.visible.map(\.work)
         if selectedWork.map({ openWork.contains($0) }) != true {
             selectedWork = openWork.first
             surfaces.clearFocus()
         }
     }
 
-    private(set) var layout: DesktopWorkLayoutInspection?
-    var openWork: [WorkWorkspaceKey] { layout?.keys ?? [] }
+    /// Work shown in the window, in slot fill order: readback, not an arrangement owner.
+    private(set) var openWork: [WorkWorkspaceKey] = []
 
     private(set) var selectedWork: WorkWorkspaceKey?
 
@@ -412,7 +405,7 @@ final class SessionsWorkspaceRegistry {
     @discardableResult
     func open(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?) -> SessionsWorkspace {
         let workspace = workspace(for: key, title: title, location: location)
-        layout = .workspace(work: key)
+        openWork = [key]
         focus(key)
         return workspace
     }
@@ -616,7 +609,7 @@ final class SessionsWorkspaceRegistry {
         guard previous != key, workspaces[key] == nil, let workspace = workspaces.removeValue(forKey: previous) else { return }
         workspace.key = key
         workspaces[key] = workspace
-        layout = layout?.replacing(previous, with: key)
+        openWork = openWork.map { $0 == previous ? key : $0 }
         if selectedWork == previous { selectedWork = key }
     }
 
@@ -632,25 +625,6 @@ final class SessionsWorkspaceRegistry {
         return workspace
     }
 
-}
-
-// Window geometry is readback of the selected destination, not another arrangement owner.
-extension DesktopWorkLayoutInspection {
-    fileprivate var keys: [WorkWorkspaceKey] {
-        switch self {
-        case .workspace(let work): [work]
-        case .split(_, _, let first, let second): first.keys + second.keys
-        }
-    }
-
-    fileprivate func replacing(_ previous: WorkWorkspaceKey, with work: WorkWorkspaceKey) -> Self {
-        switch self {
-        case .workspace(let current): .workspace(work: current == previous ? work : current)
-        case .split(let axis, let ratio, let first, let second):
-            .split(axis: axis, ratio: ratio,
-                first: first.replacing(previous, with: work), second: second.replacing(previous, with: work))
-        }
-    }
 }
 
 struct SessionItem: Identifiable, Equatable {

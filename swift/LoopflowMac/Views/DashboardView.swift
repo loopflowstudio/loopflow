@@ -115,7 +115,7 @@ struct DashboardView: View {
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.
-                DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible?.members ?? [],
+                DashboardSlotGrid(members: workingTasks ? model.workingTaskMembers : plan.projection.visible,
                                   focused: workspaces.selectedWork, layout: plan.slots,
                                   editing: editingSlots && plan.dashboardID != nil && !model.dashboardSaving
                                       ? DashboardSlotEditing { writeSlots(plan, $0) } : nil) { tile($0, plan: plan) }
@@ -182,7 +182,7 @@ struct DashboardView: View {
                         Task { await model.reorderWorkingTask(task, to: member.work.id) }; return true
                     }
                     guard arrangeable, !model.dashboardSaving, let other = plan.resolution.members.first(where: { $0.token == value }), other != member else { return false }
-                    save(plan, tree: plan.arrangement.tree?.swapping(member, other)); return true
+                    save(plan, order: plan.arrangement.moving(other, to: member)); return true
                 }
             if let entry, let content {
                 if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
@@ -222,12 +222,12 @@ struct DashboardView: View {
         model.zoom(into: work, from: id)
     }
 
-    private func save(_ plan: WorkViewPlan, tree: WorkArrangementTree? = nil, hidden: [WorkMemberRef]? = nil) {
+    private func save(_ plan: WorkViewPlan, order: [WorkMemberRef]? = nil, hidden: [WorkMemberRef]? = nil) {
         guard let id = plan.dashboardID, let revision = plan.savedRevision else {
             model.dashboardError = "Save this Dashboard before arranging its Work."; return
         }
-        let arrangement = WorkArrangement(tree: tree ?? plan.arrangement.tree, hidden: hidden ?? plan.arrangement.hidden,
-            mode: tree == nil ? plan.arrangement.mode : .touched)
+        let arrangement = WorkArrangement(order: order ?? plan.arrangement.order, hidden: hidden ?? plan.arrangement.hidden,
+            mode: order == nil ? plan.arrangement.mode : .touched)
         Task { await model.arrangeDashboard(id, arrangement: arrangement, revision: revision) }
     }
 }
@@ -255,19 +255,6 @@ struct DashboardConversationOffer: View {
 extension WorkMemberRef {
     fileprivate var token: String { String(decoding: (try? JSONEncoder().encode(self)) ?? Data(), as: UTF8.self) }
 }
-extension WorkArrangementTree {
-    fileprivate var members: [WorkMemberRef] {
-        switch self { case .member(let ref): [ref]; case .split(_, _, let first, let second): first.members + second.members }
-    }
-    fileprivate func swapping(_ a: WorkMemberRef, _ b: WorkMemberRef) -> Self {
-        switch self {
-        case .member(let ref): return .member(ref == a ? b : ref == b ? a : ref)
-        case .split(let axis, let ratio, let first, let second):
-            return .split(axis: axis, ratio: ratio, first: first.swapping(a, b), second: second.swapping(a, b))
-        }
-    }
-}
-
 extension WorkSelection {
     /// Display authored syntax; membership and validation stay in Rust.
     var queryText: String {

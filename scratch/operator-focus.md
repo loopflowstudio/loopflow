@@ -18,6 +18,29 @@ Remaining: the demo (agent run, demo/review) and the gate checks.
    alone". The opening paragraph finishes on your Tasks' dispositions plus a
    listing of the others.
 
+## Concept review 2 (2026-10-21): next implement direction
+
+The Task names the vsm-operate Flow among references that must agree, and
+`docs/waves.md` says it "applies those same questions" as wave-operate. Its
+steps still invite the plan work decision 4 removes:
+
+1. `s3.md`: "Reconcile priorities or shared capacity within accepted
+   direction. Use existing planning and Task operations" reads as Project
+   edits. Change to: report priority and capacity tensions as proposals for
+   the person; use Task operations only on Tasks you own (decisions 1–3).
+2. `s2.md`, `s4.md`, `s5.md`: "Durable changes belong in the existing plan,
+   Task or memory." Change to: findings go in the reply and the Flow's
+   scratch note; plan changes are proposals for the person, and Wave memory
+   follows the selected Flow's procedure (as wave-operate already states).
+3. `docs/waves.md` "Operate manually": say vsm-operate keeps the same
+   boundaries (no KRs, plan edits, new Tasks or backlog starts).
+4. repo-operate "Summarize current activity" omits due follow-ups that its
+   deferred wave-operate pass lists; add them before backlog so the two
+   report orders match.
+
+Extend `operator_skills_stay_on_existing_work` to cover `s1`–`s5` for
+`update-plan`, `lf task create` and `new-chapter`.
+
 Considered and kept: repo-operate cleanup can `lf task abandon` your own
 Tasks while wave-operate never abandons. That is the pre-existing cleanup
 duty decision 6 keeps, scoped to your work; questions.md 1 covers reversing it.

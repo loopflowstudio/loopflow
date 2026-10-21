@@ -6,44 +6,20 @@ recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
 Remaining: the demo (agent run, demo/review) and the gate checks.
 
-## Concept review (2026-10-21): implemented in `78f5db2b89`
+## Concept reviews (2026-10-21): implemented
 
-1. `lf config user` prints `config::participant_name()`, the identity
-   ownership uses, so `LF_USER_NAME` forwarded by `lf --machine` counts.
-   Test: `cli_discovery::config_user_reports_the_forwarded_participant`.
-   `load_user_name` is now private to `config.rs` (its last outside caller
-   is gone). The skill's "unset → unknown" rule stays.
-2. wave-operate judges ownership first: `next_move.owner: wave` names this
-   pass only on Tasks you own; another person's Task stays "theirs · left
-   alone". The opening paragraph finishes on your Tasks' dispositions plus a
-   listing of the others.
-
-## Concept review 2 (2026-10-21): implemented
-
-The Task names the vsm-operate Flow among references that must agree, and
-`docs/waves.md` says it "applies those same questions" as wave-operate. Its
-steps still invite the plan work decision 4 removes:
-
-1. `s3.md`: "Reconcile priorities or shared capacity within accepted
-   direction. Use existing planning and Task operations" reads as Project
-   edits. Change to: report priority and capacity tensions as proposals for
-   the person; use Task operations only on Tasks you own (decisions 1–3).
-2. `s2.md`, `s4.md`, `s5.md`: "Durable changes belong in the existing plan,
-   Task or memory." Change to: findings go in the reply and the Flow's
-   scratch note; plan changes are proposals for the person, and Wave memory
-   follows the selected Flow's procedure (as wave-operate already states).
-3. `docs/waves.md` "Operate manually": say vsm-operate keeps the same
-   boundaries (no KRs, plan edits, new Tasks or backlog starts).
-4. repo-operate "Summarize current activity" omits due follow-ups that its
-   deferred wave-operate pass lists; add them before backlog so the two
-   report orders match.
-
-Extend `operator_skills_stay_on_existing_work` to cover `s1`–`s5` for
-`update-plan`, `lf task create` and `new-chapter`.
+1. `78f5db2b89`: `lf config user` prints `config::participant_name()`, so
+   `LF_USER_NAME` forwarded by `lf --machine` counts (test
+   `cli_discovery::config_user_reports_the_forwarded_participant`);
+   wave-operate judges ownership before `next_move`.
+2. `83183c468d`: s1–s5 (vsm-operate) report plan and capacity changes as
+   proposals, s3 uses Task operations only on your Tasks, `docs/waves.md`
+   states vsm-operate keeps the operator boundaries, and repo-operate lists
+   due follow-ups before backlog like wave-operate.
 
 Considered and kept: repo-operate cleanup can `lf task abandon` your own
-Tasks while wave-operate never abandons. That is the pre-existing cleanup
-duty decision 6 keeps, scoped to your work; questions.md 1 covers reversing it.
+Tasks while wave-operate never abandons. That is the cleanup duty decision 6
+keeps, scoped to your work; questions.md 1 covers reversing it.
 
 ## Problem
 
@@ -163,7 +139,7 @@ before/after shows only your Task's execution changed. Repeat with
 | `builtins/wave/skill/wave_session.md` | description wording; follow-ups line matches decision 3 |
 | `builtins/ops/skill/work.md` | supervision line: operators move your existing work; no change to Task-agnostic rules |
 | `builtins/ops/skill/init.md` | "wave-operate makes a finite pass" wording only |
-| `builtins/wave/skill/s1.md`, `s3.md` (vsm-operate) | s1: start only Tasks a person selected, never another person's; s3: delete the KR-check sentence |
+| `builtins/wave/skill/s1.md`–`s5.md` (vsm-operate) | s1: start only Tasks a person selected, never another person's; s3: no KR check, priority/capacity tensions are proposals; all: plan changes are proposals |
 | `README.md` | "Keep work moving" GOAL example no longer "pursue the highest-leverage open KR"; operate comments |
 | `docs/waves.md` | Operate manually + due follow-up paragraph (line ~459) match decisions 1–3 |
 | `docs/lf.md` (~538–548) | operator paragraph: your Tasks, others' listed, backlog unstarted |
@@ -210,7 +186,7 @@ New unit test (next to the export test in `rust/loopflow/src/skills/mod.rs`):
 for the `repo-operate` and `wave-operate` registered bodies (the session skills
 inline them; their own "Begin work in a Wave" text legitimately names
 start-chapter's KR planning), assert neither contains `lf task create`, `update-plan`, `new-chapter`,
-`lf task claim`, or `KR`. Expected: pass. Docs: `git grep -n -e "highest-leverage open KR" -e "one finite planning pass" -- ':!scratch'` returns nothing.
+`lf task claim`, or `KR`; for `s1`–`s5`, assert none contains the first three. Expected: pass. Docs: `git grep -n -e "highest-leverage open KR" -e "one finite planning pass" -- ':!scratch'` returns nothing.
 `cargo test -p loopflow --test golden_prompt` passes against the regenerated golden.
 
 ## Slices

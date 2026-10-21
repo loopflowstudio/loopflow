@@ -22,7 +22,7 @@ struct TaskHistoryFilter: Equatable {
     mutating func clearValidation() { validationMessage = nil }
 
     func includes(_ task: TaskPlanningSnapshot, condition: TaskConditionSnapshot, now: Date) -> Bool {
-        if !task.isTerminal || condition.unresolvedExecution { return true }
+        if task.isCurrent(condition) { return true }
         guard task.isSuccessful, showCompleted else { return false }
         if days == 0 { return true }
         guard let timestamp = task.completedAt, let date = Self.completionDate(timestamp) else { return false }
@@ -35,16 +35,18 @@ struct TaskHistoryFilter: Equatable {
     }
 }
 
+extension TaskPlanningSnapshot {
+    /// Planned or started: not settled, or settled with execution still unresolved.
+    func isCurrent(_ condition: TaskConditionSnapshot) -> Bool { !isTerminal || condition.unresolvedExecution }
+}
+
 /// A Wave's current Tasks by rank, split by whether someone owns them.
 struct WaveTaskGroups {
     let owned: [RoadmapTask]
     let unowned: [RoadmapTask]
 
     init(_ tasks: [RoadmapTask]) {
-        // The default filter hides every settled Task, so no completion date is read.
-        let filter = TaskHistoryFilter()
-        let current = tasks.sorted { $0.task.rank < $1.task.rank }
-            .filter { filter.includes($0.task, condition: $0.condition, now: .now) }
+        let current = tasks.sorted { $0.task.rank < $1.task.rank }.filter { $0.task.isCurrent($0.condition) }
         owned = current.filter { $0.runtime?.owner != nil }
         unowned = current.filter { $0.runtime?.owner == nil }
     }

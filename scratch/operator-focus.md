@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: concept review 5 (below), then the demo (agent run, demo/review) and the gate checks.
+Remaining: the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -240,4 +240,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results (2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard; `--test golden_prompt` passed; `--test integration config_user` 1 passed; `cargo fmt --check` clean; docs grep clean outside scratch. Concept review 3 and its compress pass changed prose no test asserts; no rerun. Gate owns the suites once.
+Check results (2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard; `--test golden_prompt` passed; `--test integration config_user` 1 passed; `cargo fmt --check` clean; docs grep clean outside scratch. Concept reviews 3–5 and their compress passes changed prose no test asserts (no guard terms added); no rerun. Gate owns the suites once.

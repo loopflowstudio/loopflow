@@ -875,9 +875,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
-            loopflow::lf::commands::placement::wave(repo, command)
-        }
+        WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -910,17 +908,25 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Admission {
-            issue,
-            claim,
-            request,
-            json,
-        } => {
-            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
+        TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
+            use loopflow::ops::task_ownership::{change, render, OwnershipChange};
+            let requested = match command {
+                TaskCommand::Claim { .. } => OwnershipChange::Claim,
+                _ => OwnershipChange::Unclaim,
+            };
+            let ownership = change(repo, issue, requested)?;
+            if *json {
+                println!("{}", serde_json::to_string(&ownership)?);
+            } else {
+                println!("{}", render(&ownership));
+            }
+            Ok(())
         }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
-        | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
+        | TaskCommand::Location { .. } => {
+            unreachable!("location reads precede repository commands")
+        }
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -1089,8 +1095,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
+                    if let Some(ownership) = &status.ownership {
+                        println!("{}", loopflow::ops::task_ownership::render(ownership));
+                    }
                 } else {
-                    println!("No owned Task; retained observations do not establish ownership.");
+                    println!("No saved Task; retained observations are not Work.");
                 }
                 if let Some(at) = status.observed_at {
                     println!("Observed at: {at}");
@@ -1469,9 +1478,7 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. }
-                        | TaskCommand::WatchFiles { .. }
-                        | TaskCommand::Admission { claim: None, .. }
+                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
         if preview {
@@ -1578,9 +1585,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
-                | TaskCommand::WatchFiles { .. }
-                | TaskCommand::Admission { claim: None, .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1628,23 +1633,6 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
-    }
-    if let Some(Commands::Task {
-        cmd:
-            TaskCommand::Admission {
-                issue,
-                claim: None,
-                request,
-                json,
-            },
-    }) = &cli.command
-    {
-        return loopflow::ops::task_admission::command(
-            issue,
-            None,
-            request.as_deref(),
-            *json || cli.json,
-        );
     }
     if let Some(Commands::Task {
         cmd:
@@ -2484,6 +2472,11 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
+        Some(Commands::Machine {
+            cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
+        }) => in_directory_runtime(args, |repo| {
+            loopflow::lf::commands::machine_use::run(repo, cmd)
+        }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
             cmd:
@@ -2521,7 +2514,7 @@ fn execute_command(
         }
 
         Some(Commands::Wave {
-            cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Place { .. }),
+            cmd: cmd @ WaveCommand::Rename { .. },
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
             cmd: cmd @ WaveCommand::Workflow { .. },

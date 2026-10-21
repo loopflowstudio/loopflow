@@ -255,14 +255,25 @@ fn task_conversation_starts_at_launch_not_creation() {
         let task: Value = serde_json::from_slice(&output.stdout).unwrap();
         let id = task["id"].as_str().unwrap();
         let db = fixture.db();
-        let stored: (Option<String>, Option<String>, Option<i64>) = db
+        let claims = || -> Vec<String> {
+            let mut statement = db
+                .prepare("SELECT kind FROM task_ownership WHERE task_id=?1 ORDER BY at")
+                .unwrap();
+            statement
+                .query_map([id], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let stored: (Option<String>, Option<String>) = db
             .query_row(
-                "SELECT primary_session_id,worktree,started_at FROM tasks WHERE id=?1",
+                "SELECT primary_session_id,worktree FROM tasks WHERE id=?1",
                 [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(stored, (None, None, None));
+        assert_eq!(stored, (None, None));
+        assert!(claims().is_empty(), "creating a Task claims nothing");
         assert_eq!(
             fixture.count("agent_sessions"),
             0,
@@ -297,12 +308,8 @@ fn task_conversation_starts_at_launch_not_creation() {
         assert!(fixture.launches().is_empty());
         let prepared = fixture.count("agent_sessions");
         assert_eq!(fixture.captures(), 0);
-        let started: Option<i64> = db
-            .query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(started, None);
+        // Allocating the checkout is the work reservation that claims the Task.
+        assert_eq!(claims(), ["claim"]);
         let opened = if headless {
             fixture.run(&[
                 "-b",
@@ -335,12 +342,7 @@ fn task_conversation_starts_at_launch_not_creation() {
                 session
             );
         }
-        let started: Option<i64> = db
-            .query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert!(started.is_some());
+        assert_eq!(claims(), ["claim"], "launching keeps the one claim");
     }
 }
 
@@ -1032,7 +1034,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
 }
 
 #[test]
-fn binding_starts_the_task_once_without_reattributing_prior_work() {
+fn binding_leaves_ownership_and_prior_work_unchanged() {
     let fixture = Fixture::new(false);
     let task_path = fixture.repo.create_named_worktree("task-binding");
     let task = support::register_task_with_pr(
@@ -1054,14 +1056,21 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
         );
         fixture.launches()[before].clone()
     };
-    let started = |id: &str| -> Option<i64> {
-        fixture
-            .db()
-            .query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
+    // Ownership entries as (kind, at): binding reserves no work, so it appends none.
+    let ownership = |id: &str| -> Vec<(String, i64)> {
+        let db = fixture.db();
+        let mut statement = db
+            .prepare("SELECT kind,at FROM task_ownership WHERE task_id=?1 ORDER BY at")
+            .unwrap();
+        statement
+            .query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
             .unwrap()
     };
+    let claimed = ownership(task.task.id.as_str());
+    assert_eq!(claimed.len(), 1, "the seeded checkout claims the Task");
+    let sibling_claimed = ownership(sibling.id.as_str());
     let now = || -> i64 {
         fixture
             .db()
@@ -1083,7 +1092,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let orphan = launch(&LAUNCH);
     let (session, ..) = fixture.session_row(&orphan);
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
-    assert_eq!(started(task.task.id.as_str()), None);
+    assert_eq!(ownership(task.task.id.as_str()), claimed);
     assert!(task_runs("INF-123").is_empty());
 
     let wrong_identity = fixture.run(&["session", "bind", &orphan, "--task", "INF-123", "--json"]);
@@ -1102,7 +1111,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(preview["session_id"], session);
     assert_eq!(preview["task_id"], task.task.id.as_str());
     assert_eq!(preview["identifier"], "INF-123");
-    assert_eq!(started(task.task.id.as_str()), None);
+    assert_eq!(ownership(task.task.id.as_str()), claimed);
     assert!(fixture.sessions().is_empty());
     let history = fixture.json(&["session", "list", "--history", "--all", "--json"]);
     assert_eq!(history[0]["work"], Value::Null);
@@ -1135,7 +1144,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
         )
         .unwrap();
     assert!((before..=after).contains(&bound_at));
-    assert_eq!(started(task.task.id.as_str()), Some(bound_at));
+    assert_eq!(ownership(task.task.id.as_str()), claimed);
     assert!(task_runs("INF-123").is_empty());
     assert!(
         fixture.sessions().is_empty(),
@@ -1170,7 +1179,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
         String::from_utf8_lossy(&again.stderr)
     );
     assert_eq!(fixture.run_parents(&orphan).0, None);
-    assert_eq!(started(sibling.id.as_str()), None);
+    assert_eq!(ownership(sibling.id.as_str()), sibling_claimed);
     assert!(task_runs("INF-124").is_empty());
 
     std::thread::sleep(Duration::from_secs(2));
@@ -1183,8 +1192,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
         ":",
         "Review the parser",
     ]);
-    let started_at = started(task.task.id.as_str()).expect("future work starts the Task");
-    assert_eq!(started_at, bound_at);
+    assert_eq!(ownership(task.task.id.as_str()), claimed);
     assert_eq!(task_runs("INF-123"), vec![later]);
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
 }

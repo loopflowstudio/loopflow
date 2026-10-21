@@ -34,7 +34,7 @@ struct WorkNavigationProofTests {
             task["task"] = planning
             var runtime = try #require(task["runtime"] as? [String: Any])
             runtime["work_id"] = "scroll-work-\(index)"
-            runtime["started"] = true
+            runtime["owner"] = ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
             task["runtime"] = runtime
             return task
         }
@@ -127,7 +127,7 @@ struct WorkNavigationProofTests {
                 let workId = "work-\(waveIndex)-\(index)"
                 runtime["work_id"] = workId
                 let global = waveIndex * 50 + index
-                runtime["started"] = global < 140 && global.isMultiple(of: 7)
+                runtime["owner"] = global < 140 && global.isMultiple(of: 7) ? ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any] : NSNull()
                 item["runtime"] = runtime
                 var execution = try #require(item["execution"] as? [String: Any])
                 execution["state"] = executions[workId] ?? "idle"

@@ -261,9 +261,19 @@ Bootstrap the remote identity once:
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave list --json
-lf wave place <wave-id> <machine-id>    # record origin-side planning state
 lf --machine mini --wave shipper wave-operate
+lf machine use mini --task LOO-123  # move one Task's ownership to mini
 ```
+
+Pick the Machine that runs your new Tasks for a Wave:
+
+```bash
+lf machine use mini shipper        # stored here and on your other Machines
+lf session connect --wave shipper  # your Wave Session, now on mini
+```
+
+The choice is yours alone and never committed. Existing Tasks stay put; move one
+with `lf machine use <machine> --task <task>`.
 
 The target Machine proves its identity before running the command and keeps the
 resulting execution locally.

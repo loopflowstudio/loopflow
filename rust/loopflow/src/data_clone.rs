@@ -250,7 +250,7 @@ fn sanitize(conn: &Connection) -> Result<()> {
         UPDATE agent_sessions SET agent_process_id=NULL;
         UPDATE processes SET pid=NULL, os_started_at=NULL, endpoint=NULL,
             attached_lf_process_id=NULL, attachment_token=NULL;
-        UPDATE machines SET route='copied',label=NULL,repo=NULL;
+        UPDATE machines SET route='copied',label=NULL;
         INSERT INTO machines(id,route,created_at,observed_at)
             VALUES('home_' || lower(hex(randomblob(16))), 'local', unixepoch(), unixepoch());
         DELETE FROM session_activity;

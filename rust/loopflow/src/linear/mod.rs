@@ -945,7 +945,7 @@ impl LinearClient {
 
     /// Resolve before reserving a write: failed reads leave delivery retryable.
     pub(crate) async fn item_state_id(&self, item_id: &str, target: &str) -> LinearResult<String> {
-        if !matches!(target, "completed" | "unstarted" | "canceled") {
+        if !matches!(target, "completed" | "unstarted" | "started" | "canceled") {
             return Err(LinearError::Message(format!(
                 "unsupported Task state {target}"
             )));

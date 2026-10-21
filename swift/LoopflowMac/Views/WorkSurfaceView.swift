@@ -23,10 +23,10 @@ struct WaveTaskInventory: View {
                     switch wave.tasks {
                     case .unavailable(let reason): Text(reason).foregroundStyle(palette.warning)
                     case .available(let tasks, let truncated):
-                        ForEach([true, false], id: \.self) { started in
-                            let group = tasks.filter { ($0.runtime?.started == true) == started }
+                        ForEach([true, false], id: \.self) { owned in
+                            let group = tasks.filter { ($0.runtime?.owner != nil) == owned }
                                 .sorted { $0.task.rank < $1.task.rank }
-                            Text("\(started ? "Started" : "Not started") · \(group.count)")
+                            Text("\(owned ? "Owned" : "Unowned") · \(group.count)")
                                 .font(.caption).foregroundStyle(palette.textSecondary)
                             ForEach(group) { task in
                                 Button { model.select(.task(id: task.id)) } label: {

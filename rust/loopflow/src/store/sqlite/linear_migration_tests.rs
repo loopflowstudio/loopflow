@@ -42,12 +42,6 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
     sqlite
         .apply_migration_for_test("task_checkout_machine")
         .unwrap();
-    sqlite
-        .place_work(
-            &crate::durable::WorkRef::Wave(wave.clone()),
-            &sqlite.local_machine().unwrap().id,
-        )
-        .unwrap();
     let store = Store { sqlite };
     let observation = store.linear_issue_evidence("/repo", "fix-1").await.unwrap();
     assert_eq!(observation.state, PlanningState::Available);

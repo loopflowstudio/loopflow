@@ -402,7 +402,7 @@ impl World {
         flow_process.outcome = Some(outcome.to_string());
         flow_process.exit_code = Some(i32::from(outcome != "succeeded"));
         store.sqlite.record_process(&flow_process)?;
-        store.sqlite.record_flow_process(&flow, &graph, None)?;
+        store.sqlite.record_flow_process(&flow, &graph)?;
         for (index, skill) in skills.iter().enumerate() {
             let begin = started + minutes * 60 * index as i64;
             let mut step = self.process(

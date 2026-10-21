@@ -990,6 +990,12 @@ mod tests {
             }
             assert!(skill.contains("lf config user"), "{name} omits ownership");
         }
+        for name in ["s1", "s2", "s3", "s4", "s5"] {
+            let skill = builtins::get_builtin_skill(name).unwrap();
+            for planning in ["lf task create", "update-plan", "new-chapter"] {
+                assert!(!skill.contains(planning), "{name} names {planning:?}");
+            }
+        }
     }
 
     #[test]

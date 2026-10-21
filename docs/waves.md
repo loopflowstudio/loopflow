@@ -74,8 +74,9 @@ lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 `wave-operate` considers delivery, coordination, present capacity, adaptation
 and identity (S1–S5) over the selected Wave's existing Tasks and reports what
 it finds. It does not check KRs or metric targets, edit the plan, rotate
-chapters, file Tasks or start backlog. `vsm-operate` applies those same
-questions across the current repository's Waves, including from a linked
+chapters, file Tasks or start backlog. `vsm-operate` asks those same
+questions, with the same boundaries (no KRs, plan edits, new Tasks or backlog
+starts), across the current repository's Waves, including from a linked
 worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
 with each skill reading earlier findings from one shared working note. Each is
 also directly invokable for a focused question, with no scan/assess split.

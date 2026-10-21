@@ -18,7 +18,7 @@ Remaining: the demo (agent run, demo/review) and the gate checks.
    alone". The opening paragraph finishes on your Tasks' dispositions plus a
    listing of the others.
 
-## Concept review 2 (2026-10-21): next implement direction
+## Concept review 2 (2026-10-21): implemented
 
 The Task names the vsm-operate Flow among references that must agree, and
 `docs/waves.md` says it "applies those same questions" as wave-operate. Its
@@ -224,4 +224,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch. Concept-review repairs (compress, 2026-10-21): `--test integration config_user` 1 passed, `--lib skills::` 28 passed, `--test golden_prompt` passed without regeneration.
+Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch. Concept-review repairs (compress, 2026-10-21): `--test integration config_user` 1 passed, `--lib skills::` 28 passed, `--test golden_prompt` passed without regeneration. Concept review 2 (implement, 2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard, `--test golden_prompt` passed without regeneration, `cargo fmt --check` clean.

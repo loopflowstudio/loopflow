@@ -103,10 +103,11 @@ holds and the rung could not fire; an unstarted canceled Task is not modeled.
 ### Desktop fix
 
 Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks alone, it
-returns current Owned / Unowned Tasks by rank (`TaskHistoryFilter`'s default,
-completion off; grouped on `runtime.owner != nil`, main's #1610 rule). The
-history filter stays necessary: completion and abandonment keep the last owner,
-so a done Task would otherwise sit under Owned. `WaveTaskInventory` renders those groups with no
+returns current Owned / Unowned Tasks by rank (`TaskPlanningSnapshot.isCurrent`,
+the same predicate `TaskHistoryFilter.includes` opens with; grouped on
+`runtime.owner != nil`, main's #1610 rule). The current filter stays necessary:
+completion and abandonment keep the last owner, so a done Task would otherwise
+sit under Owned. `WaveTaskInventory` renders those groups with no
 history control, keeping #1594's assertion; completed history stays behind
 Project history. Product memory: "A Wave pairs its conversation with all
 current planned and started Tasks".
@@ -195,7 +196,7 @@ by `WaveTaskGroups`, not kept beside it.
 - A world-only store writer or raw `UPDATE tasks` that bypasses `planning_write`.
 - A clock-override env var or parameter added to production completion.
 - Checked-in JSON captured from a world; tests build the world each run.
-- A second history filter for the inventory; it reuses `TaskHistoryFilter`.
+- A second history filter for the inventory; it shares `isCurrent` with `TaskHistoryFilter`.
 
 ## Slices
 
@@ -222,9 +223,7 @@ unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
 ### Name "current" once — done (concept review, 2026-10-21)
 
 The accepted product word is *current* ("A Wave pairs its conversation with all
-current planned and started Tasks"). Desktop spells it only as the default
-`TaskHistoryFilter`'s first branch, so `WaveTaskGroups` builds a throwaway filter
-and passes an unread `now:` with a comment apologizing for it.
+current planned and started Tasks").
 
 `TaskPlanningSnapshot.isCurrent(_ condition:)` (`!isTerminal ||
 condition.unresolvedExecution`) sits beside `WaveTaskGroups`. `includes` opens
@@ -273,3 +272,4 @@ Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no s
 Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks.
 Implement (2026-10-21): `isCurrent` named once; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
 Compress (2026-10-21): tests use `isCurrent` for settled rows and share `LifecycleWorld.model()`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
+Realign (2026-10-21): `isCurrent` slice already landed; plan prose updated to match; origin/main unchanged; no checks rerun. fmt/clippy and full Swift: gate/CI.

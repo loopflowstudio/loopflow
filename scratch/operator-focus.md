@@ -16,27 +16,11 @@ Remaining: the demo (agent run, demo/review) and the gate checks.
    proposals, s3 uses Task operations only on your Tasks, `docs/waves.md`
    states vsm-operate keeps the operator boundaries, and repo-operate lists
    due follow-ups before backlog like wave-operate.
-
-## Concept review 3 (2026-10-21): implemented in the commit after `f2ecf39434`
-
-A due follow-up you already started and own falls under two rules.
-wave-operate's "Return to due follow-ups" reads due Tasks "including unstarted"
-and says "Do not start a due follow-up". Meanwhile every started Task you own
-gets one disposition, and the reply lists each started Task once. Decision 3
-places the follow-up list under unowned backlog, so the settled reading is:
-
-- The due follow-up list holds only unstarted Tasks, which are unowned backlog,
-  for the person to select. Rewrite the rule as "Do not start one". A started
-  Task you own whose due date has arrived gets its ordinary disposition and is
-  not listed again. Before that date its disposition is dependency, with the
-  date named. Make `wave_operate.md` "Return to due follow-ups" and Finish
-  ("unstarted due follow-ups"), `wave_session.md` line 21 and
-  `docs/waves.md` ~459 say the same thing.
-- Use one reply order in both operators. repo-operate's "Summarize current
-  activity" puts "what finished" between stuck and others' work, while
-  `repo_session.md` and wave-operate use Available → Moving → Stuck → Others'
-  work. Move "finished" after others' work in repo-operate: Available, Moving,
-  Stuck, Others' work, finished, due follow-ups, backlog.
+3. `9949cea87f`: the due follow-up list holds only unstarted Tasks (unowned
+   backlog, "Do not start one"); a started Task you own that is due takes its
+   ordinary disposition, dependency on the named date before it. `wave_operate.md`,
+   `wave_session.md` and `docs/waves.md` agree. Both operators reply Available,
+   Moving, Stuck, Others' work, then finished, due follow-ups, backlog.
 
 Checked and kept: started Tasks are owned. Checkout allocation claims the Task
 (`children.rs` `claim_in`), and the 0.14.12 backfill records person-less local
@@ -227,6 +211,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch. Concept-review repairs (compress, 2026-10-21): `--test integration config_user` 1 passed, `--lib skills::` 28 passed, `--test golden_prompt` passed without regeneration. Concept review 2 (implement, 2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard, `--test golden_prompt` passed without regeneration, `cargo fmt --check` clean.
-
-Check: `cargo test -p loopflow --lib builtins` — 12 passed (no test asserts the edited prose).
+Check results (2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard; `--test golden_prompt` passed; `--test integration config_user` 1 passed; `cargo fmt --check` clean; docs grep clean outside scratch. Concept review 3 and its compress pass changed prose no test asserts; no rerun. Gate owns the suites once.

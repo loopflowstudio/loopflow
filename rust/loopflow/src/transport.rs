@@ -173,9 +173,11 @@ pub fn delegate_current() -> Result<bool> {
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+        // Output decides: `lf -b … > file` typed at a terminal must write
+        // only the answer, never a relayed screen.
         let owner = start(
             &argv,
-            io::stdin().is_terminal() || io::stdout().is_terminal(),
+            io::stdout().is_terminal(),
             &std::env::current_dir()?,
             &|_| {},
         )?;

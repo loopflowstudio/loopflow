@@ -121,6 +121,21 @@ fn every_recipe_builds_a_world_lf_reads() {
             !sessions.as_array().unwrap().is_empty(),
             "{recipe} has no Sessions"
         );
+        // A Task's Session history belongs to the Task, so Desktop's Task
+        // history reads something to decode.
+        for task in sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|session| session["task_ids"].as_array().unwrap())
+        {
+            let task = task.as_str().unwrap();
+            let history = built.lf(&["usage", "--days", "0", "--task", task, "--json"]);
+            assert!(
+                !history.as_array().unwrap().is_empty(),
+                "{recipe}: Task {task} has a Session but no history"
+            );
+        }
         match recipe {
             "wave-backlog" => wave_backlog(&built, &sessions),
             "task-review" => task_review(&built),

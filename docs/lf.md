@@ -392,10 +392,10 @@ is omitted. A plan published by an older build to an unconfigured personal ref
 moves to `shared/main` on the first save after upgrade, with its identifiers,
 comments and ownership; the old ref stays on the remote until you delete it with
 `git push origin :<ref>`. Machines still on an older build keep publishing to
-their personal ref until they upgrade. Every machine uses the selected transport independently.
-Linear unavailability leaves saves buffered locally; it never switches to Git. All Tasks in a Linear
-repository are queued for publication, including Tasks created offline. Retry a
-specific Task with `lf task sync <task>`: it publishes the saved Project/Task
+their personal ref until they upgrade. Every machine uses the selected transport
+independently. Linear unavailability leaves saves buffered locally; it never
+switches to Git. All Tasks in a Linear repository are queued for publication,
+including Tasks created offline. Retry a specific Task with `lf task sync <task>`: it publishes the saved Project/Task
 identity before synchronizing state, fields, and comments. An uncertain creation remains
 pending instead of silently creating a duplicate. To deliberately retry an
 uncertain issue creation, use `lf task sync <task> --retry-creation`. This reuses

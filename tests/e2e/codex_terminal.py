@@ -510,7 +510,7 @@ trust_level="trusted"
         ("session_start", int(wrapped) + 1, "compact", "__context-block --moment compact", 30),
         ("user_prompt_submit", 0, None, "__context-block --moment tool", 30),
         ("post_tool_use", 0, None, "__context-block --moment tool", 30),
-        ("stop", int(wrapped), None, "__planning-check", 10),
+        ("stop", int(wrapped), None, "__context-block --moment stop", 10),
     ]:
         declaration = {
             "event_name": event,
@@ -649,12 +649,11 @@ trust_level="trusted"
             "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL"
         ).fetchone()[0]
         callbacks = database.execute(
-            "SELECT command, exit_code, error FROM processes "
-            "WHERE command LIKE '%__context-block%' OR command LIKE '%__planning-check%'"
+            "SELECT command, exit_code, error FROM processes WHERE command LIKE '%__context-block%'"
         ).fetchall()
     assert len(callbacks) >= 8, callbacks
     assert all(code == 0 and error is None for _, code, error in callbacks), callbacks
-    assert sum("__planning-check" in command for command, _, _ in callbacks) == 2, callbacks
+    assert sum('"--moment","stop"' in command for command, _, _ in callbacks) == 2, callbacks
     assert any(b"NATIVE_TOOL_DONE" in request for request in Model.requests)
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed

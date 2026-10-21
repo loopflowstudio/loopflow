@@ -1066,17 +1066,6 @@ fn spawn_cron_target(
     }
     let stderr = stdout.try_clone()?;
     let mut command = Command::new(&spec.lf_path);
-    if let Some(file) =
-        execution.filter(|_| receipt.flow == "release-run" && receipt.source != CronSource::Manual)
-    {
-        use std::os::fd::AsRawFd;
-        command.args([
-            "--__cron-receipt",
-            receipt.id.as_str(),
-            "--__cron-lock-fd",
-            &file.as_raw_fd().to_string(),
-        ]);
-    }
     command.args(&spec.command);
     command
         .current_dir(&spec.working_directory)
@@ -1098,6 +1087,13 @@ fn spawn_cron_target(
         use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let fd = file.as_raw_fd();
+        if receipt.flow == "release-run" && receipt.source != CronSource::Manual {
+            let execution = accounting::CronExecution {
+                receipt_id: receipt.id.to_string(),
+                lock_fd: fd,
+            };
+            command.env(accounting::CRON_EXECUTION_ENV, execution.to_env());
+        }
         // SAFETY: the parent keeps the file alive until spawn returns. The child
         // only changes an fd flag with an async-signal-safe syscall before process.
         unsafe {

@@ -121,11 +121,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
             unreachable!("named definitions are skills or Flows")
         }
     };
-    let mut args = cli.step_args();
-    if let Some(wave) = &cli.wave {
-        args.extend(["--wave".to_owned(), wave.clone()]);
-    }
-    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
+    let args = task_run_args(cli, issue, owner, flow);
     let lf = crate::os_process::resolve_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
@@ -174,6 +170,16 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
     }
 }
 
+/// The Flow child a Task run starts.
+fn task_run_args(cli: &Cli, issue: &str, owner: &str, flow: &str) -> Vec<String> {
+    let mut args = cli.step_args();
+    if let Some(wave) = &cli.wave {
+        args.extend(["--wave".to_owned(), wave.clone()]);
+    }
+    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
+    args
+}
+
 /// Drive the Flow in this process, bracketed by flow journal events.
 fn execute(
     flow_name: &str,
@@ -215,9 +221,8 @@ fn execute(
             .record_flow_process(
                 &running.process,
                 &crate::flow::graph::FlowGraph::new(flow_name, items),
-                running.task.as_ref(),
             )
-            .context("could not record the Flow and start its Task; no steps launched")?;
+            .context("could not record the Flow; no steps launched")?;
         drop(admission);
         let outcome = drive(&running, accounts).await?;
         // A step that completed its Task could not clean up under its own live
@@ -463,13 +468,9 @@ impl RunningFlow<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(flow_process::FLOW_ID_ENV, self.process.as_str());
-        if let Some((id, fd)) = self
-            .launcher
-            .cron_receipt
-            .as_ref()
-            .zip(self.launcher.cron_lock_fd)
+        if let Some(fd) =
+            crate::ops::cron::accounting::CronExecution::from_env().map(|cron| cron.lock_fd)
         {
-            command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
             // SAFETY: the cron launcher owns the descriptor throughout spawn;
             // fcntl preserves that exact capability in the step child.
             unsafe {
@@ -644,7 +645,6 @@ impl SkillExecutor for &RunningFlow<'_> {
             },
         )?;
         step_cli.skill_input = Some(input.path().to_path_buf());
-        // Each ordinary skill keeps the caller's mode and inherited terminal.
         let mut args = step_cli.step_args();
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {
@@ -749,7 +749,7 @@ fn print_step_progress(progress: Option<StepProgress>, name: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::render_pipeline_lines;
+    use super::{render_pipeline_lines, task_run_args};
     use crate::flow::ConcreteStep;
     use std::fs;
     use tempfile::tempdir;
@@ -903,5 +903,26 @@ mod tests {
         assert!(render_pipeline_lines(&items)
             .iter()
             .any(|line| line.contains("review-design [review:review_choice]")));
+    }
+
+    #[test]
+    fn flow_steps_run_headless_unless_asked_for_a_terminal() {
+        use clap::Parser;
+        let mode = |argv: &[&str]| {
+            let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
+            let args = task_run_args(&cli, "INF-1", "flow", "autonomous");
+            assert!(
+                args.ends_with(&["--task", "INF-1", "flow", "--", "autonomous"].map(String::from))
+            );
+            (
+                args.contains(&"--batch".to_owned()),
+                args.contains(&"--interactive".to_owned()),
+            )
+        };
+        assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (true, false));
+        assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
+        assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
+        let ship = crate::lf::Cli::try_parse_from(["lf", "ship"]).unwrap();
+        assert!(ship.step_args().contains(&"--batch".to_owned()));
     }
 }

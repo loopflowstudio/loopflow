@@ -875,9 +875,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
-            loopflow::lf::commands::placement::wave(repo, command)
-        }
+        WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -910,17 +908,25 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Admission {
-            issue,
-            claim,
-            request,
-            json,
-        } => {
-            loopflow::ops::task_admission::command(issue, claim.as_ref(), request.as_deref(), *json)
+        TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
+            use loopflow::ops::task_ownership::{change, render, OwnershipChange};
+            let requested = match command {
+                TaskCommand::Claim { .. } => OwnershipChange::Claim,
+                _ => OwnershipChange::Unclaim,
+            };
+            let ownership = change(repo, issue, requested)?;
+            if *json {
+                println!("{}", serde_json::to_string(&ownership)?);
+            } else {
+                println!("{}", render(&ownership));
+            }
+            Ok(())
         }
         TaskCommand::Shell { .. }
         | TaskCommand::WatchFiles { .. }
-        | TaskCommand::Location { .. } => unreachable!("location reads precede admission"),
+        | TaskCommand::Location { .. } => {
+            unreachable!("location reads precede repository commands")
+        }
         TaskCommand::Automation { json } => {
             let status = loopflow::ops::task_automation::status(repo)?;
             if *json {
@@ -1089,8 +1095,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
                     }
+                    if let Some(ownership) = &status.ownership {
+                        println!("{}", loopflow::ops::task_ownership::render(ownership));
+                    }
                 } else {
-                    println!("No owned Task; retained observations do not establish ownership.");
+                    println!("No saved Task; retained observations are not Work.");
                 }
                 if let Some(at) = status.observed_at {
                     println!("Observed at: {at}");
@@ -1469,9 +1478,7 @@ fn run() -> anyhow::Result<()> {
             || matches!(
                 cli.command,
                 Some(Commands::Task {
-                    cmd: TaskCommand::Location { .. }
-                        | TaskCommand::WatchFiles { .. }
-                        | TaskCommand::Admission { claim: None, .. }
+                    cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
         if preview {
@@ -1513,6 +1520,17 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    // Provider hooks keep the callbacks their launching lf wrote. A removed
+    // one must not fail: Claude treats exit 2 at Stop as "keep working".
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf: ignoring `{}`, a hook from an earlier lf; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
@@ -1567,9 +1585,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. }
-                | TaskCommand::WatchFiles { .. }
-                | TaskCommand::Admission { claim: None, .. }
+            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
         })
     );
     if cli.context || cli.explain || planning_read || location_read {
@@ -1617,23 +1633,6 @@ fn run() -> anyhow::Result<()> {
     loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
     if cli.context || cli.explain {
         return preview_invocation(&cli, &args);
-    }
-    if let Some(Commands::Task {
-        cmd:
-            TaskCommand::Admission {
-                issue,
-                claim: None,
-                request,
-                json,
-            },
-    }) = &cli.command
-    {
-        return loopflow::ops::task_admission::command(
-            issue,
-            None,
-            request.as_deref(),
-            *json || cli.json,
-        );
     }
     if let Some(Commands::Task {
         cmd:
@@ -1706,12 +1705,6 @@ fn run() -> anyhow::Result<()> {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
         }
-    }
-    if let Some(Commands::SessionTitle { provider }) = &cli.command {
-        // Prompt callbacks must not enter ordinary admission or wait for its
-        // durable-write budget. Keep only bounded, noninitializing observation.
-        journal::observe_process_within(&args, std::time::Duration::from_millis(100));
-        return loopflow::lf::commands::session_history::name_native_session(provider);
     }
     ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
@@ -2150,11 +2143,27 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    // Provider hooks name the stable installed entry, which an upgrade can
+    // replace under a running Session. An internal command this release no
+    // longer has came from a hook an older lf wrote; skip it rather than fail
+    // the provider's turn, since a Stop hook's error blocks stopping.
+    if let Some(Commands::External(parts)) = &cli.command {
+        if parts[0].starts_with("__") {
+            eprintln!(
+                "lf {}: skipped an internal hook this lf version no longer has; restart the Session to refresh its hooks",
+                parts[0]
+            );
+            return Ok(());
+        }
+    }
     // Own direct conversations and Flows. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
         cli.command,
-        None | Some(Commands::External(_) | Commands::Inline { .. } | Commands::Skill { .. })
+        None | Some(Commands::External(_) | Commands::Inline { .. })
+            | Some(Commands::Skill {
+                cmd: SkillCommand::External(_)
+            })
             | Some(Commands::Flow {
                 cmd: FlowCommand::External(_)
             })
@@ -2399,7 +2408,9 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Transport { cmd }) => loopflow::transport::run(cmd),
+        Some(Commands::TransportServe { terminal, argv }) => {
+            loopflow::transport::serve(argv, *terminal)
+        }
         Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
@@ -2424,12 +2435,6 @@ fn execute_command(
         Some(Commands::ContextBlock { delivery, moment }) => {
             loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment)
         }
-        Some(Commands::PlanningCheck { delivery }) => {
-            loopflow::lf::commands::context::check_planning(delivery.as_deref())
-        }
-        Some(Commands::SessionTitle { .. }) => {
-            unreachable!("title callbacks dispatch before command admission")
-        }
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Account {
             cmd,
@@ -2441,15 +2446,6 @@ fn execute_command(
             loopflow::lf::commands::account::run(cmd.as_ref(), *provider, *cached, *details, *json)
         }
         Some(Commands::Repo { cmd }) => match cmd {
-            loopflow::lf::RepoCommand::Release {
-                cmd: loopflow::lf::ReleaseCommand::Run { version, target },
-            } if cli.cron_receipt.is_some() => in_repo_runtime(args, |_| {
-                loopflow::lf::commands::ops::run_cron_release(
-                    version.as_deref(),
-                    target.as_deref(),
-                    cli,
-                )
-            }),
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
@@ -2476,6 +2472,11 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
+        Some(Commands::Machine {
+            cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
+        }) => in_directory_runtime(args, |repo| {
+            loopflow::lf::commands::machine_use::run(repo, cmd)
+        }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
             cmd:
@@ -2513,7 +2514,7 @@ fn execute_command(
         }
 
         Some(Commands::Wave {
-            cmd: cmd @ (WaveCommand::Rename { .. } | WaveCommand::Place { .. }),
+            cmd: cmd @ WaveCommand::Rename { .. },
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
             cmd: cmd @ WaveCommand::Workflow { .. },
@@ -2609,6 +2610,9 @@ fn execute_command(
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),
         },
+        Some(Commands::Disk { json, cmd }) => {
+            loopflow::lf::commands::disk::run(*json, cmd.as_ref())
+        }
         Some(Commands::History { feed, cmd }) => match cmd {
             Some(cmd) => loopflow::lf::commands::history::run(cmd),
             None => loopflow::lf::commands::activity::run(feed),

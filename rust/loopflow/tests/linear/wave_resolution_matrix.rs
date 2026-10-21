@@ -59,7 +59,8 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"], &["wave", "cron", "add"]];
 const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
 
 /// Membership changes name an explicit destination and preserve execution context.
-const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
+/// `machine use` names the Wave whose default it sets, else applies to the checkout.
+const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["machine", "use"]];
 
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.

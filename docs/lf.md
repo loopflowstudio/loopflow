@@ -35,8 +35,8 @@ lf repo new-chapter October --plan scratch/chapter-plan.json --json
 ```
 
 Use `lf wave new-chapter <wave> October --plan scratch/chapter-plan.json` for one
-Wave. Retry the same retained input after interruption. Started work carries its
-identity; unreviewed backlog stays in its prior Project. Admit new Task candidates
+Wave. Retry the same retained input after interruption. Work with an ownership entry
+carries its identity; unreviewed backlog stays in its prior Project. Admit new Task candidates
 separately after creation. Desktop’s **Realign Projects…** previews a retained plan
 file and applies the exact bytes reviewed. See [planning](architecture/planning.md)
 for the input format.
@@ -71,13 +71,12 @@ from its saved conversation history. Missing history leaves the Session unchange
 
 ```bash
 lf -i -a claude flow my-flow
-lf -b -a claude flow my-flow # run every step headlessly
 ```
 
 Each skill opens in the native agent conversation. Exit the conversation
 successfully to advance to the next step; an interrupted or failed step stops
-the Flow. Without either flag, an attached terminal selects interactive mode,
-just like a standalone skill. Task Flow launches preserve the same choice.
+the Flow. Without `-i`, every step runs headlessly, even from a terminal.
+Task Flow launches follow the same rule.
 
 ## Select where work happens
 
@@ -130,19 +129,61 @@ An explicit Task from another repository is rejected rather than silently retarg
 moves local Workflows or transfers a started Task to another Machine.
 
 ```bash
-lf task admission TASK --json    # inspect its first-start coordinator and owner
-lf task checkout TASK            # claim first execution before allocating files
+lf task claim TASK               # you, on this Machine
+lf machine use mini --task TASK  # same person, on mini
+lf task unclaim TASK             # unowned again, history intact
+lf task status TASK --json       # ownership: {owner, superseded_by, log}
 ```
 
-A new Task keeps its creating Machine as its first-start coordinator. Checkout
-and run request one permanent execution owner there. Concurrent requests and
-retries recover the same owner; later delegation cannot transfer that reservation.
-Planning exchanges the coordinator identity, never the execution claim. Both
-Machines need their configured connections; an unavailable coordinator refuses
-before checkout allocation. A confirmed claim needs no renewal. Historical shared
-Tasks without an established coordinator still refuse; local absence is not a claim.
-`task admission TASK --claim MACHINE_ID` explicitly reserves first execution
-without preparing a checkout. There is no automatic expiry, takeover or failover.
+A Task is owned by a person on a Machine, or unowned. `task checkout` and `task run`
+claim an unowned Task when they allocate its checkout. Handoff needs only the
+target's identity, not a connection. Completion, abandonment and reopening leave
+ownership alone; a Done Task shows its last owner.
+
+```bash
+lf machine use mini infrastructure            # this Wave's new Tasks and its Session
+lf machine use laptop infrastructure --session  # only the Wave Session
+lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf machine list                               # each Machine with the defaults naming it
+```
+
+A Wave's Tasks and its Session each have their own Machine: `--tasks` or
+`--session` sets one, neither sets both, and each unset one is this Machine.
+Your Wave Machine is a personal choice, never committed. It is stored in this
+Machine's local store and copied to your other Machines (`lf machine add`) over
+`lf --machine`, so the laptop knows to launch there and mini knows to receive the
+runs. An unreachable Machine gets a warning; rerun later. An unowned Task resolves
+through its Wave, then parent Waves, then this Machine, so one Machine needs no
+setup. `lf cron` installs a Wave's crons for the same Machine.
+
+Setting the Session Machine moves your Wave Session: the old Machine completes its Wave primary
+Session and the new Machine admits a fresh one, with fresh Wave context as with
+`--fresh`; native provider history stays on the old Machine.
+`lf session connect --wave <wave>`, and a bare connect in the Wave's worktree or
+the repository, route to your Session Machine for it.
+
+A Task's Machine is the one in its claim. Changing the Wave Machine moves no
+existing Task; `lf machine use <machine> --task <task>` moves one, completing its primary
+Session on the old Machine. The new Machine admits one on first connect.
+
+Claim, handoff, unclaim, run and checkout pick their writer within your own Machines:
+
+| Task is | The command |
+|---|---|
+| Yours, on another of your Machines | Reruns there over `lf --machine` |
+| Unowned | Writes your claim on your Wave Machine |
+| Someone else's | Writes your claim on your own Wave Machine; the later claim wins |
+
+Nothing routes to another person's Machine. You cannot hand off or unclaim
+someone else's claim.
+
+Each change is posted as a Task comment ("Jack Heart claimed this on mini") that
+rides ordinary comment delivery to Linear or Git planning. The Machine follows the
+person for information only; nothing another person does depends on it. With Linear, a claim
+assigns the Task to that Machine's Linear viewer and moves backlog to started;
+unclaim clears the assignee. When another Machine claims later, nothing is
+cancelled: the earlier claimant keeps its claim locally, `lf task status` reports
+"Also claimed later by Kim on mini" and its live Sessions get a steer.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
@@ -602,7 +643,7 @@ replaying the Flow. Completion requires a verified merge when the Task has a PR.
 status without moving the Workflow or stopping Processes; reopening supersedes
 an older completion request. `lf task reopen EXP-12` does the same locally,
 including offline: it returns planning to unstarted and keeps the PR, checkout,
-Started evidence and Workflow position. Restart the
+ownership and Workflow position. Restart the
 Workflow separately when needed; reopening does not start work. A PR-less
 Task can finish with research files or commits; they do not create a PR
 requirement. Old Session turns and unknown process exits cannot veto completion.
@@ -631,7 +672,7 @@ crons:
 ```
 
 ```bash
-lf cron preflight                  # validate configuration and Machine placement
+lf cron preflight                  # validate configuration and Wave Machines
 lf cron sync                       # explicitly install the configured list
 lf cron list --wave product         # filter by the command's Work selector
 lf cron list --task EXP-12
@@ -653,7 +694,7 @@ lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
-Checks continue with Desktop closed while the placed Machine's user is logged in.
+Checks continue with Desktop closed while this Machine's user is logged in.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 
@@ -758,9 +799,9 @@ other command shapes fail before effects. Combine both flags for identity plus i
 `task run --explain` also reports the intended Workflow edge (or ad-hoc Flow),
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
-and `unavailable`; no Workflow is taken up or moved. Started Tasks use recorded
-execution; unstarted Tasks show effective delegation as a **proposed destination**,
-not proof of peer-exclusive first start. Remote execution state is unavailable
+and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the
+owner's Machine; unowned Tasks show your Wave Machine as a **proposed destination**,
+with its source (`owning_machine:wave:<name>` or `this_machine`). Remote execution state is unavailable
 without reading that Machine. Completion, future checkout and provider checks are
 not fabricated; a real run checks them again.
 
@@ -771,7 +812,7 @@ Omit TASK to use `--task` or checkout inference. JSON separates `resolution`,
 `action`, `impediments` and `unavailable`. Local path/branch proposals reserve
 nothing: previews never fetch, allocate a checkout, take a lease, change a stack
 or contact a provider. Missing branch recovery and finalization remain unperformed;
-previews read admission without claiming it.
+previews read ownership without claiming.
 
 `task workflow move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
@@ -791,8 +832,8 @@ a connected thread read would refresh Linear, but preview never does.
 Missing registry, cold acquisition, Wave/Project initialization, comment provenance
 and synchronization delivery remain explicit uncertainties. No preview saves,
 imports, registers, refreshes or synchronizes anything; execution validates again.
-Refiling reports the destination Wave/current Project and recorded-work or Machine
-placement restrictions without registering or locking anything. File-save preview
+Refiling reports the destination Wave/current Project and recorded-work
+restrictions without registering or locking anything. File-save preview
 reads the draft from stdin, reports its byte count and expected revision, and uses
 the save owner's path, text and pinned-file checks. It writes neither files nor
 recovery receipts. Concurrent changes and publication permissions remain unreserved.
@@ -888,7 +929,7 @@ lf desktop list --json                       # read an already-running Mac app
 Explanation reads local records without allocating a checkout, creating a plan,
 starting a provider or contacting peers. Each identity is bound (with its source),
 unbound or unavailable. Machine identifies the reader; Execution Machine comes
-from recorded checkout evidence, never delegation substituted for a missing
+from recorded checkout evidence, never the Wave Machine substituted for a missing
 execution observation. The timestamp dates this read, not planning freshness or
 permission to start. Process checkout resolution describes current Work at that
 location, not historical usage attribution. Ordinary `lf context` still reads
@@ -1101,7 +1142,7 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ## Work on another machine
 
 ```bash
-lf machine add mini --repo '~/src/project'
+lf machine add mini
 lf machine status mini
 lf machine connect mini codex work@example.com
 lf --machine mini --repo loopflow session list
@@ -1147,11 +1188,10 @@ running older providers can retain old hook paths; this does not rewrite their
 environment or interrupt them. An installed Desktop update still requires the
 supported installation handoff; source tests do not prove that live handoff.
 
-Known Task launches resolve recorded checkout Machine before delegation. The
-cross-machine path requires the same repository plan to be explicitly bound at
-the destination. Peer selection/exchange and complete remote execution observation
-are still under development; missing local execution is not proof of globally
-unstarted work.
+Task launches route to the Machine in your claim, or your Wave Machine for an
+unowned Task. The cross-machine path requires the same repository plan to be explicitly
+bound at the destination. Complete remote execution observation is still under
+development; missing local execution is not proof of globally unstarted work.
 
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and

@@ -710,7 +710,7 @@ fn empty_release_check_returns_through_process_completion() {
     let gh = bin.join("gh");
     std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let output = command(home.path(), repo.path(), &["release", "check"])
+    let output = command(home.path(), repo.path(), &["repo", "release", "check"])
         .env(
             "PATH",
             format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),

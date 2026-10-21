@@ -121,6 +121,21 @@ fn every_recipe_builds_a_world_lf_reads() {
             !sessions.as_array().unwrap().is_empty(),
             "{recipe} has no Sessions"
         );
+        // A Task's Session history belongs to the Task, so Desktop's Task
+        // history reads something to decode.
+        for task in sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|session| session["task_ids"].as_array().unwrap())
+        {
+            let task = task.as_str().unwrap();
+            let history = built.lf(&["usage", "--days", "0", "--task", task, "--json"]);
+            assert!(
+                !history.as_array().unwrap().is_empty(),
+                "{recipe}: Task {task} has a Session but no history"
+            );
+        }
         match recipe {
             "wave-backlog" => wave_backlog(&built, &sessions),
             "task-review" => task_review(&built),
@@ -128,6 +143,63 @@ fn every_recipe_builds_a_world_lf_reads() {
             _ => {}
         }
     }
+}
+
+#[test]
+fn lifecycle_world_reports_each_state() {
+    let built = Built::new("lifecycle");
+    let shown = built.lf(&["wave", "show", "--all", "--json"]);
+    let tasks = shown["tasks"]["items"].as_array().unwrap();
+    let task = |name: &str| {
+        tasks
+            .iter()
+            .find(|task| task["task"]["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is missing"))
+    };
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    for (name, days) in [
+        ("Shipped yesterday", 1),
+        ("Shipped this week", 5),
+        ("Shipped last fortnight", 12),
+        ("Shipped last quarter", 40),
+    ] {
+        let completed_at = time::OffsetDateTime::parse(
+            task(name)["task"]["completed_at"].as_str().unwrap(),
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap()
+        .unix_timestamp();
+        assert!(
+            (now - days * 86_400 - completed_at).abs() < 3_600,
+            "{name} completed at {completed_at}"
+        );
+    }
+    for name in [
+        "Shipped yesterday",
+        "Shipped this week",
+        "Shipped last fortnight",
+        "Shipped last quarter",
+        "Abandoned attempt",
+    ] {
+        assert_eq!(task(name)["condition"]["state"], "clear", "{name}");
+    }
+    assert_eq!(task("Paused mid-flight")["runtime"]["status"], "paused");
+    assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
+    let canceled = task("Canceled upstream");
+    assert_eq!(canceled["task"]["state"], "canceled");
+    assert_eq!(canceled["runtime"]["status"], "not_ready");
+    // Started local work survives an upstream cancel until someone disposes of it.
+    assert_eq!(canceled["condition"]["unresolved_execution"], true);
+    let lost = task("Lost checkout");
+    assert_eq!(lost["condition"]["local_progress"]["state"], "missing");
+    assert_eq!(lost["condition"]["state"], "blocked");
+    let mut standalone: Vec<_> = tasks
+        .iter()
+        .filter(|task| task["task"]["wave_id"].is_null())
+        .map(|task| task["task"]["name"].as_str().unwrap())
+        .collect();
+    standalone.sort_unstable();
+    assert_eq!(standalone, ["Standalone fix", "Standalone idea"]);
 }
 
 #[test]
@@ -158,14 +230,14 @@ fn task_named<'a>(tasks: &'a [Value], name: &str) -> &'a Value {
 /// Backlog, open work and the Wave's conversation together.
 fn wave_backlog(built: &Built, sessions: &Value) {
     let tasks = built.wave_tasks("desktop");
-    let started = |item: &&Value| item["runtime"]["started"] == true;
-    let unstarted = tasks.iter().filter(|item| !started(item)).count();
+    let owned = |item: &&Value| item["runtime"]["owner"].is_object();
+    let unowned = tasks.iter().filter(|item| !owned(item)).count();
     let open = tasks
         .iter()
-        .filter(started)
+        .filter(owned)
         .filter(|item| item["task"]["completed"] == false)
         .count();
-    assert!(unstarted >= 7, "{unstarted} unstarted Tasks");
+    assert!(unowned >= 7, "{unowned} unowned Tasks");
     assert!(open >= 4, "{open} open Tasks");
     let merged = task_named(&tasks, "Show PR state on Task rows");
     assert_eq!(merged["pr"]["phase"], "merged");

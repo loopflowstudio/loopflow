@@ -1003,7 +1003,7 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        workspaces.selectedWork != nil && (currentKey.kind != .task || fileTask?.task.runtime?.started == true || workspace.presentation.content == .terminals)
+        workspaces.selectedWork != nil && (currentKey.kind != .task || fileTask?.task.runtime?.owner != nil || workspace.presentation.content == .terminals)
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1156,7 +1156,7 @@ struct SessionsContentView: View {
         let active = currentKey == key
         let crumb = active ? model.breadcrumb : model.visibleWork.breadcrumb(
             selection: key.reference, sessionId: entry.presentation.selectedSessionId)
-        let terminals = key.kind != .task || task?.task.runtime?.started == true || entry.presentation.content == .terminals
+        let terminals = key.kind != .task || task?.task.runtime?.owner != nil || entry.presentation.content == .terminals
         let context = workspaces.openWork.count > 1
         return VStack(spacing: 0) {
             if context {

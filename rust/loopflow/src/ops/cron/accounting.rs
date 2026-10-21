@@ -14,10 +14,29 @@ use super::{calendar, CronOutcome, CronReceipt, CronSource, CronSpec};
 use crate::durable::{CronReceiptId, MachineId};
 use crate::ops::{OpsError, OpsResult};
 
+/// `<receipt>:<fd>`: the receipt a scheduled release accounts to and the job
+/// lock its launcher holds. Flow steps inherit it with the descriptor.
+pub(crate) const CRON_EXECUTION_ENV: &str = "LF_CRON_EXECUTION";
+
 #[derive(Debug)]
 pub(crate) struct CronExecution {
     pub receipt_id: String,
     pub lock_fd: i32,
+}
+
+impl CronExecution {
+    pub(crate) fn from_env() -> Option<Self> {
+        let value = std::env::var(CRON_EXECUTION_ENV).ok()?;
+        let (receipt_id, fd) = value.rsplit_once(':')?;
+        Some(Self {
+            receipt_id: receipt_id.to_owned(),
+            lock_fd: fd.parse().ok()?,
+        })
+    }
+
+    pub(crate) fn to_env(&self) -> String {
+        format!("{}:{}", self.receipt_id, self.lock_fd)
+    }
 }
 
 pub(crate) fn validate_execution(

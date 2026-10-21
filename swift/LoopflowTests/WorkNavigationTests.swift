@@ -57,7 +57,7 @@ struct WorkNavigationTests {
             var inventory = try #require(waves[0]["tasks"] as? [String: Any])
             var tasks = try #require(inventory["items"] as? [[String: Any]])
             var runtime = try #require(tasks[0]["runtime"] as? [String: Any])
-            runtime["started"] = started
+            runtime["owner"] = started ? ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any] : NSNull()
             runtime["status"] = status
             tasks[0]["runtime"] = runtime
             inventory["items"] = tasks
@@ -474,9 +474,11 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
-        for member in task.wave!.tasks.items {
+        for member in task.wave!.tasks.items where member.id != "issue-later" {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(member.id)")
         }
+        // Completed work leaves the current plan; Project history keeps it.
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }
 

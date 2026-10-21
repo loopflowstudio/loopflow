@@ -16,7 +16,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
-use crate::durable::{Author, TaskState, WorkRef};
+use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::store::rows::now_unix;
@@ -114,22 +114,6 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     };
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
-    let repo: String = conn.query_row(
-        "SELECT repo FROM repository_plans WHERE id=?1",
-        [task.repository_id.as_str()],
-        |row| row.get(0),
-    )?;
-    let authority = crate::durable::TaskAdmissionAuthority {
-        machine_id: super::durable::map_local_machine(conn)?.id,
-        repository_id: super::repositories::ensure_repository_in(conn, &repo)?,
-    };
-    planning_write::local(
-        conn,
-        &crate::work::edit::WorkEdit::for_target(
-            task.id.as_str(),
-            &[Edit::TaskAdmissionAuthority(Some(authority))],
-        ),
-    )?;
     conn.execute(
         "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id)
          VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
@@ -180,18 +164,10 @@ impl SqliteStore {
             super::durable::require_selected_project(&tx, project)?;
         }
         require_task_planning(&tx, &task)?;
-        super::task_admission::require_admission_in(&tx, &task.id)?;
+        // Allocating a checkout is the actual work reservation: it claims an
+        // unowned Task, and refuses one owned on another Machine.
+        super::task_ownership::claim_in(&tx, task_id)?;
         let local = super::durable::map_local_machine(&tx)?.id;
-        let destination = match super::task_admission::owner_in(&tx, task_id)? {
-            Some(owner) => owner,
-            None => super::durable::placement_in(&tx, &WorkRef::Task(task_id.clone()))?.machine_id,
-        };
-        if destination != local {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Task {task_id} is delegated to Machine {}; no local checkout was allocated",
-                destination,
-            )));
-        }
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
         task.branch = pr.branch.clone();
@@ -614,9 +590,7 @@ impl SqliteStore {
                     "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                     [pr.task_id.as_str()],
                 )?;
-                if super::durable::task_state_in(&tx, &pr.task_id)? == TaskState::Done {
-                    super::task_state_delivery::queue_in(&tx, &pr.task_id, "unstarted")?;
-                }
+                // A new PR respects completion; only `lf task reopen` uncompletes.
             }
         }
         insert_task_pr(&tx, pr)?;
@@ -761,6 +735,7 @@ impl SqliteStore {
                 follow_ups_created.push(id);
             }
         }
+        super::task_ownership::reassert_in(&transaction, task_id)?;
 
         let Some((last_revision, last_title, last_description)) = existing else {
             // Baseline the definition; existing comments were imported above.
@@ -1136,17 +1111,6 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
-    if task.worktree.is_none()
-        && super::repositories::task_is_shared_in(conn, &task.id)?
-        && super::task_admission::authority_in(conn, &task.id)?.is_none()
-    {
-        // Planning exchange excludes execution. Neither a local absence nor a
-        // negative peer reading can reserve first start across Machines.
-        return Err(StoreError::InvalidAuthority(
-            "shared Task first-start admission is unavailable; planning is retained and no checkout was allocated"
-                .into(),
-        ));
-    }
     let (state, completed): (Option<String>, bool) = conn.query_row(
         "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
         [task.id.as_str()],
@@ -2192,6 +2156,10 @@ impl SqliteStore {
             )?;
         }
         insert_task_pr(&tx, pr)?;
+        if task.worktree.is_some() {
+            // A seeded checkout is placed work, which claims the Task like `place_task`.
+            super::task_ownership::claim_in(&tx, &task.id)?;
+        }
         seed_task_linear_observation(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;

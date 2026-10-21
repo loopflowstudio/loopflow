@@ -1,39 +1,36 @@
-# v0.14.10
+# v0.14.14
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.10 keeps your conversations when Desktop doesn't. Before this release, closing a repository window, switching Tasks or restarting the Mac could cut you off from a running Session. Getting back took several manual reattaches, and after a reboot you had to find each interrupted Session yourself. Now Desktop keeps each repository's panes and drafts until it quits and reattaches to running Sessions without restarting them. At launch it brings back every conversation a reboot or crash interrupted. Upgrade if you keep several Tasks open at once or have lost a Session to a restart. (#1605, LOO-416)
+v0.14.14 makes Flows behave the same however you start them, and stops finished work from asking for your attention. A Flow's steps now run headless by default even when launched from a terminal, matching what Task runs already did. Done and abandoned Tasks now read as clear rather than blocked by old failed runs, and Desktop's Wave inventory lists only current work. Older versions keep working against the store; this release has no compatibility break.
 
-## Interrupted conversations come back
+## Flows run headless unless you ask for a terminal
 
-`lf resume --all` reopens every Session whose execution owner is gone without recording an exit. A reboot, crash or kill leaves Sessions in that state. Sessions you exited deliberately are left alone. Desktop runs the command at launch, so after a restart your conversations are already back.
+Before this release, a standalone `lf flow` started from a terminal opened every step as an interactive conversation, while Task runs already defaulted to headless. Whether a Flow stopped for you depended on how you launched it. You take part in a Task at its Workflow nodes, in the Task conversation, not inside the Flow steps between them, so every Flow now runs its steps headless. (#1628)
 
-- `lf resume --all` resumes each Session through the ordinary `lf resume` path, in a new owner with no viewer. It skips Sessions you exited through the provider or detached from with Ctrl+].
-- The output lists each Session as resumed, still starting or failed. It also flags any turn the restart cut off. That turn is not replayed.
-- It waits up to 20 seconds for each Session's owner to bind. If the owner hasn't bound by then, the Session is reported as still starting.
-- Leaving a Session now prints the `lf resume` command that returns to it, on every harness. A resume that fails during launch is logged rather than silently dropped.
+- One rule now applies to standalone Flows, Task edge runs and commands like `lf ship`: each step gets `--batch` unless you pass `-i`.
+- `lf -i flow my-flow` opens each step in the native agent conversation and advances when you exit it.
+- `-b` is no longer needed for Flows. `docs/lf.md` and `docs/authoring.md` describe the new default.
 
-## Desktop holds its place
+## Finished Tasks read clear
 
-Desktop now treats a repository window as a view onto work that keeps running, not as the owner of that work. Closing the window, switching Tasks or showing a pane again no longer costs you anything.
+A done or abandoned Task with nothing still running now has condition `clear` ("Task is complete" / "Task is abandoned"). Before, a failed run in its history or a missing worktree could make it show `blocked`. Tasks whose execution is still unresolved keep their current condition, so a Task canceled upstream with unfinished local work stays visible until someone deals with it. (#1621)
 
-- Closing a repository window keeps its panes, selected Work and file drafts until Desktop quits. Reopening a repository you have used before shows that content immediately, even while repository lookup is still running or has failed.
-- **Resume** in Desktop now does the same thing as `lf resume`. It attaches to a conversation that is still running, or reopens its saved provider history.
-- `lf session attach --if-free` attaches only if no other viewer has input control, and never takes control from one. `lf session attach --prepare --json` returns an attach-only command without starting a provider. Desktop uses both to restore panes, so a pane becoming visible never takes input away from anyone.
-- CLI requests from Desktop time out after 30 seconds, and canceling one stops only that request. When a change times out, its outcome is treated as unknown and the change is never retried automatically.
+- **Desktop inventory shows current work only.** The Owned/Unowned inventory in a Wave now leaves out settled Tasks unless their execution is still unresolved. Settled Tasks stay reachable from Project history and the sidebar. Paused Tasks drop out of the sidebar.
+- **One definition of "current".** The Wave inventory and the completed-history filter now agree on which Tasks count as current.
 
-## Conversations exist from the moment work does
+## Realistic lifecycle data for testing
 
-Creating a Task now saves its primary conversation in the same step. Wave admission does the same for the Wave and repository conversations. Saving a conversation starts no provider and doesn't mark the Task Started. Both happen on the first input reserved by `lf connect`. This replaces the earlier step that prepared the first input in advance.
+`lf-world build lifecycle <dir>` builds a `release` Wave from real `lf` operations. It includes completions 1, 5, 12 and 40 days old (one with its checkout removed), a paused Task, an abandoned Task, a Task canceled upstream with started work, a lost checkout, one Task in progress, one not started, and two standalone Tasks with no Wave. Rust and Swift tests now check the CLI and Desktop against this world, so drift between them shows up in tests rather than in use. (#1621)
 
-## Limits
-
-- If Desktop itself dies, its in-app state is lost. The Session, its native history and a repaint come back, but live input and exact scrollback do not. The owner keeps a bounded vt100 text state, not a full terminal snapshot.
-- A turn cut off mid-flight is flagged and never replayed. With Codex, leaving during the `after-thread` startup window stops the provider, so a first turn it had already accepted can lose its input.
-- Not included: preserving layouts across Desktop installations and keeping a durable record of the intended layout. That work is tracked as LOO-497 and LOO-489. Full acceptance of LOO-416 still needs that integration, plus a measured check that native Sessions survive in an installed build.
+- Swift world tests share one `BuiltWorld` fixture that runs `lf-world` and the source `lf` in an isolated environment.
+- `TESTING.md` now builds `lf-world` alongside `lf` before the Swift tests.
 
 ## Operational notes
 
-- **Schema migration:** the `session_admission` draft is released with this version. It stores the conversations that Task creation and Wave admission save. Seed fixtures for the previously released schema live at `tests/fixtures/migrations/conversation_admission_released.sql`.
-- **New CLI surface:** `lf resume --all`, `lf session attach --if-free` and `lf session attach --prepare --json`.
-- **Verification:** new Rust tests cover `resume --all` flagging a cut-off turn and stopping the owners it resumes. New transport tests cover `--if-free` and attach-only preparation. On the Swift side, `WorkspaceRetentionTests` checks that twelve Work layouts and their drafts survive window closure. These are twelve layouts, not twelve live providers. `SessionsStoreTests` and the local Wave agent launcher tests were also updated.
+- **Interactive Flow steps need `-i`.** If you relied on a bare `lf flow my-flow` from a terminal to open each step interactively, run `lf -i flow my-flow` instead.
+- **Not yet exercised end to end.** Neither PR's suggested walkthrough was performed: comparing `lf -a claude flow my-flow` with `lf -i -a claude flow my-flow` from a terminal (#1628), and pointing Desktop at a built `lifecycle` world to check the inventory and 7-day history (#1621).
+
+## Small changes
+
+- `scripts/disk-cleanup.sh` runs `uv cache clean`/`prune` with `UV_LOCK_TIMEOUT=5`, so cleanup gives up after a few seconds instead of hanging when another uv process holds the cache lock. (#1628)

@@ -1,4 +1,6 @@
 //! Context callbacks carry provider authority, independently of the attached client.
+use std::path::Path;
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
@@ -142,6 +144,16 @@ pub(super) fn save_in(
             text
         ],
     )?;
+    // This transaction holds the write lock, so a hook that checks after this
+    // touch waits for the commit before reading pending steers.
+    if let Some(home) = conn
+        .path()
+        .filter(|path| !path.is_empty())
+        .and_then(|path| Path::new(path).parent())
+    {
+        crate::steer::touch(&crate::steer::latest_marker(home))
+            .map_err(|error| invalid(format!("Mark saved steer for hooks: {error}")))?;
+    }
     let result = conn.query_row(
         &format!("SELECT {COLUMNS} FROM steers p WHERE source=?1 AND revision=?2"),
         params![source, revision],

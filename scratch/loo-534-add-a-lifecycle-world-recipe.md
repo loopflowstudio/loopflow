@@ -219,6 +219,30 @@ Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
 unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
 
+### Name "current" once — next (concept review, 2026-10-21)
+
+The accepted product word is *current* ("A Wave pairs its conversation with all
+current planned and started Tasks"). Desktop spells it only as the default
+`TaskHistoryFilter`'s first branch, so `WaveTaskGroups` builds a throwaway filter
+and passes an unread `now:` with a comment apologizing for it.
+
+1. Add `RoadmapTask.isCurrent` (`!task.isTerminal || condition.unresolvedExecution`)
+   beside `WaveTaskGroups` in `TaskHistoryFilter.swift`.
+2. `TaskHistoryFilter.includes` opens with that predicate; `WaveTaskGroups` filters
+   on it directly. No filter instance, no `now`, no comment. Behavior unchanged;
+   still one history filter (Forbidden outcomes hold).
+
+Focused check: `scripts/test_desktop.sh --filter
+'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
+
+Reviewed and kept: the Rust settled rung keys on runtime terminal state while
+Desktop's current keys on planning terminal state. They agree on every recipe
+row: completion and abandonment set both, and the upstream-canceled Task's
+unresolved execution keeps it current in Desktop and unsettled in Rust.
+`scratch/questions.md` entries are each settled by an accepted decision
+(LOO-489 Console retention, #1594's current-only inventory, "uncertain evidence
+never auto-closes work"); they remain open for Jack to revisit, not to block.
+
 ### Original order
 
 One PR. Order: (1) world API + recipe + Rust integration test, which fails on the

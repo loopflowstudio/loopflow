@@ -507,14 +507,15 @@ final class WorkModel {
     }
 
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
-                              store: SessionsStore, registry: SessionsWorkspaceRegistry) -> SessionsWorkspace {
+                              store: SessionsStore, registry: SessionsWorkspaceRegistry,
+                              navigating: Bool = true) -> SessionsWorkspace {
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
         let workspace: SessionsWorkspace
         if case .shell(let id, let machine) = store.localTerminal(for: record),
            let key = registry.key(containingShell: id, machineId: machine),
            let retained = registry.retained(key) {
             workspace = retained
-            select(key.reference, preservingOpening: true)
+            if navigating { select(key.reference, preservingOpening: true) }
             workspace.multiplexer.selectShell(id)
             store.surfaces.focus(.shell(id, machineId: machine))
         } else {
@@ -661,6 +662,26 @@ final class WorkModel {
         if !retainedConversation {
             await openTaskLink(link, expectedTaskID: found.task.id)
         }
+    }
+
+    /// Attach a Task's primary conversation in its retained workspace without
+    /// navigating: a Dashboard tile shows it in place and the Dashboard stays.
+    func attachTaskConversation(_ id: String, in workspace: SessionsWorkspace) async {
+        guard let found = task(id: id), let registry = workspaceRegistry, let repository = workspaceRepository,
+              !workspace.openingConversation else { return }
+        let request = UUID()
+        workspace.conversationRequest = request
+        workspace.conversationError = nil
+        defer { if workspace.conversationRequest == request { workspace.conversationRequest = nil } }
+        do {
+            let record = try await query.prepareTaskSession(issue: found.task.runtime?.workId ?? found.task.id,
+                                                            cwd: found.task.task.repo)
+            sessions = .available([record] + (sessions.value ?? []).filter { $0.id != record.id })
+            let store = registry.sessionStore(repository: repository, repoPath: found.task.task.repo, query: query)
+            store.reconcile([record])
+            store.adoptPreparation(record)
+            _ = placeSession(record, in: workspace, store: store, registry: registry, navigating: false)
+        } catch { workspace.conversationError = error.localizedDescription }
     }
 
     func openPaletteWave(_ id: String) {

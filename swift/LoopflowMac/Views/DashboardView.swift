@@ -190,7 +190,9 @@ struct DashboardView: View {
                 if let task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task.task)
                 } else if let pane = entry.multiplexer.zoomedPaneId.flatMap({ entry.multiplexer.layout.pane(for: $0) })
-                    ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) }) {
+                    ?? content.primarySession.flatMap({ entry.multiplexer.pane(forSessionId: $0) })
+                    // A conversation attached in this tile shows before the plan names it primary.
+                    ?? entry.multiplexer.layout.allPanes.first(where: { $0.sessionId != nil }) {
                     WorkspacePanesView(workspace: entry, isFocused: workspaces.selectedWork == member.work, sessions: sessions, model: model,
                         onFocus: { pane, _ in
                             workspaces.focus(entry.key)
@@ -201,11 +203,7 @@ struct DashboardView: View {
                     if model.taskSessions(task.id).isEmpty, !task.task.isTerminal {
                         TaskStartOffer(model: model, task: task)
                     } else {
-                        PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",
-                                       description: "Open this Task’s recorded conversation.") {
-                            Button("Open conversation") { Task { await model.openTaskConversation(task.id) } }
-                                .accessibilityIdentifier("dashboard-open-conversation-\(task.id)")
-                        }
+                        DashboardConversationOffer(model: model, task: task, workspace: entry)
                     }
                 } else {
                     PaneEmptyState(title: "No primary Session", systemImage: "bubble.left")
@@ -231,6 +229,26 @@ struct DashboardView: View {
         let arrangement = WorkArrangement(tree: tree ?? plan.arrangement.tree, hidden: hidden ?? plan.arrangement.hidden,
             mode: tree == nil ? plan.arrangement.mode : .touched)
         Task { await model.arrangeDashboard(id, arrangement: arrangement, revision: revision) }
+    }
+}
+
+/// A tile's Task with a recorded conversation and none attached here. Opening
+/// attaches it in the tile; the zoom control is the way into the Task.
+struct DashboardConversationOffer: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let workspace: SessionsWorkspace
+
+    var body: some View {
+        if workspace.openingConversation {
+            ProgressView("Opening conversation…").frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",
+                           description: workspace.conversationError ?? "Open this Task’s recorded conversation here.") {
+                Button("Open conversation") { Task { await model.attachTaskConversation(task.id, in: workspace) } }
+                    .accessibilityIdentifier("dashboard-open-conversation-\(task.id)")
+            }
+        }
     }
 }
 

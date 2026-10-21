@@ -73,6 +73,32 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test func dashboardTileOpensConversationInPlace() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            if args.contains("connect") { return encoded }
+            if args.starts(with: ["wave", "show"]) { return planning }
+            throw RegistryQueryError("Opening in a tile reads nothing else")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.selectWorkingTasksDashboard()
+        let tile = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "repo"),
+                                      title: task.task.name, location: nil)
+        try DashboardConversationOffer(model: model, task: task, workspace: tile).inspect()
+            .find(viewWithAccessibilityIdentifier: "dashboard-open-conversation-\(task.id)").button().tap()
+        for _ in 0..<200 where tile.multiplexer.pane(forSessionId: record.id) == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(tile.multiplexer.pane(forSessionId: record.id) != nil)
+        #expect(tile.conversationError == nil)
+        #expect(model.navigation.destination == .workingTasks)
+    }
+
     @Test("Task entry exposes Move here without taking over the external terminal", arguments: [false, true])
     func taskConversationActiveElsewhere(explicitSession: Bool) async throws {
         let data = try fixture()

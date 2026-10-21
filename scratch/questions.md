@@ -42,14 +42,11 @@
     in Git (`refs/loopflow/people/<email>`: key, name, provider accounts),
     written by any of that person's Machines with lease + merge. No Machine
     records.
-11. **LOO-555 publishes Machines.** Its uncommitted `implement` tree adds
-    `refs/loopflow/machines/<id>` (`ops/machine_record.rs`, for teammates'
-    cron visibility) and `task_ownership.machine_label`. Both contradict
-    "Machines are never published". Assumption: LOO-555 drops both before
-    landing; otherwise 878ecf deletes them in its first slice. Open for Jack:
-    where teammates' crons become visible, if anywhere (one option: on the
-    Person record, with no Machine named). LOO-555 had not received this
-    direction as of 2026-10-21.
+11. **LOO-555 publishes Machines.** Cron half DECIDED by Jack Heart
+    (2026-10-21): per-cron opt-in (`lf cron publish`), each published cron
+    carrying person key, Machine key and label; LOO-555 steered. Still open:
+    `task_ownership.machine_label` (teammates see the Machine label on
+    ownership entries). Assumption: dropped; teammates see the person only.
 12. **Pickup default.** Assumption: on. Every Machine of yours lists
     person-addressed Tasks until `lf machine pickup off`; the first open
     claims. Alternative: opt-in, which strands handovers for a person who

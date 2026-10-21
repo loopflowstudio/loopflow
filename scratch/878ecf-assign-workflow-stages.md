@@ -125,8 +125,11 @@ ProviderAccount { provider: linear | asana, id, email }
   by-email lookup (`users(filter:{email})`, `GET /users/{email}`). Git-only
   planning has the records alone.
 
-Machines are never published. There is no `refs/loopflow/machines/*`, no
-`lf machine list --all`, and no Person derived from Machines. A teammate's
+Machines are never published as records. There is no `refs/loopflow/machines/*`, no
+`lf machine list --all`, and no Person derived from Machines. The one place a
+Machine appears in Git is a cron its person chose to publish (`lf cron
+publish`, LOO-555), which carries that Machine's key and label (Jack Heart,
+2026-10-21). Nothing in 878ecf reads them. A teammate's
 view of a Task names a person, never a Machine label. Ownership entries keep
 their opaque `machine_id` (today's exchange), which only your own Machines can
 resolve to a label.
@@ -424,19 +427,19 @@ the assignee, so a Machine never needs a credential for anyone else.
 - Short names in workflow files.
 - Notion.
 - Mobile.
-- Publishing anything about Machines, including crons (see Dependencies).
 
 ## Dependencies
 
 - **LOO-555** must land first with the email person key, branch reuse and Git
   comment steers. 878ecf no longer needs its Machine ref.
-  - Conflict, open for Jack (question 11): LOO-555's working tree (still at
-    `implement`, uncommitted on 2026-10-21) publishes
-    `refs/loopflow/machines/<machine-id>` for cron visibility
-    (`ops/machine_record.rs`) and adds `task_ownership.machine_label` so
-    teammates read Machine labels. Both publish Machines, which Jack's latest
-    direction rules out. 878ecf assumes LOO-555 drops both before landing.
-    If either lands, 878ecf's first slice deletes it in place with no dual
+  - Jack Heart (2026-10-21) resolved cron visibility: crons are private by
+    default and published one at a time with `lf cron publish`, each carrying
+    its person key, Machine key and Machine label. LOO-555 was steered to
+    drop the general Machine record (`ops/machine_record.rs`) in favor of
+    published crons only.
+  - Still open (question 11): `task_ownership.machine_label`, which shows
+    teammates the Machine label on ownership entries. 878ecf assumes it is
+    dropped; if it lands, 878ecf's first slice removes it with no dual
     reading.
 - **LOO-552** makes the shared ref the default. Until then the demo world
   configures `shared:` explicitly.
@@ -453,13 +456,14 @@ the assignee, so a Machine never needs a credential for anyone else.
   holder-account rule replaces it.
 - The separate same-person handoff path behind `lf machine use --task`, merged
   into the one handover writer. The command stays.
-- If LOO-555 lands them: `ops/machine_record.rs`, `refs/loopflow/machines/*`
-  publication and fetch, teammate rows in `lf cron list`, and
+- If LOO-555 lands them: a general Machine record or
+  `refs/loopflow/machines/*` beyond published crons, and
   `task_ownership.machine_label`, with their tests.
 
 Forbidden:
 - A separate transfer table or record type alongside the ownership log.
-- Any published Machine record, Machine label or Machine list.
+- Any published Machine record or Machine list. A Machine key and label
+  appear only on crons their person published.
 - Pickup stored anywhere but this Machine's local row.
 - Exchanging `task_workflows`.
 - Launching from import.

@@ -105,4 +105,4 @@ LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).
   person, pickup stays local. Both Tasks steered.
 - Refinement (Jack Heart, same day): the opt-in is per cron, not per
   Machine (`lf cron publish`). No Machine records reach Git. LOO-555 and
-  878ecf steered.
+  878ecf steered. A published cron carries its Machine key (machine_id).

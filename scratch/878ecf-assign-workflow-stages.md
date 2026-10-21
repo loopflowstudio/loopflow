@@ -1,6 +1,6 @@
 # 878ecf: Assign Workflow stages to people and hand Tasks over without a service
 
-Status: draft design. Kickoff was 2026-10-21, revised three times the same day after
+Status: approved by Jack Heart on 2026-10-21 (design review in the Task conversation). Kickoff was 2026-10-21, revised three times the same day after
 Jack Heart's design review and his person-only direction. Jack Heart filed the direction on 2026-10-21.
 
 - **Accepted (brief):** a node names a person, arrival transfers, leaving
@@ -18,7 +18,7 @@ Jack Heart's design review and his person-only direction. Jack Heart filed the d
   - A Linear reassignment is a person-level claim (a take), not a handoff.
   - LOO-555 lands the email person key first.
 - Everything else here is a kickoff mechanism choice. Open items are in
-  `scratch/questions.md`. Approval of this draft is still pending.
+  `scratch/questions.md`. Approved by Jack Heart, 2026-10-21.
 
 Beneficiary: two or more people in one repository, each with their own Machine
 and agents. Example: Jack implements and Dustin reviews designs.

@@ -4,9 +4,11 @@ description: Clear your obsolete work state, report activity, and keep your star
 Keep the repository's work state clean and your work moving. You are this
 repository's operator for your own work: clear old state that is no longer
 needed, keep your started Tasks moving through their Waves, and summarize
-current activity. The pass works existing Tasks. It leaves plans, their key
-results and metric targets, chapter rotation, new Tasks and backlog to the
-person; report gaps it finds instead of filing them.
+current activity. A Task is yours when its owner's person is `lf config user`
+or names no person; another person's Task is listed as theirs and left alone,
+and unowned backlog is listed for the person to select. The pass works existing
+Tasks. It leaves plans, their key results and metric targets, chapter rotation,
+new Tasks and backlog to the person; report gaps it finds instead of filing them.
 
 ## Clear old work state
 
@@ -17,9 +19,8 @@ Join Task and Session state to worktrees using Loopflow's returned identities
 and paths. Inspect branches and PRs to explain gaps in that shared picture.
 
 Scope cleanup to the participant's own work. A branch, PR or worktree linked
-to a Task is in scope only when that Task is yours: its owner's person is
-`lf config user` or names no person. List another person's Task as theirs and
-never abandon or prune it, even when you authored its PR. For branches with no
+to a Task is in scope only when that Task is yours. Never abandon or prune
+another person's Task, even when you authored its PR. For branches with no
 Task, read `gh api user --jq .login` and `git config user.email`, then check PR
 authorship and the repository's configured branch naming convention. A tip
 commit's author alone does not establish branch ownership. Leave uncertain
@@ -113,10 +114,7 @@ put routine progress in this conversation, not Task comments.
 Operate each Wave that has started work by following `lf help wave-operate`:
 it owns the ownership rule, dispositions and recovery. Do that here, or run
 `lf --wave <wave> wave-operate "<concrete direction>"` for a separate pass and
-read its result. Either way, a Task is yours when its owner's person is
-`lf config user` or names no person; another person's Task is listed as
-theirs and left alone, and unowned backlog is listed for the person to select.
-Operate started Tasks you own outside any Wave with `lf task-operate <issue>`.
+read its result. Operate started Tasks you own outside any Wave with `lf task-operate <issue>`.
 Sending the user to another conversation is not operating. The repository view
 connects outcomes and dependencies across Waves; the Wave pass owns the
 detailed judgment within each Wave.

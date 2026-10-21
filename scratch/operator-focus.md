@@ -35,7 +35,8 @@ is `lf config user` or names no person); another person's Task is listed as
 theirs, never abandoned or pruned; unknown ownership stays unresolved. PR
 authorship and branch naming keep scoping Task-less branches. `repo_session.md`
 inlines the body, so no second edit; no test asserts this prose.
-Implemented in `46e1e35120` ("Find stale work" states the rule).
+Implemented in `46e1e35120`; the rule is now stated once in `repo_operate.md`'s
+intro and referenced by "Find stale work" and "Drive work through Waves".
 
 Checked and kept: started Tasks are owned. Checkout allocation claims the Task
 (`children.rs` `claim_in`), and the 0.14.12 backfill records person-less local

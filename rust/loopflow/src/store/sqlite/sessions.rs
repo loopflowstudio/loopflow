@@ -555,9 +555,16 @@ impl SqliteStore {
     /// in progress keeps its owner off this list.
     pub(crate) fn idle_session_owners(&self) -> StoreResult<Vec<IdleSessionOwner>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // A Flow started inside an owner, as from a terminal, holds its steps there.
         let mut query = conn.prepare(&format!(
-            "SELECT o.id, o.repo, o.started_at, o.viewed, o.detached_at FROM processes o
+            "WITH RECURSIVE flow_ancestors(id) AS (
+                 SELECT p.parent_lf_process_id FROM flow_processes f
+                     JOIN processes p ON p.id=f.lf_process_id
+                 UNION SELECT p.parent_lf_process_id FROM processes p
+                     JOIN flow_ancestors a ON p.id=a.id)
+             SELECT o.id, o.repo, o.started_at, o.viewed, o.detached_at FROM processes o
              WHERE o.completed_at IS NULL AND o.kind='lf'
+             AND o.id NOT IN (SELECT id FROM flow_ancestors WHERE id IS NOT NULL)
              AND EXISTS(SELECT 1 FROM agent_sessions s
                  WHERE s.transport_lf_process_id=o.id AND s.completed_at IS NULL)
              AND NOT EXISTS(SELECT 1 FROM agent_sessions s
@@ -566,37 +573,17 @@ impl SqliteStore {
                      OR (s.completed_at IS NULL AND {TURN_RUNNING})))
              ORDER BY o.started_at, o.id"
         ))?;
-        let candidates = query
+        let owners = query
             .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<bool>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
-                ))
+                Ok(IdleSessionOwner {
+                    id: row.get(0)?,
+                    repo: row.get(1)?,
+                    started_at: row.get(2)?,
+                    viewed: row.get(3)?,
+                    detached_at: row.get(4)?,
+                })
             })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        // A Flow started inside the owner, as from a terminal, holds its steps there.
-        let mut flow = conn.prepare(
-            "WITH RECURSIVE descendants(id) AS (
-                 SELECT id FROM processes WHERE parent_lf_process_id=?1
-                 UNION SELECT p.id FROM processes p JOIN descendants d ON p.parent_lf_process_id=d.id)
-             SELECT EXISTS(SELECT 1 FROM descendants d JOIN flow_processes f ON f.lf_process_id=d.id)",
-        )?;
-        let mut owners = Vec::new();
-        for (id, repo, started_at, viewed, detached_at) in candidates {
-            if flow.query_row([&id], |row| row.get::<_, bool>(0))? {
-                continue;
-            }
-            owners.push(IdleSessionOwner {
-                id: crate::id::LfProcessId::parse(&id).map_err(invalid)?,
-                repo,
-                started_at,
-                viewed,
-                detached_at,
-            });
-        }
+            .collect::<rusqlite::Result<_>>()?;
         Ok(owners)
     }
 

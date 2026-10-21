@@ -1,8 +1,7 @@
 # End detached Sessions after a configurable idle period
 
 Task: [LOO-556 · Close windows without leaving agents running for days](https://linear.app/loopflow/issue/LOO-556).
-This run is taskless only because LOO-556's planning is blocked on a missing
-Linear Project (2026-10-21); link the PR to LOO-556.
+LOO-556 has no Linear Project yet (2026-10-21); the PR links LOO-556 directly.
 
 ## Problem
 
@@ -75,5 +74,6 @@ busy codex agents. The policy must make those cases impossible, with tests.
 
 ## Checks
 
-- `cargo test -p loopflow --test transport_tests detached_sessions_end_after_their_limit`
-- `cargo test -p loopflow --lib transport::idle config::tests::detached`
+- `cargo test -p loopflow --test transport_tests detached_sessions_end_after_their_limit`: pass
+- `cargo test -p loopflow --lib -- transport::idle config::tests::detached cron`: pass
+- compress: one owner query (Flow ancestry as a CTE), `platform::kill_process` for the signal; transport test, lib tests and clippy pass

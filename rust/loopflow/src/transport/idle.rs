@@ -92,10 +92,7 @@ fn sweep(store: &SqliteStore) -> Result<()> {
             continue;
         };
         tracing::info!(owner = %owner.id, pid, "ending a Session nobody has viewed");
-        // SAFETY: kill only signals; the pid's identity was just verified live.
-        unsafe {
-            libc::kill(pid as libc::pid_t, libc::SIGTERM);
-        }
+        crate::platform::kill_process(pid);
     }
     Ok(())
 }

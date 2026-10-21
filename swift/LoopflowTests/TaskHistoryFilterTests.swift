@@ -253,7 +253,7 @@ struct TaskHistoryFilterTests {
         #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-realign-projects").button().isDisabled() == false)
         let groups = WaveTaskGroups(wave.tasks.items)
         let current = groups.owned + groups.unowned
-        let hidden = wave.tasks.items.filter { task in !current.contains { $0.id == task.id } }
+        let hidden = wave.tasks.items.filter { !$0.task.isCurrent($0.condition) }
         #expect(!hidden.isEmpty)
         for task in hidden {
             #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(task.id)") }

@@ -12,10 +12,8 @@ struct LifecycleWorldTests {
     @Test func waveInventoryShowsCurrentTasksAndHistoryFiltersCompletionsByRange() async throws {
         let world = try await LifecycleWorld()
         defer { try? FileManager.default.removeItem(at: world.root) }
-        let model = WorkModel(query: RegistryQuery { args, _ in try await world.lf(args) }, repoPath: world.repo.path)
-        await model.refresh()
-        let wave = try #require(model.visibleRoadmaps.first { $0.wave.name == "release" })
-        let tasks = wave.tasks.items
+        let model = await world.model()
+        let tasks = try #require(model.visibleRoadmaps.first { $0.wave.name == "release" }).tasks.items
         let names = { (group: [RoadmapTask]) in Set(group.map(\.task.name)) }
 
         let current = WaveTaskGroups(tasks)
@@ -26,7 +24,7 @@ struct LifecycleWorldTests {
         // Project history admits successful completions by range, never abandoned or canceled work.
         var filter = TaskHistoryFilter()
         filter.showCompleted = true
-        let settled = tasks.filter { !current.owned.contains($0) && !current.unowned.contains($0) }
+        let settled = tasks.filter { !$0.task.isCurrent($0.condition) }
         for (days, expected) in [("7", ["Shipped yesterday", "Shipped this week"]),
                                  ("30", ["Shipped yesterday", "Shipped this week", "Shipped last fortnight"]),
                                  ("0", ["Shipped yesterday", "Shipped this week", "Shipped last fortnight", "Shipped last quarter"])] {
@@ -41,8 +39,7 @@ struct LifecycleWorldTests {
     @Test func sidebarRetainsSettledTasksAndHidesPausedOnes() async throws {
         let world = try await LifecycleWorld()
         defer { try? FileManager.default.removeItem(at: world.root) }
-        let model = WorkModel(query: RegistryQuery { args, _ in try await world.lf(args) }, repoPath: world.repo.path)
-        await model.refresh()
+        let model = await world.model()
         let tasks = try #require(model.visibleRoadmaps.first { $0.wave.name == "release" }).tasks.items
         let id = { (name: String) in try #require(tasks.first { $0.task.name == name }?.id) }
         let retained = [try id("Shipped yesterday"), try id("Abandoned attempt"), try id("In progress")]
@@ -81,8 +78,12 @@ private struct LifecycleWorld: Sendable {
         env = Self.base(root: root, binary: binary).merging(try #require(decoded)) { $1 }
     }
 
-    func lf(_ args: [String]) async throws -> String {
-        try await Self.run(binary, args, cwd: repo, env: env)
+    /// A refreshed WorkModel reading this world through the source CLI.
+    @MainActor func model() async -> WorkModel {
+        let model = WorkModel(query: RegistryQuery { args, _ in try await Self.run(binary, args, cwd: repo, env: env) },
+                              repoPath: repo.path)
+        await model.refresh()
+        return model
     }
 
     // Nothing from the launching agent, installed Machine, provider or account is inherited.

@@ -272,3 +272,4 @@ Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_de
 Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no stale `started` names; no checks rerun. Full CI: submit.
 Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks.
 Implement (2026-10-21): `isCurrent` named once; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
+Compress (2026-10-21): tests use `isCurrent` for settled rows and share `LifecycleWorld.model()`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.

@@ -1587,7 +1587,17 @@ fn derive_task_condition(
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
     let execution = action_evidence.and_then(|evidence| evidence.execution);
-    let (state, reason) = if let Some(execution) =
+    // Settled work keeps its retained history without asking anyone to act.
+    let settled = runtime
+        .map(|runtime| runtime.status)
+        .filter(|status| status.is_terminal() && !unresolved_execution);
+    let (state, reason) = if let Some(status) = settled {
+        let reason = match status {
+            TaskState::Abandoned => "Task is abandoned",
+            _ => "Task is complete",
+        };
+        (TaskConditionState::Clear, reason.to_string())
+    } else if let Some(execution) =
         execution.filter(|execution| execution.state != TaskExecutionState::Idle)
     {
         let state = match execution.state {
@@ -3437,6 +3447,62 @@ mod tests {
                     assert!(pending_delivery.unresolved_execution);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn settled_tasks_are_clear_with_retained_failed_history() {
+        let failed = TaskExecutionSnapshot {
+            state: TaskExecutionState::Blocked,
+            reason: "gate: process exited with status 1".into(),
+            step: None,
+            captured: None,
+        };
+        for (status, reason) in [
+            (TaskState::Done, "Task is complete"),
+            (TaskState::Abandoned, "Task is abandoned"),
+        ] {
+            let runtime = TaskRuntimeSnapshot {
+                work_id: "task-1".into(),
+                status,
+                reason: "terminal".into(),
+                updated_at: "2026-07-21T00:00:00Z".into(),
+                provider: "codex".into(),
+                owner: Some(owned()),
+                completion_pending: None,
+            };
+            let condition = derive_task_condition(
+                Some(&runtime),
+                &NextMove {
+                    owner: NextMoveOwner::Wave,
+                    reason: "done".into(),
+                },
+                LocalProgressEvidence {
+                    state: LocalProgressEvidenceState::Missing,
+                    unsettled: Some(false),
+                    dirty: None,
+                    authored_commits: None,
+                    recovery_required: Some(true),
+                    reason: Some("Task worktree is missing".into()),
+                },
+                Some(&TaskActionEvidence {
+                    status: status.work_status(),
+                    execution: Some(&failed),
+                    latest_pr_phase: None,
+                    latest_pr_merge_request: None,
+                    latest_pr_presentation_current: None,
+                    completion_refusal: None,
+                    resume_refusal: None,
+                    ci: None,
+                    predecessor_phase: None,
+                    abandon_intent: false,
+                    launch_refusal: Some("worktree is missing"),
+                }),
+                Some(&failed),
+                OffsetDateTime::now_utc(),
+            );
+            assert_eq!(condition.state, TaskConditionState::Clear);
+            assert_eq!(condition.reason, reason);
         }
     }
 

@@ -16,6 +16,7 @@ exclude:
 - uv.lock
 planning:
   provider: linear
+linear:
   team: 3871bed0-8c95-4077-ab72-728327d615b3
 release:
   targets:

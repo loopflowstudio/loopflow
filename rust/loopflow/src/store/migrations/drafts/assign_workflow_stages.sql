@@ -9,6 +9,5 @@ CREATE TABLE people (
     key TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     accounts TEXT NOT NULL CHECK (json_valid(accounts)),
-    updated_at INTEGER NOT NULL,
-    fetched_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL
 );

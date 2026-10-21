@@ -26,30 +26,25 @@ pub async fn sync(store: &SqliteStore, repo: &Path) -> OpsResult<()> {
     if !has_origin(repo) {
         return Ok(());
     }
-    if let Some(mine) = your_record(repo).await? {
-        let repo = repo.to_path_buf();
-        tokio::task::spawn_blocking(move || crate::person::publish(&repo, REMOTE, &mine))
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-    }
-    let fetched = {
-        let repo = repo.to_path_buf();
-        tokio::task::spawn_blocking(move || crate::person::fetch(&repo, REMOTE))
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .map_err(|error| OpsError::Message(error.to_string()))?
-    };
-    store
-        .replace_people(&fetched)
-        .map_err(|error| OpsError::Message(error.to_string()))
+    let mine = your_record(repo).await?;
+    let repo = repo.to_path_buf();
+    let fetched = tokio::task::spawn_blocking(move || {
+        if let Some(mine) = mine {
+            crate::person::publish(&repo, REMOTE, &mine)?;
+        }
+        crate::person::fetch(&repo, REMOTE)
+    })
+    .await
+    .map_err(message)?
+    .map_err(message)?;
+    store.replace_people(&fetched).map_err(message)
 }
 
 pub fn list(store: &SqliteStore, repo: &Path) -> OpsResult<Vec<PersonView>> {
     let you = crate::config::participant_email(repo);
     Ok(store
         .people()
-        .map_err(|error| OpsError::Message(error.to_string()))?
+        .map_err(message)?
         .into_iter()
         .map(|person| PersonView {
             is_you: you.as_deref() == Some(person.key.as_str()),
@@ -97,4 +92,8 @@ fn has_origin(repo: &Path) -> bool {
         .args(["remote", "get-url", REMOTE])
         .output()
         .is_ok_and(|output| output.status.success())
+}
+
+fn message(error: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(error.to_string())
 }

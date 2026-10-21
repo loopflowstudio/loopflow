@@ -1,7 +1,6 @@
 use rusqlite::params;
 
 use crate::person::PersonRecord;
-use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -12,20 +11,12 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute("DELETE FROM people", [])?;
-        let fetched_at = now_unix();
         for person in people {
             let accounts = serde_json::to_string(&person.accounts)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             tx.execute(
-                "INSERT INTO people (key, name, accounts, updated_at, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    person.key,
-                    person.name,
-                    accounts,
-                    person.updated_at,
-                    fetched_at
-                ],
+                "INSERT INTO people (key, name, accounts, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![person.key, person.name, accounts, person.updated_at],
             )?;
         }
         tx.commit()?;

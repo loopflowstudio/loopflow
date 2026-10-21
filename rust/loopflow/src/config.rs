@@ -65,8 +65,8 @@ pub fn participant_name() -> Result<Option<String>, LoadError> {
 }
 
 /// Your stable person key: Git's `user.email` in `repo` (your global one when
-/// the checkout is absent here), lowercased. Names are display only; a
-/// committed file can name a person by this key.
+/// the checkout is absent here) as a [`crate::person::person_key`]. Names are
+/// display only; a committed file can name a person by this key.
 pub fn participant_email(repo: &Path) -> Option<String> {
     let mut command = Command::new("git");
     if repo.is_dir() {
@@ -77,8 +77,7 @@ pub fn participant_email(repo: &Path) -> Option<String> {
         .output()
         .ok()
         .filter(|output| output.status.success())?;
-    let email = std::str::from_utf8(&output.stdout).ok()?.trim();
-    (!email.is_empty()).then(|| email.to_lowercase())
+    crate::person::person_key(std::str::from_utf8(&output.stdout).ok()?)
 }
 
 pub(crate) fn normalize_user_name(name: &str) -> Option<String> {

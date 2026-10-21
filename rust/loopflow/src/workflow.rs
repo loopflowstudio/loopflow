@@ -248,15 +248,13 @@ pub fn parse_workflow(
         if node == START || node == END {
             return Err(format!("{node} is implicit and cannot be a node"));
         }
-        let person = match person {
-            Some(person) if person.contains('@') => Some(person.trim().to_lowercase()),
-            Some(person) => {
-                return Err(format!(
-                    "node {node}: person {person} is not an email address"
-                ))
-            }
-            None => None,
-        };
+        let person =
+            match person {
+                Some(person) => Some(crate::person::person_key(&person).ok_or_else(|| {
+                    format!("node {node}: person {person} is not an email address")
+                })?),
+                None => None,
+            };
         let loaded = load_skill(&skill, repo).map_err(|error| format!("node {node}: {error}"))?;
         nodes.push(WorkflowNode {
             name: node.to_string(),

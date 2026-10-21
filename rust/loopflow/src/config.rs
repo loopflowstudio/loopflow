@@ -152,6 +152,63 @@ pub struct SessionConfig {
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
+    /// How long a Session keeps its agent running after its last viewer leaves.
+    #[serde(default)]
+    pub end_detached_after: DetachedLimit,
+}
+
+/// When an unviewed Session's agent ends: `24h`, `90m`, `2d`, or `off`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum DetachedLimit {
+    Off,
+    After(std::time::Duration),
+}
+
+impl Default for DetachedLimit {
+    fn default() -> Self {
+        Self::After(std::time::Duration::from_secs(24 * 60 * 60))
+    }
+}
+
+impl TryFrom<String> for DetachedLimit {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, String> {
+        if value.trim() == "off" {
+            return Ok(Self::Off);
+        }
+        parse_duration(&value)
+            .map(Self::After)
+            .map_err(|error| format!("end_detached_after: {error}; or use off"))
+    }
+}
+
+impl From<DetachedLimit> for String {
+    fn from(limit: DetachedLimit) -> Self {
+        match limit {
+            DetachedLimit::Off => "off".into(),
+            DetachedLimit::After(duration) => format!("{}s", duration.as_secs()),
+        }
+    }
+}
+
+/// Parse `30`, `10s`, `5m`, `1h` or `2d`; a bare number is seconds.
+pub fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
+    let value = value.trim();
+    let (number, multiplier) = match value.char_indices().last() {
+        Some((at, 's')) => (&value[..at], 1),
+        Some((at, 'm')) => (&value[..at], 60),
+        Some((at, 'h')) => (&value[..at], 60 * 60),
+        Some((at, 'd')) => (&value[..at], 24 * 60 * 60),
+        _ => (value, 1),
+    };
+    let amount: u64 = number.parse().map_err(|_| {
+        anyhow::anyhow!("invalid duration {value:?}; use seconds, 10s, 5m, 1h, or 2d")
+    })?;
+    Ok(std::time::Duration::from_secs(
+        amount.saturating_mul(multiplier),
+    ))
 }
 
 /// Release configuration.
@@ -779,6 +836,36 @@ session:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.session.terminal.as_deref(), Some("Ghostty"));
+    }
+
+    #[test]
+    fn detached_sessions_end_after_a_day_unless_configured() {
+        use super::DetachedLimit;
+        use std::time::Duration;
+        let parse = |yaml: &str| serde_yaml_ng::from_str::<Config>(yaml).map(|c| c.session);
+        assert_eq!(
+            parse("agent: claude").unwrap().end_detached_after,
+            DetachedLimit::After(Duration::from_secs(86_400))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: 90m}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::After(Duration::from_secs(5_400))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: 2d}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::After(Duration::from_secs(172_800))
+        );
+        assert_eq!(
+            parse("session: {end_detached_after: off}")
+                .unwrap()
+                .end_detached_after,
+            DetachedLimit::Off
+        );
+        assert!(parse("session: {end_detached_after: soon}").is_err());
     }
 
     #[test]

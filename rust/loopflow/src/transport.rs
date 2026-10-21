@@ -1,6 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
+mod idle;
 mod native;
 mod output;
 mod terminal;
@@ -394,6 +395,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let listener = UnixListener::bind(&path)
         .with_context(|| format!("Bind transport socket {}", path.display()))?;
     listener.set_nonblocking(true)?;
+    let socket = path.clone();
+    crate::agent::register_interrupt_cleanup(move || {
+        let _ = std::fs::remove_file(&socket);
+    });
     let control_key = uuid::Uuid::new_v4().to_string();
     let mut command = Command::new(&argv[0]);
     command.env(CONTROL_ENV, &control_key);
@@ -465,6 +470,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
+    let viewing = idle::spawn(id.clone());
+    let mut viewed = None;
     loop {
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
@@ -641,6 +648,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         || v.queue(&Response::InputHint { hint: hint.clone() }).is_ok()
                 });
             }
+        }
+        let now_viewed = viewers.iter().any(|v| v.attached);
+        if viewed != Some(now_viewed) {
+            viewed = Some(now_viewed);
+            let _ = viewing.send(now_viewed);
         }
         let detached = !viewers
             .iter()

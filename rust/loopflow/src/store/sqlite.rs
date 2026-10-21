@@ -196,7 +196,7 @@ pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
          (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
-         ON b.task_id=t.id WHERE b.branch != ''"
+         ON b.task_id=t.id"
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()

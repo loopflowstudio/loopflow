@@ -3468,7 +3468,7 @@ mod tests {
                 reason: "terminal".into(),
                 updated_at: "2026-07-21T00:00:00Z".into(),
                 provider: "codex".into(),
-                started: true,
+                owner: Some(owned()),
                 completion_pending: None,
             };
             let condition = derive_task_condition(

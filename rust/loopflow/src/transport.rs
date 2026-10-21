@@ -132,6 +132,12 @@ enum Request {
     NativeEnded {
         key: String,
     },
+    /// What a controlling viewer can type, shown when it attaches and while the
+    /// registering connection stays open.
+    InputHint {
+        key: String,
+        hint: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -156,6 +162,9 @@ enum Response {
         detach: String,
     },
     NativeEnded,
+    InputHint {
+        hint: String,
+    },
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
@@ -370,6 +379,7 @@ struct Viewer {
     token: Option<String>,
     attached: bool,
     ending: bool,
+    input_hint: Option<String>,
 }
 
 impl Viewer {
@@ -491,6 +501,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut detach = false;
     let mut client: Option<native::NativeClient> = None;
     let mut returning = None;
+    let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
     loop {
@@ -503,6 +514,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 token: None,
                 attached: false,
                 ending: false,
+                input_hint: None,
             });
         }
         viewers.retain_mut(|viewer| {
@@ -531,6 +543,10 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::NativeEnded { key } if key == control_key => {
                             viewer.ending = true;
                         }
+                        Request::InputHint { key, hint } if key == control_key => {
+                            viewer.input_hint = Some(hint);
+                            hint_due = true;
+                        }
                         Request::Attach {
                             control: wants_control,
                             replace,
@@ -548,6 +564,7 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             attached = true;
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
+                                hint_due = true;
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
                                 viewer.token = Some(token);
@@ -642,15 +659,27 @@ fn serve(argv: &[String], terminal: bool) -> Result<()> {
         });
         if detach {
             control = None;
-            for viewer in &mut viewers {
+            for viewer in viewers.iter_mut().filter(|v| v.attached) {
                 let _ = viewer.queue(&Response::Detached);
                 let _ = viewer.flush();
             }
-            viewers.clear();
+            // The execution's own control connections outlive its viewers.
+            viewers.retain(|v| !v.attached);
             detach = false;
         }
         if let Some(response) = returning.take() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
+        }
+        // The controls reach the one controlling viewer when it attaches or
+        // when the execution registers them, whichever comes later.
+        if std::mem::take(&mut hint_due) {
+            let hint = viewers.iter().rev().find_map(|v| v.input_hint.clone());
+            if let Some(hint) = hint {
+                viewers.retain_mut(|v| {
+                    !(v.attached && v.token.is_some() && v.token == control)
+                        || v.queue(&Response::InputHint { hint: hint.clone() }).is_ok()
+                });
+            }
         }
         let detached = !viewers
             .iter()
@@ -1002,6 +1031,13 @@ pub fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
                     Response::NativeEnded => {}
+                    Response::InputHint { hint } => {
+                        if let Some(terminal) = &mut terminal {
+                            write!(terminal.output.stderr, "\r\n{hint}\r\n")?;
+                        } else {
+                            eprintln!("{hint}");
+                        }
+                    }
                 }
             }
         }
@@ -1123,6 +1159,37 @@ impl Drop for NativeClient {
         })();
         if let Err(error) = ended {
             tracing::debug!(%error, "native client end was not acknowledged");
+        }
+    }
+}
+
+/// Live input a controlling viewer can type. The owner shows `hint` to each
+/// controlling viewer as it attaches until this guard drops, so headless output
+/// never contains it. `None` when no viewer can attach.
+#[derive(Debug)]
+pub(crate) struct InputHint {
+    _socket: UnixStream,
+}
+
+pub(crate) fn input_hint(hint: String) -> Option<InputHint> {
+    let handoff = HANDOFF.get()?;
+    let registered = (|| -> Result<UnixStream> {
+        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+        send(
+            &mut socket,
+            &Request::InputHint {
+                key: handoff.key.clone(),
+                hint,
+            },
+        )?;
+        Ok(socket)
+    })();
+    match registered {
+        Ok(socket) => Some(InputHint { _socket: socket }),
+        Err(error) => {
+            tracing::debug!(%error, "input hint unavailable to viewers");
+            None
         }
     }
 }

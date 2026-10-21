@@ -108,8 +108,7 @@ acceptance and delivery remain open.
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
-#1545 merged; installation and measured savings remain unproved. Assertion
-boundaries, counts and acquisition evidence:
+#1545 merged; installed savings remain unproved. Evidence:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
@@ -120,12 +119,9 @@ completion after verified merge. No logins, credential reads or real-provider te
 Six fixture Sessions prove Claude across child overrides; replay/native history
 retain their provider. Conflicting resume explains starting anew.
 
-October 11 gate repaired isolation, replay pinning and pruning's NULL-worktree
-read. Override checks passed. Release-lock failure's cause remains unknown;
-homepage overflow at 1,440 px remains. CI owns nested Python sandbox tests.
-Remote/live/installed acceptance, landing and completion remain unproved.
-Exact evidence and earlier archives:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Global agent override.
+October 11 gate passed override checks; release-lock failure's cause remains
+unknown. Remote/live/installed acceptance, landing and completion remain unproved.
+Evidence: `6935bfbadb:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
@@ -685,10 +681,8 @@ Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 Jack Heart approved installed `lf` and `~/.lf` for ordinary commands, Task
 workers and Flow steps. Explicit `LF_HOME` experiments need a fresh directory
-after schema changes. PR #1381 shipped; installed v0.12.31 acceptance closed
-LOO-342. Jack authorized legacy retirement; 37 identified processes exited,
-retained databases/receipts survived and main identity stayed unchanged.
-Exact retirement paths, release evidence and current-document links:
+after schema changes; default-home draft builds use a copy (#1612).
+LOO-342 closed (v0.12.31):
 `b1a50a7dc:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
@@ -977,7 +971,9 @@ liveness or continuity.
 
 ## Shipped history
 
-Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
+Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading. Installed
+worker recovery (LOO-295/292; LOO-373 keeps placement):
+`10ca6bd39:wave/infrastructure/MEMORY.md`.
 Cron continuity judges the latest due against exact scheduled receipts; manual
 runs prove no firing, and old gaps do not keep later telemetry red.
 

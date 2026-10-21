@@ -240,7 +240,7 @@ lf ps --json
 
 Author `.lf/wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
-`wave-operate` invocation reviews the plan and keeps every started Task moving.
+`wave-operate` invocation keeps your started Tasks moving and leaves the plan alone.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.

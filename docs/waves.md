@@ -15,7 +15,7 @@ lf wave status shipper
 ```
 
 A Wave keeps an objective, memory, cadence, budget and metrics across Tasks.
-Each invocation makes one finite planning pass. Tasks own implementation and
+Each `wave-operate` invocation makes one finite pass over existing Tasks. Tasks own implementation and
 Flow execution; each Machine retains command and conversation history.
 
 | Path | Holds |
@@ -72,7 +72,9 @@ lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
 `wave-operate` considers delivery, coordination, present capacity, adaptation
-and identity (S1–S5) within the selected Wave. `vsm-operate` applies those same
+and identity (S1–S5) over the selected Wave's existing Tasks and reports what
+it finds. It does not check KRs or metric targets, edit the plan, rotate
+chapters, file Tasks or start backlog. `vsm-operate` applies those same
 questions across the current repository's Waves, including from a linked
 worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
 with each skill reading earlier findings from one shared working note. Each is
@@ -83,19 +85,16 @@ invocations, without requiring five reports or five actions. `wave-operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
-gives every started Task one disposition: moving, acted on and verified,
-waiting on a named person or dependency, paused, or unknown. A started Task
+gives every started Task you own one disposition: moving, acted on and
+verified, waiting on a named person or dependency, paused, or unknown. A Task
+another person owns (`runtime.owner` naming someone other than `lf config user`)
+is listed with that person and Machine and left alone; its liveness is not
+judged from your Machine. A started Task
 whose Flow stopped or failed is read and its remaining work run fresh; one at
 a workflow node waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
-started Task already has a disposition. Failed reads and stale provider data remain explicit
+started Task you own already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
-
-Task findings can challenge Wave purpose; Wave findings can challenge shared
-repository direction. Preserve the source and disagreement with the affected
-Wave or Task. Return accepted decisions to those owners with their practical
-consequence. Changes beyond accepted direction stay proposals for review.
-Repository synthesis does not own identity alone.
 
 Running Task Flows keep progressing when both operators are absent; review
 happens in the Task conversation. Projects belong to Waves; they have no separate
@@ -456,11 +455,10 @@ Bare landing or a manual merge leaves the Task open. Optional new work uses ordi
 Task creation before completion, with no required filing or disposition. Inspect
 live Flow processes before retrying completion; no fresh gate or landing is needed.
 
-A due follow-up returns on its owning Wave's next operation, even if unstarted.
-Surface it for selection unless its brief already authorizes a concrete unattended
-check. Filing installs no schedule; an open conversation schedules no next turn.
-Without an installed Wave schedule, report no automatic check scheduled. Missing
-installation or provider evidence stays unknown, and time is never proof of success.
+A due follow-up returns on its owning Wave's next operation, even if unstarted,
+listed for you to select; operators do not start it. Filing installs no
+schedule; an open conversation schedules no next turn. Missing provider
+evidence stays unknown, and time is never proof of success.
 
 An early Linear completion cannot supply local merge evidence.
 Canceled and duplicate issues cannot become successful completion. Each additional

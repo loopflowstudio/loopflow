@@ -296,7 +296,7 @@ commands. Connect required logins with `lf machine connect` in a foreground
 terminal. Remote processes use credentials installed on their Machine. Before
 setting a Wave Machine, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf machine add` discovers the identity
-and records its label, repository and SSH route. `lf --wave <wave> wave-operate` makes a finite pass locally; prefix it with
+and records its label, repository and SSH route. `lf --wave <wave> wave-operate` makes a finite pass over your started Tasks locally; prefix it with
 `lf --machine <machine-id>` to run on the remote Machine. Adding a machine,
 setting a Wave Machine, handing off a Task and starting a Wave each change durable
 execution state.

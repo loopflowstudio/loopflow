@@ -1,10 +1,7 @@
 # 878ecf open questions (kickoff 2026-10-21)
 
-1. **Person key.** Jack said "emails for now", and a committed `person:` value
-   needs something a person can type. LOO-555's draft instead uses the random
-   `planning_user` UUID as the person key. Assumption: the key is the
-   lowercase Git `user.email`. LOO-555 and this Task must agree before either
-   lands.
+1. **Person key.** Resolved by Jack on 2026-10-21: the lowercase Git
+   `user.email`, landing in LOO-555 (see decisions below).
 2. **Who runs the edge after a review node.** Assumption: the owner's Machine
    runs it, and the reviewer only chooses it. The alternative is that the
    reviewer runs it. That is a takeover, and remains available via
@@ -18,8 +15,26 @@
    includes them.
 5. **Short names in `person:`.** Assumption: email only for now. A known-name
    resolution exists for `lf task handover --to` only.
-6. **Notifying.** Assumption: request a GitHub review only when a PR already
-   exists, and never open a PR just to notify. Under Linear, set the assignee.
+6. **Notifying.** Resolved by Jack on 2026-10-21: no GitHub review request.
+   Notification is provider assignment (Linear now, Asana with LOO-520), or
+   nothing.
+7. **Linear assignee edited by hand.** Assumption: the assignee is one-way. The
+   ownership log is authoritative, and the assignee mirrors the holder. The
+   alternative reads someone reassigning in Linear's UI as a manual handover,
+   which would make Linear handovers work without lf on the sender side, at
+   the cost of a second authority over who holds the Task.
+8. **LOO-555 landing shape.** On 2026-10-21 LOO-555 was at `implement`, with a
+   committed design still using the `planning_user` UUID and
+   `refs/loopflow/crons/<id>`. Assumption: if it lands that way, 878ecf's
+   first slice converts both in place, with no dual reading.
+9. **Non-public Machines.** Assumption: `lf task handover --to <someone's
+   private Machine>` is refused at the sender, with the public Machines
+   listed. The refusal exists only because Jack asked for "public". The
+   flexible alternative hands to that Machine's person and lets their pickup
+   rule apply.
+10. **Person derived from Machine records.** Assumption: there is no Person
+    ref. A Person is Machine records grouped by key. Each person's own Machines
+    publish their provider accounts and pickup flag.
 
 ## Jack Heart's direction (2026-10-21, design review)
 

@@ -236,7 +236,8 @@ struct WorldRead: Sendable, CustomTestStringConvertible {
         WorldRead("task comment", "taskComments") { world in
             let task = try await world.task(named: running)
             let comments = try await world.query.taskComments(id: task.identifier, cwd: world.repo.path)
-            #expect(comments.comments.count == 1)
+            // Checkout also posts an ownership claim; find the person's comment among them.
+            #expect(comments.comments.contains { $0.body.contains("Paint the last twenty turns first") })
         },
         WorldRead("usage --task", "taskHistory") { world in
             let task = try await world.task(named: running)

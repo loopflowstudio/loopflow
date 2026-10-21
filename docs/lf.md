@@ -200,8 +200,9 @@ Flow process for a Task is equally its work.
 same normalization as `lf wt create`; single words and longer names are accepted.
 
 Flow output shows each step's position and name followed by the agent's messages.
-Use `lf -v -b task run EXP-12 pursue` for context token accounting and INFO
-diagnostics. Codex Sessions start through the provider protocol and attach the
+Diagnostics go to `logs/lf.log` in the Loopflow home, not the terminal. Use
+`lf -v -b task run EXP-12 pursue` to see them, with context token accounting and
+INFO detail, on stderr. Codex Sessions start through the provider protocol and attach the
 native terminal. Prompts and instructions stay off the command line. Conversation
 capture requires no hook approval; context refresh uses stable launch hooks.
 Review new or changed declarations with Codex’s `/hooks`; headless runs skip
@@ -245,10 +246,9 @@ its protocol after the terminal connects.
 Claude reads its first turn from stdin, then uses the terminal for keyboard input.
 OpenCode first turns still use argv; a first turn exceeding its argument cap is
 refused before spawning the provider.
-OpenCode launches and resumes print an `OpenCode diagnostics:` path before opening
-the terminal. Full stderr is retained in that private `opencode.stderr.log` file
-beside the Session's capture. Read or tail it from another terminal; native
-errors and retries remain visible in OpenCode without raw logs covering input.
+OpenCode's full stderr is retained in a private `opencode.stderr.log` beside the
+Session's capture. Read or tail it from another terminal; native errors and
+retries remain visible in OpenCode without raw logs covering input.
 
 Interactive startup shows the current preparation stage and elapsed seconds.
 The indicator clears before the native terminal opens; redirected output stays clean.

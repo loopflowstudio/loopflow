@@ -1420,19 +1420,37 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
+/// Diagnostics go to `logs/lf.log` in the selected home; the terminal shows
+/// what commands print and the errors they return. `-v` or `RUST_LOG` shows
+/// diagnostics on stderr instead.
 fn init_tracing(verbose: bool) {
-    let default_filter = if verbose {
-        "lf=info,loopflow=info"
-    } else {
-        "warn"
-    };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
-        )
-        .with_writer(std::io::stderr)
-        .without_time()
-        .init();
+    let filter = EnvFilter::try_from_default_env().ok();
+    if verbose || filter.is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter.unwrap_or_else(|| EnvFilter::new("lf=info,loopflow=info")))
+            .with_writer(std::io::stderr)
+            .without_time()
+            .init();
+        return;
+    }
+    let directory = loopflow::store::lf_home_dir().join("logs");
+    let log = std::fs::create_dir_all(&directory).and_then(|()| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(directory.join("lf.log"))
+    });
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("warn"))
+        .with_ansi(false);
+    match log {
+        Ok(log) => subscriber.with_writer(std::sync::Mutex::new(log)).init(),
+        // An unwritable home still runs; its diagnostics stay visible.
+        Err(_) => subscriber
+            .with_writer(std::io::stderr)
+            .without_time()
+            .init(),
+    }
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {

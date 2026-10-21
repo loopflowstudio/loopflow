@@ -135,11 +135,6 @@ impl OpenCodeHarness {
         } else {
             tempfile::tempfile()?
         };
-        if self.interactive {
-            if let Some(path) = &diagnostic_path {
-                eprintln!("OpenCode diagnostics: {}", path.display());
-            }
-        }
         command.stderr(diagnostics.try_clone()?);
         self.child = Some(super::agent_process::spawn(command, None, &owner)?);
         let child = self.child.as_mut().expect("server was spawned");

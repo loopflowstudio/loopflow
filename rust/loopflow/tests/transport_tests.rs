@@ -1,4 +1,4 @@
-//! Real detached owner and public attachment; no provider credentials or display.
+//! Real detached owner and Session attachment; no provider credentials or display.
 #![cfg(unix)]
 
 mod support;
@@ -33,8 +33,10 @@ impl Fixture {
     fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("LF_")
-                || key.to_string_lossy().starts_with("LOOPFLOW_")
+            // An inherited cmux workspace would receive the fixture Session's name.
+            if ["LF_", "LOOPFLOW_", "CMUX_"]
+                .iter()
+                .any(|prefix| key.to_string_lossy().starts_with(prefix))
             {
                 command.env_remove(key);
             }
@@ -49,18 +51,64 @@ impl Fixture {
             .stdin(Stdio::null());
         command
     }
-    fn start(&self, argv: &[&str]) -> String {
-        let output = self
-            .command(&["transport", "start", "--terminal", "--"])
-            .args(argv)
-            .output()
+    /// Launch a detached owner the way a delegating execution does, returning its Process.
+    fn owner(&self, mut command: Command) -> String {
+        let logs = self.home.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(logs.join("transport.log"))
             .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        let mut child = command.stdout(Stdio::piped()).stderr(log).spawn().unwrap();
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        std::thread::spawn(move || child.wait());
+        assert!(!line.trim().is_empty(), "owner exited before acknowledging");
+        line.trim().to_owned()
+    }
+    fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
+        let mut command = self.command(&["__transport-serve"]);
+        if terminal {
+            command.arg("--terminal");
+        }
+        command.arg("--").args(argv);
+        command
+    }
+    fn start(&self, argv: &[&str]) -> String {
+        self.owner(self.serve(true, argv))
+    }
+    /// A Session row naming `owner`, so the public attach command resolves it.
+    fn session(&self, owner: &str) -> String {
+        let session = "session_5e55105e000040008000000000000001";
+        let sql = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        sql.execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,repo,agent_process_id,transport_lf_process_id)
+             VALUES(?1,'fixture','generated',1,0,?2,?3,?4,?4)",
+            rusqlite::params![
+                session,
+                self.repo.path().to_str().unwrap(),
+                loopflow::repository::CanonicalRepo::discover(self.repo.path())
+                    .unwrap()
+                    .to_string(),
+                owner
+            ],
+        )
+        .unwrap();
+        sql.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+             VALUES(?1,'captured','run_5e55105e000040008000000000000002',1,json_object('artifact_key','run_5e55105e000040008000000000000002'))",
+            [session],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE agent_sessions SET current_capture=?1 WHERE id=?2",
+            rusqlite::params![sql.last_insert_rowid(), session],
+        )
+        .unwrap();
+        session.to_owned()
     }
     fn endpoint(&self, id: &str) -> PathBuf {
         let digest = hex::encode(Sha256::digest(
@@ -295,12 +343,7 @@ fn read_until(viewer: &mut Viewer, kind: &str) -> Vec<Value> {
 #[test]
 fn only_controlling_viewers_see_live_input_controls() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(&["transport", "start", "--", "python3", "-c", INPUT_HINT_STEP])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let owner = fixture.owner(fixture.serve(false, &["python3", "-c", INPUT_HINT_STEP]));
     fixture.wait_file("registered");
 
     let mut controller = fixture.viewer(&owner, true);
@@ -330,21 +373,10 @@ fn only_controlling_viewers_see_live_input_controls() {
 #[test]
 fn pipe_eof_delivers_all_input_before_the_command_exits() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(&[
-            "transport",
-            "start",
-            "--",
-            "/bin/sh",
-            "-c",
-            "cat; printf final >&2",
-        ])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "cat; printf final >&2"]));
+    let session = fixture.session(&owner);
     let mut viewer = fixture
-        .command(&["transport", "attach", &owner])
+        .command(&["session", "attach", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -361,19 +393,14 @@ fn pipe_eof_delivers_all_input_before_the_command_exits() {
 #[test]
 fn slow_observer_does_not_block_output_or_final_exit() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(&[
-            "transport",
-            "start",
-            "--",
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
             "/bin/sh",
             "-c",
             "i=0; while [ \"$i\" -lt 64 ]; do read -r start; dd if=/dev/zero bs=65536 count=1 2>/dev/null; i=$((i+1)); done; printf final >&2",
-        ])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        ],
+    ));
     let mut slow = fixture.viewer(&owner, false);
     let mut active = fixture.viewer(&owner, true);
     active.input("start\n");
@@ -430,22 +457,18 @@ fn attachment_cancellation_preserves_pending_execution_without_replay() {
 #[test]
 fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(&[
-            "transport",
-            "start",
-            "--",
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
             "/bin/sh",
             "-c",
             "printf ready; read -r answer; printf '%s' \"$answer\"",
-        ])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        ],
+    ));
+    let session = fixture.session(&owner);
     let mut viewers = Vec::new();
     for observe in [false, true] {
-        let mut command = fixture.command(&["transport", "attach", &owner]);
+        let mut command = fixture.command(&["session", "attach", &session]);
         if observe {
             command.arg("--observe");
         }
@@ -582,35 +605,26 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let output = fixture
-        .command(&[
-            "transport",
-            "start",
-            "--terminal",
-            "--",
+    let mut owner = fixture.serve(
+        true,
+        &[
             env!("CARGO_BIN_EXE_lf"),
             "--interactive",
             "--agent",
             "claude",
             ":",
             "one original input",
-        ])
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        ],
     );
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    owner.env(
+        "PATH",
+        format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let owner = fixture.owner(owner);
     let launched = fixture.wait_file("launches");
     let (pid, capture) = launched.trim().split_once(':').unwrap();
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
@@ -744,24 +758,19 @@ read -r answer < /dev/tty
     };
     let mut owners = Vec::new();
     for input in ["first", "second", "left"] {
-        let output = fixture
-            .command(&[
-                "transport",
-                "start",
-                "--terminal",
-                "--",
+        let mut owner = fixture.serve(
+            true,
+            &[
                 env!("CARGO_BIN_EXE_lf"),
                 "--interactive",
                 "--agent",
                 "claude",
                 ":",
                 input,
-            ])
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        owners.push(String::from_utf8(output.stdout).unwrap().trim().to_owned());
+            ],
+        );
+        owner.env("PATH", &path);
+        owners.push(fixture.owner(owner));
         launches(owners.len());
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
@@ -936,20 +945,19 @@ fi
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let launched = fixture
-        .command(&["transport", "start", "--terminal", "--"])
-        .args([
+    let mut owner = fixture.serve(
+        true,
+        &[
             env!("CARGO_BIN_EXE_lf"),
             "--interactive",
             "--agent",
             "claude",
             ":",
             "call the nested CLI",
-        ])
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-        .output()
-        .unwrap();
-    assert!(launched.status.success(), "{launched:?}");
+        ],
+    );
+    owner.env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    fixture.owner(owner);
     let caller = fixture.wait_file("caller");
     let nested = fixture.wait_file("nested-launches");
     let viewer: i32 = fixture.wait_file("nested-viewer").trim().parse().unwrap();

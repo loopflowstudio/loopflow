@@ -7,6 +7,7 @@ pub mod context;
 pub mod context_cost;
 pub mod desktop;
 pub mod discord;
+pub mod disk;
 pub mod doctor;
 pub mod flow;
 pub mod flow_inventory;

@@ -255,7 +255,7 @@ impl SqliteStore {
     }
 
     /// The conversation, captured input and its event a process opened last.
-    /// A process that delegated to `lf transport serve` captures through the
+    /// A process that delegated to its transport owner captures through the
     /// command that transport serves, so the delegation chain counts as itself.
     pub(crate) fn process_input(
         &self,
@@ -266,12 +266,12 @@ impl SqliteStore {
             .query_row(
                 // Agent Processes record a bare executable name, not an argv array.
                 "WITH RECURSIVE delegated(id,serves) AS (
-                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='transport' AND json_extract(command,'$[2]')='serve' END
+                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='__transport-serve' END
                      FROM processes WHERE id=?1
                      UNION
-                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END
+                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END
                      FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='transport' AND json_extract(p.command,'$[2]')='serve' END))
+                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='__transport-serve' END))
                  SELECT session_id,receipt_key,seq FROM session_events
                  WHERE kind='captured' AND lf_process_id IN (SELECT id FROM delegated)
                  ORDER BY seq DESC LIMIT 1",
@@ -380,7 +380,7 @@ mod tests {
             process(
                 &transport,
                 Some(&step),
-                &["lf", "transport", "serve", "--", "lf"],
+                &["lf", "__transport-serve", "--", "lf"],
             );
             process(&served, Some(&transport), &["lf", "--skill-input", "in"]);
             // A command the agent ran is not the step's own capture.

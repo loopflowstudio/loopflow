@@ -73,8 +73,12 @@ const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 /// The first rollback-to-WAL transition can return BUSY immediately even with
 /// a busy handler: two readers cannot both upgrade their journal lock. Reuse
 /// migration exclusion only for that transition; ordinary WAL opens stay reads.
-fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()> {
+fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
     conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    // A deferred transaction that reads, then writes after another process
+    // committed, fails at once with SQLITE_BUSY_SNAPSHOT: the busy handler
+    // never runs. Taking the write lock at BEGIN makes it wait instead.
+    conn.set_transaction_behavior(TransactionBehavior::Immediate);
     let mode: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
     if mode != "wal" {
         let _lock = super::migrations::migration_lock(path)?;
@@ -197,7 +201,7 @@ pub(crate) fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
          (SELECT id AS task_id, branch FROM tasks UNION SELECT task_id, branch FROM task_prs) b \
-         ON b.task_id=t.id WHERE b.branch != ''"
+         ON b.task_id=t.id"
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()
@@ -535,9 +539,9 @@ impl SqliteStore {
                 StoreError::InvalidData(format!("failed to create db dir: {error}"))
             })?;
         }
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
-        configure_write_connection(&conn, path)?;
+        configure_write_connection(&mut conn, path)?;
         super::migrations::initialize_experimental_sqlite(
             &conn,
             crate::build_info::migration_draft_manifest(),
@@ -601,7 +605,7 @@ impl SqliteStore {
         crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
-        configure_write_connection(&conn, path)?;
+        configure_write_connection(&mut conn, path)?;
 
         if !shared_database {
             super::migrations::initialize_experimental_sqlite(
@@ -679,19 +683,6 @@ impl SqliteStore {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
-    }
-
-    /// Bound both lock waits and query execution for optional prompt naming.
-    pub(crate) fn open_native_title_reader(path: &Path) -> StoreResult<Self> {
-        let store = Self::open_read_only(path)?;
-        {
-            let conn = store.conn.lock().expect("store mutex poisoned");
-            let budget = Duration::from_millis(100);
-            conn.busy_timeout(budget)?;
-            let started = std::time::Instant::now();
-            conn.progress_handler(1000, Some(move || started.elapsed() >= budget))?;
-        }
-        Ok(store)
     }
 
     pub(crate) fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
@@ -2548,8 +2539,8 @@ mod wal_tests {
     fn a_burst_does_not_leave_its_wal_on_disk() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        configure_write_connection(&conn, &path).unwrap();
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        configure_write_connection(&mut conn, &path).unwrap();
         conn.execute_batch("CREATE TABLE history (payload BLOB)")
             .unwrap();
         let wal = directory.path().join("loopflow.db-wal");
@@ -2565,6 +2556,39 @@ mod wal_tests {
             .unwrap();
 
         assert!(std::fs::metadata(&wal).unwrap().len() <= WAL_SIZE_LIMIT_BYTES as u64);
+    }
+
+    #[test]
+    fn a_transaction_that_reads_then_writes_waits_for_a_concurrent_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let open = || {
+            let mut conn = rusqlite::Connection::open(&path).unwrap();
+            configure_write_connection(&mut conn, &path).unwrap();
+            conn
+        };
+        let mut first = open();
+        first
+            .execute_batch("CREATE TABLE rows (value INTEGER)")
+            .unwrap();
+        let tx = first.transaction().unwrap();
+        let before: i64 = tx
+            .query_row("SELECT COUNT(*) FROM rows", [], |row| row.get(0))
+            .unwrap();
+        // Another process writes while this transaction holds its read.
+        let second = std::thread::spawn({
+            let second = open();
+            move || second.execute("INSERT INTO rows VALUES (2)", []).unwrap()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        tx.execute("INSERT INTO rows VALUES (?1)", [before + 1])
+            .unwrap();
+        tx.commit().unwrap();
+        second.join().unwrap();
+        let count: i64 = first
+            .query_row("SELECT COUNT(*) FROM rows", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
     }
 }
 

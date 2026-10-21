@@ -191,20 +191,27 @@ pub(crate) fn classify(
     decisions
 }
 
+/// The protection that keeps a branch whatever GitHub says, if any.
+fn protection(facts: &BranchFacts, branch: &str) -> Option<Retention> {
+    if branch == facts.default_branch {
+        Some(Retention::DefaultBranch)
+    } else if facts.worktree_branches.contains(branch) {
+        Some(Retention::Worktree)
+    } else if facts.tasks.live.contains(branch) {
+        Some(Retention::LiveTask)
+    } else {
+        None
+    }
+}
+
 fn decide(
     facts: &BranchFacts,
     branch: &str,
     head: &str,
     is_ancestor: &impl Fn(&str) -> bool,
 ) -> Outcome {
-    if branch == facts.default_branch {
-        return Outcome::Retain(Retention::DefaultBranch);
-    }
-    if facts.worktree_branches.contains(branch) {
-        return Outcome::Retain(Retention::Worktree);
-    }
-    if facts.tasks.live.contains(branch) {
-        return Outcome::Retain(Retention::LiveTask);
+    if let Some(retention) = protection(facts, branch) {
+        return Outcome::Retain(retention);
     }
     let nodes = facts
         .pull_requests
@@ -249,7 +256,6 @@ fn decide(
 
 /// Why a run deleted nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub(crate) enum PruneStop {
     GitHub(RemoteFailure),
     Budget(GraphqlBudget),
@@ -272,7 +278,7 @@ impl fmt::Display for PruneStop {
 }
 
 /// Local wall-clock `HH:MM` for a Unix time.
-pub(crate) fn clock(unix: i64) -> String {
+fn clock(unix: i64) -> String {
     chrono::DateTime::from_timestamp(unix, 0)
         .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
         .unwrap_or_else(|| unix.to_string())
@@ -305,16 +311,17 @@ impl fmt::Display for BranchPruneEntry {
             Outcome::Delete(evidence) => evidence.to_string(),
             Outcome::Retain(retention) => retention.to_string(),
         };
-        let (action, reason) = match &self.status {
-            EntryStatus::WouldDelete => ("would delete", format!("{reason} at {head}")),
-            EntryStatus::Deleted => ("deleted", format!("{reason} at {head}")),
-            EntryStatus::AlreadyGone => ("already gone", format!("{reason} at {head}")),
-            EntryStatus::Retained => ("retained", format!("{reason} at {head}")),
-            EntryStatus::Moved => (
-                "retained",
-                format!("head moved from {head} during deletion"),
-            ),
-            EntryStatus::Failed(error) => ("failed", format!("{reason}: {error}")),
+        let action = match &self.status {
+            EntryStatus::WouldDelete => "would delete",
+            EntryStatus::Deleted => "deleted",
+            EntryStatus::AlreadyGone => "already gone",
+            EntryStatus::Retained | EntryStatus::Moved => "retained",
+            EntryStatus::Failed(_) => "failed",
+        };
+        let reason = match &self.status {
+            EntryStatus::Moved => format!("head moved from {head} during deletion"),
+            EntryStatus::Failed(error) => format!("{reason}: {error}"),
+            _ => format!("{reason} at {head}"),
         };
         write!(
             f,
@@ -328,13 +335,21 @@ impl fmt::Display for BranchPruneEntry {
 pub(crate) struct BranchPruneReport {
     pub entries: Vec<BranchPruneEntry>,
     pub budget: GraphqlBudget,
+    pub dry_run: bool,
 }
 
 impl BranchPruneReport {
-    pub(crate) fn count(&self, copy: BranchCopy, status: &EntryStatus) -> usize {
+    /// Copies deleted, or that a dry run would delete.
+    pub(crate) fn deleted(&self, copy: BranchCopy) -> usize {
         self.entries
             .iter()
-            .filter(|entry| entry.decision.copy == copy && &entry.status == status)
+            .filter(|entry| {
+                entry.decision.copy == copy
+                    && matches!(
+                        entry.status,
+                        EntryStatus::WouldDelete | EntryStatus::Deleted
+                    )
+            })
             .count()
     }
 
@@ -350,6 +365,24 @@ impl BranchPruneReport {
             .iter()
             .filter(|entry| matches!(entry.status, EntryStatus::Retained | EntryStatus::Moved))
             .count()
+    }
+}
+
+/// The run's summary line.
+impl fmt::Display for BranchPruneReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "branches: {} {} remote, {} local; retained {}; failed {}; GitHub GraphQL {}/{} left, resets {}",
+            if self.dry_run { "would delete" } else { "deleted" },
+            self.deleted(BranchCopy::Remote),
+            self.deleted(BranchCopy::Local),
+            self.retained(),
+            self.failed(),
+            self.budget.remaining,
+            self.budget.limit,
+            clock(self.budget.reset),
+        )
     }
 }
 
@@ -397,11 +430,7 @@ pub(crate) fn prune_branches(
         .remote_heads
         .keys()
         .chain(facts.local_heads.keys())
-        .filter(|branch| {
-            **branch != facts.default_branch
-                && !facts.worktree_branches.contains(*branch)
-                && !facts.tasks.live.contains(*branch)
-        })
+        .filter(|branch| protection(&facts, branch).is_none())
         .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -418,7 +447,11 @@ pub(crate) fn prune_branches(
         // Remote-tracking refs for branches deleted here or elsewhere.
         git_succeeds(&repo, &["remote", "prune", "origin"]);
     }
-    Ok(BranchPruneReport { entries, budget })
+    Ok(BranchPruneReport {
+        entries,
+        budget,
+        dry_run,
+    })
 }
 
 /// Delete each qualifying copy with a lease on its judged head, remote first.

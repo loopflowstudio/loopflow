@@ -74,44 +74,6 @@ Open Loopflow or run its CLI
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
-## lf transport
-
-Retain command execution independently of terminal viewers
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf transport start
-
-Start an independently owned command and print its Process identity
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport serve
-
-Own a command's transport until it exits (normally launched by start)
-
-| Argument | What it does |
-|---|---|
-| `--terminal` | terminal Default: false. |
-| `<argv>` | argv |
-| `--help / -h` | Print help |
-
-## lf transport attach
-
-Attach to an existing execution; Ctrl+] detaches without stopping it
-
-| Argument | What it does |
-|---|---|
-| `<process>` | process |
-| `--observe` | observe Default: false. |
-| `--help / -h` | Print help |
-
 ## lf clone
 
 Create and use an offline, isolated development data clone (macOS)
@@ -450,6 +412,37 @@ Reap registered orphan providers and remove dead process receipts
 |---|---|
 | `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf disk
+
+Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf disk clean
+
+Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
+| `--help / -h` | Print help |
+
+## lf disk rotate
+
+Remove the oldest backups, store copies, captures and logs until ~/.lf fits its disk_budget
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | Show what would be removed without removing anything Default: false. |
+| `--json` | json Default: false. |
+| `--quiet / -q` | Print nothing; removals are still logged to ~/.lf/logs/disk.log Default: false. |
 | `--help / -h` | Print help |
 
 ## lf :
@@ -2125,4 +2118,13 @@ Run a skill explicitly
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf skill customize
+
+Print the repository file that defines a skill, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |

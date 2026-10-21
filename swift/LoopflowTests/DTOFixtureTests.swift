@@ -345,7 +345,7 @@ struct DTOFixtureTests {
         #expect(sync.changes[3].field == "task_assignee")
         #expect(sync.changes[2].localValue == .string("Local title"))
         #expect(sync.changes[2].linearValue == .string("Linear title"))
-        #expect(sync.changes[3].text.contains("Linear: null"))
+        #expect(sync.changes[3].text.contains("provider: null"))
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{}".utf8))
         }

@@ -473,8 +473,8 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
     for operation in [
-        "state", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files", "flow-log",
-        "read", "text", "key",
+        "state", "hide", "restore", "focus", "move", "resize", "zoom", "shell", "files",
+        "flow-log", "read", "text", "key",
     ] {
         let output = command(
             home.path(),

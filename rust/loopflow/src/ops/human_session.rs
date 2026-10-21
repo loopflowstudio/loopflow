@@ -1568,7 +1568,7 @@ mod tests {
                 let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
                 store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
                 let result = super::open(&store, &session.id, super::OpenMode::Try, true).await;
-                let alive = crate::journal::OsProcess::group_is_alive(provider.id().unwrap())?;
+                let alive = !crate::journal::OsProcess::group(provider.id().unwrap())?.is_empty();
                 if alive {
                     provider.kill().await?;
                 }

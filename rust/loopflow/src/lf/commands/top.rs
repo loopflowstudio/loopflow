@@ -366,7 +366,7 @@ fn receipt_matches_live_process(
 fn os_activity_state(process: &OsProcess) -> ActivityState {
     match process.kernel_state.chars().next() {
         Some('R') => ActivityState::Working,
-        Some('T' | 'U' | 'D' | 'Z') => ActivityState::Stalled,
+        Some('T' | 'U' | 'D' | 'Z' | 'X') => ActivityState::Stalled,
         _ => ActivityState::Waiting,
     }
 }

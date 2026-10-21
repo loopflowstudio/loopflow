@@ -816,7 +816,7 @@ mod tests {
             .claim_session_attachment("stop", Some(&first), &process, false)
             .unwrap();
         assert!(harness.stop().await.is_err());
-        assert!(crate::journal::OsProcess::group_is_alive(pid).unwrap());
+        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
         harness.history = Arc::new(Mutex::new(opencode_history::History::new(Some((
             store,
             "stop".into(),

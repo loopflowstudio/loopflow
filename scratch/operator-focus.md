@@ -47,25 +47,19 @@ Considered and kept: repo-operate cleanup can `lf task abandon` your own
 Tasks while wave-operate never abandons. That is the cleanup duty decision 6
 keeps, scoped to your work; questions.md 1 covers reversing it.
 
-## Concept review 5 (2026-10-21): next implement direction
+## Concept review 5 (2026-10-21): implemented
 
 Decision 2 keeps operators off another person's Task because their Processes
 are not visible here. The same holds for a Task you own whose
 `runtime.owner.machine` is not this Machine (`lf id`): local `lf ps` cannot
-see its Flow, so "Look for a live Flow process first" reads it as idle and the
-recover/continue bullets would `lf task run` it here. Ownership code does not
-stop that: checkout allocation is the only claim (`children.rs` `claim_in`,
-whose `require_writer_in` refuses another Machine), and it returns early when
-the Task already has a checkout, so a started Task skips the check.
-
-Implement in `wave_operate.md` "Keep started work moving", one sentence under
-**Yours**: a Task you own on another Machine has unknown liveness here; operate
-it on that Machine with `lf --machine <machine> --wave <wave> wave-operate`,
-or report it unknown, naming the Machine. Do not `lf task run`, recover or
-complete it from this Machine. repo-operate defers to wave-operate and its
-Machines paragraph already names `lf --machine`; no change there. No code
-change (exclusions stand). Reply groups unchanged: it lands under Stuck as
-unknown, or Moving with the remote pass's result.
+see its Flow, so it reads as idle and recover/continue would `lf task run` it
+here. Checkout allocation (`children.rs` `claim_in`, `require_writer_in`) is
+the only claim and returns early for a started Task. Fixed in
+`wave_operate.md` "Keep started work moving" under **Yours**: such a Task has
+unknown liveness here; operate it with `lf --machine <machine> --wave <wave>
+wave-operate`, or report it unknown naming the Machine; never `lf task run`,
+recover or complete it from this Machine. It lands under Stuck as unknown, or
+Moving with the remote pass's result. repo-operate unchanged; no code change.
 
 ## Problem
 

@@ -283,7 +283,9 @@ lf task workflow move DES-123 design    # go back without running anything
 
 `start` and `end` are implicit. A node may say what you do there:
 `design: { skill: review-design, description: you review the plan }`;
-without one, the skill's first line stands in. An edge names a Flow or skill; Task launch resolves it and uses the explicit
+without one, the skill's first line stands in. A node may name the person it
+is for by email, `design: { skill: review-design, person: dustin@example.com }`,
+and the conversation's guidance at that node names them. An edge names a Flow or skill; Task launch resolves it and uses the explicit
 `flow` or `skill` invocation. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
 like builtin `research`. An edge is named by what it runs, so two edges

@@ -65,12 +65,14 @@
       {
         "name": "design",
         "skill": "review-design",
-        "description": "you review the plan"
+        "description": "you review the plan",
+        "person": "dustin@example.com"
       },
       {
         "name": "demo",
         "skill": "demo",
-        "description": "you try the change"
+        "description": "you try the change",
+        "person": null
       }
     ],
     "edges": [

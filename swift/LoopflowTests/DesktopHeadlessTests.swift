@@ -526,7 +526,7 @@ struct DesktopHeadlessTests {
         #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
 
         // An edge that goes back, or passes over a node, takes its own lane below the row.
-        let node = { Workflow.Node(name: $0, skill: "demo", description: nil) }
+        let node = { Workflow.Node(name: $0, skill: "demo", description: nil, person: nil) }
         let edge = { Workflow.Edge(from: $0, to: $1, flow: $2) }
         let lanes = WorkflowGraphLayout(nodes: [node("a"), node("b")], edges: [
             edge("start", "a", "one"), edge("a", "b", "two"), edge("b", "a", "back"), edge("start", "b", "skip"),

@@ -1447,6 +1447,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                         name: "start".into(),
                         skill: "review".into(),
                         description: None,
+                        person: None,
                     }],
                     edges: vec![],
                 },

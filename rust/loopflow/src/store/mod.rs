@@ -1573,6 +1573,7 @@ mod tests {
                     name: "review".into(),
                     skill: "review".into(),
                     description: None,
+                    person: None,
                 }],
                 edges: Vec::new(),
             };

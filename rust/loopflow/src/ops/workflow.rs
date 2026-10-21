@@ -191,10 +191,16 @@ impl Workflow {
                 self.node()
             )],
             WorkflowPosition::Node { node } => vec![match self.definition.node(node) {
-                Some(authored) => format!(
-                    "{summary}. The Task conversation works this node with the {} skill.",
-                    authored.skill
-                ),
+                Some(authored) => {
+                    let person = match &authored.person {
+                        Some(person) => format!(" It is for {person}."),
+                        None => String::new(),
+                    };
+                    format!(
+                        "{summary}. The Task conversation works this node with the {} skill.{person}",
+                        authored.skill
+                    )
+                }
                 None => format!("{summary}."),
             }],
         };
@@ -240,9 +246,25 @@ mod tests {
         });
         assert_eq!(waiting.outgoing, [3, 4]);
         let guidance = waiting.guidance("INF-1");
-        assert!(guidance.contains("with the demo skill"), "{guidance}");
+        assert!(guidance.contains("with the demo skill."), "{guidance}");
         assert!(guidance.contains("`lf -b task run INF-1 ship` moves the Task to end"));
         assert!(guidance.contains("`lf task workflow move INF-1 <node>`"));
+
+        // A node for one person names them.
+        let mut addressed = definition.clone();
+        addressed.nodes[1].person = Some("dustin@example.com".into());
+        let guidance = Workflow::new(
+            addressed,
+            WorkflowPosition::Node {
+                node: "demo".into(),
+            },
+            Vec::new(),
+        )
+        .guidance("INF-1");
+        assert!(
+            guidance.contains("demo skill. It is for dustin@example.com."),
+            "{guidance}"
+        );
 
         // On a running edge there is nothing to choose, only that the Flow runs.
         let on_edge = |running| {

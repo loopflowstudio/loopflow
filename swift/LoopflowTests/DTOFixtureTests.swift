@@ -372,6 +372,7 @@ struct DTOFixtureTests {
         let workflow = try #require(work.workflow)
         #expect(workflow.nodes.map(\.name) == ["design", "demo"])
         #expect(workflow.nodes.map(\.description) == ["you review the plan", "you try the change"])
+        #expect(workflow.nodes.map(\.person) == ["dustin@example.com", nil])
         #expect(workflow.edges.last?.launchName == "ship")
         // An edge that runs nothing is chosen by the node it enters.
         let research = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: loadFixtureData("workflow_catalog.json"))

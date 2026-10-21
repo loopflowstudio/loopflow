@@ -36,6 +36,9 @@ pub struct WorkflowNode {
     /// One line saying what the person does here: authored, else the
     /// skill's first line of prose.
     pub description: Option<String>,
+    /// The person this node is for, by lowercase email; `None` is whoever
+    /// holds the Task.
+    pub person: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +110,7 @@ struct AuthoredWorkflow {
 struct AuthoredNode {
     skill: String,
     description: Option<String>,
+    person: Option<String>,
 }
 
 /// The repository file that defines workflow `name`.
@@ -226,12 +230,17 @@ pub fn parse_workflow(
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
     let mut nodes = Vec::new();
     for (node, authored) in &authored.nodes {
-        let malformed = "each node is `name: skill` or `name: {skill, description}`";
+        let malformed = "each node is `name: skill` or `name: {skill, description, person}`";
         let node = node.as_str().ok_or(malformed)?;
-        let AuthoredNode { skill, description } = match authored.as_str() {
+        let AuthoredNode {
+            skill,
+            description,
+            person,
+        } = match authored.as_str() {
             Some(skill) => AuthoredNode {
                 skill: skill.to_string(),
                 description: None,
+                person: None,
             },
             None => serde_yaml_ng::from_value(authored.clone())
                 .map_err(|error| format!("node {node}: {malformed}: {error}"))?,
@@ -239,12 +248,22 @@ pub fn parse_workflow(
         if node == START || node == END {
             return Err(format!("{node} is implicit and cannot be a node"));
         }
+        let person = match person {
+            Some(person) if person.contains('@') => Some(person.trim().to_lowercase()),
+            Some(person) => {
+                return Err(format!(
+                    "node {node}: person {person} is not an email address"
+                ))
+            }
+            None => None,
+        };
         let loaded = load_skill(&skill, repo).map_err(|error| format!("node {node}: {error}"))?;
         nodes.push(WorkflowNode {
             name: node.to_string(),
             description: description
                 .or_else(|| loaded.content.as_deref().and_then(first_prose_line)),
             skill,
+            person,
         });
     }
     let workflow = WorkflowDefinition {
@@ -368,6 +387,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(authored.nodes[0].description.as_deref(), Some("you try it"));
+        assert_eq!(authored.nodes[0].person, None);
+        // A node may be for one person, named by email; the key is lowercase.
+        let addressed = load(
+            "nodes:\n  review: {skill: demo, person: Dustin@Example.com}\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            addressed.nodes[0].person.as_deref(),
+            Some("dustin@example.com")
+        );
         for (content, expected) in [
             (
                 "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
@@ -392,6 +421,10 @@ mod tests {
             (
                 "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
                 "two outgoing edges",
+            ),
+            (
+                "nodes:\n  review: {skill: demo, person: dustin}\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+                "person dustin is not an email address",
             ),
         ] {
             let error = load(content).unwrap_err().to_string();

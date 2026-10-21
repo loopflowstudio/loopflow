@@ -35,6 +35,9 @@ public struct Workflow: Codable, Sendable, Equatable {
         /// One line saying what the person does here; `nil` when neither the
         /// definition nor its skill says.
         public let description: String?
+        /// The person this node is for, by lowercase email; `nil` is whoever
+        /// holds the Task.
+        public let person: String?
     }
 
     public struct Edge: Codable, Sendable, Hashable {

@@ -466,6 +466,10 @@ fn task_work_preserves_all_owners() {
     assert!(!work.processes.is_empty());
     let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
     assert_eq!(
+        workflow.definition.nodes[0].person.as_deref(),
+        Some("dustin@example.com")
+    );
+    assert_eq!(
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 2,

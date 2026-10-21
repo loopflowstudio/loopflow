@@ -3418,15 +3418,12 @@ fn extract_oauth_code_from_request(request: &str) -> Option<String> {
     let first_line = request.lines().next()?;
     let path = first_line.split_whitespace().nth(1)?;
     let query = path.split_once('?')?.1;
-    for pair in query.split('&') {
-        if let Some(value) = pair.strip_prefix("code=") {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-    None
+    // Asana's codes carry `/` and `:`, so the value arrives percent-encoded.
+    serde_urlencoded::from_str::<Vec<(String, String)>>(query)
+        .ok()?
+        .into_iter()
+        .find(|(key, value)| key == "code" && !value.trim().is_empty())
+        .map(|(_, value)| value.trim().to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -5217,6 +5214,15 @@ attributes:
         assert_eq!(
             NOTION_OAUTH.redirect_uri(),
             "http://localhost:19223/oauth/callback"
+        );
+    }
+
+    #[test]
+    fn callback_code_is_percent_decoded() {
+        let request = "GET /oauth/callback?code=1%2F1213%3Aab%2Bc&state=s HTTP/1.1\r\n\r\n";
+        assert_eq!(
+            extract_oauth_code_from_request(request).as_deref(),
+            Some("1/1213:ab+c")
         );
     }
 

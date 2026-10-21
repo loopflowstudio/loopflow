@@ -98,3 +98,8 @@ local setting on each Machine: "this Machine picks up work addressed to me".
 No `refs/loopflow/machines/*`, no `lf machine list --all`. This supersedes the
 Machine-record design and the farm-out of `refs/loopflow/machines/<id>` to
 LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).
+- Refinement (Jack Heart, same day): publicly visible Machines are an
+  option, off by default. Person always reaches Git; a Machine record
+  (`refs/loopflow/machines/<id>`, LOO-555, carries crons) is published only
+  on opt-in. Assumption: visible is not addressable; handovers still name a
+  person, pickup stays local. Both Tasks steered.

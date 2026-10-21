@@ -154,11 +154,16 @@ simulators() {
 }
 
 library_caches() {
-  local count
-  count="$(find "$HOME/Library/Caches" -type f -mtime +"$cache_idle_days" 2>/dev/null | wc -l | tr -d ' ')"
-  find "$HOME/Library/Caches" -type f -mtime +"$cache_idle_days" -delete 2>/dev/null
-  find "$HOME/Library/Caches" -mindepth 1 -type d -empty -delete 2>/dev/null
-  echo "removed $count files untouched for $cache_idle_days days"
+  # Whole entries only. Deleting old files or empty directories inside a live
+  # cache leaves it half-written: SwiftPM's git mirrors lost their empty refs/
+  # and old packs, and the release's Mac build then failed to resolve packages.
+  local entry count=0
+  for entry in "$HOME/Library/Caches"/*; do
+    [ -e "$entry" ] || continue
+    [ -z "$(find "$entry" -mtime -"$cache_idle_days" -print -quit 2>/dev/null)" ] || continue
+    rm -rf "$entry" && count=$((count + 1))
+  done
+  echo "removed $count cache entries untouched for $cache_idle_days days"
 }
 
 cargo_targets() {

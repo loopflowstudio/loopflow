@@ -1519,13 +1519,10 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
                 None,
             )
             .await?;
-            let placement = store
-                .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
+            let (owning_machine, _) = store
+                .wave_owning_machine(wave.id(), crate::durable::MachineSetting::Tasks)
                 .await?;
-            (
-                main_repo_root(Path::new(wave.repo()))?,
-                placement.machine_id,
-            )
+            (main_repo_root(Path::new(wave.repo()))?, owning_machine)
         };
         let path_env = std::env::var("PATH").map_err(|_| {
             anyhow!("PATH is absent; cannot install an unattended cron environment")
@@ -1569,7 +1566,7 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
+        "Wave {wave} is owned by Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
         authority.placed_machine,
         authority.local_machine,
         authority.placed_machine,

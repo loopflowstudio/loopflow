@@ -83,7 +83,7 @@ configured publisher workflow and credentials.
 ## Understand account authority over SSH
 
 ```bash
-lf machine add mini --repo '~/src/project'
+lf machine add mini
 lf machine connect mini github
 lf machine connect mini codex work@example.com
 lf machine connect mini linear

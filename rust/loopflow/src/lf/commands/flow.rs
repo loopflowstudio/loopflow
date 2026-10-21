@@ -221,9 +221,8 @@ fn execute(
             .record_flow_process(
                 &running.process,
                 &crate::flow::graph::FlowGraph::new(flow_name, items),
-                running.task.as_ref(),
             )
-            .context("could not record the Flow and start its Task; no steps launched")?;
+            .context("could not record the Flow; no steps launched")?;
         drop(admission);
         let outcome = drive(&running, accounts).await?;
         // A step that completed its Task could not clean up under its own live

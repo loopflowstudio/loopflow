@@ -1917,3 +1917,15 @@ fn instruction_inspection_reports_recorded_reasons_and_missing_evidence() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Instruction evidence unavailable"));
 }
+
+#[test]
+fn hooks_from_an_earlier_lf_never_block_their_provider() {
+    let home = tempfile::tempdir().unwrap();
+    let output = command(home.path(), &["__planning-check"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    // Claude treats exit 2 at Stop as "keep working", so a removed callback exits 0.
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("restart the Session"));
+}

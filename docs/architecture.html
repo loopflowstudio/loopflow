@@ -1841,7 +1841,7 @@ operations available to helpers without becoming standing Work identities.</p>
 </tr>
 <tr>
 <td>Machines</td>
-<td>Placement, SSH routing, installation</td>
+<td>Task ownership, SSH routing, installation</td>
 <td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>
@@ -2003,9 +2003,9 @@ Flow                          one lf process; cursor in its memory, graph in Flo
 <td>Machine identity and observed route</td>
 </tr>
 <tr>
-<td>Placement</td>
-<td>Where a Work executes</td>
-<td><code>(WorkRef, MachineId)</code></td>
+<td>Task ownership</td>
+<td>Who works on a Task, on which Machine, or unowned</td>
+<td>Append-only <code>task_ownership</code> log; each person's Machine-local Wave → Machine default places their unowned Work</td>
 </tr>
 </tbody>
 </table>
@@ -2042,8 +2042,9 @@ target and writes; Desktop confirms it. Bind cannot clear or move an assignment
 or change Flow membership. Done and landed Tasks remain valid targets. Earlier
 usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.</p>
-<p><code>tasks.started_at</code> is set once when actual Task work is reserved or first bound.
-Recording an inspection command's Process does not start a Task. Chapter retirement
+<p>Reserving actual Task work (<code>lf task run</code> or <code>lf task checkout</code> allocating a
+checkout) claims an unowned Task in its append-only ownership log. Recording an
+inspection command's Process does not claim a Task. Chapter retirement
 also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
@@ -2117,7 +2118,7 @@ the behavior.</p>
 <td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
 </tr>
 <tr>
-<td>remote execution, placement, process control, promotion</td>
+<td>remote execution, Task ownership, process control, promotion</td>
 <td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>

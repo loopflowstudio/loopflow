@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, TaskCommand};
+use crate::lf::{Cli, Commands, MachineCommand, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -52,7 +52,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. }
+            cmd: TaskCommand::Location { .. }
         })
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
@@ -110,20 +110,77 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. } | Commands::Open(_))
         | Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::Admission { .. },
+            cmd: TaskCommand::Location { .. },
         }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
+        // Ownership is written only on the Task's writer.
+        Some(Commands::Task {
+            cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unclaim { issue, .. },
+        }) => Some(issue.as_str()),
+        Some(Commands::Machine {
+            cmd: MachineCommand::Use {
+                task: Some(task), ..
+            },
+        }) => Some(task.as_str()),
         _ => cli.task.as_deref(),
     }
+}
+
+/// Bare `lf machine use` and bare `lf connect` in a Task's worktree act on that
+/// Task, so they route to its Machine exactly as `--task` does. `--session` and
+/// `--tasks` set the worktree's Wave or repository instead.
+fn worktree_task(cli: &Cli) -> Result<Option<String>> {
+    let bare = match &cli.command {
+        Some(Commands::Machine {
+            cmd:
+                MachineCommand::Use {
+                    wave: None,
+                    task: None,
+                    repo: false,
+                    session: false,
+                    tasks: false,
+                    ..
+                },
+        }) => true,
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    all: false,
+                    ..
+                },
+        }) => cli.wave.is_none() && cli.repo.is_none() && cli.repository.is_none(),
+        _ => false,
+    };
+    if !bare || cli.task.is_some() {
+        return Ok(None);
+    }
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    let cwd = std::env::current_dir()?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    Ok(store
+        .task_checkouts()?
+        .into_iter()
+        .find(|checkout| {
+            let worktree = checkout
+                .worktree
+                .canonicalize()
+                .unwrap_or_else(|_| checkout.worktree.clone());
+            cwd.starts_with(worktree)
+        })
+        .map(|checkout| checkout.task_id.to_string()))
 }
 
 /// Return whether dispatch completed remotely. No Workflow or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
-    let Some(selector) = launch_task(cli) else {
-        return Ok(false);
+    let worktree_task = worktree_task(cli)?;
+    let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
+        return dispatch_primary_session(cli, args);
     };
     let Some(store) = read_registry()? else {
         return Ok(false);
@@ -139,6 +196,22 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     let machine = route.machine_id.clone();
     let mut forwarded = args[1..].to_vec();
+    if matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Claim { .. } | TaskCommand::Unclaim { .. }
+        }) | Some(Commands::Machine {
+            cmd: MachineCommand::Use { .. }
+        })
+    ) {
+        // Ownership needs no checkout on the writer; name the exact Task in place.
+        match forwarded.iter().rposition(|arg| arg == selector) {
+            Some(position) => forwarded[position] = route.task_id.to_string(),
+            None => forwarded.extend(["--task".into(), route.task_id.to_string()]),
+        }
+        super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
+        return Ok(true);
+    }
     // Carry the observed exact target in addition to the positional selector.
     // Destination resolution rejects an alias that now names different Work.
     let mut found = false;
@@ -162,6 +235,135 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
     Ok(true)
+}
+
+/// A Wave's or repository's Session lives on your Session Machine for it. The
+/// destination runs it wherever it arrives, even if its own copy differs. A
+/// bare connect resolves its scope from the worktree exactly as the local
+/// connect would, then routes the same way.
+fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
+    let (
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    all: false,
+                    ..
+                },
+        }),
+        None,
+    ) = (&cli.command, cli.task.as_deref())
+    else {
+        return Ok(false);
+    };
+    if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
+        return Ok(false);
+    }
+    let Some(registry) = crate::store::read_existing_registry()? else {
+        return Ok(false);
+    };
+    let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
+    let store = &registry.sqlite;
+    let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
+    let repository = match (&cli.repository, repo.as_deref()) {
+        (Some(repository), _) => Some(repository.clone()),
+        (None, Some(repo)) => store.repository_id(repo)?,
+        (None, None) => None,
+    };
+    let wave = match cli.wave.clone() {
+        Some(wave) => Some(wave),
+        None if cli.repo.is_some() || cli.repository.is_some() => None,
+        None => match context_scope(&registry, repo.as_deref())? {
+            Some(ContextScope::Wave(name)) => Some(name),
+            Some(ContextScope::Repository) => None,
+            // A Task's Session follows its claim; unresolved context stays local.
+            _ => return Ok(false),
+        },
+    };
+    let (machine, scope) = match wave.as_deref() {
+        Some(wave) => {
+            let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
+                return Ok(false);
+            };
+            (
+                store
+                    .wave_owning_machine(&wave_id, crate::durable::MachineSetting::Session)?
+                    .0,
+                format!("Wave {wave}"),
+            )
+        }
+        None => {
+            let Some(repository) = &repository else {
+                return Ok(false);
+            };
+            (
+                store
+                    .repository_owning_machine(repository, crate::durable::MachineSetting::Session)?
+                    .0,
+                "this repository".to_string(),
+            )
+        }
+    };
+    if machine == store.local_machine()?.id {
+        return Ok(false);
+    }
+    // The destination finds its own checkout by identity, never by this path.
+    let mut forwarded = Vec::new();
+    let mut iter = args[1..].iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--repo" {
+            iter.next();
+        } else if !arg.starts_with("--repo=") {
+            forwarded.push(arg.clone());
+        }
+    }
+    if cli.wave.is_none() {
+        if let Some(wave) = &wave {
+            forwarded.splice(0..0, ["--wave".into(), wave.clone()]);
+        }
+    }
+    if cli.repository.is_none() {
+        let repository = repository
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
+        forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
+    }
+    super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;
+    Ok(true)
+}
+
+/// The scope a bare connect here opens, when it is a Wave or the repository.
+#[derive(Debug)]
+enum ContextScope {
+    Wave(String),
+    Repository,
+}
+
+/// Resolve as the local connect does. Task worktrees and unassociated ones are
+/// `None`: a Task routes by its claim, and an error belongs to the local connect.
+fn context_scope(
+    store: &crate::store::SharedStore,
+    repo: Option<&str>,
+) -> Result<Option<ContextScope>> {
+    let Some(repo) = repo else {
+        return Ok(None);
+    };
+    let cwd = std::env::current_dir()?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        use crate::ops::human_session::{connection_scope, SessionTarget};
+        use crate::session::PrimaryScope;
+        Ok(
+            match connection_scope(store, &cwd, SessionTarget::Context).await {
+                Ok(PrimaryScope::Wave(id)) => store
+                    .list_waves(Some(repo))
+                    .await?
+                    .into_iter()
+                    .find(|wave| wave.id() == &id)
+                    .map(|wave| ContextScope::Wave(wave.name().to_string())),
+                Ok(PrimaryScope::Repository(_)) => Some(ContextScope::Repository),
+                Ok(PrimaryScope::Task(_)) | Err(_) => None,
+            },
+        )
+    })
 }
 
 /// Inspect known Work only. Provider acquisition and plan exchange have their
@@ -196,10 +398,7 @@ fn resolve_task(
             None
         };
     resolve_task_id(store, selector, repo.as_deref())?
-        .map(|task| {
-            tokio::runtime::Runtime::new()?
-                .block_on(crate::ops::task_location::resolve(store, &task))
-        })
+        .map(|task| store.task_execution_route(&task).map_err(Into::into))
         .transpose()
 }
 

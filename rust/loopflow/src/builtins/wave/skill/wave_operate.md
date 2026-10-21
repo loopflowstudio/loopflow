@@ -35,10 +35,10 @@ waiting indefinitely.
 
 ## Keep started work moving
 
-Give every started, unfinished Task in the Wave exactly one disposition, with
-its evidence: the first row below that fits. Started is the recorded fact,
-whether or not a Flow process is alive now. Include Tasks status lists under
-`unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
+Give every owned, unfinished Task in the Wave exactly one disposition, with
+its evidence: the first row below that fits. Ownership (`runtime.owner` in
+`lf wave show --json`) is the recorded fact, whether or not a Flow process is alive now. Include Tasks status lists under
+`unavailable_tasks`; they are unknown until read. Unowned backlog is listed
 as backlog and left alone: starting it is the person's selection, except for
 an already authorized concrete check in a due follow-up's brief (see below).
 
@@ -154,7 +154,7 @@ disagreement. A draft or failed delivery leaves the handoff pending.
 Tasks progress independently of Wave and repository passes. Neither operation
 is an approval prerequisite. A Task's Flows carry its autonomous work; do not
 perform a Flow's steps here. Preserve Flow history, conversation reviews,
-worktrees, placement and execution history.
+worktrees, ownership and execution history.
 
 - Start selected work with `lf task run <issue-id>`; use the
   current Project's Flow unless an explicit choice is warranted. Each run

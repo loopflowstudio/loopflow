@@ -292,7 +292,7 @@ generic attempt object.
 Main records have one SQLite owner. Every Task has a repository and optional Project membership; its Wave is derived through that Project. Constructors reject mismatched ancestry. Bind assigns an unassigned conversation once,
 including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
 owns that single choice. Actual work
-reservation sets Started once; logging an inspection Process does not. Every
+reservation claims an unowned Task in the ownership log; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
 process control nor Flow settlement. Attachment claims and provider identity
 are separate: a fresh claim token fences every attachment and release, including
@@ -440,6 +440,9 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
+`docs/lf-reference.md` is generated: `LF_HOME=<disposable> target/debug/lf help --all --json > catalog.json`
+then `uv run python scripts/generate_cli_reference.py catalog.json`. Without a
+custom `LF_HOME` the build re-execs the installed lf and renders its help.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

@@ -754,13 +754,14 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             session["work"],
             serde_json::json!({"kind": "task", "id": child.task.id})
         );
-        assert_eq!(
-            runtime
-                .block_on(child.store.get_task(&parent.id))
-                .unwrap()
-                .unwrap(),
-            parent_before
-        );
+        // The parent's own pending claim delivery may record a failed sync; its
+        // Work is otherwise untouched by the child's Flow.
+        let mut parent_after = runtime
+            .block_on(child.store.get_task(&parent.id))
+            .unwrap()
+            .unwrap();
+        parent_after.pm_writeback = parent_before.pm_writeback.clone();
+        assert_eq!(parent_after, parent_before);
     }
 }
 
@@ -1226,26 +1227,17 @@ fn observing_and_preparing_a_task_are_not_execution() {
         &repo.head_sha(),
     );
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    // Started is `tasks.started_at`, set by the first Run that names the Task.
-    let started_at = || -> Option<i64> {
-        rusqlite::Connection::open(home.path().join("loopflow.db"))
+    // Allocating the checkout claimed the Task; nothing after it adds an entry.
+    let entries = || {
+        task.store
+            .sqlite
+            .task_ownership(&task.task.id)
             .unwrap()
-            .query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
-                [task.task.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap()
+            .log
+            .len()
     };
-    let starts = || started_at().iter().count();
-    // The shared evidence the desktop sidebar consumes.
-    let started = || {
-        runtime
-            .block_on(task.store.task_started(&task.task.id))
-            .unwrap()
-    };
-    assert_eq!(starts(), 0);
-    assert!(!started(), "a prepared, unrun Task is not started");
+    let _ = &runtime;
+    assert_eq!(entries(), 1, "the prepared checkout claimed its Task");
     for args in [
         vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
@@ -1253,7 +1245,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     ] {
         let read = run_lf(repo.path(), home.path(), &args, None);
         assert!(read.status.success(), "{read:?}");
-        assert_eq!(started_at(), None, "inspection cannot start its Task");
+        assert_eq!(entries(), 1, "inspection writes no ownership entry");
     }
 
     write_skill(repo.path(), "review-proof", "Review the fixture.");
@@ -1287,8 +1279,7 @@ fn observing_and_preparing_a_task_are_not_execution() {
     );
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
     assert!(sessions.is_empty());
-    assert_eq!(starts(), 0, "rejected review does not start its Task");
-    assert!(!started());
+    assert_eq!(entries(), 1, "rejected review writes no ownership entry");
 }
 
 #[test]
@@ -1322,13 +1313,15 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
 
-    // An unstarted Task: an empty list, and asking neither prepares nor starts it.
+    // A Task without Runs: an empty list, and asking prepares and claims nothing.
     let before = events();
+    let claims = task.store.sqlite.task_ownership(&task.task.id).unwrap().log;
     assert!(read("INF-123").is_empty());
     assert_eq!(events(), before, "reading Run history writes no Task event");
-    assert!(!runtime
-        .block_on(task.store.task_started(&task.task.id))
-        .unwrap());
+    assert_eq!(
+        task.store.sqlite.task_ownership(&task.task.id).unwrap().log,
+        claims
+    );
 
     write_skill(repo.path(), "history-work", "Do proof-owned work.");
     register_codex_account(home.path());
@@ -1403,12 +1396,12 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let sibling =
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    // Started is `tasks.started_at`, set by the first Run that names the Task.
+    // The checkout's claim is the only ownership entry; launches add none.
     let starts = |id: &loopflow::work::task::TaskId| {
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT count(*) FROM tasks WHERE id=?1 AND started_at IS NOT NULL",
+                "SELECT count(*) FROM task_ownership WHERE task_id=?1",
                 [id.as_str()],
                 |row| row.get::<_, i64>(0),
             )
@@ -1476,7 +1469,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         after[before.len()..].trim().to_string()
     };
 
-    assert_eq!(starts(&task.task.id), 0);
+    assert_eq!(starts(&task.task.id), 1);
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
@@ -1492,10 +1485,10 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     assert_eq!(
         starts(&task.task.id),
         1,
-        "a launch bound from its checkout is work beginning"
+        "a launch bound from its checkout keeps the checkout's claim"
     );
     assert!(runtime
-        .block_on(task.store.task_started(&task.task.id))
+        .block_on(task.store.task_owned(&task.task.id))
         .unwrap());
 
     // A checkout no Task owns stays unbound and retires on exit.

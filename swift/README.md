@@ -877,4 +877,4 @@ working-output lifetime. A current Available result shows its source age. Missin
 stale or disconnected evidence shows a labeled Task summary. Codex currently
 supplies turn-qualified excerpts; providers without that evidence use the summary.
 Repository and Wave navigation displays retained conversation entry without
-starting a provider. Waves show their full Started and Not started inventory.
+starting a provider. Waves group their full inventory as Owned and Unowned; rows read "Jack Heart on mini" or "Unowned".

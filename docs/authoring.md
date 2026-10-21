@@ -376,8 +376,16 @@ Every Wave uses the repository Team and binds only its Initiative. Select the
 synchronization transport with `planning.provider`; a Team binding selects Linear
 when that choice is omitted.
 
-Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
-Placement does not edit the goal, launch work or stop existing conversations.
+Which Machine runs your work for a Wave is your choice, never repository content:
+
+```bash
+lf machine use mini product  # your Machine for this Wave's new Tasks and Session
+lf machine use mini --repo   # this repository's default
+lf machine list              # each Machine with the defaults naming it
+```
+
+It does not edit the goal or launch work. It moves your Wave Session to the new
+Machine and leaves existing Tasks where they are.
 
 ### Writing KRs
 

@@ -1261,7 +1261,8 @@ exit 0
             prs[1].id
         );
         if scenario == "completed" {
-            assert_ne!(
+            // A new PR respects completion; only `lf task reopen` uncompletes.
+            assert_eq!(
                 runtime
                     .block_on(task.store.task_state(&task.task.id))
                     .unwrap(),
@@ -1299,7 +1300,7 @@ fn continued_publication_observes_the_previous_merge() {
 }
 
 #[test]
-fn continued_publication_reopens_completed_task() {
+fn continued_publication_keeps_a_completed_task_complete() {
     continued_publication("completed");
 }
 

@@ -22,6 +22,11 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
         .env("NO_COLOR", "1")
         .current_dir(cwd)
         .args(args);
+    // In-process fixtures claim Tasks as this test process's person; `lf` acts
+    // as the same person, whatever Git identity the test repository carries.
+    if let Some(person) = loopflow::config::participant_name().unwrap() {
+        command.env("LF_USER_NAME", person);
+    }
     command
 }
 
@@ -1157,7 +1162,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     );
     assert_eq!(
         explicit["resolution"]["execution_machine"]["source"],
-        "recorded_checkout"
+        "owner"
     );
     let invalid = read(&[
         "task",
@@ -1230,7 +1235,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
 }
 
 #[test]
-fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects() {
+fn task_run_explain_reports_remote_and_refused_evidence_without_effects() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
@@ -1245,7 +1250,9 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
     let db = rusqlite::Connection::open(&path).unwrap();
     let store = SqliteStore::new(&path).unwrap();
     let machine = store.local_machine().unwrap().id;
-    for condition in ["terminal", "remote", "unknown", "missing_checkout"] {
+    let remote = loopflow::durable::MachineId::new();
+    // A handoff is append-only, so the remote owner comes last.
+    for condition in ["terminal", "missing_checkout", "remote"] {
         db.execute(
             "UPDATE tasks SET planning_state=NULL, planning_completed=0, checkout_machine_id=?1",
             [machine.as_str()],
@@ -1257,16 +1264,10 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
                     .unwrap();
             }
             "remote" => {
-                let remote = loopflow::durable::MachineId::new();
                 store
                     .add_machine(&remote, "must-not-contact.invalid", "fixture-peer")
                     .unwrap();
-                db.execute("UPDATE tasks SET checkout_machine_id=?1", [remote.as_str()])
-                    .unwrap();
-            }
-            "unknown" => {
-                db.execute("UPDATE tasks SET checkout_machine_id=NULL", [])
-                    .unwrap();
+                store.handoff_task(&registered.task.id, &remote).unwrap();
             }
             "missing_checkout" => {
                 db.execute(
@@ -1302,21 +1303,24 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
             ),
             "remote" => {
                 assert!(report["action"].is_null());
-                assert!(report["unavailable"]
-                    .to_string()
-                    .contains("no recorded execution owner was observed"));
+                assert_eq!(
+                    report["resolution"]["execution_machine"],
+                    serde_json::json!({"state":"bound", "value":remote.as_str(), "source":"owner"})
+                );
+                assert!(
+                    report["unavailable"]
+                        .to_string()
+                        .contains("no remote preparation was performed"),
+                    "{report}"
+                );
             }
-            "unknown" => assert_eq!(
-                report["resolution"]["execution_machine"]["state"],
-                "unavailable"
-            ),
             "missing_checkout" => {
                 assert!(report["impediments"].to_string().contains("missing"));
                 assert!(report["action"].is_null());
             }
             _ => unreachable!(),
         }
-        if matches!(condition, "remote" | "unknown") {
+        if condition == "remote" {
             let movement: serde_json::Value = serde_json::from_str(&success(
                 command(
                     home.path(),
@@ -2057,7 +2061,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     assert_eq!(
         preview["resolution"]["execution_machine"]["source"],
-        "recorded_checkout"
+        "owner"
     );
     assert_eq!(
         preview["action"],
@@ -3110,7 +3114,9 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
         .unwrap();
     let store = SqliteStore::new(&path).unwrap();
     let local = store.local_machine().unwrap().id;
-    for condition in ["absent", "occupied", "terminal", "unknown", "remote"] {
+    let peer = loopflow::durable::MachineId::new();
+    // A handoff is append-only, so the remote owner comes last.
+    for condition in ["absent", "occupied", "terminal", "remote"] {
         db.execute(
             "UPDATE tasks SET planning_state=NULL,checkout_machine_id=?1",
             [local.as_str()],
@@ -3122,17 +3128,11 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
                 db.execute("UPDATE tasks SET planning_state='canceled'", [])
                     .unwrap();
             }
-            "unknown" => {
-                db.execute("UPDATE tasks SET checkout_machine_id=NULL", [])
-                    .unwrap();
-            }
             "remote" => {
-                let peer = loopflow::durable::MachineId::new();
                 store
                     .add_machine(&peer, "must-not-contact.invalid", "peer")
                     .unwrap();
-                db.execute("UPDATE tasks SET checkout_machine_id=?1", [peer.as_str()])
-                    .unwrap();
+                store.handoff_task(&registered.task.id, &peer).unwrap();
             }
             _ => {}
         }
@@ -3175,16 +3175,19 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
                     .contains("terminal planning"),
                 "{report}"
             ),
-            "unknown" => assert_eq!(
-                report["resolution"]["execution_machine"]["state"],
-                "unavailable"
-            ),
-            "remote" => assert!(
-                report["unavailable"]
-                    .to_string()
-                    .contains("no recorded execution owner was observed"),
-                "{report}"
-            ),
+            "remote" => {
+                assert_eq!(
+                    report["resolution"]["execution_machine"]["value"],
+                    peer.as_str(),
+                    "{report}"
+                );
+                assert!(
+                    report["unavailable"]
+                        .to_string()
+                        .contains("no remote preparation was performed"),
+                    "{report}"
+                );
+            }
             _ => unreachable!(),
         }
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();

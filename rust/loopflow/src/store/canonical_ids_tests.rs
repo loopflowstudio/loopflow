@@ -805,6 +805,7 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .collect::<Result<_, _>>()
             .unwrap();
     apply_sqlite(&conn).unwrap();
+    apply_drafts(&conn);
     assert_eq!(
         conn.query_row(
             "SELECT session_id,payload FROM session_events WHERE receipt_key='Case-Receipt'",
@@ -851,12 +852,18 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .unwrap(),
         1
     );
-    let authority: String = conn
-        .query_row("SELECT admission_authority FROM tasks", [], |r| r.get(0))
-        .unwrap();
+    // The admitting Machine survives as the Task's recorded ownership entry.
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&authority).unwrap()["machine_id"],
-        "home_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        conn.query_row(
+            "SELECT kind,machine_id FROM task_ownership WHERE task_id='task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        )
+        .unwrap(),
+        (
+            "recorded".to_string(),
+            "home_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()
+        )
     );
     let event: String = conn
         .query_row("SELECT kind_json FROM task_events", [], |r| r.get(0))
@@ -906,8 +913,10 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn
-        .execute("UPDATE task_admissions SET machine_id='other'", [])
-        .is_err());
+        .execute("UPDATE task_ownership SET machine_id='other'", [])
+        .unwrap_err()
+        .to_string()
+        .contains("append-only"));
     assert!(conn
         .execute(
             "UPDATE tasks SET external_issue_id=upper(external_issue_id)",
@@ -916,7 +925,14 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         .unwrap_err()
         .to_string()
         .contains("canonical identity"));
-    assert!(conn.execute("UPDATE tasks SET admission_authority=json_set(admission_authority,'$.machine_id',upper(json_extract(admission_authority,'$.machine_id')))",[]).unwrap_err().to_string().contains("canonical identity"));
+    assert!(conn
+        .execute(
+            "UPDATE tasks SET checkout_machine_id=upper(checkout_machine_id)",
+            []
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("canonical identity"));
     // References need no trigger: the store's foreign keys match canonical owners exactly.
     conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
     assert!(conn

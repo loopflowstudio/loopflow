@@ -46,6 +46,8 @@ CREATE TRIGGER store_revision_scope_defaults_insert AFTER INSERT ON scope_defaul
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_scope_defaults_update AFTER UPDATE ON scope_defaults
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_scope_defaults_delete AFTER DELETE ON scope_defaults
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 -- The Machine registry is the person's, across every repository: a Machine
 -- names no checkout, and `lf --machine` addresses the repository by identity.

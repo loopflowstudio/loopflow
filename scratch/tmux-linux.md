@@ -28,15 +28,13 @@ person he shows it to (a tmux user, likely on Windows later; Linux first).
   tmux window (or cmux workspace) for the Session, follows renames, and
   restores tmux automatic-rename when it leaves.
 
+Hooks on a real signed-in Claude Session (Claude Code 2.1.306) in tmux on
+Linux: an interactive turn with a tool call and a failed tool, detach, `lf
+resume`, another turn, then `lf -b`: no hook error on screen, empty
+`hookErrors` in every transcript record, clean headless stderr.
+
 ## Left
 
-- Hooks on a real signed-in Claude Session on Linux, interactive in tmux and
-  `lf -b`: every hook exit 0 with empty stderr across turns, tool calls, a
-  failed tool and resume. Needs a Claude login on the box (`lf machine
-  connect <machine> claude <email>`, a browser approval).
-  Direct probe with a live claude's env: SessionStart, UserPromptSubmit and
-  Stop are clean; PostToolUse rejects a probe whose `session_id` is not the
-  native conversation, unproven against a real one.
 - Linux Worktree sandbox (`failIfUnavailable`, bubblewrap/socat) and the two
   `--settings` flags (hooks + sandbox) under a real Session.
 - A conversation viewed from a plain terminal records no placement, so its
@@ -47,6 +45,11 @@ person he shows it to (a tmux user, likely on Windows later; Linux first).
   outside tmux. Windows/WSL follow-up.
 
 ## Questions
+
+- Every interactive launch prints `Loopflow diagnostics: <log>` once per lf
+  layer (twice for `lf skill default`), before anything was recorded. #1595
+  announces deliberately; the exit line already reports a log that grew.
+  Keep, dedupe, or announce only on exit?
 
 - Herdr inside tmux vs tmux inside Herdr both carry both env sets; this picks
   Herdr. Revisit if someone nests them.

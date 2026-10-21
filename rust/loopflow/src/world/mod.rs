@@ -28,6 +28,7 @@ use crate::process::{LfProcess, ProcessKind};
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
+use crate::work::edit::{Disposition, WorkEdit, WorkValue};
 use crate::work::project::ProjectKR;
 use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
@@ -35,6 +36,9 @@ pub use crate::work::wave::metrics::Threshold;
 
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
+
+/// The person whose Machine a World is: their config and their commits.
+const PERSON: &str = "Demo";
 
 /// Directories Desktop prepends to a child's `PATH` when absent
 /// (`GUIProcessEnvironment.enrichedPath` in
@@ -224,6 +228,10 @@ impl World {
         }
         write_executable(&dir, "claude", STUB_CLAUDE)?;
         write_executable(&dir, "gh", GH)?;
+        std::fs::write(
+            env.lf_home.join("config.yaml"),
+            format!("user:\n  name: {PERSON}\n"),
+        )?;
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
@@ -337,11 +345,11 @@ impl World {
         Ok(())
     }
 
-    /// Create an unstarted Task in `wave`.
-    pub fn task(&self, wave: &str, title: &str, report: &str) -> Result<Task> {
+    /// Create an unstarted Task in `wave`, or a standalone one without.
+    pub fn task(&self, wave: Option<&str>, title: &str, report: &str) -> Result<Task> {
         Ok(crate::ops::task::task_create(
             &self.repo,
-            Some(wave),
+            wave,
             Some(title.to_string()),
             Some(report.to_string()),
         )?)
@@ -366,13 +374,68 @@ impl World {
         Ok(())
     }
 
-    /// Complete a Task the way `lf task complete` does.
-    pub fn complete(&self, task: &Task, note: &str) -> Result<Task> {
-        Ok(crate::ops::task::task_complete(
-            &self.repo,
-            &task.identifier,
-            Some(note),
-        )?)
+    /// Complete a Task the way `lf task complete` does, then date the
+    /// completion `completed_days_ago` through the planning writer.
+    pub fn complete(&self, task: &Task, note: &str, completed_days_ago: f64) -> Result<Task> {
+        let task = crate::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?;
+        let at = time::OffsetDateTime::from_unix_timestamp(self.days_ago(completed_days_ago))?
+            .format(&time::format_description::well_known::Rfc3339)?;
+        self.dispose(
+            &task,
+            Disposition {
+                planning_state: Some("completed".into()),
+                planning_completed: 1,
+                planning_completed_at: Some(at),
+            },
+        )?;
+        Ok(task)
+    }
+
+    /// Pause a Task the way `lf task pause` does.
+    pub fn pause(&self, task: &Task) -> Result<()> {
+        Ok(crate::ops::task::task_pause(&task.identifier, true)?)
+    }
+
+    /// Abandon a Task the way `lf task abandon` does, removing its checkout.
+    pub fn abandon(&self, task: &Task) -> Result<()> {
+        crate::ops::task::task_abandon(&self.repo, Some(&task.identifier), true)?;
+        Ok(())
+    }
+
+    /// Cancel a Task's planning the way an accepted Linear cancellation does,
+    /// leaving its local runtime alone.
+    pub fn cancel_upstream(&self, task: &Task) -> Result<()> {
+        self.dispose(
+            task,
+            Disposition {
+                planning_state: Some("canceled".into()),
+                planning_completed: 0,
+                planning_completed_at: None,
+            },
+        )
+    }
+
+    /// Delete a Task's checkout folder, leaving Git's worktree metadata, as a
+    /// person removing the directory would.
+    pub fn remove_checkout(&self, task: &Task) -> Result<()> {
+        let worktree = task
+            .worktree
+            .as_ref()
+            .ok_or_else(|| anyhow!("Task {} has no checkout", task.identifier))?;
+        std::fs::remove_dir_all(worktree)?;
+        Ok(())
+    }
+
+    fn dispose(&self, task: &Task, disposition: Disposition) -> Result<()> {
+        let store = self.store()?;
+        let mut conn = store.sqlite.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        crate::store::sqlite::planning_write::local(
+            &tx,
+            &WorkEdit::for_target(task.id.as_str(), &[WorkValue::Disposition(disposition)]),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Record a finished Flow run in `task`'s checkout (the repository when
@@ -435,8 +498,9 @@ impl World {
     }
 
     /// Write a Claude conversation of alternating turns and admit it as a
-    /// Session, bound to `task` when given. It resumes in the Task's checkout
-    /// when it has one.
+    /// Session. It resumes in the Task's checkout when it has one. A Task's
+    /// Session is bound and then takes its next input, so its history is the
+    /// Task's: binding attributes only work after it.
     pub fn session(
         &self,
         task: Option<&Task>,
@@ -455,12 +519,29 @@ impl World {
             .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
         let session_id = session.id.to_string();
         if let Some(task) = task {
-            self.runtime
-                .block_on(store.bind_session(&session_id, session.captured, &task.id))?;
+            let bound = self.runtime.block_on(store.bind_session(
+                &session_id,
+                session.captured,
+                &task.id,
+            ))?;
+            let next = self
+                .runtime
+                .block_on(crate::ops::human_session::append_input(&store, bound))?;
+            // The provider observed that input resuming this conversation, so
+            // connecting resumes it rather than starting a new one.
+            let dir = crate::ops::human_session::local_capture_dir(next.input_key()?)
+                .ok_or_else(|| anyhow!("Session {session_id} has an invalid capture reference"))?;
+            crate::session_record::write_provider_session(&dir, &id.as_str().into(), None)?;
         }
         self.runtime
             .block_on(store.rename_session(&session_id, title, TitleSource::Human))?;
         Ok(session_id)
+    }
+
+    /// Comment on a Task the way `lf task comment` does.
+    pub fn comment(&self, task: &Task, message: &str) -> Result<()> {
+        crate::ops::task::task_comment(&self.repo, &task.identifier, None, Some(message), false)?;
+        Ok(())
     }
 
     /// Open `wave`'s ongoing conversation the way `lf wave session` does and
@@ -888,7 +969,8 @@ fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String> {
         command.current_dir(cwd);
     }
     let output = command
-        .args(["-c", "user.name=Demo", "-c", "user.email=demo@example.com"])
+        .args(["-c", &format!("user.name={PERSON}")])
+        .args(["-c", "user.email=demo@example.com"])
         .args(args)
         .output()
         .with_context(|| format!("run git {}", args.join(" ")))?;

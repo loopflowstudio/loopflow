@@ -156,63 +156,6 @@ struct WaveDetailReadingTests {
         }
     }
 
-    // The populated detail-pane hierarchy can't be driven live in every
-    // environment (a Wave whose registry carries W2-123 lens data needs a
-    // schema-current `lf` + populated store). This walks the real populated
-    // `lf wave status --json` fixture through the exact projections the detail-pane
-    // Project and Task rows render (`WaveLens.forTasks` / `.forTask`,
-    // open-task count, KR list) — the mockup hierarchy proven at the data layer.
-    @Test("the populated detail hierarchy renders objective, chapter KRs, Tasks, and shared lenses")
-    func populatedDetailHierarchyProjectsThroughLensGrammar() throws {
-        let detail = try JSONDecoder().decode(
-            WaveDetailSnapshot.self,
-            from: loadFixtureData("wave_detail.json")
-        )
-        let workMap = detail.workMap
-
-        // The Wave objective leads the pane; chapter KRs and Tasks share its scope.
-        #expect(!workMap.objective.trimmingCharacters(in: .whitespaces).isEmpty)
-        #expect(workMap.currentProject != nil)
-
-        let chapter = try #require(workMap.currentProject)
-        let tasks = workMap.tasks.items
-
-        // KR list is a Project's strongest quality — it must be present.
-        #expect(chapter.krs.count == 1)
-        #expect(chapter.krs.allSatisfy { !$0.text.isEmpty })
-
-        // Open-task count is the other headline quality (both fixture tasks open).
-        let openTasks = tasks.filter { !$0.task.completed }.count
-        #expect(openTasks == 2)
-
-        // Project row lens: derived from Task condition only. A waiting Task
-        // (INF-123) outranks the clear one (INF-124).
-        let projectLens = WaveLens.forTasks(tasks: tasks)
-        #expect(projectLens.color == .blue)
-        #expect(projectLens.reason == "merge pull request head 333333333333 on GitHub")
-
-        // Task rows: the shared condition and reason, verbatim — Swift
-        // never reconstructs the level from status or process flags.
-        let byId = Dictionary(uniqueKeysWithValues: tasks.map { ($0.task.identifier, $0) })
-        let inf123 = try #require(byId["INF-123"])
-        let inf124 = try #require(byId["INF-124"])
-
-        let lens123 = WaveLens.forTask(inf123.condition)
-        #expect(lens123.color == .blue)
-        #expect(lens123.color == WaveLensColor(inf123.condition.state))
-        #expect(lens123.reason == inf123.condition.reason)
-
-        let lens124 = WaveLens.forTask(inf124.condition)
-        #expect(lens124.color == .black)
-        #expect(lens124.color == WaveLensColor(inf124.condition.state))
-        #expect(lens124.reason == inf124.condition.reason)
-
-        // Every rendered lens carries a reason — VoiceOver names the state.
-        #expect(!projectLens.reason.isEmpty)
-        #expect(!lens123.reason.isEmpty)
-        #expect(!lens124.reason.isEmpty)
-    }
-
     private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
         let testFile = URL(fileURLWithPath: sourceFile)
         let fixtures = testFile

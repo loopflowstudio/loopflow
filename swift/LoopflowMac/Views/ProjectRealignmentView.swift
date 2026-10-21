@@ -30,7 +30,7 @@ struct ProjectRealignmentView: View {
                             Text("\(wave.predecessor?.name ?? "No predecessor") → \(wave.successor?.name ?? "New Project")")
                             Text(wave.successor_id).font(.caption).textSelection(.enabled)
                             ForEach(wave.tasks, id: \.task.id) { task in
-                                Text("\(task.task.identifier) · \(task.task.name): \(task.disposition) — \(task.reason)")
+                                Text("\(task.task.identifier) · \(task.task.title): \(task.disposition) — \(task.reason)")
                             }
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)

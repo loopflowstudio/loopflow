@@ -71,13 +71,12 @@ from its saved conversation history. Missing history leaves the Session unchange
 
 ```bash
 lf -i -a claude flow my-flow
-lf -b -a claude flow my-flow # run every step headlessly
 ```
 
 Each skill opens in the native agent conversation. Exit the conversation
 successfully to advance to the next step; an interrupted or failed step stops
-the Flow. Without either flag, an attached terminal selects interactive mode,
-just like a standalone skill. Task Flow launches preserve the same choice.
+the Flow. Without `-i`, every step runs headlessly, even from a terminal.
+Task Flow launches follow the same rule.
 
 ## Select where work happens
 

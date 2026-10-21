@@ -127,7 +127,11 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         std::io::stdout().flush()?;
         let heartbeat = Instant::now() + Duration::from_secs(2);
         paths = loop {
+            // Continuous ignored churn must not starve the heartbeat's ownership recheck.
             let wait = heartbeat.saturating_duration_since(Instant::now());
+            if wait.is_zero() {
+                break Vec::new();
+            }
             let Ok(first) = events.recv_timeout(wait) else {
                 break Vec::new();
             };

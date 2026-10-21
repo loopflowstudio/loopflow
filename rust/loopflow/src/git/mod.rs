@@ -1266,9 +1266,14 @@ pub(crate) fn ignored_paths<'a>(
 ) -> std::io::Result<HashSet<String>> {
     // File-backed input avoids a pipe deadlock for batches larger than a pipe buffer.
     let mut input = tempfile::tempfile()?;
+    let mut empty = true;
     for path in paths {
         input.write_all(path.as_bytes())?;
         input.write_all(b"\0")?;
+        empty = false;
+    }
+    if empty {
+        return Ok(HashSet::new());
     }
     input.rewind()?;
     let output = Command::new("git")

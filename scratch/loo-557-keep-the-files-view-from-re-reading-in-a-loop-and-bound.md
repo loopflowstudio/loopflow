@@ -1,6 +1,6 @@
 # LOO-557: Files view stops feeding itself; Process receipts stay bounded
 
-Status: implemented and compressed (2026-10-21), both slices; uncommitted. Remaining: gate (full suites) and the Desktop demo. Evidence: `scratch/receipt-storm-5whys.md`.
+Status: implemented, compressed and gated (2026-10-21), both slices. Remaining: the Desktop demo. Evidence: `scratch/receipt-storm-5whys.md`.
 
 ## Problem
 
@@ -211,7 +211,7 @@ evidence rule.
 - `cargo test -p loopflow --lib disk`: footprint JSON includes `process_receipts`.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean.
 
-Check result (realign, 2026-10-21): no repair needed; reuses compress run — `swift test --filter 'TaskFilesTests|DTOFixtureTests'` 73 passed, focused `cargo test` lib/integration filters pass, fmt/clippy clean; full suites deferred to gate.
+Check result (gate, 2026-10-21): fmt/clippy clean; `swift test --filter 'TaskFilesTests|DTOFixtureTests'` 73 passed; `cargo test --test integration dto_fixtures remote_companions…` 43 passed; `cargo test --lib journal top disk ops::task git:: canonical_ids` 190 passed, 3 unrelated load flakes (boot_time, build_cleanup, claude_stop) pass alone; full matrix deferred to CI. Gate fixes: heartbeat no longer starves under continuous ignored churn; `ignored_paths` skips git for an empty batch.
 
 ## Concept review (2026-10-21, headless)
 

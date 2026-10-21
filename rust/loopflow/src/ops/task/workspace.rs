@@ -1,11 +1,12 @@
 //! Retained-checkout companions. Neither operation prepares or starts Task work.
+use std::collections::{BTreeSet, HashSet};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, ensure, Result};
 use notify::{RecursiveMode, Watcher};
@@ -21,7 +22,9 @@ pub struct TaskFilesFrame {
     pub task_id: TaskId,
     pub machine_id: MachineId,
     pub checkout: String,
-    pub changed: bool,
+    /// Checkout-relative paths that may change what the view shows: `.git/...`
+    /// for repository metadata, `""` for a rescan. Empty is a heartbeat.
+    pub paths: Vec<String>,
 }
 
 fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
@@ -55,26 +58,39 @@ pub fn task_shell(issue: &str, expected: &Path) -> Result<()> {
 
 /// The existing owned-line transport keeps stdin open and closes it on cancellation.
 /// Heartbeats recheck recorded ownership; filesystem events, not a read timer,
-/// invalidate contents. Access events from our own reads never cause another read.
+/// invalidate contents. Access events from our own reads never cause another read,
+/// and neither do git-ignored writes such as `lf`'s own journal traces.
 pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<()> {
     let checkout = pinned_checkout(issue, expected)?;
-    let (wake, events) = mpsc::sync_channel(1);
+    let metadata = crate::git::absolute_git_dir(expected)?;
+    // Watchers report either the watched spelling or the resolved one.
+    let roots = EventRoots {
+        checkout: vec![expected.to_path_buf(), expected.canonicalize()?],
+        metadata: vec![metadata.clone(), metadata.canonicalize()?],
+    };
+    // Each event carries its checkout-relative paths; the reader batches them.
+    let (send, events) = mpsc::channel::<Vec<String>>();
     let error = Arc::new(Mutex::new(None));
     let failure = error.clone();
-    let changes = wake.clone();
+    let observed = send.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        match event {
+        let paths = match event {
             Ok(event) if event.kind.is_access() => return,
-            Ok(_) => {}
+            Ok(event) if event.need_rescan() => vec![String::new()],
+            Ok(event) => event
+                .paths
+                .iter()
+                .filter_map(|path| roots.relative(path))
+                .collect(),
             Err(error) => {
-                *failure.lock().expect("file observation error lock") = Some(error.to_string())
+                *failure.lock().expect("file observation error lock") = Some(error.to_string());
+                // A rescan wakes the reader, which reports the failure before any frame.
+                vec![String::new()]
             }
-        }
-        // One outstanding invalidation represents every event until the next read.
-        let _ = changes.try_send(());
+        };
+        let _ = observed.send(paths);
     })?;
     watcher.watch(expected, RecursiveMode::Recursive)?;
-    let metadata = crate::git::absolute_git_dir(expected)?;
     if !metadata.starts_with(expected) {
         watcher.watch(&metadata, RecursiveMode::Recursive)?;
     }
@@ -84,9 +100,10 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         let mut byte = [0];
         while std::io::stdin().read(&mut byte).is_ok_and(|n| n != 0) {}
         input_closed.store(true, Ordering::Release);
-        let _ = wake.try_send(());
+        let _ = send.send(Vec::new());
     });
-    let mut changed = true;
+    let mut paths = vec![String::new()];
+    let mut ignore_failed = false;
     loop {
         if closed.load(Ordering::Acquire) {
             return Ok(());
@@ -104,14 +121,81 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
             task_id: current.task_id,
             machine_id: current.machine_id.expect("file_context requires a Machine"),
             checkout: expected.to_string_lossy().into_owned(),
-            changed,
+            paths,
         };
         println!("{}", serde_json::to_string(&frame)?);
         std::io::stdout().flush()?;
-        changed = events.recv_timeout(Duration::from_secs(2)).is_ok();
-        if changed {
+        let heartbeat = Instant::now() + Duration::from_secs(2);
+        paths = loop {
+            let wait = heartbeat.saturating_duration_since(Instant::now());
+            let Ok(first) = events.recv_timeout(wait) else {
+                break Vec::new();
+            };
+            if closed.load(Ordering::Acquire) {
+                break Vec::new();
+            }
             std::thread::sleep(Duration::from_millis(150));
-            while events.try_recv().is_ok() {}
-        }
+            let batch = first
+                .into_iter()
+                .chain(events.try_iter().flatten())
+                .collect();
+            let relevant = relevant_paths(expected, batch, &mut ignore_failed);
+            if !relevant.is_empty() {
+                break relevant;
+            }
+        };
     }
+}
+
+struct EventRoots {
+    checkout: Vec<PathBuf>,
+    metadata: Vec<PathBuf>,
+}
+
+impl EventRoots {
+    /// Report metadata as if it sat inside the checkout, as a main checkout's does.
+    fn relative(&self, path: &Path) -> Option<String> {
+        if let Some(inside) = self
+            .metadata
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok())
+        {
+            return Some(
+                Path::new(".git")
+                    .join(inside)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        let inside = self
+            .checkout
+            .iter()
+            .find_map(|root| path.strip_prefix(root).ok())?;
+        Some(inside.to_string_lossy().into_owned())
+    }
+}
+
+/// Drop git-ignored paths. Metadata and rescans pass; the reader judges them.
+/// When git cannot judge, every path stays relevant.
+fn relevant_paths(root: &Path, batch: BTreeSet<String>, ignore_failed: &mut bool) -> Vec<String> {
+    if batch.contains("") {
+        return vec![String::new()];
+    }
+    let candidates = batch
+        .iter()
+        .filter(|path| *path != ".git" && !path.starts_with(".git/"))
+        .map(String::as_str);
+    let ignored = match crate::git::ignored_paths(root, candidates) {
+        Ok(ignored) => ignored,
+        Err(error) => {
+            if !std::mem::replace(ignore_failed, true) {
+                tracing::warn!("file observation keeps ignored paths: {error}");
+            }
+            HashSet::new()
+        }
+    };
+    batch
+        .into_iter()
+        .filter(|path| !ignored.contains(path))
+        .collect()
 }

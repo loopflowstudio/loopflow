@@ -28,15 +28,14 @@ Cleanup's ownership test disagrees with decision 2. "Clear old work state"
 scopes cleanup by PR authorship (`gh api user`) and branch naming, then offers
 `lf task abandon <issue>`, which retires the Task and closes its PR. A Task
 whose PR you authored but another person now owns (`lf task claim` takeover)
-passes the PR test, so the pass can abandon a teammate's Task. Implement: in
-`repo_operate.md` "Find stale work", a Task-linked branch, PR or worktree is
-cleanup scope only when its Task is yours by the operator rule (owner person
-is `lf config user` or names no person); another person's Task is listed as
-theirs, never abandoned or pruned; unknown ownership stays unresolved. PR
-authorship and branch naming keep scoping Task-less branches. `repo_session.md`
-inlines the body, so no second edit; no test asserts this prose.
-Implemented in `46e1e35120`; the rule is now stated once in `repo_operate.md`'s
-intro and referenced by "Find stale work" and "Drive work through Waves".
+passes the PR test, so the pass could abandon a teammate's Task. Fixed in
+`46e1e35120` and `d884077d7c`: the ownership rule is stated once in
+`repo_operate.md`'s intro; "Find stale work" puts a Task-linked branch, PR or
+worktree in cleanup scope only when its Task is yours, never abandons or prunes
+another person's Task, and leaves uncertain ownership unresolved; PR authorship
+and branch naming scope Task-less branches only. "Drive work through Waves"
+defers to wave-operate. `repo_session.md` inlines the body; no test asserts
+this prose.
 
 Checked and kept: started Tasks are owned. Checkout allocation claims the Task
 (`children.rs` `claim_in`), and the 0.14.12 backfill records person-less local

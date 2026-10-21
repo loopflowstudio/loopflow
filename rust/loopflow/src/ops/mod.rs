@@ -15,6 +15,7 @@ pub(crate) mod land;
 pub mod linear;
 pub mod linear_observe;
 pub(crate) mod metrics;
+pub mod people;
 pub(crate) mod planning_delivery;
 pub(crate) mod planning_export;
 mod planning_order;

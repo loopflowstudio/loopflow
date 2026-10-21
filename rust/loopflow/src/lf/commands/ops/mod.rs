@@ -910,6 +910,14 @@ pub fn sync_planning(
     } else {
         planning_wave(repo, wave)?
     };
+    let runtime = tokio::runtime::Runtime::new()?;
+    if let Some(store) = runtime.block_on(crate::store::open_existing_store()) {
+        // Sharing who you are never holds up planning.
+        if let Err(error) = runtime.block_on(crate::ops::people::sync(&store.sqlite, repo)) {
+            eprintln!("warning: people were not synchronized: {error}");
+        }
+    }
+    drop(runtime);
     let result = crate::ops::linear::refresh(
         repo,
         &crate::ops::linear::LinearSyncOptions { wave, plan },

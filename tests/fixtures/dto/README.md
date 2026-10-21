@@ -96,3 +96,7 @@ pathless execution, local absence and unavailable peers. Negative readings grant
 no ownership; execution locations never enter planning exchange.
 
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
+
+`person_list.json` pins `lf person list --json`: each person by lowercase email
+key with display name, provider accounts and `is_you`. No Machine appears.
+Rust round-trips it; the Mac app mirror arrives with the Hand over picker.

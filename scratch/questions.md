@@ -104,3 +104,12 @@ LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).
 - Refinement (Jack Heart, same day): the opt-in is per cron, not per
   Machine (`lf cron publish`). No Machine records reach Git. LOO-555 and
   878ecf steered. A published cron carries its Machine key (machine_id).
+
+## Implementation assumptions (2026-10-21)
+
+14. **Person key before LOO-555.** Slice 2 reads the key as the lowercase Git
+    `user.email` itself; LOO-555's worktree has `config::participant_email`.
+    On rebase, 878ecf switches to LOO-555's function and deletes its own.
+15. **Public name on `lf machine public <name>`.** `off` is reserved as the
+    word that makes this Machine private; no Machine can be publicly named
+    "off".

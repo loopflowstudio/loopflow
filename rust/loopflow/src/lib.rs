@@ -22,6 +22,7 @@ pub mod lf;
 pub(crate) mod machine_route;
 pub mod naming;
 pub(crate) mod os_process;
+pub mod person;
 pub mod platform;
 pub mod portfolio;
 pub mod process;

@@ -1178,3 +1178,25 @@ fn task_overview_excludes_diagnostic_process_history() {
         serde_json::from_str::<serde_json::Value>(input).unwrap()
     );
 }
+
+#[test]
+fn person_list_names_people_and_you_without_machines() {
+    let input = include_str!("../../../tests/fixtures/dto/person_list.json");
+    let people: Vec<loopflow::ops::people::PersonView> = serde_json::from_str(input).unwrap();
+    assert_eq!(
+        people.iter().filter(|person| person.is_you).count(),
+        1,
+        "exactly one person is you"
+    );
+    assert_eq!(
+        people[0].accounts[0].provider,
+        loopflow::person::PersonProvider::Linear
+    );
+    assert_eq!(
+        serde_json::to_value(&people).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(input).unwrap();
+    missing[1].as_object_mut().unwrap().remove("is_you");
+    assert!(serde_json::from_value::<Vec<loopflow::ops::people::PersonView>>(missing).is_err());
+}

@@ -80,7 +80,11 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
         }
     }
     let viewer = match super::linear::issue_client().await {
-        Ok(client) => client.viewer_id().await.map_err(message),
+        Ok(client) => client
+            .viewer()
+            .await
+            .map(|viewer| viewer.id)
+            .map_err(message),
         Err(error) => Err(error),
     };
     match viewer {

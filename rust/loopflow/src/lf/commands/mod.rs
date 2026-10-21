@@ -20,6 +20,7 @@ pub mod machine_use;
 pub mod monitor;
 pub mod open;
 pub mod ops;
+pub mod person;
 pub mod planning;
 pub mod profile;
 pub mod replay;

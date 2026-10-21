@@ -30,6 +30,7 @@ mod linear_migration_tests;
 
 mod linear_team_checks;
 mod metrics;
+mod people;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;

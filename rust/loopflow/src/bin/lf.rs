@@ -2478,6 +2478,7 @@ fn execute_command(
             loopflow::lf::commands::machine_use::run(repo, cmd)
         }),
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
+        Some(Commands::Person { cmd }) => loopflow::lf::commands::person::run(cmd),
         Some(Commands::Self_ {
             cmd:
                 loopflow::lf::SelfCommand::SyncSkills {

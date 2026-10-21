@@ -590,6 +590,7 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
 const VIEWER_QUERY: &str = r#"query Viewer {
   viewer {
     id
+    email
   }
 }"#;
 
@@ -1830,10 +1831,10 @@ impl LinearClient {
         Ok(())
     }
 
-    /// Identify the authenticated Linear user for machine login transfers.
-    pub async fn viewer_id(&self) -> LinearResult<String> {
+    /// The authenticated Linear user.
+    pub async fn viewer(&self) -> LinearResult<LinearViewer> {
         let response: ViewerData = self.graphql(VIEWER_QUERY, json!({})).await?;
-        Ok(response.viewer.id)
+        Ok(response.viewer)
     }
 
     /// Read one issue's title, description, comments, and revision marker.
@@ -2041,7 +2042,13 @@ struct IdNode {
 
 #[derive(Deserialize)]
 struct ViewerData {
-    viewer: IdNode,
+    viewer: LinearViewer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct LinearViewer {
+    pub id: String,
+    pub email: String,
 }
 
 #[derive(Deserialize)]

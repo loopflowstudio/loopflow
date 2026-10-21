@@ -1,0 +1,20 @@
+[
+  {
+    "key": "dustin@example.com",
+    "name": "Dustin",
+    "accounts": [
+      {
+        "provider": "linear",
+        "id": "b5c1e2d4-0000-4000-8000-000000000001",
+        "email": "dustin@example.com"
+      }
+    ],
+    "is_you": false
+  },
+  {
+    "key": "jack@example.com",
+    "name": "Jack Heart",
+    "accounts": [],
+    "is_you": true
+  }
+]

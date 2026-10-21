@@ -523,6 +523,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
+    /// See the people who share this repository's `origin`
+    Person {
+        #[command(subcommand)]
+        cmd: PersonCommand,
+    },
     /// Bridge new Discord messages to finite Wave Sessions
     Discord {
         #[command(subcommand)]
@@ -2075,6 +2080,15 @@ pub enum MachineCommand {
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work
     Remove { label: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PersonCommand {
+    /// List the people fetched from `origin` by `lf refresh`
+    List {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

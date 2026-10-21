@@ -549,8 +549,9 @@ async fn linear_login(token: &str) -> Result<String> {
     #[cfg(not(test))]
     let client = crate::linear::LinearClient::new(token.to_string(), None);
     client
-        .viewer_id()
+        .viewer()
         .await
+        .map(|viewer| viewer.id)
         .map_err(|_| anyhow!("Linear identity request failed"))
 }
 
@@ -984,8 +985,10 @@ chmod 600 "$GH_CONFIG_DIR/hosts.yml"
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
-        let (endpoint, server) =
-            identity_server(json!({"data":{"viewer":{"id":"viewer-123"}}})).await;
+        let (endpoint, server) = identity_server(
+            json!({"data":{"viewer":{"id":"viewer-123","email":"jack@example.com"}}}),
+        )
+        .await;
         std::env::set_var("LF_TEST_MACHINE_LINEAR_URL", endpoint);
         let store = store(root.path()).await;
         let grant = |refresh: &str| Credential::Linear {

@@ -496,7 +496,26 @@ Forbidden:
    the addressee on graph nodes.
 6. The `workflow-handover` lf-world recipe, the acceptance suite and docs.
 
-This slice: 1.
+Jack Heart (2026-10-21): build what is independent of LOO-555 first (slices 1
+and 2), then rebase onto LOO-555 for the handover protocol.
+
+- Done: slices 1 and 2. Draft `assign_workflow_stages.sql` adds
+  `machines.pickup`, `machines.public_name` and `people`. `lf refresh`
+  publishes your Person record (Git email, name, Linear viewer account) and
+  caches everyone's before it refreshes Linear; a failure warns and planning
+  continues. `lf person list [--json]` reads the cache. `LinearClient::viewer`
+  replaced `viewer_id`.
+- Remaining in slice 2:
+  - Git-only planning has no `lf refresh` path yet (refresh is Linear-only),
+    so the people fetch should also ride Git planning sync at a low cadence.
+  - `person.rs`'s Git calls have no deadline; planning Git kills at 30 s.
+    Give the people ref the same bound.
+- Next: rebase onto LOO-555 (take its `config::participant_email`, which
+  878ecf copied verbatim), then slice 3.
+- Docs for pickup, public names and `lf person` land with slice 3, which also
+  deletes the "cross-person handoff is deferred" text; until then neither
+  setting has a reader.
+- The Swift `PersonView` mirror lands with the Hand over picker (slice 5).
 
 ## Done when (gate)
 
@@ -530,4 +549,4 @@ This slice: 1.
 - Review and demo: Jack and Dustin run the demo on the lf-world with Desktop
   open on both Homes.
 
-Check: kickoff revision only; no build or tests run (prose).
+Check: `cargo test -p loopflow --lib` `workflow::`, `store::durable::`, `person::`, `migration`, `machine_credentials`, `lf::tests`; `--test integration` `dto_fixtures`, `documented_commands`, `cli_reference`; `swift test --filter DTOFixtureTests`; clippy: pass.

@@ -1276,6 +1276,24 @@ Run work on a Machine: hand off a Task, or set a Wave's or this repository's def
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf machine pickup
+
+Show or set whether this Machine picks up work addressed to you
+
+| Argument | What it does |
+|---|---|
+| `<state>` | state |
+| `--help / -h` | Print help |
+
+## lf machine public
+
+Show this Machine's public name, set one, or `off` to keep it private
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
+| `--help / -h` | Print help |
+
 ## lf machine rename
 
 Change a saved machine's label
@@ -1293,6 +1311,23 @@ Forget a connection without touching remote work
 | Argument | What it does |
 |---|---|
 | `<label>` | label |
+| `--help / -h` | Print help |
+
+## lf person
+
+See the people who share this repository's `origin`
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf person list
+
+List the people fetched from `origin` by `lf refresh`
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf discord

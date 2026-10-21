@@ -342,6 +342,25 @@ impl ReleaseCandidate {
     }
 }
 
+/// The released tag a candidate branch was cut for: its name parses as one of
+/// [`ReleaseCandidate`]'s branches, `head` is the commit it names, and the tag
+/// exists. Anything else is not release evidence.
+pub(crate) fn released_candidate_tag<'a>(
+    branch: &str,
+    head: &str,
+    tags: &'a HashSet<String>,
+) -> Option<&'a str> {
+    let rest = branch.strip_prefix("release-candidate/")?;
+    let (rest, commit) = rest.rsplit_once('/')?;
+    let (target, tag_name) = rest.rsplit_once('/')?;
+    if target.is_empty() || target.contains('/') || commit != head {
+        return None;
+    }
+    tags.iter()
+        .find(|tag| sanitize_ref_segment(tag) == tag_name)
+        .map(String::as_str)
+}
+
 #[derive(Debug, Deserialize)]
 struct GhReleaseView {
     #[serde(rename = "isDraft")]

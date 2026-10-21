@@ -185,7 +185,7 @@ struct DesktopHeadlessTests {
         }
         func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkFrame {
             let line: [String: Any] = [
-                "part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId,
+                "part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
                 "revisions": NSNull(), "unavailable": NSNull(), "body": body,
             ]
             return try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: line))

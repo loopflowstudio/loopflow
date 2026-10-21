@@ -210,9 +210,10 @@ struct DesktopPerformanceTests {
         let fixture = try DesktopNativeSessionFixture.load()
         let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
         let reads = SnapshotReads()
+        let copiedRepo = try #require(env["LF_DESKTOP_TASK_REPO"])
         let query = RegistryQuery { args, cwd in
             let result = await reads.read(binary: fixture.cli, home: try #require(env["LF_DESKTOP_TASK_SNAPSHOT"]),
-                                          args: args, cwd: cwd ?? fixture.repo, fixture: fixture)
+                                          args: args, cwd: cwd ?? copiedRepo, fixture: fixture)
             try await MainActor.run {
                 var receipt: [String: Any] = ["event": "read", "args": args,
                     "outcome": result.isSuccess ? "passed" : "unavailable"]
@@ -694,7 +695,7 @@ struct DesktopPerformanceTests {
         }
         let files = workspace.files(issue: fixture.issue, cwd: fixture.checkout, query: query)
         files.autosave = false
-        files.selection = "notes.txt"
+        files.selection = "README.md"
         await files.loadFile()
         let document = try #require(files.selectedDocument)
         try #require(document.snapshot != nil)
@@ -726,7 +727,7 @@ struct DesktopPerformanceTests {
             }, ready: {
                 let terminal = registry.surfaces.view(for: identity)
                 let hasHistory = terminal.surface.map {
-                    terminalText($0).contains("native:\(fixture.nativeId):retained-history")
+                    terminalText($0).contains("resumed \(fixture.nativeId)")
                 } ?? false
                 let focused = window.firstResponder === terminal
                 let selected = model.selection?.id == fixture.taskId
@@ -742,12 +743,12 @@ struct DesktopPerformanceTests {
                 return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
-                 "provider": "owned Codex stub", "history_preserved": (try? fixture.historyIsPreserved()) == true]
+                 "provider": "lf-world stub claude", "history_preserved": (try? fixture.historyIsPreserved()) == true]
             }, input: {
                 let surface = try #require(registry.surfaces.view(for: identity).surface)
                 let message = "reopened-\(round)"
                 try send(window, message + "\n")
-                try await wait(window) { terminalText(surface).contains("reply:\(fixture.nativeId):\(message)") }
+                try await wait(window) { terminalText(surface).contains("reply \(fixture.nativeId): \(message)") }
             })
             try journal.write(["event": "memory_phase", "phase": "native_input_complete", "round": round])
             // Navigate away and back while the client is still live, retaining
@@ -1153,7 +1154,7 @@ private final class PerformanceReader {
 
     private func send(_ part: String, _ answers: Int, _ body: String) {
         sequence += 1
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","copy":null,"revisions":null,"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
         if let frame = try? WorkFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
     }

@@ -343,12 +343,7 @@ fn read_until(viewer: &mut Viewer, kind: &str) -> Vec<Value> {
 #[test]
 fn only_controlling_viewers_see_live_input_controls() {
     let fixture = Fixture::new();
-    let output = fixture
-        .command(&["transport", "start", "--", "python3", "-c", INPUT_HINT_STEP])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let owner = fixture.owner(fixture.serve(false, &["python3", "-c", INPUT_HINT_STEP]));
     fixture.wait_file("registered");
 
     let mut controller = fixture.viewer(&owner, true);

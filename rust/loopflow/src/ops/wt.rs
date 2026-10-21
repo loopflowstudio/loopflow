@@ -103,6 +103,24 @@ pub(crate) fn prepare_delete(
     })
 }
 
+/// Delete exactly the branch copies observed at these heads, with no checkout.
+/// A `None` copy is left alone; a copy that moved is retained.
+pub(crate) fn branch_copies_at(
+    repo: &Path,
+    branch: &str,
+    remote_head: Option<String>,
+    local_head: Option<String>,
+) -> BranchDeletion {
+    BranchDeletion {
+        repo: repo.to_path_buf(),
+        branch: branch.to_string(),
+        worktree: None,
+        remote_head,
+        local_head,
+        force: false,
+    }
+}
+
 pub(crate) fn prepare_landed_delete(
     repo: &Path,
     branch: &str,
@@ -137,7 +155,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
     let current_head = ref_exists(&repo, &format!("refs/heads/{branch}"))?
         .then(|| rev_parse(&repo, &format!("refs/heads/{branch}")))
         .transpose()?;
-    if current_head != local_head {
+    if local_head.is_some() && current_head != local_head {
         return Err(OpsError::Message(
             "local branch changed during deletion; retained its branches".into(),
         ));
@@ -171,7 +189,8 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
             &|_| {},
         )?;
     }
-    if ref_exists(&repo, &format!("refs/heads/{branch}"))? {
+    // A branch absent when observed and created since is new work.
+    if local_head.is_some() && ref_exists(&repo, &format!("refs/heads/{branch}"))? {
         delete_local_branch(&repo, &branch)?;
     }
     Ok(())

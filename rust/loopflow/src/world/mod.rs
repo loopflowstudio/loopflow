@@ -5,9 +5,12 @@
 //! written by the same ops and store calls `lf` uses, so a migration never
 //! leaves a recipe behind. Times are relative to the moment of building.
 //!
-//! The world's `bin/` leads its `PATH` with a stand-in `claude` ([`STUB_CLAUDE`]):
-//! resuming a world Session finds its transcript and echoes each input line, so
-//! Sessions open live without an account or network.
+//! A World stands in for the outside programs Loopflow runs. `env.json` puts
+//! its `bin/` first on `PATH`: a `claude` ([`STUB_CLAUDE`]) resumes a world
+//! Session from its transcript and echoes each input line, so Sessions open live
+//! without an account or network; a `gh` answers pull-request reads from files
+//! under `github/pulls/` and refuses everything else, so nothing run inside a
+//! World reaches GitHub.
 
 pub mod recipes;
 
@@ -20,16 +23,88 @@ use serde::Serialize;
 use crate::flow::graph::FlowGraph;
 use crate::flow::{ConcreteSkill, ConcreteStep, Skill};
 use crate::id::{LfProcessId, TraceId};
+use crate::ops::human_session::provider_conversation;
 use crate::process::{LfProcess, ProcessKind};
+use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
 use crate::work::edit::{Disposition, WorkEdit, WorkValue};
 use crate::work::project::ProjectKR;
-use crate::work::task::Task;
+use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
 pub use crate::work::wave::metrics::Threshold;
 
 const DAY: i64 = 24 * 60 * 60;
+const GITHUB_REPO: &str = "https://github.com/demo/project";
+
+/// Directories Desktop prepends to a child's `PATH` when absent
+/// (`GUIProcessEnvironment.enrichedPath` in
+/// `swift/LoopflowMac/Services/ProcessEnvironment.swift`). Listing them after
+/// the World's `bin` leaves Desktop nothing to prepend ahead of its `gh`.
+const DESKTOP_PATH: [&str; 6] = [
+    "~/.local/bin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "~/.cargo/bin",
+];
+
+const GH: &str = r#"#!/bin/sh
+# lf-world's GitHub. Answers the pull-request reads Loopflow makes from files
+# the World's builder wrote under ../github/pulls; refuses everything else, so
+# nothing run inside a World reaches GitHub.
+pulls="$(cd "$(dirname "$0")/../github/pulls" 2>/dev/null && pwd)"
+refuse() {
+    echo "lf-world's GitHub answers only PR reads: $*" >&2
+    exit 1
+}
+answer() {
+    if [ -e "$pulls/$1.unavailable" ]; then
+        echo "HTTP 502: Server Error (https://api.github.com/graphql)" >&2
+        exit 1
+    fi
+    if [ ! -f "$pulls/$1.$2" ]; then
+        echo "GraphQL: Could not resolve to a PullRequest with the number of $1. (repository.pullRequest)" >&2
+        exit 1
+    fi
+    cat "$pulls/$1.$2"
+    exit 0
+}
+case "$1 $2" in
+"pr view")
+    number="${3##*/}"
+    for arg in "$@"; do
+        [ "$arg" = "--jq" ] && answer "$number" heads
+    done
+    answer "$number" json
+    ;;
+"api --hostname")
+    case "$6" in
+    repos/*/*/pulls/*/files*)
+        number="${6#repos/*/*/pulls/}"
+        answer "${number%%/*}" files.json
+        ;;
+    esac
+    ;;
+esac
+refuse "$@"
+"#;
+
+/// What the World's GitHub reports for one pull request.
+#[derive(Debug, Clone)]
+pub enum PrSurface {
+    Published {
+        draft: bool,
+        /// Check name and GitHub result: `SUCCESS`, `FAILURE`, `IN_PROGRESS`.
+        checks: &'static [(&'static str, &'static str)],
+        /// `REVIEW_REQUIRED`, `APPROVED`, `CHANGES_REQUESTED` or empty.
+        review: &'static str,
+        reviewers: &'static [&'static str],
+    },
+    /// Every read fails the way an unavailable GitHub does.
+    Unavailable,
+}
 
 /// The world's `claude`. `--resume <id>` prints `resumed <id>: <n> lines`
 /// after reading the world transcript (exit 1 when there is none), then answers
@@ -76,27 +151,37 @@ pub struct WorldEnv {
     pub claude_config_dir: PathBuf,
     #[serde(rename = "CODEX_HOME")]
     pub codex_home: PathBuf,
-    /// The world's `bin/` ahead of the builder's `PATH`.
+    /// The World's `bin` first, so its `claude` and `gh` answer instead of real ones.
     #[serde(rename = "PATH")]
     pub path: String,
 }
 
 impl WorldEnv {
     fn new(dir: &Path) -> Self {
-        let inherited = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string());
+        let home = dirs::home_dir().unwrap_or_default();
+        let desktop = DESKTOP_PATH.map(|entry| match entry.strip_prefix("~/") {
+            Some(rest) => home.join(rest).to_string_lossy().into_owned(),
+            None => entry.to_string(),
+        });
+        let path = std::iter::once(dir.join("bin").to_string_lossy().into_owned())
+            .chain(desktop)
+            .chain(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from))
+            .collect::<Vec<_>>()
+            .join(":");
         Self {
             lf_home: dir.join("home"),
             claude_config_dir: dir.join("claude"),
             codex_home: dir.join("codex"),
-            path: format!("{}:{inherited}", dir.join("bin").display()),
+            path,
         }
     }
 
-    fn vars(&self) -> [(&'static str, &Path); 3] {
+    fn vars(&self) -> [(&'static str, &std::ffi::OsStr); 4] {
         [
-            ("LF_HOME", &self.lf_home),
-            ("CLAUDE_CONFIG_DIR", &self.claude_config_dir),
-            ("CODEX_HOME", &self.codex_home),
+            ("LF_HOME", self.lf_home.as_os_str()),
+            ("CLAUDE_CONFIG_DIR", self.claude_config_dir.as_os_str()),
+            ("CODEX_HOME", self.codex_home.as_os_str()),
+            ("PATH", std::ffi::OsStr::new(&self.path)),
         ]
     }
 }
@@ -121,12 +206,12 @@ impl World {
         if dir.exists() {
             bail!("{} already exists; worlds are built fresh", dir.display());
         }
-        let env = WorldEnv::new(dir);
+        std::fs::create_dir_all(dir)?;
+        let dir = dir.canonicalize()?;
+        let env = WorldEnv::new(&dir);
         for path in [&env.lf_home, &env.claude_config_dir, &env.codex_home] {
             std::fs::create_dir_all(path)?;
         }
-        let dir = dir.canonicalize()?;
-        let env = WorldEnv::new(&dir);
         // A builder launched from an lf Session inherits that Session's
         // identity; the world's writes must not attribute to it.
         for (name, _) in std::env::vars_os() {
@@ -138,7 +223,8 @@ impl World {
         for (name, value) in env.vars() {
             std::env::set_var(name, value);
         }
-        write_stub_claude(&dir.join("bin"))?;
+        write_executable(&dir, "claude", STUB_CLAUDE)?;
+        write_executable(&dir, "gh", GH)?;
         let repo = dir.join("repo");
         create_repo(&repo, &dir.join("origin.git"))?;
         // Manual membership: folder mode would scan the person's own ~/src.
@@ -364,15 +450,7 @@ impl World {
         let trace = TraceId::new();
         let ended = self.days_ago(ended_days_ago);
         let started = ended - minutes * 60 * skills.len() as i64;
-        let cwd = match task {
-            Some(task) => task.worktree.clone().ok_or_else(|| {
-                anyhow!(
-                    "Task {} has no checkout; call checkout first",
-                    task.identifier
-                )
-            })?,
-            None => self.repo.clone(),
-        };
+        let cwd = self.cwd(task)?;
         let flow = LfProcessId::new();
         let mut flow_process = self.process(&trace, None, &cwd, vec!["lf", "flow", name], started);
         flow_process.id = flow.clone();
@@ -403,7 +481,8 @@ impl World {
     }
 
     /// Write a Claude conversation of alternating turns and admit it as a
-    /// Session, bound to `task` when given.
+    /// Session, bound to `task` when given. It resumes in the Task's checkout
+    /// when it has one.
     pub fn session(
         &self,
         task: Option<&Task>,
@@ -411,12 +490,279 @@ impl World {
         turns: &[&str],
         started_days_ago: f64,
     ) -> Result<String> {
+        let cwd = task
+            .and_then(|task| task.worktree.clone())
+            .unwrap_or_else(|| self.repo.clone());
+        let id = self.transcript(&cwd, turns, started_days_ago)?;
+        let store = self.store()?;
+        let session = self
+            .runtime
+            .block_on(provider_conversation::admit(&store, &id))?
+            .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
+        let session_id = session.id.to_string();
+        if let Some(task) = task {
+            self.runtime
+                .block_on(store.bind_session(&session_id, session.captured, &task.id))?;
+        }
+        self.runtime
+            .block_on(store.rename_session(&session_id, title, TitleSource::Human))?;
+        Ok(session_id)
+    }
+
+    /// Open `wave`'s ongoing conversation the way `lf wave session` does and
+    /// give it `turns` as its Claude history.
+    pub fn wave_conversation(
+        &self,
+        wave: &str,
+        turns: &[&str],
+        started_days_ago: f64,
+    ) -> Result<String> {
+        let store = self.store()?;
+        let record = self
+            .runtime
+            .block_on(crate::ops::human_session::primary::ensure(
+                &store,
+                &self.repo,
+                Some(wave),
+                false,
+            ))?;
+        let session = self
+            .runtime
+            .block_on(store.session(record.id.as_str()))?
+            .ok_or_else(|| anyhow!("Wave {wave}'s conversation disappeared"))?;
+        let id = self.transcript(&session.cwd, turns, started_days_ago)?;
+        self.runtime.block_on(provider_conversation::select(
+            &store,
+            &session,
+            Provider::Claude,
+            &id,
+            None,
+        ))?;
+        Ok(session.id.to_string())
+    }
+
+    /// Write `files` into `task`'s checkout (the repository when absent) and
+    /// commit them. Repository commits are pushed, so later checkouts start
+    /// from them.
+    pub fn files(
+        &self,
+        task: Option<&Task>,
+        files: &[(impl AsRef<str>, impl AsRef<str>)],
+        message: &str,
+    ) -> Result<()> {
+        let cwd = self.cwd(task)?;
+        let paths = write_files(&cwd, files)?;
+        git(Some(&cwd), &[&["add", "--"][..], &paths[..]].concat())?;
+        git(Some(&cwd), &["commit", "-m", message])?;
+        if task.is_none() {
+            git(Some(&cwd), &["push", "origin", "main"])?;
+        }
+        Ok(())
+    }
+
+    /// Write `files` into `task`'s checkout without committing them.
+    pub fn uncommitted(
+        &self,
+        task: &Task,
+        files: &[(impl AsRef<str>, impl AsRef<str>)],
+    ) -> Result<()> {
+        write_files(&self.cwd(Some(task))?, files)?;
+        Ok(())
+    }
+
+    /// Publish `task`'s checkout as pull request `number` the way `lf pr
+    /// publish` records it, and have the World's GitHub report `surface` for
+    /// it. Its files and counts come from the checkout's commits.
+    pub fn pr(
+        &self,
+        task: &Task,
+        number: u64,
+        title: &str,
+        body: &str,
+        surface: &PrSurface,
+    ) -> Result<()> {
+        let worktree = self.cwd(Some(task))?;
+        let body = format!(
+            "{body}\n\n> **Task:** {} · {}\n",
+            task.title, task.identifier
+        );
+        crate::ops::task::request_task_pr_publication(&worktree, title, &body)?;
+        let head = git(Some(&worktree), &["rev-parse", "HEAD"])?;
+        let url = format!("{GITHUB_REPO}/pull/{number}");
+        crate::ops::task::attach_task_github_pr(
+            &worktree,
+            Some(&crate::ops::PrInfo {
+                url: url.clone(),
+                number,
+                state: "open".to_string(),
+                branch: task.branch.clone(),
+                merge_commit: None,
+                merged_at: None,
+                head_sha: Some(head.clone()),
+                merge_state: None,
+            }),
+            &|_| {},
+        )?;
+
+        let pulls = self.pulls()?;
+        let PrSurface::Published {
+            draft,
+            checks,
+            review,
+            reviewers,
+        } = surface
+        else {
+            std::fs::write(pulls.join(format!("{number}.unavailable")), "")?;
+            return Ok(());
+        };
+        let base = &task.base_commit;
+        let files = pr_files(&worktree, base, &head)?;
+        let total = |key: &str| {
+            files
+                .iter()
+                .map(|file| file[key].as_u64().unwrap_or(0))
+                .sum::<u64>()
+        };
+        let checks: Vec<_> = checks
+            .iter()
+            .map(|(name, result)| {
+                let pending = ["QUEUED", "IN_PROGRESS", "PENDING"].contains(result);
+                serde_json::json!({
+                    "__typename": "CheckRun",
+                    "name": name,
+                    "status": if pending { *result } else { "COMPLETED" },
+                    "conclusion": if pending { "" } else { *result },
+                    "detailsUrl": format!("{GITHUB_REPO}/actions/runs/{number}"),
+                })
+            })
+            .collect();
+        let reviewers: Vec<_> = reviewers
+            .iter()
+            .map(|login| serde_json::json!({"__typename": "User", "login": login}))
+            .collect();
+        let pr = serde_json::json!({
+            "number": number,
+            "url": url,
+            "title": title,
+            "body": body,
+            "state": "OPEN",
+            "isDraft": draft,
+            "additions": total("additions"),
+            "deletions": total("deletions"),
+            "changedFiles": files.len(),
+            "headRefOid": head,
+            "baseRefOid": base,
+            "headRefName": task.branch,
+            "baseRefName": "main",
+            "reviewDecision": review,
+            "reviewRequests": reviewers,
+            "statusCheckRollup": checks,
+        });
+        std::fs::write(
+            pulls.join(format!("{number}.json")),
+            serde_json::to_string_pretty(&pr)? + "\n",
+        )?;
+        std::fs::write(
+            pulls.join(format!("{number}.heads")),
+            format!("{head} {base}\n"),
+        )?;
+        std::fs::write(
+            pulls.join(format!("{number}.files.json")),
+            serde_json::to_string(&[files])? + "\n",
+        )?;
+        Ok(())
+    }
+
+    /// Merge `task`'s published branch into `main` and push it, then settle
+    /// its pull request as merged the way GitHub observation does. The Task
+    /// stays open until completed.
+    pub fn merge(&self, task: &Task) -> Result<()> {
+        let store = self.store()?;
+        let mut pr = self
+            .runtime
+            .block_on(store.active_task_pr(&task.id))?
+            .ok_or_else(|| anyhow!("Task {} has no pull request", task.identifier))?;
+        let github = pr
+            .github()
+            .cloned()
+            .ok_or_else(|| anyhow!("Task {}'s pull request is unpublished", task.identifier))?;
+        git(
+            Some(&self.repo),
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                &format!("Merge pull request #{} from {}", github.number, pr.branch),
+                &pr.branch,
+            ],
+        )?;
+        git(Some(&self.repo), &["push", "origin", "main"])?;
+        let merge_commit = git(Some(&self.repo), &["rev-parse", "HEAD"])?;
+        let now = time::OffsetDateTime::now_utc();
+        pr.merge_commit = Some(merge_commit.clone());
+        pr.updated_at = now;
+        self.runtime
+            .block_on(store.settle_task_pr_merged(&pr, Some(now)))?;
+        self.runtime.block_on(store.append_task_event(
+            &task.id,
+            &TaskEventKind::PrMerged {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                number: github.number,
+                url: github.url,
+                merge_commit,
+            },
+        ))?;
+        let stub = self.pulls()?.join(format!("{}.json", github.number));
+        if stub.exists() {
+            let mut published: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&stub)?)?;
+            published["state"] = "MERGED".into();
+            std::fs::write(&stub, serde_json::to_string_pretty(&published)? + "\n")?;
+        }
+        Ok(())
+    }
+
+    /// Write `env.json` and return the environment.
+    pub fn finish(self) -> Result<WorldEnv> {
+        std::fs::write(
+            self.dir.join("env.json"),
+            serde_json::to_string_pretty(&self.env)? + "\n",
+        )?;
+        Ok(self.env)
+    }
+
+    /// `task`'s checkout, or the repository when absent.
+    fn cwd(&self, task: Option<&Task>) -> Result<PathBuf> {
+        match task {
+            Some(task) => task.worktree.clone().ok_or_else(|| {
+                anyhow!(
+                    "Task {} has no checkout; call checkout first",
+                    task.identifier
+                )
+            }),
+            None => Ok(self.repo.clone()),
+        }
+    }
+
+    fn pulls(&self) -> Result<PathBuf> {
+        let pulls = self.dir.join("github/pulls");
+        std::fs::create_dir_all(&pulls)?;
+        Ok(pulls)
+    }
+
+    /// Write a Claude transcript of alternating turns recorded in `cwd` and
+    /// return its conversation id.
+    fn transcript(&self, cwd: &Path, turns: &[&str], started_days_ago: f64) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let project = self
-            .env
-            .claude_config_dir
-            .join("projects")
-            .join(self.repo.to_string_lossy().replace('/', "-"));
+        // Claude names a project directory after its path, every other
+        // character a dash.
+        let directory: String = cwd
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let project = self.env.claude_config_dir.join("projects").join(directory);
         std::fs::create_dir_all(&project)?;
         let started = self.days_ago(started_days_ago);
         let mut lines = Vec::with_capacity(turns.len());
@@ -442,7 +788,7 @@ impl World {
                 "uuid": uuid,
                 "parentUuid": parent,
                 "sessionId": id,
-                "cwd": self.repo,
+                "cwd": cwd,
                 "timestamp": at,
                 "userType": "external",
                 "message": message,
@@ -450,31 +796,7 @@ impl World {
             parent = Some(uuid);
         }
         std::fs::write(project.join(format!("{id}.jsonl")), lines.join("\n") + "\n")?;
-
-        let store = self.store()?;
-        let session = self
-            .runtime
-            .block_on(crate::ops::human_session::provider_conversation::admit(
-                &store, &id,
-            ))?
-            .ok_or_else(|| anyhow!("Claude conversation {id} was not found after writing it"))?;
-        let session_id = session.id.to_string();
-        if let Some(task) = task {
-            self.runtime
-                .block_on(store.bind_session(&session_id, session.captured, &task.id))?;
-        }
-        self.runtime
-            .block_on(store.rename_session(&session_id, title, TitleSource::Human))?;
-        Ok(session_id)
-    }
-
-    /// Write `env.json` and return the environment.
-    pub fn finish(self) -> Result<WorldEnv> {
-        std::fs::write(
-            self.dir.join("env.json"),
-            serde_json::to_string_pretty(&self.env)? + "\n",
-        )?;
-        Ok(self.env)
+        Ok(id)
     }
 
     fn process(
@@ -515,15 +837,6 @@ impl World {
     }
 }
 
-fn write_stub_claude(bin: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::create_dir_all(bin)?;
-    let path = bin.join("claude");
-    std::fs::write(&path, STUB_CLAUDE)?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
-    Ok(())
-}
-
 fn create_repo(repo: &Path, origin: &Path) -> Result<()> {
     git(
         None,
@@ -531,8 +844,7 @@ fn create_repo(repo: &Path, origin: &Path) -> Result<()> {
     )?;
     git(None, &["init", "-b", "main", &repo.to_string_lossy()])?;
     std::fs::write(repo.join("README.md"), "# Demo project\n")?;
-    // Sessions are Claude's; pinning the agent keeps launch evidence the same
-    // whichever providers this machine has installed.
+    // Worlds write Claude history, so conversations they open are Claude's.
     std::fs::create_dir_all(repo.join(".lf"))?;
     std::fs::write(repo.join(".lf/config.yaml"), "agent: claude\n")?;
     git(Some(repo), &["add", "README.md", ".lf/config.yaml"])?;
@@ -545,7 +857,78 @@ fn create_repo(repo: &Path, origin: &Path) -> Result<()> {
     Ok(())
 }
 
-fn git(cwd: Option<&Path>, args: &[&str]) -> Result<()> {
+fn write_executable(dir: &Path, name: &str, body: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin)?;
+    let path = bin.join(name);
+    std::fs::write(&path, body)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+fn write_files<'a>(
+    cwd: &Path,
+    files: &'a [(impl AsRef<str>, impl AsRef<str>)],
+) -> Result<Vec<&'a str>> {
+    let mut paths = Vec::with_capacity(files.len());
+    for (path, content) in files {
+        let target = cwd.join(path.as_ref());
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(target, content.as_ref())?;
+        paths.push(path.as_ref());
+    }
+    Ok(paths)
+}
+
+/// GitHub's file list for `base..head`, from git: status, counts and the
+/// patch hunks without their file header.
+fn pr_files(cwd: &Path, base: &str, head: &str) -> Result<Vec<serde_json::Value>> {
+    let range = format!("{base}..{head}");
+    let statuses = git(
+        Some(cwd),
+        &["diff", "--no-renames", "--name-status", &range],
+    )?;
+    let counts = git(Some(cwd), &["diff", "--no-renames", "--numstat", &range])?;
+    statuses
+        .lines()
+        .zip(counts.lines())
+        .map(|(status, count)| {
+            let (status, path) = status
+                .split_once('\t')
+                .ok_or_else(|| anyhow!("unexpected git status line {status:?}"))?;
+            let mut count = count.splitn(3, '\t');
+            let mut number = || {
+                count
+                    .next()
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .unwrap_or(0)
+            };
+            let (additions, deletions) = (number(), number());
+            let patch = git(Some(cwd), &["diff", "--no-renames", &range, "--", path])?;
+            let patch = patch
+                .find("\n@@")
+                .map(|start| patch[start + 1..].to_string());
+            Ok(serde_json::json!({
+                "filename": path,
+                "status": match status {
+                    "A" => "added",
+                    "D" => "removed",
+                    _ => "modified",
+                },
+                "additions": additions,
+                "deletions": deletions,
+                "patch": patch,
+                "blob_url": format!("{GITHUB_REPO}/blob/{head}/{path}"),
+            }))
+        })
+        .collect()
+}
+
+/// Run git as the World's author and return its trimmed stdout.
+fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String> {
     let mut command = Command::new("git");
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
@@ -562,5 +945,5 @@ fn git(cwd: Option<&Path>, args: &[&str]) -> Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    Ok(())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

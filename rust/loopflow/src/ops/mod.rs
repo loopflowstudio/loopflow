@@ -1,4 +1,5 @@
 mod abandon;
+pub(crate) mod branch_prune;
 pub mod chapter;
 pub mod checkout;
 pub(crate) mod child;

@@ -257,6 +257,76 @@ fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
     assert_eq!(fixture.wait_file("answer"), "reconnected");
 }
 
+/// Stands in for a Task step: registers its live controls with the owner, then
+/// handles `detach` like `/detach` and exits on `done`.
+const INPUT_HINT_STEP: &str = r#"
+import hashlib, json, os, socket, sys
+home = os.path.realpath(os.environ["LF_HOME"])
+digest = hashlib.sha256(home.encode()).hexdigest()[:16]
+path = f"{os.path.realpath('/tmp')}/lf-{os.geteuid()}-{digest}/{os.environ['LF_TRANSPORT_OWNER']}.sock"
+key = os.environ["LF_TRANSPORT_CONTROL"]
+def request(value):
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(path)
+    s.sendall((json.dumps(dict(value, key=key)) + "\n").encode())
+    return s
+hint = request({"kind": "input_hint", "hint": "type here"})
+print("working", flush=True)
+open(os.environ["HOME"] + "/registered", "w").write("1")
+for line in sys.stdin:
+    if line.strip() == "detach":
+        request({"kind": "detach_viewers"}).close()
+    if line.strip() == "done":
+        break
+"#;
+
+fn read_until(viewer: &mut Viewer, kind: &str) -> Vec<Value> {
+    let mut frames = Vec::new();
+    loop {
+        let frame = viewer.read();
+        let done = frame["kind"] == kind;
+        frames.push(frame);
+        if done {
+            return frames;
+        }
+    }
+}
+
+#[test]
+fn only_controlling_viewers_see_live_input_controls() {
+    let fixture = Fixture::new();
+    let output = fixture
+        .command(&["transport", "start", "--", "python3", "-c", INPUT_HINT_STEP])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let owner = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    fixture.wait_file("registered");
+
+    let mut controller = fixture.viewer(&owner, true);
+    let hint = json!({"kind":"input_hint","hint":"type here"});
+    assert!(read_until(&mut controller, "input_hint").contains(&hint));
+
+    // Detaching viewers keeps the step's registration for the next one.
+    controller.input("detach\n");
+    read_until(&mut controller, "detached");
+    let mut returning = fixture.viewer(&owner, true);
+    read_until(&mut returning, "input_hint");
+    let mut observer = fixture.viewer(&owner, false);
+    returning.input("done\n");
+    returning.finish();
+
+    let frames = read_until(&mut observer, "exit");
+    assert!(!frames.contains(&hint), "{frames:?}");
+    let tail: String = frames
+        .iter()
+        .filter(|frame| frame["kind"] == "output")
+        .flat_map(|frame| frame["bytes"].as_array().unwrap().clone())
+        .map(|byte| byte.as_u64().unwrap() as u8 as char)
+        .collect();
+    assert_eq!(tail, "working\n");
+}
+
 #[test]
 fn pipe_eof_delivers_all_input_before_the_command_exits() {
     let fixture = Fixture::new();

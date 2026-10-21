@@ -204,6 +204,10 @@ Second pass: tile drag calls `lf desktop order <member> --to <member> --query ID
 one move. `arrange` stays the full-map baseline. `save_dashboard` alone sets
 `Touched`, exactly when the order differs from the stored one; hide/restore never does.
 
+Third pass (after `e9ae4969d4`): nothing to change. One order gesture, one full-map
+baseline and one mode owner match the accepted contract; remaining candidates are
+follow-up polish in `questions.md`, per Jack Heart's October 21 ship decision.
+
 ## Acceptance and review
 
 Focused coverage proves: independent Dashboard identities, immutable built-in

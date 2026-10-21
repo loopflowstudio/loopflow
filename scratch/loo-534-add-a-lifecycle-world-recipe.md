@@ -227,3 +227,4 @@ Kickoff: portfolio world reproduced `88a613` done with `condition.state=waiting`
 Gate (2026-10-21, before #1617 merge): `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `commands::waves` 19/19, `world_recipes` 3/3, integration `wave` 16/16, `scripts/test_desktop.sh -Xswiftc -gnone` 617/617: passed.
 After #1617 merge: `world_recipes` 3/3, `scripts/test_desktop.sh --filter 'LifecycleWorldTests|WorkDensityWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 43/43. clippy and full Swift: gate/CI.
 Compress (2026-10-21): plan prose only; no checks rerun.
+Concept review (2026-10-21, after #1617 merge): BuiltWorld and WaveTaskGroups match the accepted model; no change, questions.md assumptions stand.

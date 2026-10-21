@@ -40,10 +40,11 @@ struct WaveTaskGroups {
     let owned: [RoadmapTask]
     let unowned: [RoadmapTask]
 
-    init(_ tasks: [RoadmapTask], now: Date) {
+    init(_ tasks: [RoadmapTask]) {
+        // The default filter hides every settled Task, so no completion date is read.
         let filter = TaskHistoryFilter()
         let current = tasks.sorted { $0.task.rank < $1.task.rank }
-            .filter { filter.includes($0.task, condition: $0.condition, now: now) }
+            .filter { filter.includes($0.task, condition: $0.condition, now: .now) }
         owned = current.filter { $0.runtime?.owner != nil }
         unowned = current.filter { $0.runtime?.owner == nil }
     }

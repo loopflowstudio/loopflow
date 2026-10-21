@@ -23,7 +23,7 @@ struct WaveTaskInventory: View {
                     switch wave.tasks {
                     case .unavailable(let reason): Text(reason).foregroundStyle(palette.warning)
                     case .available(let tasks, let truncated):
-                        let groups = WaveTaskGroups(tasks, now: Date())
+                        let groups = WaveTaskGroups(tasks)
                         taskGroup("Owned", groups.owned)
                         taskGroup("Unowned", groups.unowned)
                         if truncated { Text("Planning is partial; more Tasks exist.").foregroundStyle(palette.warning) }

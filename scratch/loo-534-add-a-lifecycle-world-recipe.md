@@ -100,7 +100,7 @@ holds and the rung could not fire; an unstarted canceled Task is not modeled.
 
 ### Desktop fix
 
-Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks and `now`, it
+Extract `WaveTaskGroups` next to `TaskHistoryFilter`: from tasks alone, it
 returns current Owned / Unowned Tasks by rank (`TaskHistoryFilter`'s default,
 completion off; grouped on `runtime.owner != nil`, main's #1610 rule). The
 history filter stays necessary: completion and abandonment keep the last owner,
@@ -241,3 +241,4 @@ Publish revision: inventory is current-only with no history control (#1594's ass
 Realign after main merge (2026-10-20): `cargo test -p loopflow --test integration world_recipes` 3/3 passed at 52ed99b138; Swift and full CI deferred to #1621's CI.
 Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one conflict, `WorkSurfaceView.swift`; branch code still reads removed `runtime.started`.
 Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
+Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.

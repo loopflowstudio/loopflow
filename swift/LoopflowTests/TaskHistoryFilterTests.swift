@@ -251,7 +251,7 @@ struct TaskHistoryFilterTests {
             == wave.wave.status.label.capitalized)
         #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-project-history").button().isDisabled() == false)
         #expect(try overview.inspect().find(viewWithAccessibilityIdentifier: "wave-realign-projects").button().isDisabled() == false)
-        let groups = WaveTaskGroups(wave.tasks.items, now: Date())
+        let groups = WaveTaskGroups(wave.tasks.items)
         let current = groups.owned + groups.unowned
         let hidden = wave.tasks.items.filter { task in !current.contains { $0.id == task.id } }
         #expect(!hidden.isEmpty)

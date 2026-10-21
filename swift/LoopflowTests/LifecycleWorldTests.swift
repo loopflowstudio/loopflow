@@ -18,7 +18,7 @@ struct LifecycleWorldTests {
         let tasks = wave.tasks.items
         let names = { (group: [RoadmapTask]) in Set(group.map(\.task.name)) }
 
-        let current = WaveTaskGroups(tasks, now: Date())
+        let current = WaveTaskGroups(tasks)
         // Owned work survives an upstream cancel until someone disposes of it.
         #expect(names(current.owned) == ["Paused mid-flight", "Canceled upstream", "Lost checkout", "In progress"])
         #expect(names(current.unowned) == ["Not started"])

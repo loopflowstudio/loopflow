@@ -37,7 +37,10 @@ frame at once, so a terminal regrids once per change; demo judges whether that f
 8. Jack: “scrolling speed seems pretty slow.” `GhosttyTerminalView.scrollWheel` forwards
    raw `scrollingDeltaX/Y`; Ghostty's own macOS view doubles precise (trackpad) deltas
    before `ghostty_surface_mouse_scroll`. Match Ghostty: ×2 when precise. Applies to every
-   terminal, not only Dashboard tiles.
+   terminal, not only Dashboard tiles. Jack: “its not just slow its also choppy movement.”
+   Ghostty's view also packs the momentum phase into the scroll mods (`momentum << 1`);
+   ours sends only the precise bit, so inertial scrolling arrives as plain events. Match
+   both, then check whether SwiftUI work per scroll event (tile re-render) adds stutter.
 9. Jack: “Opening a conversation opens the conversation in a focused mode, i want it to
    open inline in the dashboard.” Dashboard tile **Open conversation** calls
    `openTaskConversation`, which runs `openTaskDestination` and sets `.terminals`, leaving

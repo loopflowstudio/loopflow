@@ -121,13 +121,11 @@ struct World: Sendable {
             .appendingPathComponent("\(prefix)\(recipe)-\(getpid())").resolvingSymlinksInPath()
         try? FileManager.default.removeItem(at: root)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let builder = try BuiltLf(home: root)
-        let printed = try await builder.run(["build", recipe, root.appendingPathComponent("world").path],
-                                            executable: try BuiltLf.binary("lf-world"))
+        let world = root.appendingPathComponent("world")
+        let printed = try await BuiltLf(home: root).run(["build", recipe, world.path],
+                                                        executable: try BuiltLf.binary("lf-world"))
         let environment = try JSONDecoder().decode([String: String].self, from: Data(printed.utf8))
-        let home = try #require(environment["LF_HOME"], "lf-world printed no LF_HOME")
-        let repo = URL(fileURLWithPath: home).deletingLastPathComponent().appendingPathComponent("repo")
-        return World(lf: try BuiltLf(home: root, cwd: repo, overriding: environment))
+        return World(lf: try BuiltLf(home: root, cwd: world.appendingPathComponent("repo"), overriding: environment))
     }
 
     /// Worlds outlive their test process; remove those whose process has exited.

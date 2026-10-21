@@ -16,11 +16,15 @@ Read `lf wave show --json`, `lf session list --json`, and `lf wt list --json`.
 Join Task and Session state to worktrees using Loopflow's returned identities
 and paths. Inspect branches and PRs to explain gaps in that shared picture.
 
-Scope cleanup to the participant's own work. Read `gh api user --jq .login`
-and `git config user.email`, then check PR authorship and the repository's
-configured branch naming convention. A tip commit's author alone does not
-establish branch ownership. Leave uncertain ownership unresolved and continue with the rest; do not
-triage teammates' PRs or delete their branches.
+Scope cleanup to the participant's own work. A branch, PR or worktree linked
+to a Task is in scope only when that Task is yours: its owner's person is
+`lf config user` or names no person. List another person's Task as theirs and
+never abandon or prune it, even when you authored its PR. For branches with no
+Task, read `gh api user --jq .login` and `git config user.email`, then check PR
+authorship and the repository's configured branch naming convention. A tip
+commit's author alone does not establish branch ownership. Leave uncertain
+ownership unresolved and continue with the rest; do not triage teammates' PRs
+or delete their branches.
 
 Use these checks where they help establish what can be cleared:
 

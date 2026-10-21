@@ -72,3 +72,13 @@
    accounts, teams, and the handover itself on top.
 - Drop the GitHub review request entirely; notification is provider
   assignment, or nothing.
+
+## Jack Heart's direction (2026-10-21, later): only the person reaches Git
+
+"the only thing that reaches git is the person, and then you can mark machines
+to pick up things that match 'you'". Machines are never published. Git holds a
+Person record (key = lowercase email, name, provider accounts). Pickup is a
+local setting on each Machine: "this Machine picks up work addressed to me".
+No `refs/loopflow/machines/*`, no `lf machine list --all`. This supersedes the
+Machine-record design and the farm-out of `refs/loopflow/machines/<id>` to
+LOO-555 (open: what happens to LOO-555's cron visibility, which used that ref).

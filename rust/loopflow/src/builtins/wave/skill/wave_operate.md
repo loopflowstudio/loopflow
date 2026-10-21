@@ -189,10 +189,8 @@ Use this ID-first form in operational lists; in prose, shorten later
 references when unambiguous.
 
 Take the identifier from `task.identifier` and the readable title from `task.name`. Give the Task's disposition as its status, not
-`runtime.status` alone, and take the next owner from `next_move.owner`. On a
-Task you own, an owner of `wave` names work this pass acts on, not a handoff:
-report its result. Another person's Task stays “theirs · left alone”.
-Link the Task's optional `pr` using its recorded GitHub number and URL; omit
+`runtime.status` alone, and take the next owner from `next_move.owner`, read
+as described under ownership above. Link the Task's optional `pr` using its recorded GitHub number and URL; omit
 the PR link when absent. State the next action only when supported by current evidence; leave
 unknown state unknown. Include an
 workspace slug only when navigating that workspace is the job, using

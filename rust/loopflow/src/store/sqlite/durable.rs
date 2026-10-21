@@ -4,8 +4,8 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, ProjectId, SteerComment, TaskId, TaskState,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Author, Machine, MachineId, MachineSharing, ProjectId, SteerComment, TaskId,
+    TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
@@ -129,6 +129,45 @@ impl SqliteStore {
         if conn.execute("UPDATE machines SET label=NULL WHERE label=?1", [label])? == 0 {
             return Err(StoreError::NotFound);
         }
+        Ok(())
+    }
+
+    pub fn machine_sharing(&self) -> StoreResult<MachineSharing> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT pickup, public_name FROM machines WHERE route='local'",
+            [],
+            |row| {
+                Ok(MachineSharing {
+                    pickup: row.get(0)?,
+                    public_name: row.get(1)?,
+                })
+            },
+        )?)
+    }
+
+    pub fn set_machine_pickup(&self, pickup: bool) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE machines SET pickup=?1 WHERE route='local'",
+            [pickup],
+        )?;
+        Ok(())
+    }
+
+    /// Make this Machine public under `name`, or private with `None`.
+    pub fn set_machine_public_name(&self, name: Option<&str>) -> StoreResult<()> {
+        let name = name.map(str::trim);
+        if name == Some("") {
+            return Err(StoreError::InvalidData(
+                "a public name cannot be empty; use `off` to make this Machine private".into(),
+            ));
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE machines SET public_name=?1 WHERE route='local'",
+            [name],
+        )?;
         Ok(())
     }
 

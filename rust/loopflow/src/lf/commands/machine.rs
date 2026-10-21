@@ -171,6 +171,31 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string(&statuses)?);
             }
         }
+        MachineCommand::Pickup { state } => {
+            if let Some(state) = state {
+                store.sqlite.set_machine_pickup(state == "on")?;
+            }
+            let pickup = store.sqlite.machine_sharing()?.pickup;
+            println!(
+                "{}",
+                if pickup {
+                    "This Machine picks up work addressed to you"
+                } else {
+                    "This Machine leaves work addressed to you to your other Machines"
+                }
+            );
+        }
+        MachineCommand::Public { name } => {
+            if let Some(name) = name {
+                store
+                    .sqlite
+                    .set_machine_public_name(Some(name.as_str()).filter(|name| *name != "off"))?;
+            }
+            match store.sqlite.machine_sharing()?.public_name {
+                Some(name) => println!("Teammates see this Machine as {name}"),
+                None => println!("This Machine is private; teammates see only you"),
+            }
+        }
         MachineCommand::Rename { label, name } => {
             store.rename_machine(label, name).await?;
             println!("Renamed {label} to {name}");

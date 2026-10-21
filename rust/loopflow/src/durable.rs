@@ -270,6 +270,16 @@ pub struct Machine {
     pub observed_at: OffsetDateTime,
 }
 
+/// How this Machine takes part in work shared with other people. Both stay
+/// on this Machine's local row and are never exchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineSharing {
+    /// This Machine lists Tasks addressed to its person.
+    pub pickup: bool,
+    /// What teammates read for this Machine; `None` keeps it private.
+    pub public_name: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {

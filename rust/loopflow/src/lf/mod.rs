@@ -2064,6 +2064,13 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Show or set whether this Machine picks up work addressed to you
+    Pickup {
+        #[arg(value_parser = ["on", "off"])]
+        state: Option<String>,
+    },
+    /// Show this Machine's public name, set one, or `off` to keep it private
+    Public { name: Option<String> },
     /// Change a saved machine's label
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work

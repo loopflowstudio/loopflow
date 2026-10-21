@@ -205,4 +205,25 @@ mod tests {
         ));
         assert_eq!(store.local_machine().await.unwrap(), local);
     }
+
+    #[tokio::test]
+    async fn this_machine_picks_up_work_and_stays_private_until_set() {
+        let (store, _) = wave_work().await;
+        let sharing = store.sqlite.machine_sharing().unwrap();
+        assert!(sharing.pickup);
+        assert_eq!(sharing.public_name, None);
+
+        store.sqlite.set_machine_pickup(false).unwrap();
+        store
+            .sqlite
+            .set_machine_public_name(Some(" studio-mini "))
+            .unwrap();
+        let sharing = store.sqlite.machine_sharing().unwrap();
+        assert!(!sharing.pickup);
+        assert_eq!(sharing.public_name.as_deref(), Some("studio-mini"));
+        assert!(store.sqlite.set_machine_public_name(Some(" ")).is_err());
+
+        store.sqlite.set_machine_public_name(None).unwrap();
+        assert_eq!(store.sqlite.machine_sharing().unwrap().public_name, None);
+    }
 }

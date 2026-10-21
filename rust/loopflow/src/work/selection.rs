@@ -499,32 +499,21 @@ impl Arrangement {
 
     /// Incomplete reads can add evidence, but can never erase retained intent.
     pub fn reconcile(&mut self, resolution: &SelectionResolution) {
-        let complete = resolution.unavailable.is_empty();
-        let mut members = if complete {
-            resolution.members.clone()
-        } else {
-            self.order.clone()
-        };
-        let mut selected: BTreeSet<_> = members.iter().cloned().collect();
-        if !complete {
-            for member in &resolution.members {
-                if selected.insert(member.clone()) {
-                    members.push(member.clone());
-                }
+        if resolution.unavailable.is_empty() {
+            if self.mode == ArrangementMode::Auto {
+                self.order = resolution.members.clone();
+            } else {
+                let selected: BTreeSet<_> = resolution.members.iter().collect();
+                self.order.retain(|member| selected.contains(member));
             }
         }
-        self.hidden.retain(|member| selected.contains(member));
-        if self.mode == ArrangementMode::Auto && complete {
-            self.order = members;
-            return;
+        let mut present: BTreeSet<_> = self.order.iter().cloned().collect();
+        for member in &resolution.members {
+            if present.insert(member.clone()) {
+                self.order.push(member.clone());
+            }
         }
-        self.order.retain(|member| selected.contains(member));
-        let retained: BTreeSet<_> = self.order.iter().cloned().collect();
-        self.order.extend(
-            members
-                .into_iter()
-                .filter(|member| !retained.contains(member)),
-        );
+        self.hidden.retain(|member| present.contains(member));
     }
 }
 

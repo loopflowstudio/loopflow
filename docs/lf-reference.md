@@ -290,12 +290,13 @@ Report how long `lf wt list` has taken on this machine
 
 ## lf wt prune
 
-Prune worktrees or completed build output
+Prune worktrees, completed build output, or finished branches
 
 | Argument | What it does |
 |---|---|
 | `--dry-run` | Show what would be pruned without removing anything Default: false. |
 | `--builds` | Reclaim old generated output from completed Tasks; retain checkouts Default: false. |
+| `--branches` | Delete origin and local branches tied to merged or closed PRs, finished Tasks, or published release candidates Default: false. |
 | `--json` | Emit cleanup entries and allocated-byte receipts Default: false. |
 | `--retention-hours` | Keep output modified within this many hours Default: 24. |
 | `--maximum-roots` | Maximum generated roots removed per invocation Default: 8. |

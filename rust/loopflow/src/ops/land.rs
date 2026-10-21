@@ -409,10 +409,17 @@ fn finalize_local(
     feature_branch: &str,
     progress: &impl Progress,
 ) -> OpsResult<()> {
+    let merged_head = crate::git::rev_parse(repo_root, "HEAD")?;
     progress.status("Merging locally...");
     let _ = git_land(repo_root, LandStrategy::LocalMerge, main_branch)?;
-    delete_remote_branch(repo_root, feature_branch)?;
-    Ok(())
+    // Only the head just merged; a remote that moved since carries new work.
+    let remote = crate::ops::wt::branch_copies_at(
+        &main_repo_root(repo_root)?,
+        feature_branch,
+        Some(merged_head),
+        None,
+    );
+    crate::ops::wt::apply_delete(remote, progress)
 }
 
 #[allow(clippy::too_many_arguments)] // Remote PR facts and explicit child capability inheritance.
@@ -529,19 +536,6 @@ pub fn mark_ready(repo: &Path, inherit_pr: &impl Fn(&mut Command)) -> OpsResult<
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
     inherit_pr(&mut cmd);
-    if let Err(err) = run_command(&mut cmd) {
-        return Err(OpsError::CommandFailed {
-            command: err.command_line(),
-            stderr: err.stderr,
-        });
-    }
-    Ok(())
-}
-
-fn delete_remote_branch(repo: &Path, branch: &str) -> OpsResult<()> {
-    let mut cmd = Command::new("git");
-    cmd.args(["push", "origin", "--delete", branch])
-        .current_dir(repo);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

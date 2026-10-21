@@ -108,8 +108,7 @@ acceptance and delivery remain open.
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
 Jack Heart authorized selective cleanup without retries or a five-minute CI claim.
-#1545 merged; installation and measured savings remain unproved. Assertion
-boundaries, counts and acquisition evidence:
+#1545 merged; installed savings remain unproved. Evidence:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Global agent override (LOO-440, curated 2026-10-11)
@@ -120,12 +119,9 @@ completion after verified merge. No logins, credential reads or real-provider te
 Six fixture Sessions prove Claude across child overrides; replay/native history
 retain their provider. Conflicting resume explains starting anew.
 
-October 11 gate repaired isolation, replay pinning and pruning's NULL-worktree
-read. Override checks passed. Release-lock failure's cause remains unknown;
-homepage overflow at 1,440 px remains. CI owns nested Python sandbox tests.
-Remote/live/installed acceptance, landing and completion remain unproved.
-Exact evidence and earlier archives:
-`6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Global agent override.
+October 11 gate passed override checks; release-lock failure's cause remains
+unknown. Remote/live/installed acceptance, landing and completion remain unproved.
+Evidence: `6935bfbadb:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
@@ -237,19 +233,15 @@ the endpoint. Live cmux workspace/tab rename passed with a stand-in
 and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
-October 11 hook repair: Jack Heart initially requested publication for review;
-his later comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26` requests landing
-PR #1530 after sync and conflict resolution. A held WAL writer reproduced a callback exceeding six seconds
-before naming; ordinary Process admission permits a 15-second receipt wait.
-Optional prompt hooks need bounded observation as well as bounded ownership
-reads: lock waits and history scans are separate costs. Preserve best-effort
-Process recording, reuse the bounded connection for parent reads, and never
-retry failed early observation at exit with the ordinary budget. Unavailable
-ownership leaves names unchanged. Implementation decisions, not approvals.
-Lock fixtures and interrupted history scans
-prove source behavior; installed concurrent-Flow acceptance remains unproved.
-The slow status/ensure observations and unattributed records-read report have
-no established common cause. Plan: `scratch/stop-the-session-title-hook.md`.
+October 11 hook repair: Jack Heart's comment `d6ad11df-fd8b-4b4a-861b-ac7ab785cb26`
+requests landing PR #1530 after sync. A held WAL writer reproduced a callback
+over six seconds before naming; Process admission permits a 15-second receipt
+wait. Optional prompt hooks bound observation and ownership reads separately
+(lock waits vs history scans), reuse the bounded connection for parent reads and
+never retry failed early observation at exit. Unavailable ownership leaves names
+unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
+acceptance and the slow status/ensure cause remain unproved.
+Plan: `scratch/stop-the-session-title-hook.md`.
 
 Jack Heart's October 11 Kata report (`d4991d61`) reproduced consecutive
 prompt timeouts outside Loopflow with one background shell. Shared-store contention
@@ -510,8 +502,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
-“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
+Earlier cleanup: `66da3fdf7:wave/infrastructure/MEMORY.md`, “Retained capture
+storage and autonomous cleanup”; current direction: Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -545,9 +537,9 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`, hosted CI passing.
-LOO-370 recovered and completed October 6 under the opaque-root decision.
-Installed acceptance is unproved; LOO-373 owns landing-placement reconciliation.
+Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb` with hosted CI green.
+LOO-370 completed October 6. Installed acceptance is unproved; LOO-373 owns
+landing-placement reconciliation.
 
 Save service, attached lf and provider identities before stop removes receipts.
 Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
@@ -638,11 +630,6 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery
-
-LOO-295/292 closed; LOO-373 retains placement repair. Evidence and unapproved
-batching: `10ca6bd39:wave/infrastructure/MEMORY.md`, this heading.
-
 ## Optional chapters and Task workflows (curated 2026-10-12)
 
 Jack Heart's October 2 direction separates ordinary work from optional chapters.
@@ -694,10 +681,8 @@ Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 Jack Heart approved installed `lf` and `~/.lf` for ordinary commands, Task
 workers and Flow steps. Explicit `LF_HOME` experiments need a fresh directory
-after schema changes. PR #1381 shipped; installed v0.12.31 acceptance closed
-LOO-342. Jack authorized legacy retirement; 37 identified processes exited,
-retained databases/receipts survived and main identity stayed unchanged.
-Exact retirement paths, release evidence and current-document links:
+after schema changes; default-home draft builds use a copy (#1612).
+LOO-342 closed (v0.12.31):
 `b1a50a7dc:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
@@ -932,12 +917,6 @@ Historical trigger/default-wait proposals need current selection. Current
 [delivery mechanics](../../../docs/architecture/delivery.md) and TESTING.md own
 their guidance; Wave learning stays with its identified owner.
 
-## Prompt reduction boundary (2026-09-24)
-
-LOO-287's open proof and Intelligence ownership of assembly remain at
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Identity, eligibility
-and consumed launch evidence stay separate.
-
 ## Installation and command scope (curated 2026-10-11)
 
 Jack Heart closed LOO-292 on machine evidence October 4. History and remaining
@@ -992,7 +971,9 @@ liveness or continuity.
 
 ## Shipped history
 
-Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading.
+Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading. Installed
+worker recovery (LOO-295/292; LOO-373 keeps placement):
+`10ca6bd39:wave/infrastructure/MEMORY.md`.
 Cron continuity judges the latest due against exact scheduled receipts; manual
 runs prove no firing, and old gaps do not keep later telemetry red.
 
@@ -1075,10 +1056,13 @@ judgments; preserve unrelated provider associations and diagnose ambiguous moves
 Standing frontier plans need no invented completion date. No fourth planning noun
 was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this heading.
 
-## Earlier follow-ups
+## Archived pointers
 
-Unselected work and Jack Heart's unresolved July 6 “up/down 5ths” referent:
-`7b28ab1ca:wave/infrastructure/MEMORY.md`, this heading. Archives authorize no work.
+Archives authorize no work. Installed worker recovery (LOO-295/292 closed;
+LOO-373 retains placement repair): `10ca6bd39:wave/infrastructure/MEMORY.md`.
+Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
+earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
+referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 

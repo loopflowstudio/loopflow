@@ -49,3 +49,4 @@ mod work_open_tests;
 mod worktree_tests;
 mod world_recipes;
 mod wt_ci_logs_tests;
+mod wt_prune_branches;

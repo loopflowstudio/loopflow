@@ -19,9 +19,11 @@ holds five failures:
 LOO-520 made no progress for about 22 hours. Its status showed the error
 only as "latest Flow: implement: invalid flow: …".
 
-**Status: recovered** in `7d0c4047b8`. With installed 0.14.12,
-`lf repo planning status` in the worktree reads "Planning: Linear". The
-pursue relaunch was not rerun as part of the repair.
+**Status: shim reverted.** `7d0c4047b8` read the released `linear.team` so
+installed lf kept working here. Jack rejected it on October 21: no
+compatibility shims. The branch keeps `planning.team`; Flows in this
+worktree need the branch-built lf until the release, and lf is deployed with
+the merge.
 
 ## Causal chain
 
@@ -84,10 +86,8 @@ pursue relaunch was not rerun as part of the repair.
 
 ## Prevention (proposed, not accepted)
 
-Fix already made: `7d0c4047b8` keeps the released `linear:` block in this
-repository's config, and has the branch build read it as Linear planning's
-team instead of refusing it. Covered by
-`repo_config_reads_the_released_linear_team`.
+Jack rejected the fold in `7d0c4047b8` (reverted): no compatibility shims.
+Proposal 1 below is rejected with it.
 
 1. **Treat repository config as a format that two versions read at once.**
    This addresses links 3–4. While a branch is in flight, the released lf and

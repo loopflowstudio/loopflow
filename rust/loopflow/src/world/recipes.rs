@@ -54,6 +54,12 @@ pub const RECIPES: &[Recipe] = &[
         build: lifecycle,
     },
     Recipe {
+        name: "density",
+        rung: Rung::Artifacts,
+        demos: "sidebar density: 150 Tasks across three Waves, 20 started, orphan Sessions",
+        build: density,
+    },
+    Recipe {
         name: "wave-backlog",
         rung: Rung::Artifacts,
         demos: "LOO-514: Wave backlog, conversation and open-Task dashboard together",
@@ -406,6 +412,44 @@ fn lifecycle(world: &World) -> Result<()> {
         &["Fix the install line.", "Fixed."],
         0.3,
     )?;
+    Ok(())
+}
+
+fn density(world: &World) -> Result<()> {
+    const PHRASES: [&str; 4] = [
+        "Retry and publish the chapter safely",
+        "Understand running work",
+        "A calmer desktop workspace",
+        "Keep Task observation read-only",
+    ];
+    for (wave_index, wave) in ["product", "infrastructure", "intelligence"]
+        .into_iter()
+        .enumerate()
+    {
+        world.wave(wave)?;
+        for index in 0..50 {
+            let title = format!("{} {index}", PHRASES[index % PHRASES.len()]);
+            let task = world.task(Some(wave), &title, "One of many Tasks in a dense Wave.")?;
+            let global = wave_index * 50 + index;
+            if global < 140 && global % 7 == 0 {
+                world.claim(&task)?;
+                world.session(
+                    Some(&task),
+                    &title,
+                    &["Pick this up.", "Started; the first pass is underway."],
+                    0.5,
+                )?;
+            }
+        }
+    }
+    for title in ["demo", "realign", "luna-aria", "loopflow"] {
+        world.session(
+            None,
+            title,
+            &["Look around.", "Nothing here belongs to a Task yet."],
+            1.0,
+        )?;
+    }
     Ok(())
 }
 

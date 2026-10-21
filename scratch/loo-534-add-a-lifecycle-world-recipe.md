@@ -4,8 +4,8 @@ Status: implemented, gated and published as [#1621](https://github.com/loopflows
 (2026-10-20); main merged at 52ed99b138 (#1622's `wave-backlog`, `task-review`, `wave-lifecycle`
 recipes adapted to `task(Option<&str>)` and dated `complete`). Main merged again at f8d1b4f3cf
 (2026-10-21) for #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned. Main moved again
-to aa7038fcf9 (#1617, LOO-533 `density` recipe): see *Main moved again*. Remaining: that slice,
-then CI, review and merge; Task completion follows delivery.
+to aa7038fcf9 (#1617, LOO-533 `density` recipe), merged with one shared `BuiltWorld` Swift
+fixture. Remaining: CI, review and merge; Task completion follows delivery.
 CI's matrix runs only once scratch is cleared (`scratch-clear` candidate), so it
 runs at submit; #1621's head 40b769765f has only `scratch-clear` passing, the rest skipped. Jack Heart requested this as an
 autonomous follow-up to lf-world (#1612) on 2026-10-20.
@@ -227,7 +227,7 @@ Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
 unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
 
-### Main moved again — This slice (kickoff, 2026-10-21)
+### Main moved again — done (2026-10-21)
 
 Jack Heart's #1617 (LOO-533) landed a `density` recipe, `World::claim`, and
 `WorkDensityWorldTests` with a private `DensityWorld` fixture that duplicates
@@ -244,8 +244,8 @@ It also landed the identical `--bin lf-world` lines in `ci.yml` and
    `swift/LoopflowTests/BuiltWorld.swift` (internal) owns build, env and
    `query`, honoring `LOOPFLOW_TEST_LF` / `LOOPFLOW_TEST_LF_WORLD` (main's
    lookup) and draining stderr concurrently (main's runner). Both suites use it;
-   `LifecycleWorld` and `DensityWorld` are deleted. `model()` stays a helper in
-   `LifecycleWorldTests` only if density does not want it.
+   `LifecycleWorld` and `DensityWorld` are deleted. `model()` lives on
+   `BuiltWorld`; density uses it too.
 3. No assertion changes. Density's `claim` + Session rows and lifecycle's
    `checkout` claim coexist; the world's `checkout` still claims.
 
@@ -309,3 +309,4 @@ Realign (2026-10-21): `isCurrent` slice already landed; plan prose updated to ma
 Concept review (2026-10-21): no design change, no open choice; "Done when" now names Project history as the range owner. Prose only, no checks.
 Gate (2026-10-21): clippy caught the settled-rung unit test still setting removed `started` after #1610's merge; now `owner: Some(owned())`. `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `commands::waves` 19/19, `world_recipes` 3/3, integration `wave` 16/16, `scripts/test_desktop.sh -Xswiftc -gnone` 617/617: passed. Full CI: submit.
 Kickoff (2026-10-21): origin/main at aa7038fcf9 (#1617); `git merge-tree` conflicts in `world/mod.rs`, `world/recipes.rs`; no checks run.
+Implement (2026-10-21): merged aa7038fcf9, `BuiltWorld` replaces both private fixtures; `world_recipes` 3/3, `scripts/test_desktop.sh --filter 'LifecycleWorldTests|WorkDensityWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 43/43. clippy and full Swift: gate/CI.

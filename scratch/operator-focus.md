@@ -59,7 +59,8 @@ started work moving" under **Yours** (`505509f5e5`, `62c5a3a3b1`): such a Task
 has unknown liveness here; operate that one Task with `lf --machine <machine>
 task-operate <issue>` and file its disposition under Moving/Stuck, or report it
 unknown naming the Machine; never `lf task run`, recover or complete it from
-this Machine. Review 5 first delegated to a remote whole-Wave `wave-operate`,
+this Machine. `docs/waves.md` states the same rule beside the theirs-left-alone
+sentence. Review 5 first delegated to a remote whole-Wave `wave-operate`,
 which could hand your Task on A back from B without bound; task-operate's Task
 is local there, so it never delegates further. repo-operate's Machines
 paragraph keeps whole-Wave `lf --machine … wave-operate` as a person's

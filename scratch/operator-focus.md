@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: the demo (agent run, demo/review) and the gate checks.
+Remaining: concept review 3's due-follow-up and reply-order wording (below), then the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -16,6 +16,33 @@ Remaining: the demo (agent run, demo/review) and the gate checks.
    proposals, s3 uses Task operations only on your Tasks, `docs/waves.md`
    states vsm-operate keeps the operator boundaries, and repo-operate lists
    due follow-ups before backlog like wave-operate.
+
+## Concept review 3 (2026-10-21): next implement direction
+
+A due follow-up you already started and own falls under two rules.
+wave-operate's "Return to due follow-ups" reads due Tasks "including unstarted"
+and says "Do not start a due follow-up". Meanwhile every started Task you own
+gets one disposition, and the reply lists each started Task once. Decision 3
+places the follow-up list under unowned backlog, so the settled reading is:
+
+- The due follow-up list holds only unstarted Tasks, which are unowned backlog,
+  for the person to select. Rewrite the rule as "Do not start one". A started
+  Task you own whose due date has arrived gets its ordinary disposition and is
+  not listed again. Before that date its disposition is dependency, with the
+  date named. Make `wave_operate.md` "Return to due follow-ups" and Finish
+  ("unstarted due follow-ups"), `wave_session.md` line 21 and
+  `docs/waves.md` ~459 say the same thing.
+- Use one reply order in both operators. repo-operate's "Summarize current
+  activity" puts "what finished" between stuck and others' work, while
+  `repo_session.md` and wave-operate use Available → Moving → Stuck → Others'
+  work. Move "finished" after others' work in repo-operate: Available, Moving,
+  Stuck, Others' work, finished, due follow-ups, backlog.
+
+Checked and kept: started Tasks are owned. Checkout allocation claims the Task
+(`children.rs` `claim_in`), and the 0.14.12 backfill records person-less local
+entries, which `is_mine` treats as yours and never delivers to a teammate. So
+"unowned = backlog" never strands started work of yours. The exception is
+deliberate `lf task unclaim`, and backlog is the right reading there.
 
 Considered and kept: repo-operate cleanup can `lf task abandon` your own
 Tasks while wave-operate never abandons. That is the cleanup duty decision 6

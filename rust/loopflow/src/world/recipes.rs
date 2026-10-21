@@ -39,7 +39,7 @@ pub const RECIPES: &[Recipe] = &[
         name: "one-task",
         rung: Rung::Artifacts,
         demos: "Wave → Task → Session → Flow click-through on one small piece of work; \
-                a Task waiting at a Workflow node; a six-step Flow exec (LOO-392)",
+                a Task waiting at a Workflow node; an eight-step Flow exec (LOO-392)",
         build: one_task,
     },
     Recipe {

@@ -363,7 +363,7 @@ fn wave_lifecycle(built: &Built) {
 }
 
 #[test]
-fn one_task_waits_at_demo_after_a_six_step_pursue() {
+fn one_task_waits_at_demo_after_an_eight_step_pursue() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     let workflow = built.workflow(&issue);
@@ -395,7 +395,9 @@ fn one_task_waits_at_demo_after_a_six_step_pursue() {
             (2, "sync"),
             (3, "realign"),
             (4, "loop-or-next"),
-            (5, "pr-publish"),
+            (5, "concept-review"),
+            (6, "loop-or-next"),
+            (7, "pr-publish"),
         ]
     );
 }

@@ -7,7 +7,7 @@ logic, failure/transitional states, terminal/focus proofs and DTO fixtures.
 ## Problem
 
 LOO-434 (Workflow experience) needs a Task standing mid-Workflow to design
-against; LOO-392 (Flow exec step row clips) needs a Flow with six or more steps.
+against; LOO-392 (Flow exec step row clips) needs a Flow with six or more steps (`pursue` has eight).
 Neither exists in any built world: `World` has no Workflow writer, and
 `World::flow` invents a graph from a hand-written skill list, so every recorded
 Flow is one or two fake steps (`implement`, `gate`) that match no authored Flow.
@@ -20,13 +20,13 @@ target/debug/lf-world build one-task /tmp/w
 env $(jq -r 'to_entries[]|"\(.key)=\(.value)"' /tmp/w/env.json) \
   target/debug/lf task status <ISSUE>          # "Workflow feature: at demo"
 env … target/debug/lf flow list --processes --for-task <ISSUE>   # task-design, pursue
-env … target/debug/lf flow show --processes <PURSUE-ID> --json  # six steps, keys 0–5
+env … target/debug/lf flow show --processes <PURSUE-ID> --json  # eight steps, keys 0–7
 scripts/loopflow-dev.py run-debug --world /tmp/w
 ```
 
 In Desktop the Task shows the `feature` Workflow waiting at `demo` with its move
-history; opening the `pursue` exec draws six steps (implement, compress, sync,
-realign, loop-or-next, pr-publish) and the row clips at the default split —
+history; opening the `pursue` exec draws eight steps (implement, compress, sync,
+realign, loop-or-next, concept-review, loop-or-next, pr-publish) and the row clips at the default split —
 LOO-392 reproduced. `lf-world build portfolio` adds a Task stopped on a failed
 `pursue` edge and one a person moved to `demo` by hand.
 
@@ -36,9 +36,9 @@ LOO-392 reproduced. `lf-world build portfolio` adds a Task stopped on a failed
 the parent Process that started it, if any), loads
 it from the world repository with the production loader (`flow::load_flow` +
 `compile_flow`, as `ops::task::load_task_flow` does) and builds `FlowGraph::new`
-from the compiled steps. Real `pursue` compiles flat to six nodes (keys 0–5,
-`refresh` expanded, `loop-or-next` with `returns_to: 0`), which is exactly the
-LOO-392 shape. One step Process per top-level node, in preorder: skills record
+from the compiled steps. Real `pursue` compiles flat to eight nodes (keys 0–7,
+`refresh` expanded, both `loop-or-next` nodes with `returns_to: 0`; #1611 added
+`concept-review`), which exceeds the LOO-392 shape. One step Process per top-level node, in preorder: skills record
 `lf -b skill <label>`, commands their `Command::argv()`. An `Outcome` replaces
 the outcome string: `Succeeded`, or `FailedAt(k)` which records steps 0..=k with
 step k failed and nothing after it. Single pass, so iterations stay `[[]]`; XOR
@@ -62,8 +62,8 @@ refuses an edge with no Flow or into `end` (completion belongs to
 
 **Recipes.**
 - `one-task`: `task_run("feature")` (takes up, runs `task-design` → design),
-  then `task_run("pursue")` (→ demo, six steps, succeeded). Its Session stays.
-  Demos string adds "Task waiting at a Workflow node; six-step Flow exec (LOO-392)".
+  then `task_run("pursue")` (→ demo, eight steps, succeeded). Its Session stays.
+  Demos string adds "Task waiting at a Workflow node; eight-step Flow exec (LOO-392)".
 - `portfolio`: "Record a reader floor" runs `task_run("code")` whose `pursue`
   edge fails at `sync` (stopped edge, three step rows). "Open conversations
   faster" runs `task_run("feature")` to design, then a person moves it to
@@ -135,14 +135,14 @@ refuses an edge with no Flow or into `end` (completion belongs to
 ## Done when
 
 1. `one-task`'s Task reads `Workflow feature: at demo` in `lf task status`, with
-   history took_up, chose, arrived, chose, arrived; its `pursue` exec has six
-   step Processes on graph nodes 0–5.
+   history took_up, chose, arrived, chose, arrived; its `pursue` exec has eight
+   step Processes on graph nodes 0–7.
 2. `portfolio` has a Task stopped on a failed `pursue` edge (three step rows)
    and one at `demo` by a person's `set` move with its note.
 3. `cargo test -p loopflow --test integration world_recipes` asserts (1) and the stopped
    edge through `lf task status --json` / `lf flow list --processes --json`
    (headless; expected: pass).
-4. Desktop opens the one-task world and shows the clipped six-step row (demo,
+4. Desktop opens the one-task world and shows the clipped eight-step row (demo,
    by eye; LOO-392's own render proof stays with LOO-392).
 5. After merge, LOO-392 and LOO-434 carry a progress comment naming the recipe
    and the `lf-world build one-task <dir>` / `run-debug --world` commands.
@@ -161,9 +161,14 @@ refuses an edge with no Flow or into `end` (completion belongs to
   `task_run(task, "pursue", …)`: succeeded stays `Succeeded`; the old failed
   `implement`/`gate` runs (lifecycle's abandoned attempt, wave-backlog's failed
   Task) fail at `implement` (`FailedAt(0)`). Step durations kept their per-step
-  minutes, so these Flows now span six steps. Their consumers
+  minutes, so these Flows now span eight steps. Their consumers
   (`tests/world_recipes.rs`, `LifecycleWorldTests`, `WorkDensityWorldTests`)
   assert Task state, not Flow shape.
+- Synced with main through `53491fff86` (v0.14.14), which includes #1619
+  (`9c08610519`). `portfolio`'s "Open conversations faster" block keeps
+  `task_run(…, "feature", …)` + `move_to(…, "demo", …)`, followed by main's
+  `uncommitted` README edit and `comment`. The branch's Session binding and
+  `config.yaml` (person `Demo`) do not touch the Workflow writers.
 - Wave memory took main's curation; the branch's own memory wording edits were
   dropped (memory is read-only to this Task).
 - Tests live in `tests/world_recipes.rs`, compiled into the `integration`
@@ -171,12 +176,6 @@ refuses an edge with no Flow or into `end` (completion belongs to
 
 ## Remaining
 
-- Sync onto main `9c08610519` (#1619, LOO-531). It edits `portfolio`'s
-  "Open conversations faster" block (adds `world.uncommitted` README edit and
-  `world.comment` after the old `world.flow`), so `recipes.rs` will conflict:
-  keep `task_run("feature")` + `move_to(…, "demo", …)`, then main's
-  uncommitted/comment calls. It also binds Sessions then appends an input and
-  writes `config.yaml` with person `Demo` — no overlap with the Workflow writers.
 - Gate: affected suites, including the Swift built-world suites
   (`LifecycleWorldTests`, `WorkDensityWorldTests`, and #1619's `WorldReadTests`,
   which builds `portfolio`) whose recipes changed Flow shape; regenerate
@@ -186,4 +185,4 @@ refuses an edge with no Flow or into `end` (completion belongs to
   Task counts are unchanged, since no recipe adds or removes Tasks.
 - Done-when 4 (Desktop demo by eye) and 5 (LOO-392/LOO-434 comments after merge).
 
-Check (compress, 2026-10-21): `cargo test -p loopflow --test integration world_recipes` — 3 passed; second pass dropped `World::flow`'s unused id return, `cargo clippy -p loopflow --lib -- -D warnings` clean; gate owns affected suites.
+Check (realign, 2026-10-21): `cargo test -p loopflow --test integration world_recipes` — 5 passed after updating the stale six-step `pursue` assertion to #1611's eight steps; `cargo clippy --all-targets -- -D warnings` clean; gate owns affected suites.

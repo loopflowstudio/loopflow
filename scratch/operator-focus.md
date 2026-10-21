@@ -1,8 +1,11 @@
 # LOO-553 · Operators work the Wave's existing work
 
-Status: draft plan (kickoff, 2026-10-21). Product direction accepted by Jack
-Heart on 2026-10-21; the two open decisions below proceed on recorded
-assumptions (`scratch/questions.md`).
+Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
+direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
+recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
+
+Remaining: the demo below (agent run, demo/review) and the gate checks. No
+skill or doc text from the target shapes is outstanding.
 
 ## Problem
 
@@ -127,7 +130,7 @@ before/after shows only your Task's execution changed. Repeat with
 | `docs/waves.md` | Operate manually + due follow-up paragraph (line ~459) match decisions 1–3 |
 | `docs/lf.md` (~538–548) | operator paragraph: your Tasks, others' listed, backlog unstarted |
 | `docs/architecture.md`, `docs/architecture/planning.md`, `docs/getting-started.md`, `docs/agent-api.md` | "planning pass"/"reviews the plan"/"reassess Project priorities" examples become operating examples |
-| `tests/goldens/with_docs.md` | regenerate if `work.md` lines change |
+| `tests/goldens/with_docs.md` | regenerated for the `work.md` supervision line |
 
 ## Source of truth
 
@@ -169,13 +172,13 @@ New unit test (next to the export test in `rust/loopflow/src/skills/mod.rs`):
 for the `repo-operate` and `wave-operate` registered bodies (the session skills
 inline them; their own "Begin work in a Wave" text legitimately names
 start-chapter's KR planning), assert neither contains `lf task create`, `update-plan`, `new-chapter`,
-`lf task claim`, or `KR`. Expected: pass. Docs: `git grep -n -e "highest-leverage open KR" -e "one finite planning pass"` returns nothing.
+`lf task claim`, or `KR`. Expected: pass. Docs: `git grep -n -e "highest-leverage open KR" -e "one finite planning pass" -- ':!scratch'` returns nothing.
+`cargo test -p loopflow --test golden_prompt` passes against the regenerated golden.
 
 ## Slices
 
-One indivisible text change (This slice): rewrite both operator skills, then
-session/other builtins, then docs, then the guard test. No deletion target
-outside the skill text itself.
+One indivisible text change, done: both operator skills, session and other
+builtins, docs, the guard test and the golden.
 
 ## Done when
 
@@ -183,4 +186,4 @@ Running either operator over a Wave with unowned backlog, a KR and a teammate's
 Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
-Check results: `cargo test -p loopflow --lib skills::` — 28 passed (compress, 2026-10-21); docs grep deferred to gate.
+Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch.

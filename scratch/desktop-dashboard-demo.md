@@ -31,3 +31,15 @@ Worked: white titlebar text, Started/Paused labels, paging, focus growing a band
 
 Animation: focus and page turns share one 0.25 s spring. A representable takes its final
 frame at once, so a terminal regrids once per change; demo judges whether that flickers.
+
+## Golden-grid re-demo — October 21, 2026 (a5af466979, store copy, Jack Heart)
+
+8. Jack: “scrolling speed seems pretty slow.” `GhosttyTerminalView.scrollWheel` forwards
+   raw `scrollingDeltaX/Y`; Ghostty's own macOS view doubles precise (trackpad) deltas
+   before `ghostty_surface_mouse_scroll`. Match Ghostty: ×2 when precise. Applies to every
+   terminal, not only Dashboard tiles.
+9. Jack: “Opening a conversation opens the conversation in a focused mode, i want it to
+   open inline in the dashboard.” Dashboard tile **Open conversation** calls
+   `openTaskConversation`, which runs `openTaskDestination` and sets `.terminals`, leaving
+   the Dashboard. From a tile it must attach the Task's conversation in that tile and stay
+   on the Dashboard; the zoom control remains the explicit way into the Task.

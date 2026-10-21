@@ -107,12 +107,14 @@ reviews, arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Return to due follow-ups
 
-Read due dates and briefs in the shared plan, including unstarted Tasks.
-List due or overdue follow-ups separately from unrelated backlog, for the
-person to select. Use the date and any timezone, release or environment
-prerequisite in the brief; a due date is a day, not an exact-time alarm.
-Missing date or provider evidence stays unknown. Do not start a due follow-up:
-elapsed time never authorizes execution or completes the Task. This pass
+Read due dates and briefs in the shared plan. List unstarted Tasks that are
+due or overdue separately from unrelated backlog, for the person to select;
+they are unowned backlog. Do not start one: elapsed time never authorizes
+execution or completes the Task. A started Task you own whose date has
+arrived takes its ordinary disposition above and is not listed again; before
+that date its disposition is dependency, naming the date. Use the date and any
+timezone, release or environment prerequisite in the brief; a due date is a
+day, not an exact-time alarm. Missing date or provider evidence stays unknown. This pass
 installs no schedule; an open conversation does not schedule its next turn.
 
 ## Judge the Wave's existing work
@@ -166,7 +168,7 @@ headings in this order, omitting an empty group:
 4. **Others' work** — each Task another person owns, with that person and
    Machine, “left alone”.
 
-Then list due follow-ups for selection, unstarted backlog, and after it any
+Then list unstarted due follow-ups for selection, other backlog, and after it any
 judgment, proposals, unresolved decisions and evidence gaps. Keep each row to its disposition and decisive evidence. If
 nothing needed action, say why briefly. Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;

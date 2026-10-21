@@ -94,8 +94,8 @@ as success.
 ## Summarize current activity
 
 Give a concise update grouped in this order: what waits on the participant,
-what is moving, and what is stuck, then what finished, other people's work
-left alone, due follow-ups, and backlog. Include cleanup results and useful
+what is moving, what is stuck, and other people's work left alone, then what
+finished, due follow-ups, and backlog. Include cleanup results and useful
 next moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
 for shared state; inspect PRs and branches where they explain a gap.
 

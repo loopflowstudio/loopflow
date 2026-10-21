@@ -456,8 +456,9 @@ Bare landing or a manual merge leaves the Task open. Optional new work uses ordi
 Task creation before completion, with no required filing or disposition. Inspect
 live Flow processes before retrying completion; no fresh gate or landing is needed.
 
-A due follow-up returns on its owning Wave's next operation, even if unstarted,
-listed for you to select; operators do not start it. Filing installs no
+An unstarted due follow-up returns on its owning Wave's next operation, listed
+for you to select; operators do not start it. A started one you own takes its
+ordinary disposition, dependency on the named date until that date arrives. Filing installs no
 schedule; an open conversation schedules no next turn. Missing provider
 evidence stays unknown, and time is never proof of success.
 

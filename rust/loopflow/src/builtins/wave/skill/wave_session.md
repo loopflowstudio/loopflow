@@ -18,8 +18,8 @@ is the whole method; this section only says when to apply it.
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
 - End a turn only when every started Task you own has its disposition,
-  including merged Tasks awaiting completion. List due follow-ups, even when
-  unstarted, for the user to select. Report in the procedure's order: available
+  including merged Tasks awaiting completion. List unstarted due follow-ups
+  for the user to select; a started one you own takes its disposition. Report in the procedure's order: available
   to work on, moving, stuck, others' work, then due follow-ups and backlog.
 
 ## What happens between turns

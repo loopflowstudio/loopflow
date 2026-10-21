@@ -4,7 +4,7 @@ Status: implemented (2026-10-21, commits `7bb419141a`, `82c45d5e2b`). Product
 direction accepted by Jack Heart on 2026-10-21; decisions 1–3 and 6 proceed on
 recorded assumptions awaiting Jack's confirmation (`scratch/questions.md`).
 
-Remaining: concept review 3's due-follow-up and reply-order wording (below), then the demo (agent run, demo/review) and the gate checks.
+Remaining: the demo (agent run, demo/review) and the gate checks.
 
 ## Concept reviews (2026-10-21): implemented
 
@@ -17,7 +17,7 @@ Remaining: concept review 3's due-follow-up and reply-order wording (below), the
    states vsm-operate keeps the operator boundaries, and repo-operate lists
    due follow-ups before backlog like wave-operate.
 
-## Concept review 3 (2026-10-21): next implement direction
+## Concept review 3 (2026-10-21): implemented in the commit after `f2ecf39434`
 
 A due follow-up you already started and own falls under two rules.
 wave-operate's "Return to due follow-ups" reads due Tasks "including unstarted"
@@ -228,3 +228,5 @@ Task leaves the plan, ownership and backlog unchanged, names the teammate's
 Task as theirs, and moves only your own started Tasks.
 
 Check results: `cargo test -p loopflow --test golden_prompt` — passed after regenerating `with_docs.md` (realign, 2026-10-21); `skills::` 28 passed at compress; docs grep clean outside scratch. Concept-review repairs (compress, 2026-10-21): `--test integration config_user` 1 passed, `--lib skills::` 28 passed, `--test golden_prompt` passed without regeneration. Concept review 2 (implement, 2026-10-21): `--lib skills::` 28 passed with the s1–s5 guard, `--test golden_prompt` passed without regeneration, `cargo fmt --check` clean.
+
+Check: `cargo test -p loopflow --lib builtins` — 12 passed (no test asserts the edited prose).

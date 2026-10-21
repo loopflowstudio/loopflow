@@ -460,7 +460,7 @@ mod tests {
         let repo = tempdir().unwrap();
         let components = crate::prompt::PromptComponents {
             repo_root: repo.path().display().to_string(),
-            skill: Some(crate::flow::Skill {
+            skill: Some(crate::graph::Skill {
                 source: None,
                 name: "test".into(),
                 content: Some("Test skill".into()),

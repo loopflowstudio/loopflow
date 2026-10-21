@@ -1110,16 +1110,16 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
 }
 
 #[test]
-fn headless_flow_settles_its_original_step_after_creator_teardown() {
-    headless_flow(false);
+fn headless_graph_settles_its_original_step_after_creator_teardown() {
+    headless_graph(false);
 }
 
 #[test]
-fn explicit_native_resume_interrupts_original_flow_without_replay() {
-    headless_flow(true);
+fn explicit_native_resume_interrupts_original_graph_without_replay() {
+    headless_graph(true);
 }
 
-fn headless_flow(resume: bool) {
+fn headless_graph(resume: bool) {
     let fixture = Fixture::new();
     let bin = fixture.home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
@@ -1135,10 +1135,10 @@ fn headless_flow(resume: bool) {
         .create_file(".lf/skills/probe.md", "Do the fixture work.");
     fixture
         .repo
-        .create_file(".lf/flows/proof.yaml", "- probe\n");
+        .create_file(".lf/graphs/proof.yaml", "- probe\n");
     std::fs::write(fixture.home.path().join("hold-turn"), "").unwrap();
     let mut creator = fixture
-        .command(&["-b", "--agent", "opencode", "flow", "proof"])
+        .command(&["-b", "--agent", "opencode", "graph", "proof"])
         .env(
             "PATH",
             format!(
@@ -1210,16 +1210,16 @@ fn headless_flow(resume: bool) {
         assert!(Instant::now() < deadline, "step did not settle");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let flow: String = sql
+    let graph: String = sql
         .query_row(
-            "SELECT flow_lf_process_id FROM flow_process_steps WHERE lf_process_id=?1",
+            "SELECT graph_lf_process_id FROM graph_process_steps WHERE lf_process_id=?1",
             [&step],
             |r| r.get(0),
         )
         .unwrap();
     loop {
         let outcome: Option<String> = sql
-            .query_row("SELECT outcome FROM processes WHERE id=?1", [&flow], |r| {
+            .query_row("SELECT outcome FROM processes WHERE id=?1", [&graph], |r| {
                 r.get(0)
             })
             .unwrap();
@@ -1227,7 +1227,7 @@ fn headless_flow(resume: bool) {
             assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
             break;
         }
-        assert!(Instant::now() < deadline, "Flow did not settle");
+        assert!(Instant::now() < deadline, "Graph did not settle");
         std::thread::sleep(Duration::from_millis(20));
     }
     if resume {
@@ -1238,15 +1238,15 @@ fn headless_flow(resume: bool) {
                 |r| r.get(0),
             )
             .unwrap();
-        let flow_code: i32 = sql
+        let graph_code: i32 = sql
             .query_row(
                 "SELECT exit_code FROM processes WHERE id=?1",
-                [&flow],
+                [&graph],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(step_code, 130);
-        assert_eq!(flow_code, 3, "held Flow must not request a retry");
+        assert_eq!(graph_code, 3, "held Graph must not request a retry");
         let interrupted: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%' AND payload LIKE '%interrupted%'", [&session], |r| r.get(0)).unwrap();
         assert_eq!(interrupted, 1);
     }

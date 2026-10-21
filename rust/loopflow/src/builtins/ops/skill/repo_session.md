@@ -31,10 +31,10 @@ watch, check back or follow up later.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, launched Flows keep running independently. The periodic Task
+- Between turns, launched Graphs keep running independently. The periodic Task
   check and CI watcher help only where installed: read `lf task automation`
   and `lf ci watch --status`, and say which are active. `lf task reconcile`
-  checks deliveries once; it never resumes a stopped Flow. Inspect its history
+  checks deliveries once; it never resumes a stopped Graph. Inspect its history
   and effects before selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
   `lf connect --fresh` gives the repository a fresh conversation after an
@@ -97,5 +97,5 @@ placement until an idle attachment boundary permits adoption of the persistent w
 `lf wt create <name> --persistent` creates or reuses an independent document workspace.
 `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing only added
 scratch files. Existing files and edits remain; PR open and publish do not run general scratch cleanup.
-Wave context is read-only outside a selected Loopflow Flow that maintains it;
+Wave context is read-only outside a selected Loopflow Graph that maintains it;
 keep proposed changes in scratch.

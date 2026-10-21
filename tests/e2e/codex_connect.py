@@ -124,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
             }
         else:
             text = "Fixture complete."
-            # A Flow process writes the answer contract into the message.
+            # A Graph process writes the answer contract into the message.
             if ANSWER_CONTRACT in json.dumps(request["input"]):
                 text = json.dumps(
                     self.server.decision_outputs.pop(0)
@@ -239,7 +239,7 @@ def main() -> None:
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
     parser.add_argument("--planning-peers", action="store_true")
-    parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
+    parser.add_argument("--graph-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
     args.launch = args.launch or args.shared_provider_home or args.planning_peers
@@ -335,17 +335,17 @@ enabled = false
                             binary, work, env, server, shared_agent_process=False
                         )
                         return
-                    if args.flow_decision_retry:
-                        _flow_decision_retry_contract(
+                    if args.graph_decision_retry:
+                        _graph_decision_retry_contract(
                             binary,
                             work,
                             env,
                             server,
                             results,
-                            replace=args.flow_decision_retry == "replace",
+                            replace=args.graph_decision_retry == "replace",
                         )
                         return
-                    parser.error("--launch requires a Flow proof mode")
+                    parser.error("--launch requires a Graph proof mode")
                 finally:
                     _stop_fixture_agent_processes(agent_processes)
                 return
@@ -1422,7 +1422,7 @@ def _init_repo(work: Path, env: dict[str, str]) -> None:
     )
 
 
-def _flow_decision_retry_contract(
+def _graph_decision_retry_contract(
     binary: Path,
     work: Path,
     env: dict[str, str],
@@ -1432,10 +1432,10 @@ def _flow_decision_retry_contract(
     replace: bool,
 ) -> None:
     _init_repo(work, env)
-    for directory in ("skills", "flows"):
+    for directory in ("skills", "graphs"):
         (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
     (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
-    (work / ".lf/flows/native-proof.yaml").write_text(
+    (work / ".lf/graphs/native-proof.yaml").write_text(
         "- step:\n    id: work\n    name: native-proof\n- loop: work\n  step: native-proof\n"
     )
     server.fail_request = 4
@@ -1443,22 +1443,22 @@ def _flow_decision_retry_contract(
     server.commands[3] = "printf failed-turn-work"
     server.commands[5] = "printf retry-work"
     command = _command(
-        [str(binary), "--agent", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--agent", "codex", "graph", "native-proof", "-b", "--no-loopflow"],
         work=work,
         env=env,
         timeout=90,
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(_database(env)) as db:
-        # A Flow is its Flow process and the step Processes that process recorded.
-        results["flow"] = db.execute(
-            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id"
+        # A Graph is its Graph process and the step Processes that process recorded.
+        results["graph"] = db.execute(
+            "SELECT d.outcome FROM graph_processes f JOIN processes d ON d.id=f.lf_process_id"
         ).fetchone()
         results["history"] = db.execute(
             "SELECT seq,kind,provider_turn,payload FROM session_events ORDER BY seq"
         ).fetchall()
         results["steps"] = db.execute(
-            "SELECT e.command FROM flow_process_steps s "
+            "SELECT e.command FROM graph_process_steps s "
             "JOIN processes e ON e.id=s.lf_process_id ORDER BY s.seq"
         ).fetchall()
     outputs = [
@@ -1483,10 +1483,10 @@ def _flow_decision_retry_contract(
     # resuming the conversation that gave the invalid answer.
     corrections = [command for (command,) in results["steps"] if '"session","resume"' in command]
     if replace:
-        assert command.returncode == 0 and results["flow"][0] == "succeeded", results
+        assert command.returncode == 0 and results["graph"][0] == "succeeded", results
         assert len(results["steps"]) == 2 and not corrections, results["steps"]
     else:
-        assert command.returncode != 0 and results["flow"][0] == "failed", results
+        assert command.returncode != 0 and results["graph"][0] == "failed", results
         assert "structured output validation exhausted" in command.stderr, command.stderr
         assert len(results["steps"]) == 4 and len(corrections) == 2, results["steps"]
     results["failed_decision_discarded"] = "passed"

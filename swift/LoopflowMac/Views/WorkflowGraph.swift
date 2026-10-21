@@ -34,7 +34,7 @@ struct WorkflowGraphLayout {
         /// An edge is named by what it runs.
         var text: String { Self.text(edge) }
 
-        static func text(_ edge: Workflow.Edge) -> String { edge.flow ?? "finish" }
+        static func text(_ edge: Workflow.Edge) -> String { edge.graph ?? "finish" }
     }
 
     static let nodeHeight: CGFloat = 44
@@ -193,7 +193,7 @@ struct WorkflowGraph: View {
             .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
     }
 
-    /// Whether the Task is on `edge` with its Flow still running; `nil` when it is not on it.
+    /// Whether the Task is on `edge` with its Graph still running; `nil` when it is not on it.
     private func running(_ edge: Int) -> Bool? {
         if case .edge(edge, _, let running) = position { running } else { nil }
     }

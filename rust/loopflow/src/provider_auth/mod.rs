@@ -410,9 +410,9 @@ pub enum AuthError {
     #[error("unsupported provider: {0}")]
     UnsupportedProvider(String),
     #[error("auth flow already in progress for {0}")]
-    FlowAlreadyPending(Provider),
+    GraphAlreadyPending(Provider),
     #[error("no pending auth flow for {0}")]
-    NoPendingFlow(Provider),
+    NoPendingGraph(Provider),
     #[error("{0} auth flow does not accept manual completion")]
     CompletionUnavailable(Provider),
     #[error("{provider} CLI not found: {command}")]
@@ -1031,7 +1031,7 @@ impl ProviderAuthService {
     pub async fn start_auth(&self, provider: Provider) -> Result<AuthFlowResponse, AuthError> {
         self.prune_finished_pending().await;
         if self.is_pending(provider).await {
-            return Err(AuthError::FlowAlreadyPending(provider));
+            return Err(AuthError::GraphAlreadyPending(provider));
         }
 
         let broker = self.broker(provider)?;
@@ -1093,7 +1093,7 @@ impl ProviderAuthService {
     /// Cached status does not establish whether this attempt succeeded.
     ///
     /// # Errors
-    /// Returns the attempt's authorization or persistence error, or `NoPendingFlow`
+    /// Returns the attempt's authorization or persistence error, or `NoPendingGraph`
     /// when its completion has already been consumed or no attempt was started.
     pub async fn wait_for_auth(&self, provider: Provider) -> Result<(), AuthError> {
         let completion = self
@@ -1102,7 +1102,7 @@ impl ProviderAuthService {
             .await
             .get_mut(&provider)
             .and_then(|pending| pending.completion.take())
-            .ok_or(AuthError::NoPendingFlow(provider))?;
+            .ok_or(AuthError::NoPendingGraph(provider))?;
         completion.await.map_err(|_| AuthError::CommandFailed {
             provider,
             message: "authorization completion unavailable".to_string(),
@@ -1215,7 +1215,7 @@ fn socket_auth_flow_handle(
         .unwrap_or(SOCKET_AUTH_DEFAULT_TIMEOUT)
         .min(SOCKET_AUTH_MAX_TIMEOUT);
     let provider_name = provider.as_str().to_string();
-    let flow_response = AuthFlowResponse {
+    let graph_response = AuthFlowResponse {
         completion: AuthCompletion::Browser { manual_uri: None },
         provider,
         verification_uri: response.verification_uri,
@@ -1249,7 +1249,7 @@ fn socket_auth_flow_handle(
             }
         }
     });
-    AuthFlowHandle::new(flow_response, monitor)
+    AuthFlowHandle::new(graph_response, monitor)
 }
 
 #[derive(Debug, Clone)]
@@ -1961,7 +1961,7 @@ async fn start_auth_command(
                 builder.verification_uri = Some(strip_query(url).to_string());
                 builder.verification_uri_complete = Some(url.clone());
             }
-            if let Some(mut response) = build_flow_response(provider, &builder) {
+            if let Some(mut response) = build_graph_response(provider, &builder) {
                 if input == AuthCommandInput::AuthorizationCode {
                     response.completion = if callback_url.is_some() {
                         AuthCompletion::Browser { manual_uri: manual }
@@ -2096,7 +2096,7 @@ fn parse_github_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
 
 /// A loopback URL is the provider CLI's local callback listener, never the
 /// page for authorizing access. codex prints its `localhost:1455` server line
-/// before the real authorization URL, and the first URL parsed wins the flow —
+/// before the real authorization URL, and the first URL parsed wins the graph —
 /// treating loopback as a verification URL opened a dead "Not Found" tab and
 /// returned before the real URL was ever read.
 fn is_loopback_url(url: &str) -> bool {
@@ -2137,7 +2137,7 @@ fn parse_generic_auth_line(line: &str, builder: &mut AuthFlowBuilder) {
     }
 }
 
-fn build_flow_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<AuthFlowResponse> {
+fn build_graph_response(provider: Provider, builder: &AuthFlowBuilder) -> Option<AuthFlowResponse> {
     let verification_uri = builder.verification_uri.clone().or_else(|| {
         builder
             .verification_uri_complete
@@ -3891,7 +3891,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::GitHub, &builder).expect("response");
+        let response = build_graph_response(Provider::GitHub, &builder).expect("response");
         assert_eq!(response.verification_uri, "https://github.com/login/device");
         assert_eq!(response.user_code, Some("ABCD-1234".to_string()));
         assert!(response
@@ -3908,7 +3908,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(response.verification_uri, "https://example.com/device");
         assert_eq!(
             response.verification_uri_complete,
@@ -3920,7 +3920,7 @@ mod tests {
     /// `codex login` announces its localhost callback server before printing
     /// the real authorization URL. The listener is not a page someone can
     /// authorize on — taking it as the verification URL opened a dead
-    /// "Not Found" tab and ended the flow before the real URL arrived.
+    /// "Not Found" tab and ended the graph before the real URL arrived.
     #[test]
     fn generic_parser_waits_past_the_loopback_callback_listener() {
         let mut builder = AuthFlowBuilder::default();
@@ -3929,15 +3929,15 @@ mod tests {
             &mut builder,
         );
         assert!(
-            build_flow_response(Provider::Codex, &builder).is_none(),
-            "a loopback URL alone must not complete the flow"
+            build_graph_response(Provider::Codex, &builder).is_none(),
+            "a loopback URL alone must not complete the graph"
         );
 
         parse_generic_auth_line(
             "If your browser did not open, navigate to https://auth.openai.com/oauth/authorize?client_id=abc&state=xyz",
             &mut builder,
         );
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/oauth/authorize"
@@ -3955,7 +3955,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Claude, &builder).expect("response");
+        let response = build_graph_response(Provider::Claude, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://claude.com/cai/oauth/authorize"
@@ -4258,7 +4258,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/codex/device"
@@ -4274,7 +4274,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::Codex, &builder).expect("response");
+        let response = build_graph_response(Provider::Codex, &builder).expect("response");
         assert_eq!(
             response.verification_uri,
             "https://auth.openai.com/oauth/authorize"
@@ -4295,7 +4295,7 @@ mod tests {
             &mut builder,
         );
 
-        let response = build_flow_response(Provider::GitHub, &builder).expect("response");
+        let response = build_graph_response(Provider::GitHub, &builder).expect("response");
         assert_eq!(response.user_code, Some("09FB-AAD5".to_string()));
         assert_eq!(response.verification_uri, "https://github.com/login/device");
     }
@@ -4425,7 +4425,7 @@ attributes:
     }
 
     #[tokio::test]
-    async fn service_reports_pending_when_flow_running() {
+    async fn service_reports_pending_when_graph_running() {
         #[derive(Debug)]
         struct FakeBroker;
 
@@ -4635,7 +4635,7 @@ attributes:
             .get_provider_token("github")
             .await
             .expect("get token")
-            .expect("token persisted by flow");
+            .expect("token persisted by graph");
         assert_eq!(stored.access_token, "gho_flow123");
         assert_eq!(stored.login.as_deref(), Some("jackdanger"));
         assert_eq!(stored.credential_type, CredentialType::OAuth);

@@ -629,7 +629,7 @@ mod activity_tests {
     use super::ClaudeHarness;
     use crate::harness::Harness;
     use crate::session_record::{
-        activity, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+        activity, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
     };
 
     #[tokio::test]
@@ -655,7 +655,7 @@ mod activity_tests {
                 worktree: None,
                 skill: None,
                 subjects: vec![],
-                flow: SessionFlowMembership::Independent,
+                graph: SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots() {
-        use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
+        use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionGraphMembership};
 
         async fn observed_input(home: &std::path::Path, text: &str) -> String {
             tokio::time::timeout(Duration::from_secs(5), async {
@@ -816,7 +816,7 @@ mod tests {
                     worktree: None,
                     skill: None,
                     subjects: vec![],
-                    flow: SessionFlowMembership::Independent,
+                    graph: SessionGraphMembership::Independent,
                     work: None,
                 },
             )?;

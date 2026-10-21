@@ -1,7 +1,7 @@
 # Authoring
 
 The prompt library lives in your repo and is reviewed like code: skills
-and flows under `.lf/`, goals under `.lf/wave/`. This page is how to
+and graphs under `.lf/`, goals under `.lf/wave/`. This page is how to
 write each one well. Where they resolve and what ships builtin is reference —
 see [`lf` → Skills](lf.md#skills).
 
@@ -38,7 +38,7 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. Flow steps inherit that choice;
+Direct launch from a TTY runs interactively. Graph steps inherit that choice;
 `-i` requests interactive conversations and `-b` runs headlessly. Define the inputs
 and useful change independently of the caller. When judgment is unavailable, make supported
 corrections and leave consequential choices explicit. Use a reviewer protocol
@@ -57,38 +57,38 @@ interaction through types, APIs, and infrastructure. Product clarity is valuable
 even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
 behavior. The work and updated plan supply evidence; `loop-or-next` owns navigation
-when the Flow declares a decision step.
+when the Graph declares a decision step.
 
-## Flows
+## Graphs
 
-A flow is a YAML list of steps — each step names a skill, an op, or another
-flow — with commits between them:
+A graph is a YAML list of steps — each step names a skill, an op, or another
+graph — with commits between them:
 
 ```yaml
-# .lf/flows/ship-api.yaml
+# .lf/graphs/ship-api.yaml
 - implement
 - compress
 - gate
 ```
 
-Bare names and `flow: NAME` select an exact literal name before considering
-slash/dash fallbacks. When a skill and Flow share that literal name, the Flow
-wins; an exact skill still wins over a fallback Flow. Use `step: NAME` to select
-the skill explicitly; this also lets a Flow call its own same-named skill
-without a cycle. An invalid selected Flow reports its error instead of falling
-back to the skill. Unlike YAML `flow: NAME`, CLI `lf flow show NAME` selects only
-Flows.
+Bare names and `graph: NAME` select an exact literal name before considering
+slash/dash fallbacks. When a skill and Graph share that literal name, the Graph
+wins; an exact skill still wins over a fallback Graph. Use `step: NAME` to select
+the skill explicitly; this also lets a Graph call its own same-named skill
+without a cycle. An invalid selected Graph reports its error instead of falling
+back to the skill. Unlike YAML `graph: NAME`, CLI `lf graph show NAME` selects only
+Graphs.
 
 Skills that need another Work's perspective launch it directly with
 `lf --task <task> : "<prompt>"`. Headless skills missing required input
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Keep design and review in the Task conversation. Operational Flows reject
-`human: true` steps, including inside composed Flows and XOR alternatives, before
+Keep design and review in the Task conversation. Operational Graphs reject
+`human: true` steps, including inside composed Graphs and XOR alternatives, before
 launching work. Save agreed feedback and remaining work in the conversation;
 Session completion controls are retired. Inspect the exact
-Flow and its effects before selecting further work.
+Graph and its effects before selecting further work.
 
 Mechanical git/PR operations ride along as `cmd:` steps:
 
@@ -98,17 +98,17 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 - cmd: pr land
 ```
 
-`cmd:` invokes a builtin command with its arguments. Named skills and flows
-remain separate targets; `lf skill NAME` and `lf flow NAME` select their kind. Use
+`cmd:` invokes a builtin command with its arguments. Named skills and graphs
+remain separate targets; `lf skill NAME` and `lf graph NAME` select their kind. Use
 `cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
 
-### Flows in chat
+### Graphs in chat
 
 ```bash
 lf sync-skills --repo
 ```
 
-Select the Flow's name as a native skill. Its `SKILL.md` contains a direct
+Select the Graph's name as a native skill. Its `SKILL.md` contains a direct
 checklist: ordinary steps run `lf -b implement` and wait for the result;
 `human: true` steps execute the skill in the current conversation and wait for
 the participant's response.
@@ -126,22 +126,22 @@ conversation with their own criteria. XOR chooses one declared path and rejoins
 afterward. Reviews stay in the conversation; no substitute reviewer or assumed
 approval. Skill bodies and JSON verdict schemas are not bundled into recipes.
 
-Skills and Flows keep exact literal names. Slash and dash definitions can coexist;
+Skills and Graphs keep exact literal names. Slash and dash definitions can coexist;
 normalization is a fallback when the exact name is absent. Codex retains both
 names; Claude uses the literal dashed name when flattening would collide.
 Recipes retain source paths for conversational skills so a flattened name cannot
 silently select another definition. Native controls and resource bases still apply;
 a user-only native skill requires invocation by the participant. Loopflow skill
-exports allow model invocation; Flow entry points remain user-invoked in Claude.
+exports allow model invocation; Graph entry points remain user-invoked in Claude.
 
 Headless commands retain normal LF execution records and agent settings. The
-coordinating conversation creates no outer Flow process or Task Workflow move.
+coordinating conversation creates no outer Graph process or Task Workflow move.
 After interruption, inspect results before repeating a successful command.
 
-Native names have no Flow prefix. If a skill already owns the same native name,
-sync skips the Flow export and preserves the skill. Recipes capture topology at
+Native names have no Graph prefix. If a skill already owns the same native name,
+sync skips the Graph export and preserves the skill. Recipes capture topology at
 sync time: run `sync-skills --repo` after adding, editing or overriding a repository
-Flow. Repository recipes stay in the checkout; global sync exports builtin Flows.
+Graph. Repository recipes stay in the checkout; global sync exports builtin Graphs.
 Headless commands load their skills normally when launched.
 
 ### Working notes and feedback
@@ -166,17 +166,17 @@ is assembled into fresh context; a running agent can reread updated files.
 
 ### Branching (xor)
 
-Branches route a flow on an agent's assessment of the current state. Exactly
+Branches route a graph on an agent's assessment of the current state. Exactly
 one path runs:
 
 ```yaml
-# .lf/flows/assess-change.yaml
+# .lf/graphs/assess-change.yaml
 - qa
 - xor:
     router: triage
     paths:
       repair:
-        flow: code
+        graph: code
         description: "Reproduced defects within the change need repair"
       silence:
         description: "No actionable defect in the supplied change"
@@ -186,13 +186,13 @@ The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
 as its message asks. Routing instructions and path descriptions are appended
 to its captured prompt. The choice belongs to the selected native turn and takes effect
 when it succeeds; a retry must supply its own candidate. A path
-with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
+with no `graph:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
 exit. With no `router:`, a generic routing agent picks from `scratch/` contents.
 
 ### Loopflows
 
-A **loopflow** is a Flow with one or more backward edges. Use the same Flow
-commands; Task binding adds context and Task authority. Task and ordinary Flow
+A **loopflow** is a Graph with one or more backward edges. Use the same Graph
+commands; Task binding adds context and Task authority. Task and ordinary Graph
 execution interpret backward edges through the same transition rules.
 
 ```bash
@@ -200,13 +200,13 @@ lf pursue
 lf task run DES-123 pursue
 ```
 
-A loop is a backward edge in that Flow. `loop: <target>` runs a deciding step
+A loop is a backward edge in that Graph. `loop: <target>` runs a deciding step
 last and returns to an earlier step; the steps between form its body:
 
 ```yaml
 - implement
 - compress
-- flow: refresh
+- graph: refresh
 - loop: implement
 - pr-publish
 ```
@@ -224,7 +224,7 @@ give one occurrence an `id` and loop to that. `step:` replaces the default
 
 One pass runs implement, compress, refresh (sync → realign), and loop-or-next.
 The work and updated plan supply evidence; loop-or-next chooses Advance or Iterate through the
-[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to the target
+[decision protocol](lf-reference.md#graph-decisions-and-recovery). Iterate returns to the target
 with direction. This is `pursue`: Advance leaves the implementation loop for
 `concept-review`, whose own loop-or-next iterates to implement when the review
 changed the design, blocks on an open product choice, and otherwise publishes.
@@ -233,24 +233,24 @@ No step waits for a person.
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
 `{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The contract
-travels in the step's message, not as a provider schema. The Flow reads the final answer of the turn its
+travels in the step's message, not as a provider schema. The Graph reads the final answer of the turn its
 step captured; invalid output gets at most two corrective turns in the same
-conversation, then the Flow fails. A failed turn cannot navigate.
+conversation, then the Graph fails. A failed turn cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
 decision: return it with a required reason in the final structured result.
 Existing logs and outcomes provide the evidence. The Wave operator resolves
-impediments or discusses missing judgment in its ongoing chat. A stopped Flow
+impediments or discusses missing judgment in its ongoing chat. A stopped Graph
 is never retried or resumed; its caller launches fresh work explicitly.
 
-Inspect a Flow's Processes and effects before launching further work.
-Edits to the source apply to new Flows.
-Finishing a Flow grants no implicit merge or Task-completion authority and
-does not choose another Flow; author delivery explicitly.
+Inspect a Graph's Processes and effects before launching further work.
+Edits to the source apply to new Graphs.
+Finishing a Graph grants no implicit merge or Task-completion authority and
+does not choose another Graph; author delivery explicitly.
 
-`pursue` starts at implementation. Ordinary and Task Flows compile every XOR router and path
+`pursue` starts at implementation. Ordinary and Task Graphs compile every XOR router and path
 before execution and use the same cursor for nested paths and backward edges.
 The implementation and recovery fixtures do not establish live provider/Session
 handoff parity; that still requires a configured end-to-end demonstration.
@@ -258,7 +258,7 @@ handoff parity; that still requires a configured end-to-end demonstration.
 ## Workflows
 
 A workflow is a Task's outer shape: nodes where you take part in the Task
-conversation, joined by edges that each run one Flow.
+conversation, joined by edges that each run one Graph.
 
 ```yaml
 # .lf/workflows/feature.yaml
@@ -266,11 +266,11 @@ nodes:
   design: review-design      # the skill the conversation uses at this node
   demo: demo
 edges:
-  - { from: start,  to: design, flow: task-design }
-  - { from: design, to: design, flow: task-design }   # revise the design
-  - { from: design, to: demo,   flow: pursue }
-  - { from: demo,   to: demo,   flow: pursue }        # another pass
-  - { from: demo,   to: end,    flow: ship }          # land
+  - { from: start,  to: design, graph: task-design }
+  - { from: design, to: design, graph: task-design }  # revise the design
+  - { from: design, to: demo,   graph: pursue }
+  - { from: demo,   to: demo,   graph: pursue }       # another pass
+  - { from: demo,   to: end,    graph: ship }         # land
 ```
 
 ```bash
@@ -283,8 +283,8 @@ lf task workflow move DES-123 design    # go back without running anything
 
 `start` and `end` are implicit. A node may say what you do there:
 `design: { skill: review-design, description: you review the plan }`;
-without one, the skill's first line stands in. An edge names a Flow or skill; Task launch resolves it and uses the explicit
-`flow` or `skill` invocation. Only an edge into `end` may omit `flow:`; take it with
+without one, the skill's first line stands in. An edge names a Graph or skill; Task launch resolves it and uses the explicit
+`graph` or `skill` invocation. Only an edge into `end` may omit `graph:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
 like builtin `research`. An edge is named by what it runs, so two edges
 leaving one node run different things.
@@ -292,20 +292,20 @@ leaving one node run different things.
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
 default, then repository `workflow:`. It keeps the graph as it was then.
 The Task's position is stored. Choosing an edge puts the Task on it; the
-process that ran the edge puts the Task at its target when the Flow succeeds.
-A Flow that stops or fails leaves the Task on the edge, shown as stopped:
+process that ran the edge puts the Task at its target when the Graph succeeds.
+A Graph that stops or fails leaves the Task on the edge, shown as stopped:
 choose that edge again, choose another one leaving the same node, or
 `lf task workflow move ISSUE NODE`. `task workflow move` puts the Task at any node and runs
 nothing: go back for another round, skip ahead, or record a landing that
-settled after its Flow stopped. An edge cannot be chosen while another is
+settled after its Graph stopped. An edge cannot be chosen while another is
 running. `lf task status ISSUE --json` carries the position, the edges that
 can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
-which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE flow FLOW` runs a Flow without moving the Task.
+which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE graph GRAPH` runs a Graph without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
 `research` (findings, no PR). `lf wave workflow list` lists Workflows;
-`lf flow list` lists autonomous Flows. To edit a Workflow, read its source,
+`lf graph list` lists autonomous Graphs. To edit a Workflow, read its source,
 edit the file, then save it to the Wave:
 
 ```bash
@@ -314,9 +314,9 @@ lf wave workflow source feature WAVE > /tmp/feature.yaml
 lf wave workflow set feature WAVE --file /tmp/feature.yaml
 ```
 
-`lf flow customize NAME` copies a builtin into `.lf/flows/`, reusing an
+`lf graph customize NAME` copies a builtin into `.lf/graphs/`, reusing an
 existing local file and printing its path.
-Overrides stay within their kind: a Flow and a Workflow can share a name.
+Overrides stay within their kind: a Graph and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 
 `lf wave workflow set NAME WAVE` changes what future Tasks take up.
@@ -325,7 +325,7 @@ moves that graph to `start`, retaining its move and execution history; it
 neither reloads the definition nor executes work.
 
 Each Session receives applicable steers independently, in bounded batches.
-Repeating a Flow step creates another Session; continuing or compacting the same
+Repeating a Graph step creates another Session; continuing or compacting the same
 Session preserves its delivery history.
 
 ## Goals

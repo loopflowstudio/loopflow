@@ -1155,7 +1155,7 @@ pub(crate) fn input_hint(hint: String) -> Option<InputHint> {
     }
 }
 
-/// A Flow and its steps share one terminal owner. This is an explicit execution
+/// A Graph and its steps share one terminal owner. This is an explicit execution
 /// handoff, not authority inferred from process ancestry.
 pub(crate) fn configure_child(command: &mut Command) {
     if let Some(handoff) = HANDOFF.get() {

@@ -698,7 +698,7 @@ exit 23
 }
 
 #[test]
-fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
+fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
@@ -708,7 +708,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
     repo.create_file(".lf/skills/probe.md", "First input marker.");
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
     repo.create_file(
-        ".lf/flows/inspect.yaml",
+        ".lf/graphs/inspect.yaml",
         "- probe\n- loop: probe\n  step: decide\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -718,7 +718,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("PATH", "/usr/bin:/bin")
         .current_dir(repo.path())
-        .args(["flow", "inspect", "literal input", "--context", "--json"])
+        .args(["graph", "inspect", "literal input", "--context", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -727,7 +727,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["graph"]["steps"][1]["returns_to"], 0);
+    assert_eq!(report["compiled"]["steps"][1]["returns_to"], 0);
     assert_eq!(report["inputs"][0]["node"], 0);
     let prompt = report["inputs"][0]["input"]["task_prompt"]
         .as_str()
@@ -741,7 +741,7 @@ fn flow_context_preview_preserves_absent_store_and_captured_first_skill() {
 }
 
 #[test]
-fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
+fn graph_context_preview_retains_native_arguments_and_operating_guidance() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
@@ -752,7 +752,7 @@ fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
         ".claude/skills/audit/SKILL.md",
         "---\nname: audit\ndescription: Native audit\n---\nAudit these exact arguments.",
     );
-    repo.create_file(".lf/flows/inspect.yaml", "- audit\n");
+    repo.create_file(".lf/graphs/inspect.yaml", "- audit\n");
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home.path())
@@ -763,7 +763,7 @@ fn flow_context_preview_retains_native_arguments_and_operating_guidance() {
         .args([
             "-a",
             "claude",
-            "flow",
+            "graph",
             "inspect",
             "  literal input  ",
             "--context",
@@ -796,7 +796,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
-    repo.create_file(".lf/flows/inspect.yaml", "- repo/operate\n");
+    repo.create_file(".lf/graphs/inspect.yaml", "- repo/operate\n");
     let preview = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
@@ -814,7 +814,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         vec!["operate"],
         vec!["repo/operate"],
         vec!["skill", "repo-operate"],
-        vec!["flow", "inspect"],
+        vec!["graph", "inspect"],
     ] {
         let output = preview(&args);
         assert!(!output.status.success(), "{args:?}");
@@ -831,7 +831,7 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
         ".lf/skills/repo/operate.md",
         "Local skill, current checkout.",
     );
-    for args in [vec!["repo/operate"], vec!["flow", "inspect"]] {
+    for args in [vec!["repo/operate"], vec!["graph", "inspect"]] {
         let output = preview(&args);
         assert!(
             output.status.success(),

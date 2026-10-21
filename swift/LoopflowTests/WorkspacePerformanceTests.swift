@@ -42,7 +42,7 @@ struct WorkspacePerformanceTests {
                     "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(),
                     "work_path": NSNull(), "title_source": "generated", "task_primary": false,
                     "actions": sessionActionFixture(state: "active"),
-                    "flow_membership": ["kind": "independent"],
+                    "graph_membership": ["kind": "independent"],
                     "task_ids": ["work-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"],
                 ]))
             }

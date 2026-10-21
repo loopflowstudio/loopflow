@@ -1,4 +1,4 @@
-//! Causal command provenance never grants process or Flow control authority.
+//! Causal command provenance never grants process or Graph control authority.
 
 use serde::{Deserialize, Serialize};
 
@@ -78,7 +78,7 @@ pub struct LfProcessCursor {
     pub id: LfProcessId,
 }
 
-/// At most the requested number of command rows; no Session or Flow payloads.
+/// At most the requested number of command rows; no Session or Graph payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LfProcessPage {
     pub entries: Vec<LfProcess>,
@@ -92,14 +92,14 @@ pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
 #[error("command exited with status {0}")]
 pub struct CommandExit(pub u8);
 
-/// A Flow stopped where a person or a watcher takes over: blocked, or short of
-/// its last step. Its process exits with [`FlowHeld::EXIT`], so a caller can
-/// tell it from a Flow that failed.
+/// A Graph stopped where a person or a watcher takes over: blocked, or short of
+/// its last step. Its process exits with [`GraphHeld::EXIT`], so a caller can
+/// tell it from a Graph that failed.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct FlowHeld(pub String);
+pub struct GraphHeld(pub String);
 
-impl FlowHeld {
+impl GraphHeld {
     pub const EXIT: u8 = 3;
 }
 

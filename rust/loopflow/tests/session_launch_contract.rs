@@ -456,7 +456,7 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
 }
 
 #[test]
-fn headless_continuation_and_flow_keep_current_options_without_repeating_the_skill() {
+fn headless_continuation_and_graph_keep_current_options_without_repeating_the_skill() {
     let fixture = Fixture::new("claude:sonnet");
     fixture
         .repo
@@ -494,8 +494,8 @@ fn headless_continuation_and_flow_keep_current_options_without_repeating_the_ski
     assert!(resumed["input"].to_string().contains("second turn"));
     fixture
         .repo
-        .create_file(".lf/flows/launch-probe.yaml", "- probe\n");
-    let flowed = fixture.run(&["--yolo", "--chrome", "on", "flow", "launch-probe"]);
+        .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
+    let flowed = fixture.run(&["--yolo", "--chrome", "on", "graph", "launch-probe"]);
     bypass(&flowed, "claude", true);
     assert!(args(&flowed).contains(&"--chrome"));
 }

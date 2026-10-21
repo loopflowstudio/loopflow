@@ -421,7 +421,7 @@ mod tests {
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
                 Some(definition)
             );
-            let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
+            let changed = "nodes: {}\nedges: [{from: start, to: end, graph: debug}]\n";
             store
                 .select_wave_workflow(&wave, "review", changed)
                 .unwrap();

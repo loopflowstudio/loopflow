@@ -86,7 +86,7 @@ def test_census_weighs_sources_and_keeps_missing_usage_absent(tmp_path: Path):
     ]
     context = {"system": None, "task": {"text": task, "tokens": 1_000, "assets": assets}}
     (directory / "context.json").write_text(json.dumps({"context": context}))
-    command = {"type": "command", "command": ["/bin/zsh -c 'cargo test && lf flow advance'"]}
+    command = {"type": "command", "command": ["/bin/zsh -c 'cargo test && lf graph advance'"]}
     events = [
         {"type": "user_input", "op": "initial"},
         {"type": "conversation", "event": {"type": "item_completed", "item": command}},

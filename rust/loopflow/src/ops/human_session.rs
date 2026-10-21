@@ -38,7 +38,7 @@ const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum HumanSessionToken {
-    /// A conversation; no caller or Flow waits on it.
+    /// A conversation; no caller or Graph waits on it.
     Primary { id: String },
 }
 
@@ -274,7 +274,7 @@ pub struct SessionRecord {
     pub actions: Vec<SessionAction>,
     pub title: String,
     pub title_source: SessionTitleSource,
-    pub flow_membership: SessionFlowMembership,
+    pub graph_membership: SessionGraphMembership,
     pub detail: String,
     /// The provider its current input launched with; absent until a review's
     /// first launch records one.
@@ -304,21 +304,21 @@ fn session_availability(session: &crate::session::SessionSummary) -> Option<Sess
     session.available.then_some(SessionAvailability::Available)
 }
 
-/// Whether a Session's conversation is an occurrence of a Flow. Membership
-/// comes only from its recorded Flow invocation, never from matching Task, checkout,
+/// Whether a Session's conversation is an occurrence of a Graph. Membership
+/// comes only from its recorded Graph invocation, never from matching Task, checkout,
 /// provider, or skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum SessionFlowMembership {
+pub enum SessionGraphMembership {
     Step {
-        flow: String,
+        graph: String,
         #[serde(deserialize_with = "crate::id::deserialize_uuid")]
-        flow_lf_process_id: String,
+        graph_lf_process_id: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
         node: Option<u32>,
         iterations: Option<Vec<Vec<u32>>>,
-        occurrence: SessionFlowOccurrence,
+        occurrence: SessionGraphOccurrence,
     },
     Independent,
     Unknown {
@@ -326,10 +326,10 @@ pub enum SessionFlowMembership {
     },
 }
 
-/// Where a Flow occurrence sits relative to its Flow's current position.
+/// Where a Graph occurrence sits relative to its Graph's current position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionFlowOccurrence {
+pub enum SessionGraphOccurrence {
     /// The row retains membership but no selected occurrence.
     Unknown,
     /// The invocation's current position.
@@ -343,7 +343,7 @@ pub enum SessionFlowOccurrence {
 pub(crate) fn publish_prepared_input(
     store: &crate::store::sqlite::SqliteStore,
     session: &LfSession,
-    flow: crate::session_record::SessionFlowMembership,
+    graph: crate::session_record::SessionGraphMembership,
 ) -> Result<LfSession> {
     anyhow::ensure!(
         session.captured.is_some(),
@@ -359,7 +359,7 @@ pub(crate) fn publish_prepared_input(
             worktree: Some(session.cwd.clone()),
             skill: session.skill.clone(),
             subjects: capture_subjects(session),
-            flow,
+            graph,
             work: None,
         },
         session.caller_artifact_key.clone(),
@@ -422,16 +422,20 @@ pub(crate) async fn list(
     Ok(sessions)
 }
 
-/// Where a Session's step stands in its Flow: the last one a still-open Flow
-/// process launched, an earlier one, or part of a Flow whose process has exited.
-fn flow_occurrence(
-    state: crate::session::FlowProcessSummaryState,
+/// Where a Session's step stands in its Graph: the last one a still-open Graph
+/// process launched, an earlier one, or part of a Graph whose process has exited.
+fn graph_occurrence(
+    state: crate::session::GraphProcessSummaryState,
     latest_step: bool,
-) -> SessionFlowOccurrence {
+) -> SessionGraphOccurrence {
     match (state, latest_step) {
-        (crate::session::FlowProcessSummaryState::Current, true) => SessionFlowOccurrence::Current,
-        (crate::session::FlowProcessSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
-        _ => SessionFlowOccurrence::Past,
+        (crate::session::GraphProcessSummaryState::Current, true) => {
+            SessionGraphOccurrence::Current
+        }
+        (crate::session::GraphProcessSummaryState::Current, false) => {
+            SessionGraphOccurrence::Earlier
+        }
+        _ => SessionGraphOccurrence::Past,
     }
 }
 
@@ -456,21 +460,21 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_lf_process_id, &session.flow) {
-        (None, _) if session.independent => SessionFlowMembership::Independent,
-        (None, _) => SessionFlowMembership::Unknown {
-            reason: "Flow membership was not recorded".into(),
+    let graph_membership = match (&session.graph_lf_process_id, &session.graph) {
+        (None, _) if session.independent => SessionGraphMembership::Independent,
+        (None, _) => SessionGraphMembership::Unknown {
+            reason: "Graph membership was not recorded".into(),
         },
-        (Some(id), Some(flow)) => SessionFlowMembership::Step {
-            flow: flow.name.clone(),
-            flow_lf_process_id: id.clone(),
+        (Some(id), Some(graph)) => SessionGraphMembership::Step {
+            graph: graph.name.clone(),
+            graph_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
-            occurrence: flow_occurrence(flow.state, session.flow_step_latest),
+            occurrence: graph_occurrence(graph.state, session.graph_step_latest),
         },
-        (Some(id), _) => SessionFlowMembership::Unknown {
-            reason: format!("Flow {id} metadata is unavailable"),
+        (Some(id), _) => SessionGraphMembership::Unknown {
+            reason: format!("Graph {id} metadata is unavailable"),
         },
     };
     let state = session_state(session);
@@ -506,7 +510,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             crate::session::TitleSource::Human => SessionTitleSource::Human,
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
-        flow_membership,
+        graph_membership,
         detail: session
             .model
             .as_ref()
@@ -561,7 +565,7 @@ fn session_token(session: &LfSession) -> HumanSessionToken {
     }
 }
 
-/// Launch the prepared input of a conversation or of a saved Flow's review.
+/// Launch the prepared input of a conversation or of a saved Graph's review.
 async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: File) -> Result<()> {
     let lf = crate::os_process::resolve_lf_binary()?;
     let mut command = tokio::process::Command::new(lf);
@@ -869,7 +873,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
             publish_prepared_input(
                 &store.sqlite,
                 &session,
-                crate::session_record::SessionFlowMembership::Independent,
+                crate::session_record::SessionGraphMembership::Independent,
             )?
         }
     };
@@ -914,7 +918,7 @@ async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSess
     publish_prepared_input(
         &store.sqlite,
         &next,
-        crate::session_record::SessionFlowMembership::Independent,
+        crate::session_record::SessionGraphMembership::Independent,
     )
 }
 
@@ -986,21 +990,21 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
     } else {
         human_session_argv(&session.id, "connect")?
     };
-    let flow_membership = match (&session.flow_lf_process_id, &metadata.flow) {
-        (None, _) if metadata.independent => SessionFlowMembership::Independent,
-        (None, _) => SessionFlowMembership::Unknown {
-            reason: "Flow membership was not recorded".into(),
+    let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
+        (None, _) if metadata.independent => SessionGraphMembership::Independent,
+        (None, _) => SessionGraphMembership::Unknown {
+            reason: "Graph membership was not recorded".into(),
         },
-        (Some(id), Some(flow)) => SessionFlowMembership::Step {
-            flow: flow.name.clone(),
-            flow_lf_process_id: id.clone(),
+        (Some(id), Some(graph)) => SessionGraphMembership::Step {
+            graph: graph.name.clone(),
+            graph_lf_process_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
-            occurrence: flow_occurrence(flow.state, metadata.flow_step_latest),
+            occurrence: graph_occurrence(graph.state, metadata.graph_step_latest),
         },
-        (Some(id), None) => SessionFlowMembership::Unknown {
-            reason: format!("Flow {id} is unavailable"),
+        (Some(id), None) => SessionGraphMembership::Unknown {
+            reason: format!("Graph {id} is unavailable"),
         },
     };
     let mut reading = SessionRecord {
@@ -1023,7 +1027,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
             crate::session::TitleSource::Human => SessionTitleSource::Human,
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
-        flow_membership,
+        graph_membership,
         detail: launch_model(session),
         provider: session.provider.clone(),
         cwd: session.cwd.display().to_string(),
@@ -1530,7 +1534,7 @@ mod tests {
                         worktree: None,
                         skill: None,
                         subjects: vec![],
-                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        graph: crate::session_record::SessionGraphMembership::Independent,
                         work: None,
                     },
                 )?;
@@ -1643,11 +1647,11 @@ mod tests {
             "available"
         );
         assert!(matches!(
-            session.flow_membership,
-            super::SessionFlowMembership::Step {
+            session.graph_membership,
+            super::SessionGraphMembership::Step {
                 node: None,
                 iterations: None,
-                occurrence: super::SessionFlowOccurrence::Unknown,
+                occurrence: super::SessionGraphOccurrence::Unknown,
                 ..
             }
         ));
@@ -1684,18 +1688,18 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_lf_process_id: Some("flow".into()),
+            graph_lf_process_id: Some("graph".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
             model: None,
             node: Some(2),
             iterations: None,
-            flow_step_latest: false,
-            flow: Some(crate::session::FlowProcessSummary {
-                id: "flow".into(),
+            graph_step_latest: false,
+            graph: Some(crate::session::GraphProcessSummary {
+                id: "graph".into(),
                 name: "retained".into(),
-                state: crate::session::FlowProcessSummaryState::Current,
+                state: crate::session::GraphProcessSummaryState::Current,
                 task_id: Some(task.clone()),
                 wave_id: Some(wave.clone()),
                 updated_at: 1,
@@ -1711,44 +1715,44 @@ mod tests {
         assert_eq!(row.work_path.as_deref(), Some("Infrastructure / INF-123"));
         assert_eq!(row.state, super::SessionState::Unknown);
         assert!(matches!(
-            row.flow_membership,
-            super::SessionFlowMembership::Step {
+            row.graph_membership,
+            super::SessionGraphMembership::Step {
                 node: Some(2),
-                occurrence: super::SessionFlowOccurrence::Earlier,
+                occurrence: super::SessionGraphOccurrence::Earlier,
                 ..
             }
         ));
-        summary.flow_step_latest = true;
+        summary.graph_step_latest = true;
         assert!(matches!(
-            super::summary_surface(&summary).flow_membership,
-            super::SessionFlowMembership::Step {
-                occurrence: super::SessionFlowOccurrence::Current,
+            super::summary_surface(&summary).graph_membership,
+            super::SessionGraphMembership::Step {
+                occurrence: super::SessionGraphOccurrence::Current,
                 ..
             }
         ));
-        summary.flow.as_mut().unwrap().state = crate::session::FlowProcessSummaryState::Stopped;
+        summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
         let row = super::summary_surface(&summary);
         assert!(matches!(
-            row.flow_membership,
-            super::SessionFlowMembership::Step {
-                occurrence: super::SessionFlowOccurrence::Past,
+            row.graph_membership,
+            super::SessionGraphMembership::Step {
+                occurrence: super::SessionGraphOccurrence::Past,
                 ..
             }
         ));
         assert_eq!(
             row.state,
             super::SessionState::Unknown,
-            "Flow completion is not Session/process completion"
+            "Graph completion is not Session/process completion"
         );
-        summary.flow_lf_process_id = None;
+        summary.graph_lf_process_id = None;
         assert!(matches!(
-            super::summary_surface(&summary).flow_membership,
-            super::SessionFlowMembership::Unknown { .. }
+            super::summary_surface(&summary).graph_membership,
+            super::SessionGraphMembership::Unknown { .. }
         ));
         summary.independent = true;
         assert_eq!(
-            super::summary_surface(&summary).flow_membership,
-            super::SessionFlowMembership::Independent
+            super::summary_surface(&summary).graph_membership,
+            super::SessionGraphMembership::Independent
         );
         summary.ready_summary = Some("Exact retained feedback".into());
         let row = super::summary_surface(&summary);
@@ -1882,7 +1886,7 @@ mod tests {
     }
 
     #[test]
-    fn flow_membership_fixtures_cover_every_projection_and_are_required() {
+    fn graph_membership_fixtures_cover_every_projection_and_are_required() {
         let sessions: Vec<super::SessionRecord> = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/session_memberships.json"
         ))
@@ -1890,22 +1894,22 @@ mod tests {
         let mut kinds = Vec::new();
         for session in &sessions {
             assert_eq!(session.actions, super::session_actions(session.state));
-            kinds.push(match &session.flow_membership {
-                super::SessionFlowMembership::Step { occurrence, .. } => match occurrence {
-                    super::SessionFlowOccurrence::Unknown => "unknown_occurrence",
-                    super::SessionFlowOccurrence::Current => "current",
-                    super::SessionFlowOccurrence::Earlier => "earlier",
-                    super::SessionFlowOccurrence::Past => "past",
+            kinds.push(match &session.graph_membership {
+                super::SessionGraphMembership::Step { occurrence, .. } => match occurrence {
+                    super::SessionGraphOccurrence::Unknown => "unknown_occurrence",
+                    super::SessionGraphOccurrence::Current => "current",
+                    super::SessionGraphOccurrence::Earlier => "earlier",
+                    super::SessionGraphOccurrence::Past => "past",
                 },
-                super::SessionFlowMembership::Independent => "independent",
-                super::SessionFlowMembership::Unknown { .. } => "unknown",
+                super::SessionGraphMembership::Independent => "independent",
+                super::SessionGraphMembership::Unknown { .. } => "unknown",
             });
             let mut value = serde_json::to_value(session).unwrap();
             assert_eq!(
                 serde_json::from_value::<super::SessionRecord>(value.clone()).unwrap(),
                 *session
             );
-            value.as_object_mut().unwrap().remove("flow_membership");
+            value.as_object_mut().unwrap().remove("graph_membership");
             assert!(serde_json::from_value::<super::SessionRecord>(value).is_err());
         }
         assert_eq!(
@@ -1920,10 +1924,10 @@ mod tests {
                 "current"
             ]
         );
-        // An older capture keeps its Flow provenance with no node or tuple.
+        // An older capture keeps its Graph provenance with no node or tuple.
         assert!(matches!(
-            &sessions[5].flow_membership,
-            super::SessionFlowMembership::Step {
+            &sessions[5].graph_membership,
+            super::SessionGraphMembership::Step {
                 node: None,
                 iterations: None,
                 ..
@@ -1943,7 +1947,7 @@ mod tests {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../../../tests/fixtures/dto/session.json"))
                 .unwrap();
-        for kind in ["conversation", "flow"] {
+        for kind in ["conversation", "graph"] {
             let mut value = fixture.clone();
             value["kind"] = kind.into();
             let session: super::SessionRecord = serde_json::from_value(value.clone()).unwrap();
@@ -2022,7 +2026,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_lf_process_id: None,
+            graph_lf_process_id: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -2060,9 +2064,9 @@ mod tests {
 
     #[test]
     fn old_captured_membership_keeps_its_provenance_without_a_fabricated_node() {
-        use crate::session_record::SessionFlowStep;
+        use crate::session_record::SessionGraphStep;
         // Captures from before node keys carried a leaf index and scalar visit.
-        let old: SessionFlowStep = serde_json::from_value(serde_json::json!({
+        let old: SessionGraphStep = serde_json::from_value(serde_json::json!({
             "task_id": null, "task_pr_id": null, "invocation_id": "process_old",
             "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
         }))
@@ -2133,7 +2137,7 @@ mod tests {
                 worktree: None,
                 skill: Some("review-design".into()),
                 subjects: Vec::new(),
-                flow: crate::session_record::SessionFlowMembership::Independent,
+                graph: crate::session_record::SessionGraphMembership::Independent,
                 work: None,
             },
         )
@@ -2174,8 +2178,8 @@ mod tests {
 
     #[test]
     fn membership_wire_ids_are_derived_from_their_captures() {
-        use crate::flow::graph::FlowGraph;
-        use crate::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
+        use crate::graph::compiled::CompiledGraph;
+        use crate::graph::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),
@@ -2219,18 +2223,18 @@ mod tests {
         let expected = std::collections::BTreeMap::from([
             (
                 "00000000-0000-0000-0000-00000000f10w".to_string(),
-                FlowGraph::new("task-design", &opening()),
+                CompiledGraph::new("task-design", &opening()),
             ),
             (
                 "00000000-0000-0000-0000-0000000000f1".to_string(),
-                FlowGraph::new("feature", &past),
+                CompiledGraph::new("feature", &past),
             ),
             (
                 "00000000-0000-0000-0000-0000000000f2".to_string(),
-                FlowGraph::new("feature", &current),
+                CompiledGraph::new("feature", &current),
             ),
         ]);
-        let graphs: std::collections::BTreeMap<String, FlowGraph> = serde_json::from_str(
+        let graphs: std::collections::BTreeMap<String, CompiledGraph> = serde_json::from_str(
             include_str!("../../../../tests/fixtures/dto/session_membership_graphs.json"),
         )
         .unwrap();
@@ -2240,15 +2244,15 @@ mod tests {
         ))
         .unwrap();
         for session in sessions {
-            if let super::SessionFlowMembership::Step {
-                flow_lf_process_id,
+            if let super::SessionGraphMembership::Step {
+                graph_lf_process_id,
                 step,
                 node: Some(node),
                 ..
-            } = session.flow_membership
+            } = session.graph_membership
             {
                 assert_eq!(
-                    graphs[&flow_lf_process_id].node_at(node).unwrap().label,
+                    graphs[&graph_lf_process_id].node_at(node).unwrap().label,
                     step
                 );
             }

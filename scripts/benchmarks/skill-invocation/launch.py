@@ -168,7 +168,7 @@ def _probe(
     source: Path,
     asset_name: str,
     terminal: bool,
-    flow: bool,
+    graph: bool,
     folder: str | None = None,
     custom_prompt: bool = False,
     output: Path | None = None,
@@ -293,10 +293,10 @@ def _probe(
         pristine_home = root / "pristine-home"
         shutil.copytree(home, pristine_home)
         target = [skill_name, argument]
-        if flow:
-            flows = work / ".lf/flows"
-            flows.mkdir(parents=True)
-            (flows / "proof.yaml").write_text(f"- {skill_name}\n")
+        if graph:
+            graphs = work / ".lf/graphs"
+            graphs.mkdir(parents=True)
+            (graphs / "proof.yaml").write_text(f"- {skill_name}\n")
             child = bin_dir / "lf"
             child.write_text(
                 f"#!/bin/sh\nrm -f {shlex.quote(str(skill_file))}\n"
@@ -304,7 +304,7 @@ def _probe(
             )
             child.chmod(0o755)
             env["LF_BIN"] = str(child)
-            target = ["flow", "proof", argument]
+            target = ["graph", "proof", argument]
         try:
             start = time.monotonic()
             result = _run(
@@ -345,11 +345,11 @@ def _probe(
                 {
                     "context_user_only": marker in user_text and marker not in privileged,
                     "source_retained": (not skill_file.exists())
-                    if flow
+                    if graph
                     else skill_file.read_bytes() == source_bytes,
                     "no_lf_configuration": not (work / ".lf/config.yaml").exists(),
                     "operating_guidance_matches_scope": ("<lf:loopflow>" in json.dumps(first))
-                    == flow,
+                    == graph,
                 }
             )
             if custom_prompt:
@@ -357,7 +357,7 @@ def _probe(
                     "position=<quoted argument> named=<named value>" in user_text
                 )
             comparison = None
-            if dialect == provider and not flow and not custom_prompt:
+            if dialect == provider and not graph and not custom_prompt:
                 # Neither launch inherits provider caches/history from the other.
                 shutil.rmtree(home)
                 shutil.copytree(pristine_home, home)
@@ -482,7 +482,7 @@ def main() -> int:
     parser.add_argument("--provider", choices=("claude", "codex"), default="claude")
     parser.add_argument("--source", choices=tuple(SOURCES), default="internal-comms")
     parser.add_argument("--terminal", action="store_true")
-    parser.add_argument("--flow", action="store_true")
+    parser.add_argument("--graph", action="store_true")
     parser.add_argument("--output", type=Path, help="Save isolated requests and startup traces")
     parser.add_argument(
         "--warm-machine",
@@ -507,7 +507,7 @@ def main() -> int:
             args.fixtures / args.source,
             SOURCES[args.source][3],
             args.terminal,
-            args.flow,
+            args.graph,
             args.folder,
             args.custom_prompt,
             args.output,

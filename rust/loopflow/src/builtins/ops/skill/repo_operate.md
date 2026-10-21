@@ -30,7 +30,7 @@ Use these checks where they help establish what can be cleared:
   before treating a branch as present or gone. Exclude the default branch
   and symbolic refs.
 - Worktree condition: inspect `git -C <path> status --short`, unpushed commits,
-  associated Tasks, and active Sessions/Flows. Run `lf wt prune --dry-run` to
+  associated Tasks, and active Sessions/Graphs. Run `lf wt prune --dry-run` to
   identify merged, squash-merged, closed-PR, remote-gone, terminal, and inactive
   cleanup candidates. Review the preview; inactivity alone is not abandonment.
 - Branch disposition: compare ahead/behind the repository's default branch,
@@ -61,7 +61,7 @@ Use the appropriate operation:
 
 - **Ship / ship-partial:** use the delivery skill appropriate to the requested
   outcome in the owning checkout. Preserve useful unfinished scope in a Task.
-  Keep running Flows and review conversations intact.
+  Keep running Graphs and review conversations intact.
 - **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
   together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
   and removes its checkout and branches. Use `lf task delete <issue>` only when
@@ -106,7 +106,7 @@ put routine progress in this conversation, not Task comments.
 ## Drive work through Waves
 
 Every started, unfinished Task in the repository ends this pass with one
-disposition and its evidence: **moving** (a live Flow process was observed),
+disposition and its evidence: **moving** (a live Graph process was observed),
 **acted** (continued, recovered or delivered here, then verified), **waiting on
 a person** (the named review, decision or merge click and its Session or PR),
 **waiting on a dependency or capacity**, **paused** (an explicit hold or
@@ -123,15 +123,15 @@ read its result. Operate started Tasks outside any Wave with
 operating. The repository view connects outcomes and dependencies across
 Waves; the Wave pass owns the detailed judgment within each Wave.
 
-Leave live Flows running. For a failed or stopped Flow, read its log and effects,
+Leave live Graphs running. For a failed or stopped Graph, read its log and effects,
 repair the cause, and launch only authorized remaining work through
-`lf task run <issue> <flow> --reason "<what changed>"`. Verify from
-`lf task status <issue> --json`; nothing resumes a stopped Flow process. A Flow ends
+`lf task run <issue> <graph> --reason "<what changed>"`. Verify from
+`lf task status <issue> --json`; nothing resumes a stopped Graph process. A Graph ends
 where authored. Work awaiting review or a new direction stays in the Task
 conversation, with the PR and remaining scope named.
 
-Preserve Task identity, Flow history, conversations and existing execution.
-Do not create a competing Flow process or require a repository pass before a Task
+Preserve Task identity, Graph history, conversations and existing execution.
+Do not create a competing Graph process or require a repository pass before a Task
 can progress. Follow an intervention through to its observed result, then
 include that result in the repository update.
 
@@ -186,7 +186,7 @@ Wave operator reads its logs.
 ## Launching and advancing work
 
 Inspect whether the requested work already has a Task, prepared context, or
-running Flow before filing or launching. Keep the Task title and description
+running Graph before filing or launching. Keep the Task title and description
 focused on the current problem, desired experience, observable acceptance, and
 real constraints. Reconcile changed scope instead of appending amendments.
 Keep current blockers, dependencies, and accepted scope visible in the description.
@@ -211,15 +211,15 @@ Stdin becomes the durable Task description; `--directive` supplies
 direction and does not replace that brief.
 
 A Workflow has nodes where a person takes part
-in the Task conversation, joined by edges that each run one Flow. A Task on a
+in the Task conversation, joined by edges that each run one Graph. A Task on a
 workflow takes only an edge leaving its current node. Bare
 `lf task run <issue>` takes the only one or names the choices,
-`lf task run <issue> <flow>` picks one, and `lf task run <issue> end` takes an
+`lf task run <issue> <graph>` picks one, and `lf task run <issue> end` takes an
 edge that runs nothing. A Task with no workflow takes up its Wave default, then repository `workflow:`; naming one
-(`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> flow <flow>` runs any Flow
+(`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> graph <graph>` runs any Graph
 without moving the Task.
 
-Use the workflow or Flow the user selected; otherwise the Wave default, then repository `workflow:`. Read the actual Flow before describing its
+Use the workflow or Graph the user selected; otherwise the Wave default, then repository `workflow:`. Read the actual Graph before describing its
 review gates. Do not infer policy from obsolete fix/feature flags or
 first/loop/finally settings.
 
@@ -251,7 +251,7 @@ and retained PRs survive; deletion does not certify process termination.
 
 ## Existing-design handoff
 
-When the user asks to file a Task and run a Flow from an existing design,
+When the user asks to file a Task and run a Graph from an existing design,
 keep the design separate. Reuse the Task if it is the same work; otherwise file
 a short user-problem brief under the selected Wave, with a design reference,
 its maturity, and open questions. Do not invent ownership.
@@ -267,7 +267,7 @@ Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-Flow. Do not overwrite newer destination work.
+Graph. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`
@@ -276,7 +276,7 @@ needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Continue the design already present without treating its draft choices as
-approved. Report the Task link, destination design path, selected Flow, and
+approved. Report the Task link, destination design path, selected Graph, and
 observed launch result. Verify supplied context separately from the launch.
 
 If implementation already exists in the source checkout, preserve it and its
@@ -302,26 +302,26 @@ foreground with `lf machine connect`; work uses credentials resident on its Mach
 Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
 `lf --wave <wave> wave-operate "<direction>"`. `--task TASK` / `--wave WAVE`
-attributes a skill, inline prompt, or Flow. Attribution resolves this command's
+attributes a skill, inline prompt, or Graph. Attribution resolves this command's
 `--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
 Process ancestry supplies no Work attribution. Every attributed contribution
 is equally the Task's work; none claims exclusive ownership. `task run` places
 the Task, records the workflow edge it takes when the Task has one, then is
-the same command as `lf --task <issue> flow <flow>`.
+the same command as `lf --task <issue> graph <graph>`.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-`lf task run <issue>` returns when its Flow ends; run it with
+`lf task run <issue>` returns when its Graph ends; run it with
 your own background tool for pursuit you will not wait on. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.
 
 When evidence invalidates the attempt, `lf task interrupt <issue>` its live
 execution, update the Task, and wait for required contributions. Then launch
-fresh work with `lf task run <issue> <flow> --reason "<changed direction>"`.
-The stopped Flow stays as history; Task, worktree and PR identity are unchanged.
+fresh work with `lf task run <issue> <graph> --reason "<changed direction>"`.
+The stopped Graph stays as history; Task, worktree and PR identity are unchanged.
 Reconcile prior scratch against the new evidence rather than treating it as
 approved design.
 

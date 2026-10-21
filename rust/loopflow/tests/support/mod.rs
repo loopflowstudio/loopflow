@@ -586,20 +586,20 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Flow the way `lf flow` leaves one: a Flow process, its FlowProcess row
-/// and one step Process in `cwd`, both exited. Returns the Flow process's id, which
-/// names the Flow.
-#[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
-pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
-    use loopflow::flow::{ConcreteSkill, ConcreteStep, Skill};
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
+/// names the Graph.
+#[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
+pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: &str) -> String {
+    use loopflow::graph::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let flow_process = loopflow::id::LfProcessId::new();
+    let graph_process = loopflow::id::LfProcessId::new();
     let step = loopflow::id::LfProcessId::new();
     for (id, parent, argv) in [
-        (flow_process.clone(), None, vec!["lf", "flow", flow]),
+        (graph_process.clone(), None, vec!["lf", "graph", graph]),
         (
             step.clone(),
-            Some(flow_process.clone()),
+            Some(graph_process.clone()),
             vec!["lf", "--batch", "skill", label],
         ),
     ] {
@@ -615,10 +615,10 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
                 outcome
             ],
         )
-        .expect("record Flow Process");
+        .expect("record Graph Process");
     }
-    let graph = loopflow::flow::graph::FlowGraph::new(
-        flow,
+    let compiled = loopflow::graph::compiled::CompiledGraph::new(
+        graph,
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
             id: None,
@@ -628,45 +628,45 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         })],
     );
     db.execute(
-        "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,?2,?3)",
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,?2,?3)",
         rusqlite::params![
-            flow_process.as_str(),
-            flow,
-            serde_json::to_string(&graph).expect("graph serializes")
+            graph_process.as_str(),
+            graph,
+            serde_json::to_string(&compiled).expect("compiled serializes")
         ],
     )
-    .expect("record FlowProcess");
+    .expect("record GraphProcess");
     db.execute(
-        "INSERT INTO flow_process_steps(flow_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
-        rusqlite::params![flow_process.as_str(), step.as_str()],
+        "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        rusqlite::params![graph_process.as_str(), step.as_str()],
     )
-    .expect("record Flow step");
-    flow_process.to_string()
+    .expect("record Graph step");
+    graph_process.to_string()
 }
 
-/// Every Flow in launch order: its process's outcome and each recorded step as
-/// `{flow, label, key, iterations, argv}`, `argv` without the binary path.
-#[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
-pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
+/// Every Graph in launch order: its process's outcome and each recorded step as
+/// `{graph, label, key, iterations, argv}`, `argv` without the binary path.
+#[allow(dead_code)] // Shared helper compiled into integration tests that read no Graph.
+pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let mut flow_processes = db
+    let mut graph_processes = db
         .prepare(
-            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.id=f.lf_process_id
+            "SELECT d.id,d.outcome,f.graph,f.compiled FROM graph_processes f JOIN processes d ON d.id=f.lf_process_id
              ORDER BY d.rowid",
         )
-        .expect("select Flow processes");
-    let rows = flow_processes
+        .expect("select Graph processes");
+    let rows = graph_processes
         .query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
-        .expect("read Flow processes")
+        .expect("read Graph processes")
         .collect::<rusqlite::Result<Vec<(String, Option<String>, String, String)>>>()
-        .expect("decode Flow processes");
+        .expect("decode Graph processes");
     rows.into_iter()
-        .map(|(flow_process, outcome, flow, graph)| {
-            let graph: loopflow::flow::graph::FlowGraph =
-                serde_json::from_str(&graph).expect("a Flow graph");
-            fn label(nodes: &[loopflow::flow::graph::FlowNode], key: u32) -> Option<String> {
+        .map(|(graph_process, outcome, graph, compiled)| {
+            let compiled: loopflow::graph::compiled::CompiledGraph =
+                serde_json::from_str(&compiled).expect("a Graph compiled");
+            fn label(nodes: &[loopflow::graph::compiled::GraphNode], key: u32) -> Option<String> {
                 nodes.iter().find_map(|node| {
                     if node.key == key {
                         return Some(node.label.clone());
@@ -676,25 +676,25 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             }
             let mut steps = db
                 .prepare(
-                    "SELECT e.command,s.node,s.iterations FROM flow_process_steps s
-                     JOIN processes e ON e.id=s.lf_process_id WHERE s.flow_lf_process_id=?1 ORDER BY s.seq",
+                    "SELECT e.command,s.node,s.iterations FROM graph_process_steps s
+                     JOIN processes e ON e.id=s.lf_process_id WHERE s.graph_lf_process_id=?1 ORDER BY s.seq",
                 )
-                .expect("select Flow steps");
+                .expect("select Graph steps");
             let steps = steps
-                .query_map([flow_process], |row| {
+                .query_map([graph_process], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, u32>(1)?,
                         row.get::<_, String>(2)?,
                     ))
                 })
-                .expect("read Flow steps")
+                .expect("read Graph steps")
                 .map(|row| {
-                    let (argv, key, iterations) = row.expect("a Flow step");
+                    let (argv, key, iterations) = row.expect("a Graph step");
                     let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
                     serde_json::json!({
-                        "flow": flow,
-                        "label": label(&graph.steps, key).expect("a graph node"),
+                        "graph": graph,
+                        "label": label(&compiled.steps, key).expect("a compiled node"),
                         "key": key,
                         "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
                             .expect("iteration counts"),

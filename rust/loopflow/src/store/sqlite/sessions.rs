@@ -12,24 +12,24 @@ use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-/// The Flow whose process recorded, as a step, the Process that captured session
-/// `s`'s current input. Sessions carry no Flow column of their own.
-macro_rules! session_flow {
+/// The Graph whose process recorded, as a step, the Process that captured session
+/// `s`'s current input. Sessions carry no Graph column of their own.
+macro_rules! session_graph {
     () => {
-        "(SELECT fs.flow_lf_process_id FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
+        "(SELECT fs.graph_lf_process_id FROM session_events captured JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)"
     };
 }
-/// That step's node and loop counts, as its Flow process recorded them.
+/// That step's node and loop counts, as its Graph process recorded them.
 macro_rules! session_step {
     ($column:literal) => {
-        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
+        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id WHERE captured.seq=s.current_capture)")
     };
 }
-pub(super) const SESSION_FLOW: &str = session_flow!();
+pub(super) const SESSION_GRAPH: &str = session_graph!();
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
-    s.task_id,s.wave_id,", session_flow!(), " AS flow_lf_process_id,s.work_source,s.bound_at,
+    s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
@@ -65,7 +65,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_lf_process_id: row.get(12)?,
+            graph_lf_process_id: row.get(12)?,
             work_source: row
                 .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
@@ -203,10 +203,10 @@ fn inventory_query(
 }
 
 // Preserve the existing filters/order. Materialize only the selected metadata
-// before joining Flow/Work labels; no request or historical payload is selected.
+// before joining Graph/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
-    ", session_flow!(), " AS flow_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
+    ", session_graph!(), " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
@@ -214,10 +214,10 @@ const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let available = available_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
-    // A Flow is the Flow process above the step that captured the current input.
+    // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.flow_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,flow_process.id,flow.flow,flow_process.outcome,flow_process.completed_at,step.started_at,
-        (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_lf_process_id=fs.flow_lf_process_id)),
+        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
+        (fs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=fs.graph_lf_process_id)),
         w.slug,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
@@ -234,10 +234,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
-        LEFT JOIN flow_process_steps fs ON fs.lf_process_id=captured.lf_process_id
-        LEFT JOIN flow_processes flow ON flow.lf_process_id=fs.flow_lf_process_id
+        LEFT JOIN graph_process_steps fs ON fs.lf_process_id=captured.lf_process_id
+        LEFT JOIN graph_processes graph ON graph.lf_process_id=fs.graph_lf_process_id
         LEFT JOIN processes step ON step.id=fs.lf_process_id
-        LEFT JOIN processes flow_process ON flow_process.id=fs.flow_lf_process_id
+        LEFT JOIN processes graph_process ON graph_process.id=fs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
@@ -260,14 +260,14 @@ fn read_summary(
             .map(|id| crate::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
-        let flow = match row.get::<_, Option<String>>(17)? {
-            Some(flow_process) => {
+        let graph = match row.get::<_, Option<String>>(17)? {
+            Some(graph_process) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
-                Some(crate::session::FlowProcessSummary {
-                    id: flow_process,
+                Some(crate::session::GraphProcessSummary {
+                    id: graph_process,
                     name,
-                    state: crate::session::FlowProcessSummaryState::of_process(
+                    state: crate::session::GraphProcessSummaryState::of_process(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -327,7 +327,7 @@ fn read_summary(
             interactive: row.get(6)?,
             task_id,
             wave_id,
-            flow_lf_process_id: row.get(9)?,
+            graph_lf_process_id: row.get(9)?,
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
@@ -337,8 +337,8 @@ fn read_summary(
                 .get::<_, Option<String>>(15)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
-            flow,
-            flow_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
+            graph,
+            graph_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
             wave_name: row.get(23)?,
             task_identifier,
             independent: row.get::<_, Option<bool>>(24)?.unwrap_or(false),
@@ -524,7 +524,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.flow_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture, (
+            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture, (
                 SELECT MAX(json_extract(payload,'$.opened_at_ms'))
                 FROM session_events WHERE session_id=candidates.id AND kind='observed'
                 AND json_extract(payload,'$.type')='interactive_opened'
@@ -1706,7 +1706,7 @@ impl SqliteStore {
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_lf_process_id: None,
+                graph_lf_process_id: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -1731,7 +1731,7 @@ mod metadata_tests {
 
     use super::SqliteStore;
 
-    use crate::session::{FlowProcessSummaryState, SessionFilter};
+    use crate::session::{GraphProcessSummaryState, SessionFilter};
 
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {
@@ -1897,12 +1897,12 @@ mod metadata_tests {
     }
 
     #[test]
-    fn session_metadata_reads_its_flow_from_the_process_that_captured_its_input() {
+    fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let flow_process =
-            store.test_flow("retained", "/unavailable", &[("implement", None)], None);
+        let graph_process =
+            store.test_graph("retained", "/unavailable", &[("implement", None)], None);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1917,7 +1917,7 @@ mod metadata_tests {
                 "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
                  VALUES('session','captured',?1,(SELECT id FROM processes WHERE parent_lf_process_id=?2),1,
                     json_object('artifact_key',?1))",
-                params![input, flow_process],
+                params![input, graph_process],
             )
             .unwrap();
             conn.execute(
@@ -1932,29 +1932,29 @@ mod metadata_tests {
             )
             .unwrap();
         }
-        // Listing reads the Flow from Processes and survives unreadable detail.
+        // Listing reads the Graph from Processes and survives unreadable detail.
         let rows = store
             .session_summaries(&SessionFilter::default(), 0)
             .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(
-            rows[0].flow_lf_process_id.as_deref(),
-            Some(flow_process.as_str())
+            rows[0].graph_lf_process_id.as_deref(),
+            Some(graph_process.as_str())
         );
-        let flow = rows[0].flow.as_ref().unwrap();
+        let graph = rows[0].graph.as_ref().unwrap();
         assert_eq!(
-            (flow.name.as_str(), flow.state),
-            ("retained", FlowProcessSummaryState::Current)
+            (graph.name.as_str(), graph.state),
+            ("retained", GraphProcessSummaryState::Current)
         );
-        assert!(rows[0].flow_step_latest);
+        assert!(rows[0].graph_step_latest);
         assert_eq!(
             store
                 .session("session")
                 .unwrap()
                 .unwrap()
-                .flow_lf_process_id
+                .graph_lf_process_id
                 .as_deref(),
-            Some(flow_process.as_str())
+            Some(graph_process.as_str())
         );
         assert!(
             store.input_events(&input).is_err(),
@@ -1966,16 +1966,16 @@ mod metadata_tests {
             .unwrap()
             .execute(
                 "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
-                params![flow_process],
+                params![graph_process],
             )
             .unwrap();
-        let flow = store
+        let graph = store
             .session_summary("session", 0)
             .unwrap()
             .unwrap()
-            .flow
+            .graph
             .unwrap();
-        assert_eq!(flow.state, FlowProcessSummaryState::Completed);
+        assert_eq!(graph.state, GraphProcessSummaryState::Completed);
     }
 
     #[test]

@@ -125,7 +125,7 @@ fn process_query(
             ),
         };
         let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. A Flow's steps ran
+        // Native starts retain their original assignment. A Graph's steps ran
         // in their Task's checkout. Neither a current Session bind nor
         // another Process's command context establishes performed work.
         sql.push_str(&format!(
@@ -133,7 +133,7 @@ fn process_query(
             SELECT lf_process_id FROM session_events
             WHERE kind='started' AND {column}={value} AND lf_process_id IS NOT NULL
             UNION
-            SELECT op.id FROM flow_process_steps fs JOIN processes op ON op.id=fs.lf_process_id
+            SELECT op.id FROM graph_process_steps fs JOIN processes op ON op.id=fs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
             WHERE tw.worktree!=''
               AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
@@ -1110,7 +1110,7 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         // Ordinary disposable conversations retire on an observed exit. Primary
-        // conversations, Wave conversations, Task work and Flow reviews stay open.
+        // conversations, Wave conversations, Task work and Graph reviews stay open.
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
@@ -1118,7 +1118,7 @@ impl SqliteStore {
              AND s.wave_id IS NULL AND {} IS NULL
              AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
-                super::sessions::SESSION_FLOW,
+                super::sessions::SESSION_GRAPH,
                 super::task_work::session_tasks("s")
             ),
             params![session, now, outcome],
@@ -1610,14 +1610,14 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            // A Flow process recorded both Processes as steps in the first Task's checkout.
+            // A Graph process recorded both Processes as steps in the first Task's checkout.
             conn.execute(
                 "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
                 [first.as_str()],
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO flow_processes(lf_process_id,flow,graph) VALUES(?1,'proof','{}')",
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
                 [&observer],
             )
             .unwrap();
@@ -1628,7 +1628,7 @@ mod discovery_tests {
                 )
                 .unwrap();
                 conn.execute(
-                    "INSERT INTO flow_process_steps(flow_lf_process_id,lf_process_id,node,iterations) VALUES(?2,?1,0,'[]')",
+                    "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?2,?1,0,'[]')",
                     params![process, observer],
                 )
                 .unwrap();

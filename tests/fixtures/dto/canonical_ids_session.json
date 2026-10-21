@@ -31,16 +31,16 @@
       "unavailable_reason": null
     }
   ],
-  "flow_membership": {
+  "graph_membership": {
     "kind": "step",
-    "flow": "task-design",
+    "graph": "task-design",
     "step": "review-design",
     "occurrence": "current",
     "node": 1,
     "iterations": [
       []
     ],
-    "flow_lf_process_id": "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
+    "graph_lf_process_id": "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC"
   },
   "workspace": {
     "machine_id": "HOME_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",

@@ -20,8 +20,8 @@ use std::process::Command;
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
-use crate::flow::graph::FlowGraph;
-use crate::flow::{ConcreteSkill, ConcreteStep, Skill};
+use crate::graph::compiled::CompiledGraph;
+use crate::graph::{ConcreteSkill, ConcreteStep, Skill};
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::process::{LfProcess, ProcessKind};
@@ -375,10 +375,10 @@ impl World {
         )?)
     }
 
-    /// Record a finished Flow run in `task`'s checkout (the repository when
+    /// Record a finished Graph run in `task`'s checkout (the repository when
     /// absent), one step Process per skill, each lasting `minutes` and the last
-    /// ending `ended_days_ago`. A Flow in a checkout starts its Task.
-    pub fn flow(
+    /// ending `ended_days_ago`. A Graph in a checkout starts its Task.
+    pub fn graph(
         &self,
         task: Option<&Task>,
         name: &str,
@@ -400,24 +400,25 @@ impl World {
                 })
             })
             .collect();
-        let graph = FlowGraph::new(name, &steps);
+        let compiled = CompiledGraph::new(name, &steps);
         let trace = TraceId::new();
         let ended = self.days_ago(ended_days_ago);
         let started = ended - minutes * 60 * skills.len() as i64;
         let cwd = self.cwd(task)?;
-        let flow = LfProcessId::new();
-        let mut flow_process = self.process(&trace, None, &cwd, vec!["lf", "flow", name], started);
-        flow_process.id = flow.clone();
-        flow_process.completed_at = Some(ended);
-        flow_process.outcome = Some(outcome.to_string());
-        flow_process.exit_code = Some(i32::from(outcome != "succeeded"));
-        store.sqlite.record_process(&flow_process)?;
-        store.sqlite.record_flow_process(&flow, &graph)?;
+        let graph = LfProcessId::new();
+        let mut graph_process =
+            self.process(&trace, None, &cwd, vec!["lf", "graph", name], started);
+        graph_process.id = graph.clone();
+        graph_process.completed_at = Some(ended);
+        graph_process.outcome = Some(outcome.to_string());
+        graph_process.exit_code = Some(i32::from(outcome != "succeeded"));
+        store.sqlite.record_process(&graph_process)?;
+        store.sqlite.record_graph_process(&graph, &compiled)?;
         for (index, skill) in skills.iter().enumerate() {
             let begin = started + minutes * 60 * index as i64;
             let mut step = self.process(
                 &trace,
-                Some(&flow),
+                Some(&graph),
                 &cwd,
                 vec!["lf", "-b", "skill", skill],
                 begin,
@@ -429,9 +430,9 @@ impl World {
             store.sqlite.record_process(&step)?;
             store
                 .sqlite
-                .record_flow_step(&flow, &step.id, index as u32, &[Vec::new()])?;
+                .record_graph_step(&graph, &step.id, index as u32, &[Vec::new()])?;
         }
-        Ok(flow)
+        Ok(graph)
     }
 
     /// Write a Claude conversation of alternating turns and admit it as a

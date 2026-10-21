@@ -188,7 +188,7 @@ pub fn release_history(
         observed_at: now,
         observation_frontier: obligations
             .iter()
-            .filter(|o| o.flow == "release-run")
+            .filter(|o| o.graph == "release-run")
             .map(|o| o.observed_at)
             .min(),
         obligations,
@@ -342,7 +342,7 @@ fn summarize(
         }
     }
     for receipt in receipts.iter().filter(|r| r.outcome == CronOutcome::Failed) {
-        if receipt.flow == "telemetry-daily" {
+        if receipt.graph == "telemetry-daily" {
             summary.failed_verifications += 1;
         }
         let owner = obligations

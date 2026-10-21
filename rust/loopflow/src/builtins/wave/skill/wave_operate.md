@@ -3,14 +3,14 @@ description: Operate one Wave; keep every started Task moving and judge delivery
 action_style: procedural
 ---
 Operate the selected Wave once: read, judge, act, verify, and exit. You are this
-Wave's operator: a started Task with no live Flow process has nobody else to take its
+Wave's operator: a started Task with no live Graph process has nobody else to take its
 next step. A pass is finished when each started Task has a disposition, not
 after a number of moves. No chat or schedule is required. Another conversation
 or scheduled pass may be operating this Wave at the same time; work it is
 driving is moving, and you leave it alone.
 
-Writes to `.lf/wave/` belong to the selected Loopflow Flow's procedure. Outside
-that Flow, keep proposed Wave changes in scratch; Work association alone
+Writes to `.lf/wave/` belong to the selected Loopflow Graph's procedure. Outside
+that Graph, keep proposed Wave changes in scratch; Work association alone
 does not select memory maintenance.
 
 ## Scope and evidence
@@ -37,19 +37,19 @@ waiting indefinitely.
 
 Give every owned, unfinished Task in the Wave exactly one disposition, with
 its evidence: the first row below that fits. Ownership (`runtime.owner` in
-`lf wave show --json`) is the recorded fact, whether or not a Flow process is alive now. Include Tasks status lists under
+`lf wave show --json`) is the recorded fact, whether or not a Graph process is alive now. Include Tasks status lists under
 `unavailable_tasks`; they are unknown until read. Unowned backlog is listed
 as backlog and left alone: starting it is the person's selection, except for
 an already authorized concrete check in a due follow-up's brief (see below).
 
 | Disposition | Evidence and action |
 | --- | --- |
-| moving | A live Flow process was observed. Leave it alone. A connected conversation or review Session is not a Flow process. |
+| moving | A live Graph process was observed. Leave it alone. A connected conversation or review Session is not a Graph process. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | available | Work the person can take up now: a review, demo, concrete choice or merge click, with its conversation link or PR. Never completed or approved for them. |
 | dependency or capacity | The named Task, PR, running check, account or limit. |
 | paused | The person's instruction to stop, or an explicit hold (`lf task automate <issue> off`) on work nothing else is moving. |
-| unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Flow process. |
+| unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Graph process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
 When status gives `next_move.owner` as `wave`, that owner is you: the Task's
@@ -58,27 +58,27 @@ a suggestion to check against the rules below, not an instruction. No action is
 a valid result only when every started Task already holds a disposition above
 and due follow-ups have been checked for selection or authorized execution.
 
-- **Look for a live Flow process first.** Read `lf task status <issue> --json` and
-  check every Flow in `execution.work.flows` and every unfinished Process in
+- **Look for a live Graph process first.** Read `lf task status <issue> --json` and
+  check every Graph in `execution.work.graphs` and every unfinished Process in
   `execution.work.processes` against `lf ps --json`. A live process makes the Task
   moving, whoever launched it. Unknown liveness is not idle.
 - **Recover before reporting a blocker.** Read the failed step's log and
   inspect its effects. Repair a supported cause, then launch only the remaining
-  authorized work with `lf task run <issue> <flow> --reason "<what changed>"`.
-  A stopped Flow is history and cannot be resumed. Retry only on new evidence;
+  authorized work with `lf task run <issue> <graph> --reason "<what changed>"`.
+  A stopped Graph is history and cannot be resumed. Retry only on new evidence;
   report an unchanged failure instead of repeating it.
-- **A Flow ends where authored.** A finished Flow or published PR does not
+- **A Graph ends where authored.** A finished Graph or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
   a decision. A Task on a workflow (`execution.work.workflow`) at a node its
   last edge reached is available to the person there; rerun an edge that stopped or
-  failed with `lf task run <issue> <flow>`, and take no other edge for them;
+  failed with `lf task run <issue> <graph>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
 - **Retry completion alone.** A durable completion request at end retries with
   `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
   position and Process liveness are independent. A newer reopening supersedes
   old intent; end alone cannot re-complete it.
 - **Finish merged delivery.** Merge alone does not complete a Task. Inspect
-  associated Flows and unfinished Processes; leave a live ship Flow to finish.
+  associated Graphs and unfinished Processes; leave a live ship Graph to finish.
   Otherwise, when the accepted outcome is satisfied, run `lf task complete <issue>`
   and reread status. Optional new work uses ordinary Task creation; no filing or
   disposition is required. Do not replay gate or re-arm a merged PR.
@@ -99,7 +99,7 @@ is a day, not an exact-time alarm. Missing date or provider evidence stays unkno
 
 Surface each due Task for selection unless its accepted brief already authorizes
 that concrete unattended check. For an authorized check, use ordinary Task execution
-and the same live Flow process inspection above. Missing credentials or installation
+and the same live Graph process inspection above. Missing credentials or installation
 leaves it blocked; elapsed time never establishes success or completes the Task.
 Filing a follow-up grants no permission for unrelated future work.
 
@@ -152,19 +152,19 @@ disagreement. A draft or failed delivery leaves the handoff pending.
 ## The hierarchy is an intent graph, not a control plane
 
 Tasks progress independently of Wave and repository passes. Neither operation
-is an approval prerequisite. A Task's Flows carry its autonomous work; do not
-perform a Flow's steps here. Preserve Flow history, conversation reviews,
+is an approval prerequisite. A Task's Graphs carry its autonomous work; do not
+perform a Graph's steps here. Preserve Graph history, conversation reviews,
 worktrees, ownership and execution history.
 
 - Start selected work with `lf task run <issue-id>`; use the
-  current Project's Flow unless an explicit choice is warranted. Each run
-  is a fresh Flow and returns when it ends; background it with your own tool.
+  current Project's Graph unless an explicit choice is warranted. Each run
+  is a fresh Graph and returns when it ends; background it with your own tool.
   Leave a live one running instead of duplicating it.
 - Inspect `lf task status` and existing logs before recovery. Resolve
   impediments; discuss missing judgment in the ongoing Wave chat when present.
   Headless operation stops with the reason when it cannot proceed. After a
   failure, inspect its effects and launch fresh work with
-  `lf task run <issue> <flow> --reason "<what changed>"` only when new
+  `lf task run <issue> <graph> --reason "<what changed>"` only when new
   evidence warrants it. Unknown liveness is not idle. Preserve historical review
   evidence; discuss feedback and next work in the ongoing Task conversation.
 - Read existing Tasks before `lf task create --wave <wave>`. Give work an

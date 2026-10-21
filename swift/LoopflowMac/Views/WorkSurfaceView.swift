@@ -275,7 +275,7 @@ struct WorkSurfaceView: View {
                             }
                             .buttonStyle(WorkOutlineButtonStyle())
                             .disabled(model.navigation.startingTaskSessions.contains(task.id))
-                            .help("Open an independent conversation with this Task's context in its worktree. No Flow is started.")
+                            .help("Open an independent conversation with this Task's context in its worktree. No Graph is started.")
                             .accessibilityIdentifier("task-new-session")
                         }
                     }
@@ -311,7 +311,7 @@ struct WorkSurfaceView: View {
                 }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
-                // Raw records, for when the Workflow and the Flow process log disagree with them.
+                // Raw records, for when the Workflow and the Graph process log disagree with them.
                 TaskDiagnosticsView(model: model, task: task)
                     .id(task.id)
                     .font(Typography.body(12))

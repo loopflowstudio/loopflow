@@ -58,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Flows", href="/cli#flows")),
+                Li(A("Graphs", href="/cli#graphs")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -209,7 +209,7 @@ DOCS_AREAS = (
         "extend",
         "Change how Loopflow works: every step is a text file.",
         (
-            DocPage("Authoring", "authoring", "Write your own steps, flows, and goals"),
+            DocPage("Authoring", "authoring", "Write your own steps, graphs, and goals"),
             DocPage(
                 "The Agent API",
                 "agent-api",
@@ -255,7 +255,7 @@ ARCHITECTURE_AREA = DocArea(
         DocPage(
             "Planning",
             "architecture/planning",
-            "Flows, Work, Steer and Ask",
+            "Graphs, Work, Steer and Ask",
             parent="architecture",
         ),
         DocPage(
@@ -943,7 +943,7 @@ def build_cli_page() -> tuple:
             _terminal(agents["commands"], "lf commands"),
             _plain_list(agents["items"]),
             P(*[A(link["label"], href=link["href"]) for link in agents["links"]], cls="more"),
-            id="flows",
+            id="graphs",
             cls="reading",
         ),
         Section(

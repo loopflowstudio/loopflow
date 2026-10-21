@@ -133,7 +133,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             assert!(execution.worktree.is_none());
             assert!(execution.pr.is_none());
             assert!(execution.work.sessions.is_empty());
-            assert!(execution.work.flow_processes.is_empty());
+            assert!(execution.work.graph_processes.is_empty());
         }
         assert_eq!(status.planning_error.is_some(), error, "{selector}");
         assert_eq!(

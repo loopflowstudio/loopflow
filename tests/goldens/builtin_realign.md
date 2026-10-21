@@ -2,22 +2,22 @@
 # Using lf
 
 `lf` launches coding agents, keeps their Sessions, and runs saved Skills and
-Flows. Use as much of it as the request needs. A Flow is an authored sequence
+Graphs. Use as much of it as the request needs. A Graph is an authored sequence
 of steps; it runs with or without a Task.
 
 Work in the supplied checkout. Read its agent guide and existing work, preserve
 other contributions, and carry out the request here. Do not launch another
 agent or create a worktree merely to do the work already assigned to this one.
-Follow a supplied Flow's steps and boundaries; finishing it selects no next work.
+Follow a supplied Graph's steps and boundaries; finishing it selects no next work.
 
 Use the requested tools and repository conventions. Read
-`lf help <command-or-skill>` for instructions on Sessions, Skills, Flows,
+`lf help <command-or-skill>` for instructions on Sessions, Skills, Graphs,
 worktrees and PRs.
 
 When continuing an existing Task or when the request calls for Tasks, Waves,
 or Projects, read `lf help skill work` unless that guidance was preloaded. It is also
 available as `lf skill work`. Work association supplies context; the request
-or selected Skill/Flow determines what to do. Stay within that chosen scope.
+or selected Skill/Graph determines what to do. Stay within that chosen scope.
 
 Name the Session for the work in two or three specific words. Read `session_id`
 from `LF_AGENT_CALLER` and use `lf session rename <id> "<name>" --suggest` when
@@ -90,10 +90,10 @@ Bring the plan and the implementation into agreement with what the work has taug
    When a change needs a product decision, show the exact choice and leave it
    unresolved. Do not silently promote a proposal into an accepted decision.
 
-   Maintain `.lf/wave/` only as part of a selected Loopflow Flow that calls for it.
+   Maintain `.lf/wave/` only as part of a selected Loopflow Graph that calls for it.
    Standalone reconciliation and Work association alone leave it read-only;
    record proposed Wave changes in scratch instead. The memory curation below
-   applies only inside that Flow procedure.
+   applies only inside that Graph procedure.
 
    Before curating the selected Wave's memory, inspect `.lf/wave/<address>/` with
    ordinary filesystem tools for immediate child directories containing
@@ -118,7 +118,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    repairs with the smallest relevant check. Keep blockers, contrary evidence,
    and deferred checks visible where they affect the next action. If a check cannot
    run headless, leave it to gate/CI or replace it with a headless check; do not
-   block the Flow on it. Human judgment belongs to demo/review.
+   block the Graph on it. Human judgment belongs to demo/review.
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
 plan. Record one check-result line. Omit session instructions and ambient Machine
@@ -140,7 +140,7 @@ the caller.
 
 Run `lf context` to read memory and scratch size targets, their configuration
 sources, and current usage. Read complete sources before curating them.
-Within the selected Flow's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
+Within the selected Graph's memory procedure, curate Wave memory gradually. When it exceeds either limit, retire the largest
 stale sections to git history first and bring it just under both limits. Stop
 once it fits; do not rewrite the whole memory toward a smaller target or shrink
 an in-budget memory merely for size. Continue correcting stale guidance and

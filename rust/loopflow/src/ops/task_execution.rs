@@ -1,13 +1,13 @@
-//! What a Task's most recently launched Flow is doing, read from its Processes and
-//! their processes. Observation only: no Flow is selected, claimed or resumed.
+//! What a Task's most recently launched Graph is doing, read from its Processes and
+//! their processes. Observation only: no Graph is selected, claimed or resumed.
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::FlowProcessDetail;
+use crate::durable::GraphProcessDetail;
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::flow_process::FlowProcess;
-use crate::session::FlowProcessSummaryState;
+use crate::ops::graph_process::GraphProcess;
+use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreResult};
 
@@ -26,7 +26,7 @@ pub enum TaskExecutionState {
 pub struct TaskExecutionSnapshot {
     pub state: TaskExecutionState,
     pub reason: String,
-    /// Label of the latest Flow's latest step, while that Flow is unfinished.
+    /// Label of the latest Graph's latest step, while that Graph is unfinished.
     pub step: Option<String>,
     /// The Session input that step captured, when it opened one.
     pub captured: Option<i64>,
@@ -36,19 +36,19 @@ pub(crate) async fn task_execution(
     store: &SharedStore,
     task_id: &TaskId,
 ) -> StoreResult<TaskExecutionSnapshot> {
-    Ok(task_execution_and_flow(store, task_id).await?.0)
+    Ok(task_execution_and_graph(store, task_id).await?.0)
 }
 
-/// Execution and the Flow record read from the same Processes.
-pub(crate) async fn task_execution_and_flow(
+/// Execution and the Graph record read from the same Processes.
+pub(crate) async fn task_execution_and_graph(
     store: &SharedStore,
     task_id: &TaskId,
-) -> StoreResult<(TaskExecutionSnapshot, Option<FlowProcessDetail>)> {
-    let Some(flow) = store.sqlite.task_flows(task_id)?.pop() else {
+) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
+    let Some(graph) = store.sqlite.task_graphs(task_id)?.pop() else {
         return Ok((
             TaskExecutionSnapshot {
                 state: TaskExecutionState::Idle,
-                reason: "No Task Flow has run; independent Sessions may still be active"
+                reason: "No Task Graph has run; independent Sessions may still be active"
                     .to_string(),
                 step: None,
                 captured: None,
@@ -56,20 +56,20 @@ pub(crate) async fn task_execution_and_flow(
             None,
         ));
     };
-    let entry = store.sqlite.flow_entry(&flow)?;
+    let entry = store.sqlite.graph_entry(&graph)?;
     let evidence = |process: &crate::process::LfProcess| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
         None => crate::journal::process_evidence(&store.sqlite, &process.id),
     };
-    let step = flow.latest().map(|step| &step.process);
+    let step = graph.latest().map(|step| &step.process);
     let input = match step {
         Some(step) => store.sqlite.process_input(&step.id)?,
         None => None,
     };
     let mut snapshot = project_execution(
-        &flow,
+        &graph,
         entry.summary.state,
-        evidence(&flow.process),
+        evidence(&graph.process),
         step.map_or(ProcessIdentityEvidence::Dead, evidence),
     );
     snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
@@ -88,49 +88,49 @@ pub(crate) async fn task_execution_and_flow(
             }
         }
     }
-    Ok((snapshot, Some(flow.detail(entry))))
+    Ok((snapshot, Some(graph.detail(entry))))
 }
 
-/// A Flow runs while a process of its own does; with both gone, how its
+/// A Graph runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
-    flow: &FlowProcess,
-    state: FlowProcessSummaryState,
-    flow_process: ProcessIdentityEvidence,
+    graph: &GraphProcess,
+    state: GraphProcessSummaryState,
+    graph_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
-    if state == FlowProcessSummaryState::Completed {
+    if state == GraphProcessSummaryState::Completed {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
-            reason: format!("Flow {} finished; nothing further is launched", flow.name),
+            reason: format!("Graph {} finished; nothing further is launched", graph.name),
             step: None,
             captured: None,
         };
     }
-    // A Flow process that has started no step is the Flow's only Process so far.
-    let (label, process) = match flow.latest() {
-        Some(latest) => (flow.label(latest), &latest.process),
-        None => (flow.name.clone(), &flow.process),
+    // A Graph process that has started no step is the Graph's only Process so far.
+    let (label, process) = match graph.latest() {
+        Some(latest) => (graph.label(latest), &latest.process),
+        None => (graph.name.clone(), &graph.process),
     };
     let label = &label;
-    let (state, reason) = match (flow_process, step) {
+    let (state, reason) = match (graph_process, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
             format!("Step Process {} is running {label}", process.id),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,
-            format!("Flow is between steps after {label}"),
+            format!("Graph is between steps after {label}"),
         ),
         (ProcessIdentityEvidence::Unknown, _) | (_, ProcessIdentityEvidence::Unknown) => (
             TaskExecutionState::Unknown,
-            format!("Flow Processes at {label} have unknown process identity; inspect their effects before launching further work"),
+            format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
             if process.outcome.as_deref() == Some("succeeded") {
                 (
                     TaskExecutionState::Idle,
-                    format!("Flow stopped after {label}; inspect its history and effects before launching fresh work"),
+                    format!("Graph stopped after {label}; inspect its history and effects before launching fresh work"),
                 )
             } else {
                 let ended = match (&process.error, process.exit_code) {
@@ -157,25 +157,31 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionState};
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
-    use crate::session::FlowProcessSummaryState;
+    use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn a_flow_runs_while_its_processes_do_and_blocks_on_a_failed_step() {
+    fn a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
-        let flow = |outcome| {
-            let flow_process = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
+        let graph = |outcome| {
+            let graph_process =
+                store.test_graph("feature", "/repo", &[("implement", outcome)], None);
             store
-                .flow_process(flow_process.as_str())
+                .graph_process(graph_process.as_str())
                 .unwrap()
                 .unwrap()
                 .0
         };
-        let state = |flow, flow_process, step| {
-            project_execution(flow, FlowProcessSummaryState::Current, flow_process, step)
+        let state = |graph, graph_process, step| {
+            project_execution(
+                graph,
+                GraphProcessSummaryState::Current,
+                graph_process,
+                step,
+            )
         };
-        let running = flow(None);
+        let running = graph(None);
         assert_eq!(
             state(&running, Live, Live).state,
             TaskExecutionState::Running
@@ -188,12 +194,12 @@ mod tests {
             state(&running, Unknown, Dead).state,
             TaskExecutionState::Unknown
         );
-        // A Flow process that died is history: nothing is running or resumable.
-        let succeeded = flow(Some("succeeded"));
+        // A Graph process that died is history: nothing is running or resumable.
+        let succeeded = graph(Some("succeeded"));
         let stopped = state(&succeeded, Dead, Dead);
         assert_eq!(stopped.state, TaskExecutionState::Idle);
         assert_eq!(stopped.step.as_deref(), Some("implement"));
-        let failed = flow(Some("failed"));
+        let failed = graph(Some("failed"));
         let failed = state(&failed, Dead, Dead);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
         assert!(
@@ -202,7 +208,7 @@ mod tests {
             failed.reason
         );
         let finished =
-            project_execution(&succeeded, FlowProcessSummaryState::Completed, Dead, Dead);
+            project_execution(&succeeded, GraphProcessSummaryState::Completed, Dead, Dead);
         assert!(finished.step.is_none());
     }
 }

@@ -16,7 +16,7 @@ implementation plan. Preserve its original problem when the solution changes.
 Continue an existing design and investigate its material gaps; a newly filed
 Task does not require restarting discovery. Keep accepted decisions binding
 and linked, preserve draft status and open questions, and honor the selected
-Flow. Launching a draft does not approve it.
+Graph. Launching a draft does not approve it.
 
 ## Orientation
 

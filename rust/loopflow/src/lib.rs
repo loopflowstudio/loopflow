@@ -12,8 +12,8 @@ pub mod definition;
 pub mod disk;
 pub mod durable;
 pub mod error;
-pub mod flow;
 pub mod git;
+pub mod graph;
 pub mod harness;
 pub mod id;
 pub mod installation;
@@ -72,8 +72,8 @@ extern crate self as loopflow;
 pub(crate) mod test_linear_input;
 
 #[cfg(test)]
-#[path = "../tests/linear/flow_tests.rs"]
-mod flow_tests;
+#[path = "../tests/linear/graph_tests.rs"]
+mod graph_tests;
 #[cfg(test)]
 #[path = "../tests/linear/local_planning.rs"]
 mod local_planning;
@@ -93,8 +93,8 @@ mod status_tests;
 #[path = "../tests/linear/task_adoption_tests.rs"]
 mod task_adoption_tests;
 #[cfg(test)]
-#[path = "../tests/linear/task_flow_launch_tests.rs"]
-mod task_flow_launch_tests;
+#[path = "../tests/linear/task_graph_launch_tests.rs"]
+mod task_graph_launch_tests;
 #[cfg(test)]
 #[path = "../tests/linear/wave_repository_ownership.rs"]
 mod wave_repository_ownership;

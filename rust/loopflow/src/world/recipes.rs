@@ -38,7 +38,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "one-task",
         rung: Rung::Artifacts,
-        demos: "Wave → Task → Session → Flow click-through on one small piece of work",
+        demos: "Wave → Task → Session → Graph click-through on one small piece of work",
         build: one_task,
     },
     Recipe {
@@ -101,7 +101,7 @@ fn one_task(world: &World) -> Result<()> {
         ],
         0.2,
     )?;
-    world.flow(
+    world.graph(
         Some(&task),
         "implement",
         &["implement", "gate"],
@@ -178,7 +178,7 @@ fn portfolio(world: &World) -> Result<()> {
         ],
         4.0,
     )?;
-    world.flow(
+    world.graph(
         Some(&shipped),
         "implement",
         &["implement", "gate"],
@@ -204,7 +204,7 @@ fn portfolio(world: &World) -> Result<()> {
         ],
         0.5,
     )?;
-    world.flow(
+    world.graph(
         Some(&running),
         "implement",
         &["implement"],
@@ -219,7 +219,7 @@ fn portfolio(world: &World) -> Result<()> {
         "Additive migrations should not lock out older lf.",
     )?;
     let failed = world.checkout(&failed)?;
-    world.flow(
+    world.graph(
         Some(&failed),
         "implement",
         &["implement", "gate"],
@@ -327,10 +327,10 @@ const BACKLOG: &[(&str, &str)] = &[
          when collapsed.",
     ),
     (
-        "Show the last Flow on each Task row",
-        "A Task row says nothing about its last run.\n\nShow the last Flow's \
+        "Show the last Graph on each Task row",
+        "A Task row says nothing about its last run.\n\nShow the last Graph's \
          name, result and age on the row (\"gate failed · 2h\"). Clicking it \
-         opens that Flow's steps.",
+         opens that Graph's steps.",
     ),
     (
         "Archive stale backlog ideas",
@@ -382,7 +382,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         ],
         0.1,
     )?;
-    world.flow(
+    world.graph(
         Some(&recent),
         "implement",
         &["implement", "gate"],
@@ -397,7 +397,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         "Switching Tasks resets the conversation to the top.",
     )?;
     let failed = world.checkout(&failed)?;
-    world.flow(
+    world.graph(
         Some(&failed),
         "implement",
         &["implement", "gate"],
@@ -436,7 +436,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         )],
         "Show PR state on Task rows",
     )?;
-    world.flow(
+    world.graph(
         Some(&merged),
         "implement",
         &["implement", "gate"],
@@ -459,7 +459,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     ] {
         let done = world.task("desktop", title, "Small polish from the last chapter.")?;
         let done = world.checkout(&done)?;
-        world.flow(
+        world.graph(
             Some(&done),
             "implement",
             &["implement", "gate"],
@@ -502,7 +502,7 @@ fn wave_backlog(world: &World) -> Result<()> {
     world.task(
         "systems",
         "Compact old Process rows",
-        "Process history grows without bound. Compact finished Flows older than a month.",
+        "Process history grows without bound. Compact finished Graphs older than a month.",
     )?;
     let systems = world.task(
         "systems",
@@ -510,7 +510,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         "A busy store fails the write. Retry with backoff before failing.",
     )?;
     let systems = world.checkout(&systems)?;
-    world.flow(
+    world.graph(
         Some(&systems),
         "implement",
         &["implement"],
@@ -752,7 +752,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         ],
         0.5,
     )?;
-    world.flow(
+    world.graph(
         Some(&open),
         "implement",
         &["implement"],
@@ -766,7 +766,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         "Waves list in creation order.",
     )?;
     let done = world.checkout(&done)?;
-    world.flow(
+    world.graph(
         Some(&done),
         "implement",
         &["implement", "gate"],
@@ -790,7 +790,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
     ] {
         let done = world.task("archive", title, "Finished last chapter.")?;
         let done = world.checkout(&done)?;
-        world.flow(
+        world.graph(
             Some(&done),
             "implement",
             &["implement", "gate"],
@@ -957,7 +957,7 @@ match still competes.
 
 - Should the half-life be configurable per repository? A research repo may
   want months; a busy product repo, days.
-- Do we decay Flow output the same as conversation turns?
+- Do we decay Graph output the same as conversation turns?
 
 ## Out of scope
 

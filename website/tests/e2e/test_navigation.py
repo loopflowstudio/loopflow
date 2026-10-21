@@ -15,7 +15,7 @@ def test_navbar_docs_link(homepage: Page, base_url: str):
 
 
 @pytest.mark.parametrize(
-    ("path", "label", "destination"), [("/", "CLI", "/cli"), ("/docs", "Flows", "/cli#flows")]
+    ("path", "label", "destination"), [("/", "CLI", "/cli"), ("/docs", "Graphs", "/cli#graphs")]
 )
 def test_cli_navigation(page: Page, base_url: str, path: str, label: str, destination: str) -> None:
     page.goto(f"{base_url}{path}")
@@ -23,7 +23,7 @@ def test_cli_navigation(page: Page, base_url: str, path: str, label: str, destin
         "link", name=label, exact=True
     ).click()
     expect(page).to_have_url(f"{base_url}{destination}")
-    heading = page.locator("#flows .plain")
+    heading = page.locator("#graphs .plain")
     heading.scroll_into_view_if_needed()
     expect(heading).to_be_visible()
 

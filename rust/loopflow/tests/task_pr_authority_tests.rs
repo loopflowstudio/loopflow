@@ -5,7 +5,7 @@
 //! or schema-incompatible. These tests prove the observable contract: every
 //! Task entry point refuses **before any push or `gh pr` mutation** with an
 //! actionable authority error (zero remote mutation), ordinary non-Task PR
-//! flows stay explicit, and valid authority still publishes and records the PR.
+//! graphs stay explicit, and valid authority still publishes and records the PR.
 
 mod support;
 

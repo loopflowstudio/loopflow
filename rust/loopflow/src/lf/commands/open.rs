@@ -264,7 +264,7 @@ impl Resolved {
     }
 
     /// Compare the calling conversation with this Work's selected destination.
-    /// Same Work is not enough: a Flow step and the primary can share a Task.
+    /// Same Work is not enough: a Graph step and the primary can share a Task.
     fn relation(&self) -> (ConversationRelation, Option<String>) {
         let Some(caller) = crate::journal::agent_caller() else {
             return (

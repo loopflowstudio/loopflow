@@ -3,12 +3,12 @@ use std::fs;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::builtins::{
-    builtin_flow_names, builtin_skill_description, builtin_skill_names, BUILTIN_FLOW_CATEGORIES,
+    builtin_graph_names, builtin_skill_description, builtin_skill_names, BUILTIN_GRAPH_CATEGORIES,
     BUILTIN_SKILL_CATEGORIES,
 };
 use loopflow::definition::{resolve_definition, Target};
-use loopflow::flow::load_flow;
-use loopflow::flow::load_skill;
+use loopflow::graph::load_graph;
+use loopflow::graph::load_skill;
 use loopflow::skills::catalog::SkillCatalog;
 use tempfile::TempDir;
 
@@ -84,7 +84,7 @@ fn builtin_catalog_uses_portable_dashes_and_never_slashes_or_underscores() {
     assert!(!skill_names.iter().any(|name| name.starts_with("project-")));
     assert!(skill_names.contains(&"implement"));
     assert!(skill_names.iter().all(|name| !name.contains(['_', '/'])));
-    assert!(builtin_flow_names()
+    assert!(builtin_graph_names()
         .iter()
         .all(|name| !name.contains(['_', '/'])));
 }
@@ -109,26 +109,26 @@ fn discover_repo_skills() {
 }
 
 #[test]
-fn discover_repo_flows() {
+fn discover_repo_graphs() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let flows_dir = repo.path().join(".lf/flows");
-    std::fs::create_dir_all(&flows_dir).expect("create flows dir");
-    std::fs::write(flows_dir.join("ship.yaml"), "- implement\n- gate\n").expect("write flow");
+    let graphs_dir = repo.path().join(".lf/graphs");
+    std::fs::create_dir_all(&graphs_dir).expect("create graphs dir");
+    std::fs::write(graphs_dir.join("ship.yaml"), "- implement\n- gate\n").expect("write graph");
 
-    let flows =
-        loopflow::lf::commands::list::list_children(&["flow".to_string()], repo.path()).unwrap();
-    let flow = flows.iter().find(|f| f.name == "ship").expect("flow");
-    assert_eq!(flow.description, "implement → gate");
+    let graphs =
+        loopflow::lf::commands::list::list_children(&["graph".to_string()], repo.path()).unwrap();
+    let graph = graphs.iter().find(|f| f.name == "ship").expect("graph");
+    assert_eq!(graph.description, "implement → gate");
 }
 
 #[test]
-fn discover_namespaced_flows_with_slash_names_and_authored_branch_summaries() {
+fn discover_namespaced_graphs_with_slash_names_and_authored_branch_summaries() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let flows_dir = repo.path().join(".lf/flows/gstack");
+    let graphs_dir = repo.path().join(".lf/graphs/gstack");
     let skills_dir = repo.path().join(".lf/skills/gstack");
-    std::fs::create_dir_all(&flows_dir).expect("create namespaced flows dir");
+    std::fs::create_dir_all(&graphs_dir).expect("create namespaced graphs dir");
     std::fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
     for skill in ["office-hours", "autoplan", "pr-review"] {
         std::fs::write(
@@ -138,12 +138,12 @@ fn discover_namespaced_flows_with_slash_names_and_authored_branch_summaries() {
         .expect("write namespaced skill");
     }
     std::fs::write(
-        flows_dir.join("plan-manual.yaml"),
+        graphs_dir.join("plan-manual.yaml"),
         "- gstack/office-hours\n",
     )
-    .expect("write nested flow");
+    .expect("write nested graph");
     std::fs::write(
-        flows_dir.join("sprint.yaml"),
+        graphs_dir.join("sprint.yaml"),
         r#"
 - gstack/office-hours
 - xor:
@@ -153,22 +153,22 @@ fn discover_namespaced_flows_with_slash_names_and_authored_branch_summaries() {
         skill: gstack/autoplan
         description: "Auto-plan with minimal interaction"
       manual:
-        flow: gstack/plan-manual
+        graph: gstack/plan-manual
         description: "Interactive planning"
 - implement
 - gstack/pr-review
 "#,
     )
-    .expect("write flow");
+    .expect("write graph");
 
-    let flows =
-        loopflow::lf::commands::list::list_children(&["flow".to_string()], repo.path()).unwrap();
-    let flow = flows
+    let graphs =
+        loopflow::lf::commands::list::list_children(&["graph".to_string()], repo.path()).unwrap();
+    let graph = graphs
         .iter()
         .find(|f| f.name == "gstack/sprint")
-        .expect("flow");
+        .expect("graph");
     assert_eq!(
-        flow.description,
+        graph.description,
         "gstack/office-hours → xor[gstack/office-hours]{autoplan: gstack/autoplan | manual: gstack/plan-manual} → implement → gstack/pr-review"
     );
 }
@@ -197,11 +197,12 @@ fn resolve_target_finds_skill() {
 }
 
 #[test]
-fn resolve_target_finds_flow() {
+fn resolve_target_finds_graph() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let target = resolve_definition(repo.path(), "pursue", None).expect("should find builtin flow");
-    assert!(matches!(target, Target::Flow(_)));
+    let target =
+        resolve_definition(repo.path(), "pursue", None).expect("should find builtin graph");
+    assert!(matches!(target, Target::Graph(_)));
 }
 
 #[test]
@@ -280,39 +281,40 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
     }
 }
 
-/// Every builtin flow file on disk must appear in exactly one category and
-/// must load via `load_flow`.
+/// Every builtin graph file on disk must appear in exactly one category and
+/// must load via `load_graph`.
 #[test]
-fn every_builtin_flow_is_categorized_and_loadable() {
+fn every_builtin_graph_is_categorized_and_loadable() {
     let tmp = TempDir::new().expect("tempdir");
 
-    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_FLOW_CATEGORIES
+    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_GRAPH_CATEGORIES
         .iter()
         .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
         .collect();
 
-    for name in builtin_flow_names() {
+    for name in builtin_graph_names() {
         assert!(
             categorized.contains_key(name),
-            "builtin flow {name} is missing from BUILTIN_FLOW_CATEGORIES",
+            "builtin graph {name} is missing from BUILTIN_GRAPH_CATEGORIES",
         );
-        load_flow(name, tmp.path())
-            .unwrap_or_else(|err| panic!("builtin flow {name} failed to load: {err}"));
+        load_graph(name, tmp.path())
+            .unwrap_or_else(|err| panic!("builtin graph {name} failed to load: {err}"));
     }
 
-    let known: std::collections::HashSet<&'static str> = builtin_flow_names().into_iter().collect();
-    for (_cat, names) in BUILTIN_FLOW_CATEGORIES {
+    let known: std::collections::HashSet<&'static str> =
+        builtin_graph_names().into_iter().collect();
+    for (_cat, names) in BUILTIN_GRAPH_CATEGORIES {
         for name in *names {
             assert!(
                 known.contains(*name),
-                "category lists flow {name} but no matching builtin exists"
+                "category lists graph {name} but no matching builtin exists"
             );
         }
     }
 }
 
 #[test]
-fn installed_skills_share_listing_execution_and_flow_resolution() {
+fn installed_skills_share_listing_execution_and_graph_resolution() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().unwrap();
     let skills = repo.path().join(".agents/skills");
@@ -336,10 +338,10 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
             .as_deref(),
         Some("Explain code.")
     );
-    let flows = repo.path().join(".lf/flows");
-    fs::create_dir_all(&flows).unwrap();
-    fs::write(flows.join("explain-code.yaml"), "- missing-child-23952\n").unwrap();
+    let graphs = repo.path().join(".lf/graphs");
+    fs::create_dir_all(&graphs).unwrap();
+    fs::write(graphs.join("explain-code.yaml"), "- missing-child-23952\n").unwrap();
     let error = resolve_definition(repo.path(), "explain-code", None).unwrap_err();
-    assert!(error.to_string().contains("invalid flow"), "{error}");
+    assert!(error.to_string().contains("invalid graph"), "{error}");
     assert!(error.to_string().contains("missing-child-23952"), "{error}");
 }

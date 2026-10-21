@@ -33,7 +33,7 @@ pub struct CronSpec {
     // Retained job identity: these bytes own installed labels, receipts and locks.
     // The command alone selects execution and supplies Work scope.
     pub wave: String,
-    pub flow: String,
+    pub graph: String,
     pub command: Vec<String>,
     pub schedule: CronSchedule,
     pub working_directory: PathBuf,
@@ -66,11 +66,11 @@ pub fn command_matches_scope(
 
 impl CronSpec {
     fn target_kind(&self) -> OpsResult<CronTargetKind> {
-        use crate::lf::{Commands, FlowCommand, TaskCommand};
+        use crate::lf::{Commands, GraphCommand, TaskCommand};
         Ok(match parse_cron_command(&self.command)?.command {
-            Some(Commands::Flow {
-                cmd: FlowCommand::External(_),
-            }) => CronTargetKind::Flow,
+            Some(Commands::Graph {
+                cmd: GraphCommand::External(_),
+            }) => CronTargetKind::Graph,
             Some(Commands::Skill { .. }) => CronTargetKind::Skill,
             Some(Commands::Task {
                 cmd: TaskCommand::Reconcile { .. },
@@ -82,7 +82,7 @@ impl CronSpec {
         self.working_directory.join(format!(
             ".lf/logs/cron.{}.{}.log",
             self.wave,
-            self.flow.replace('/', ".")
+            self.graph.replace('/', ".")
         ))
     }
 }
@@ -117,7 +117,7 @@ impl CronSchedule {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum CronTargetKind {
-    Flow,
+    Graph,
     Skill,
     Repository,
     Command,
@@ -126,7 +126,7 @@ pub enum CronTargetKind {
 impl CronTargetKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Flow => "flow",
+            Self::Graph => "graph",
             Self::Skill => "skill",
             Self::Repository => "repository",
             Self::Command => "command",
@@ -139,7 +139,7 @@ impl FromStr for CronTargetKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "flow" => Ok(Self::Flow),
+            "graph" => Ok(Self::Graph),
             "skill" => Ok(Self::Skill),
             "repository" => Ok(Self::Repository),
             "command" => Ok(Self::Command),
@@ -178,7 +178,7 @@ pub struct CronReceipt {
     #[serde(alias = "home_id")]
     pub machine_id: MachineId,
     pub wave: String,
-    pub flow: String,
+    pub graph: String,
     pub target_kind: CronTargetKind,
     pub source: CronSource,
     pub schedule: String,
@@ -205,7 +205,7 @@ impl CronReceipt {
 pub(crate) struct CronObligation {
     pub(crate) target_kind: CronTargetKind,
     pub(crate) wave: String,
-    pub(crate) flow: String,
+    pub(crate) graph: String,
     pub(crate) schedule: CronSchedule,
     pub(crate) machine_id: MachineId,
     pub(crate) activated_at: i64,
@@ -228,7 +228,7 @@ pub struct CronSyncResult {
 pub struct InstalledCron {
     pub command: Vec<String>,
     pub wave: String,
-    pub flow: String,
+    pub graph: String,
     pub label: String,
     pub path: PathBuf,
     pub schedule: String,
@@ -293,13 +293,13 @@ pub fn add_cron(
     if let Some(parent) = spec.log_path().parent() {
         fs::create_dir_all(parent)?;
     }
-    let path = plist_path(launch_agents_dir, &spec.wave, &spec.flow);
+    let path = plist_path(launch_agents_dir, &spec.wave, &spec.graph);
     let now = Utc::now().timestamp();
     let activated_at = if path.exists() {
         let prior = read_cron_obligation(&path)?;
         let prior_spec = read_cron_spec(&path)?;
         retain_installed_obligation(&prior_spec, prior.activated_at, now)?;
-        if matches!(prior_spec.flow.as_str(), "release-run" | "telemetry-daily")
+        if matches!(prior_spec.graph.as_str(), "release-run" | "telemetry-daily")
             && (prior_spec.host.lf_home != spec.host.lf_home
                 || prior_spec.host.machine_id != spec.host.machine_id
                 || prior_spec.working_directory.canonicalize()?
@@ -319,7 +319,7 @@ pub fn add_cron(
     } else {
         now
     };
-    if matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
+    if matches!(spec.graph.as_str(), "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         accounting::observe(spec, activated_at, now, &zone)?;
     }
@@ -334,15 +334,15 @@ pub fn add_cron(
 pub fn remove_cron(
     launch_agents_dir: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     launchctl: &dyn Launchctl,
 ) -> OpsResult<Option<InstalledCron>> {
-    let path = plist_path(launch_agents_dir, wave, flow);
+    let path = plist_path(launch_agents_dir, wave, graph);
     if !path.exists() {
         return Ok(None);
     }
     let cron = inspect_cron(&path, launchctl)?;
-    if matches!(cron.flow.as_str(), "release-run" | "telemetry-daily") {
+    if matches!(cron.graph.as_str(), "release-run" | "telemetry-daily") {
         let spec = read_cron_spec(&path)?;
         let now = Utc::now().timestamp();
         retain_installed_obligation(&spec, cron.activated_at, now)?;
@@ -354,7 +354,7 @@ pub fn remove_cron(
 }
 
 fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> OpsResult<()> {
-    if !matches!(spec.flow.as_str(), "release-run" | "telemetry-daily") {
+    if !matches!(spec.graph.as_str(), "release-run" | "telemetry-daily") {
         return Ok(());
     }
     let repo = spec.working_directory.canonicalize()?;
@@ -364,7 +364,7 @@ fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> 
         s.repo == repo
             && s.machine_id == spec.host.machine_id
             && s.wave == spec.wave
-            && s.flow == spec.flow
+            && s.graph == spec.graph
             && s.schedule == spec.schedule.expression()
             && s.installation_activated_at == activated_at
             && s.closed_at.is_none()
@@ -417,7 +417,7 @@ pub(crate) fn list_cron_obligations(launch_agents_dir: &Path) -> OpsResult<Vec<C
     obligations.sort_by(|left, right| {
         left.wave
             .cmp(&right.wave)
-            .then_with(|| left.flow.cmp(&right.flow))
+            .then_with(|| left.graph.cmp(&right.graph))
     });
     Ok(obligations)
 }
@@ -495,10 +495,10 @@ pub fn validate_cron_specs(specs: &[CronSpec]) -> OpsResult<()> {
     let mut labels = HashSet::new();
     for spec in specs {
         parse_cron_command(&spec.command)?;
-        if spec.flow.is_empty() || !labels.insert(label(&spec.wave, &spec.flow)) {
+        if spec.graph.is_empty() || !labels.insert(label(&spec.wave, &spec.graph)) {
             return Err(OpsError::Parse(format!(
                 "Cron job {} is empty or declared more than once",
-                spec.flow
+                spec.graph
             )));
         }
     }
@@ -519,13 +519,13 @@ pub fn sync_crons(
         if !command_matches_scope(&spec.command, wave, task)? {
             return Err(OpsError::Parse(format!(
                 "Cron {} is outside the selected Work scope",
-                spec.flow
+                spec.graph
             )));
         }
     }
     let desired = specs
         .iter()
-        .map(|spec| label(&spec.wave, &spec.flow))
+        .map(|spec| label(&spec.wave, &spec.graph))
         .collect::<HashSet<_>>();
     let mut installed = Vec::new();
     for spec in specs {
@@ -537,9 +537,12 @@ pub fn sync_crons(
             && command_matches_scope(&existing.command, wave, task)?
             && !desired.contains(&existing.label)
         {
-            if let Some(cron) =
-                remove_cron(launch_agents_dir, &existing.wave, &existing.flow, launchctl)?
-            {
+            if let Some(cron) = remove_cron(
+                launch_agents_dir,
+                &existing.wave,
+                &existing.graph,
+                launchctl,
+            )? {
                 removed.push(cron);
             }
         }
@@ -550,7 +553,7 @@ pub fn sync_crons(
 pub fn run_cron(
     launch_agents_dir: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     current_machine: &MachineId,
     placed_machine: &MachineId,
     source: CronSource,
@@ -558,7 +561,7 @@ pub fn run_cron(
     run_cron_recorded(
         launch_agents_dir,
         wave,
-        flow,
+        graph,
         current_machine,
         placed_machine,
         source,
@@ -569,15 +572,15 @@ pub fn run_cron(
 pub(crate) fn run_cron_recorded(
     launch_agents_dir: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     current_machine: &MachineId,
     placed_machine: &MachineId,
     source: CronSource,
     record: &mut dyn FnMut(&CronReceipt) -> OpsResult<()>,
 ) -> OpsResult<CronReceipt> {
-    let path = plist_path(launch_agents_dir, wave, flow);
+    let path = plist_path(launch_agents_dir, wave, graph);
     let spec = read_cron_spec(&path)?;
-    validate_installed_spec(&spec, wave, flow)?;
+    validate_installed_spec(&spec, wave, graph)?;
     let root = receipt_root(&spec.host.lf_home);
     let mut receipt = new_receipt(&spec, current_machine, source)?;
     if source == CronSource::Scheduled && accounting::consume_trigger(&spec, &receipt)? {
@@ -594,7 +597,7 @@ pub(crate) fn run_cron_recorded(
         return Err(error);
     }
 
-    let obligation = if matches!(flow, "release-run" | "telemetry-daily") {
+    let obligation = if matches!(graph, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         let obligation = read_cron_obligation(&path)?;
         Some(accounting::observe(
@@ -606,7 +609,7 @@ pub(crate) fn run_cron_recorded(
     } else {
         None
     };
-    let release_obligation = obligation.filter(|_| flow == "release-run");
+    let release_obligation = obligation.filter(|_| graph == "release-run");
 
     let placement_error = if spec.host.machine_id != *placed_machine {
         Some(format!(
@@ -629,11 +632,11 @@ pub(crate) fn run_cron_recorded(
         }
         write_receipt(&root, &receipt)?;
         return Err(OpsError::Message(format!(
-            "refusing cron {wave}/{flow}: {error}"
+            "refusing cron {wave}/{graph}: {error}"
         )));
     }
 
-    let _execution = if release_obligation.is_some() || flow == "telemetry-daily" {
+    let _execution = if release_obligation.is_some() || graph == "telemetry-daily" {
         let lease = accounting::claim_execution(&spec)?;
         if lease.is_none() {
             receipt.finished_at = Some(Utc::now().timestamp());
@@ -684,7 +687,7 @@ pub(crate) fn run_cron_recorded(
             ));
             write_receipt(&root, &receipt)?;
             return Err(OpsError::CommandFailed {
-                command: format!("cron {wave}/{flow}"),
+                command: format!("cron {wave}/{graph}"),
                 stderr: receipt.error.clone().unwrap_or_default(),
             });
         }
@@ -713,7 +716,7 @@ pub(crate) fn run_cron_recorded(
         Ok(receipt)
     } else {
         Err(OpsError::CommandFailed {
-            command: format!("cron {wave}/{flow}"),
+            command: format!("cron {wave}/{graph}"),
             stderr: receipt.error.clone().unwrap_or_default(),
         })
     }
@@ -725,23 +728,23 @@ pub(crate) fn run_cron_recorded(
 pub fn record_cron_preflight_failure(
     launch_agents_dir: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     source: CronSource,
     error: &str,
 ) -> OpsResult<CronReceipt> {
-    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
-    validate_installed_spec(&spec, wave, flow)?;
+    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, graph))?;
+    validate_installed_spec(&spec, wave, graph)?;
     let root = receipt_root(&spec.host.lf_home);
     let mut receipt = new_receipt(&spec, &spec.host.machine_id, source)?;
     write_receipt(&root, &receipt)?;
     receipt.finished_at = Some(Utc::now().timestamp());
     receipt.outcome = CronOutcome::Failed;
     receipt.error = Some(format!("Machine placement preflight failed: {error}"));
-    if matches!(flow, "release-run" | "telemetry-daily") {
+    if matches!(graph, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
-        let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, flow))?;
+        let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, graph))?;
         let id = accounting::observe(&spec, prior.activated_at, receipt.started_at, &zone)?;
-        if flow == "release-run" {
+        if graph == "release-run" {
             accounting::preflight_failure(&spec.host.lf_home, &id, &receipt)?;
         }
     }
@@ -756,13 +759,13 @@ pub fn receipt_root(lf_home: &Path) -> PathBuf {
 pub fn list_cron_receipts(
     root: &Path,
     wave: &str,
-    flow: Option<&str>,
+    graph: Option<&str>,
     days: u32,
 ) -> OpsResult<Vec<CronReceipt>> {
     let since = Utc::now()
         .timestamp()
         .saturating_sub(i64::from(days).saturating_mul(24 * 60 * 60));
-    let mut receipts = read_receipts(root, wave, flow)?;
+    let mut receipts = read_receipts(root, wave, graph)?;
     receipts.retain(|receipt| receipt.started_at >= since);
     receipts.sort_by(|left, right| {
         right
@@ -773,8 +776,8 @@ pub fn list_cron_receipts(
     Ok(receipts)
 }
 
-pub fn latest_cron_receipt(root: &Path, wave: &str, flow: &str) -> OpsResult<Option<CronReceipt>> {
-    let mut receipts = read_receipts(root, wave, Some(flow))?;
+pub fn latest_cron_receipt(root: &Path, wave: &str, graph: &str) -> OpsResult<Option<CronReceipt>> {
+    let mut receipts = read_receipts(root, wave, Some(graph))?;
     receipts.sort_by_key(|receipt| receipt.started_at);
     Ok(receipts.pop())
 }
@@ -782,9 +785,9 @@ pub fn latest_cron_receipt(root: &Path, wave: &str, flow: &str) -> OpsResult<Opt
 pub(crate) fn cron_receipt_ids(
     root: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
 ) -> OpsResult<Vec<CronReceiptId>> {
-    Ok(read_receipts(root, wave, Some(flow))?
+    Ok(read_receipts(root, wave, Some(graph))?
         .into_iter()
         .map(|receipt| receipt.id)
         .collect())
@@ -796,30 +799,30 @@ pub fn receipt_is_stale(receipt: &CronReceipt, now: i64) -> bool {
             || !process_alive(receipt.runner_pid))
 }
 
-pub fn record_cron_trigger(launch_agents_dir: &Path, wave: &str, flow: &str) -> OpsResult<String> {
-    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
+pub fn record_cron_trigger(launch_agents_dir: &Path, wave: &str, graph: &str) -> OpsResult<String> {
+    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, graph))?;
     accounting::record_trigger(&spec, Utc::now().timestamp())
 }
 
 pub fn record_cron_trigger_failure(
     launch_agents_dir: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     id: &str,
     cause: &str,
 ) -> OpsResult<()> {
-    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
+    let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, graph))?;
     accounting::trigger_failed(&spec, id, cause)
 }
 
-pub fn trigger_cron(launchctl: &dyn Launchctl, wave: &str, flow: &str) -> OpsResult<()> {
-    launchctl.trigger(&label(wave, flow))
+pub fn trigger_cron(launchctl: &dyn Launchctl, wave: &str, graph: &str) -> OpsResult<()> {
+    launchctl.trigger(&label(wave, graph))
 }
 
 pub fn wait_for_cron_receipt(
     root: &Path,
     wave: &str,
-    flow: &str,
+    graph: &str,
     prior_receipts: &[CronReceiptId],
     started_after: i64,
     timeout: Duration,
@@ -827,7 +830,7 @@ pub fn wait_for_cron_receipt(
     let deadline = Instant::now() + timeout;
     loop {
         let now = Utc::now().timestamp();
-        let mut receipts = read_receipts(root, wave, Some(flow))?;
+        let mut receipts = read_receipts(root, wave, Some(graph))?;
         receipts.retain(|receipt| {
             receipt.source != CronSource::Manual
                 && !prior_receipts.contains(&receipt.id)
@@ -845,7 +848,7 @@ pub fn wait_for_cron_receipt(
         }
         if Instant::now() >= deadline {
             return Err(OpsError::Message(format!(
-                "timed out after {}s waiting for cron {wave}/{flow}; inspect `lf wave cron history --wave {wave} --flow {flow}`",
+                "timed out after {}s waiting for cron {wave}/{graph}; inspect `lf wave cron history --wave {wave} --graph {graph}`",
                 timeout.as_secs()
             )));
         }
@@ -904,11 +907,11 @@ pub fn resolve_lf_path() -> OpsResult<PathBuf> {
 fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCron> {
     let spec = read_cron_spec(path)?;
     let obligation = read_cron_obligation(path)?;
-    let label = label(&spec.wave, &spec.flow);
+    let label = label(&spec.wave, &spec.graph);
     Ok(InstalledCron {
         command: spec.command.clone(),
         wave: spec.wave.clone(),
-        flow: spec.flow.clone(),
+        graph: spec.graph.clone(),
         label: label.clone(),
         path: path.to_path_buf(),
         schedule: spec.schedule.expression().to_string(),
@@ -921,7 +924,7 @@ fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCr
         latest_receipt: latest_cron_receipt(
             &receipt_root(&spec.host.lf_home),
             &spec.wave,
-            &spec.flow,
+            &spec.graph,
         )?,
     })
 }
@@ -943,7 +946,7 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
     };
     Ok(CronSpec {
         wave: required("LoopflowWave")?,
-        flow: required("LoopflowFlow")?,
+        graph: required("LoopflowGraph")?,
         command: match plist_string(&content, "LoopflowCommand") {
             Some(json) => {
                 serde_json::from_str(&json).map_err(|error| OpsError::Parse(error.to_string()))?
@@ -952,13 +955,13 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
                 CronTargetKind::Repository => {
                     vec!["task".into(), "reconcile".into(), "--json".into()]
                 }
-                kind @ (CronTargetKind::Flow | CronTargetKind::Skill) => vec![
+                kind @ (CronTargetKind::Graph | CronTargetKind::Skill) => vec![
                     "--wave".into(),
                     required("LoopflowWave")?,
                     "--batch".into(),
                     kind.as_str().into(),
                     "--".into(),
-                    required("LoopflowFlow")?,
+                    required("LoopflowGraph")?,
                 ],
                 CronTargetKind::Command => {
                     return Err(OpsError::Parse(
@@ -985,7 +988,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
     let receipts = read_receipts(
         &receipt_root(&spec.host.lf_home),
         &spec.wave,
-        Some(&spec.flow),
+        Some(&spec.graph),
     )?;
     let activated_at = match plist_string(&content, "LoopflowActivatedAt") {
         Some(value) => value.parse::<i64>().map_err(|error| {
@@ -1000,7 +1003,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
             .filter(|receipt| {
                 receipt.source == CronSource::Scheduled
                     && receipt.wave == spec.wave
-                    && receipt.flow == spec.flow
+                    && receipt.graph == spec.graph
                     && receipt.machine_id == spec.host.machine_id
                     && receipt.schedule == spec.schedule.expression()
             })
@@ -1022,7 +1025,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
         lf_path: spec.lf_path,
         log_path,
         wave: spec.wave,
-        flow: spec.flow,
+        graph: spec.graph,
         schedule: spec.schedule,
         machine_id: spec.host.machine_id,
         activated_at,
@@ -1032,7 +1035,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
 
 fn same_obligation(prior: &CronObligation, spec: &CronSpec) -> bool {
     prior.wave == spec.wave
-        && prior.flow == spec.flow
+        && prior.graph == spec.graph
         && prior.schedule == spec.schedule
         && prior.machine_id == spec.host.machine_id
 }
@@ -1087,7 +1090,7 @@ fn spawn_cron_target(
         use std::os::fd::AsRawFd;
         use std::os::unix::process::CommandExt;
         let fd = file.as_raw_fd();
-        if receipt.flow == "release-run" && receipt.source != CronSource::Manual {
+        if receipt.graph == "release-run" && receipt.source != CronSource::Manual {
             let execution = accounting::CronExecution {
                 receipt_id: receipt.id.to_string(),
                 lock_fd: fd,
@@ -1147,13 +1150,13 @@ fn wait_for_cron_target(
     }
 }
 
-fn validate_installed_spec(spec: &CronSpec, wave: &str, flow: &str) -> OpsResult<()> {
-    if spec.wave == wave && spec.flow == flow {
+fn validate_installed_spec(spec: &CronSpec, wave: &str, graph: &str) -> OpsResult<()> {
+    if spec.wave == wave && spec.graph == graph {
         return Ok(());
     }
     Err(OpsError::Message(format!(
-        "installed cron metadata names {}/{} instead of {wave}/{flow}",
-        spec.wave, spec.flow
+        "installed cron metadata names {}/{} instead of {wave}/{graph}",
+        spec.wave, spec.graph
     )))
 }
 
@@ -1171,7 +1174,7 @@ fn new_receipt(
             .flatten(),
         machine_id: machine_id.clone(),
         wave: spec.wave.clone(),
-        flow: spec.flow.clone(),
+        graph: spec.graph.clone(),
         target_kind: spec.target_kind()?,
         source,
         schedule: spec.schedule.expression().to_string(),
@@ -1189,21 +1192,21 @@ fn new_receipt(
 pub(crate) fn read_receipts(
     root: &Path,
     wave: &str,
-    flow: Option<&str>,
+    graph: Option<&str>,
 ) -> OpsResult<Vec<CronReceipt>> {
     let wave_root = root.join(safe_component(wave));
     if !wave_root.is_dir() {
         return Ok(Vec::new());
     }
-    let flow_dirs = match flow {
-        Some(flow) => vec![wave_root.join(safe_component(flow))],
+    let graph_dirs = match graph {
+        Some(graph) => vec![wave_root.join(safe_component(graph))],
         None => fs::read_dir(&wave_root)?
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_type().ok()?.is_dir().then_some(entry.path()))
             .collect(),
     };
     let mut receipts = Vec::new();
-    for dir in flow_dirs {
+    for dir in graph_dirs {
         if !dir.is_dir() {
             continue;
         }
@@ -1226,7 +1229,7 @@ pub(crate) fn read_receipts(
                     entry.path().display()
                 )));
             }
-            if receipt.wave == wave && flow.is_none_or(|flow| receipt.flow == flow) {
+            if receipt.wave == wave && graph.is_none_or(|graph| receipt.graph == graph) {
                 receipts.push(receipt);
             }
         }
@@ -1239,7 +1242,7 @@ const MINUTE_LOG_LIMIT: u64 = 1024 * 1024;
 
 /// Keep recent receipts plus the latest success and failure.
 fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) -> OpsResult<()> {
-    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.flow))?;
+    let mut receipts = read_receipts(root, &spec.wave, Some(&spec.graph))?;
     receipts.sort_by_key(|receipt| std::cmp::Reverse(receipt.started_at));
     let latest = |outcome| {
         receipts
@@ -1250,7 +1253,7 @@ fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) 
     let kept = [latest(CronOutcome::Succeeded), latest(CronOutcome::Failed)];
     let dir = root
         .join(safe_component(&spec.wave))
-        .join(safe_component(&spec.flow));
+        .join(safe_component(&spec.graph));
     for receipt in receipts.iter().skip(MINUTE_RECEIPTS_KEPT) {
         if &receipt.id == current || kept.contains(&Some(receipt.id.clone())) {
             continue;
@@ -1267,7 +1270,7 @@ fn prune_minute_receipts(root: &Path, spec: &CronSpec, current: &CronReceiptId) 
 fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     let dir = root
         .join(safe_component(&receipt.wave))
-        .join(safe_component(&receipt.flow));
+        .join(safe_component(&receipt.graph));
     fs::create_dir_all(&dir)?;
     #[cfg(unix)]
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
@@ -1282,7 +1285,7 @@ fn write_receipt(root: &Path, receipt: &CronReceipt) -> OpsResult<()> {
     write_private_file(&temporary, &bytes)?;
     fs::rename(&temporary, path)?;
     sync_directory(&dir)?;
-    if receipt.flow == "release-run" && receipt.finished_at.is_some() {
+    if receipt.graph == "release-run" && receipt.finished_at.is_some() {
         if let Some(home) = root.parent().and_then(Path::parent) {
             accounting::finish_process(home, receipt)?;
         }
@@ -1311,8 +1314,8 @@ fn sync_directory(path: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn plist_path(dir: &Path, wave: &str, flow: &str) -> PathBuf {
-    dir.join(format!("{}.plist", label(wave, flow).replace('/', ".")))
+fn plist_path(dir: &Path, wave: &str, graph: &str) -> PathBuf {
+    dir.join(format!("{}.plist", label(wave, graph).replace('/', ".")))
 }
 
 pub fn repository_cron_key(repo: &Path, home: &MachineId) -> String {
@@ -1324,8 +1327,8 @@ pub fn repository_cron_key(repo: &Path, home: &MachineId) -> String {
     format!("repository-{}", &hex::encode(hash.finalize())[..24])
 }
 
-fn label(wave: &str, flow: &str) -> String {
-    format!("loopflow.cron.{wave}.{flow}").replace('/', ".")
+fn label(wave: &str, graph: &str) -> String {
+    format!("loopflow.cron.{wave}.{graph}").replace('/', ".")
 }
 
 fn is_cron_plist(name: &str) -> bool {
@@ -1356,8 +1359,8 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> OpsResult<String> {
         "--scheduled".to_string(),
         "--wave".to_string(),
         spec.wave.clone(),
-        "--flow".to_string(),
-        spec.flow.clone(),
+        "--graph".to_string(),
+        spec.graph.clone(),
     ];
     let program_args_xml = args
         .iter()
@@ -1366,7 +1369,7 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> OpsResult<String> {
         .join("\n");
     let metadata = [
         ("LoopflowWave", spec.wave.clone()),
-        ("LoopflowFlow", spec.flow.clone()),
+        ("LoopflowGraph", spec.graph.clone()),
         (
             "LoopflowCommand",
             serde_json::to_string(&spec.command)
@@ -1433,7 +1436,7 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> OpsResult<String> {
 </dict>
 </plist>
 "#,
-        label = xml_escape(&label(&spec.wave, &spec.flow)),
+        label = xml_escape(&label(&spec.wave, &spec.graph)),
         path_env = xml_escape(&spec.host.path_env),
         lf_home = xml_escape(&spec.host.lf_home.to_string_lossy()),
         working_directory = xml_escape(&spec.working_directory.to_string_lossy()),
@@ -1527,7 +1530,7 @@ mod tests {
 
     use clap::Parser;
 
-    use crate::lf::{Cli, Commands, FlowCommand, SkillCommand};
+    use crate::lf::{Cli, Commands, GraphCommand, SkillCommand};
 
     #[derive(Debug, Default)]
     struct FakeLaunchctl {
@@ -1539,19 +1542,19 @@ mod tests {
             let content = fs::read_to_string(path)?;
             let wave = plist_string(&content, "LoopflowWave")
                 .ok_or_else(|| OpsError::Parse("missing wave".to_string()))?;
-            let flow = plist_string(&content, "LoopflowFlow")
-                .ok_or_else(|| OpsError::Parse("missing flow".to_string()))?;
-            self.loaded.borrow_mut().insert(label(&wave, &flow));
+            let graph = plist_string(&content, "LoopflowGraph")
+                .ok_or_else(|| OpsError::Parse("missing graph".to_string()))?;
+            self.loaded.borrow_mut().insert(label(&wave, &graph));
             Ok(())
         }
 
         fn unload(&self, path: &Path) -> OpsResult<()> {
             if let Ok(content) = fs::read_to_string(path) {
-                if let (Some(wave), Some(flow)) = (
+                if let (Some(wave), Some(graph)) = (
                     plist_string(&content, "LoopflowWave"),
-                    plist_string(&content, "LoopflowFlow"),
+                    plist_string(&content, "LoopflowGraph"),
                 ) {
-                    self.loaded.borrow_mut().remove(&label(&wave, &flow));
+                    self.loaded.borrow_mut().remove(&label(&wave, &graph));
                 }
             }
             Ok(())
@@ -1585,7 +1588,7 @@ mod tests {
             "reliability",
             "wave-report",
             "0 0 3 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         )
     }
 
@@ -1593,13 +1596,13 @@ mod tests {
         root: &Path,
         lf_path: &Path,
         wave: &str,
-        flow: &str,
+        graph: &str,
         schedule: &str,
         target_kind: CronTargetKind,
     ) -> CronSpec {
         CronSpec {
             wave: wave.to_string(),
-            flow: flow.to_string(),
+            graph: graph.to_string(),
             command: if target_kind == CronTargetKind::Repository {
                 vec!["task".into(), "reconcile".into(), "--json".into()]
             } else {
@@ -1609,7 +1612,7 @@ mod tests {
                     "--batch".into(),
                     target_kind.as_str().into(),
                     "--".into(),
-                    flow.into(),
+                    graph.into(),
                 ]
             },
             schedule: parse_schedule(schedule).unwrap(),
@@ -1668,7 +1671,7 @@ mod tests {
             "infra",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         fs::create_dir_all(&spec.working_directory).unwrap();
         add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
@@ -1676,7 +1679,7 @@ mod tests {
         let error = run_cron(
             temp.path(),
             &spec.wave,
-            &spec.flow,
+            &spec.graph,
             &spec.host.machine_id,
             &spec.host.machine_id,
             CronSource::Recovery,
@@ -1688,7 +1691,7 @@ mod tests {
         let receipt = run_cron(
             temp.path(),
             &spec.wave,
-            &spec.flow,
+            &spec.graph,
             &spec.host.machine_id,
             &spec.host.machine_id,
             CronSource::Recovery,
@@ -1731,7 +1734,7 @@ mod tests {
             "infra",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         fs::create_dir_all(&spec.working_directory).unwrap();
         add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
@@ -1770,7 +1773,7 @@ mod tests {
             run_cron(
                 temp.path(),
                 &spec.wave,
-                &spec.flow,
+                &spec.graph,
                 &spec.host.machine_id,
                 &spec.host.machine_id,
                 CronSource::Recovery,
@@ -1778,7 +1781,7 @@ mod tests {
         };
         assert!(matches!(contender(), Err(OpsError::ReleaseDeferred { .. })));
         assert_eq!(
-            read_receipts(&root, &spec.wave, Some(&spec.flow))
+            read_receipts(&root, &spec.wave, Some(&spec.graph))
                 .unwrap()
                 .into_iter()
                 .find(|r| r.id == receipt.id)
@@ -1793,7 +1796,7 @@ mod tests {
         let recovered = contender().unwrap();
         assert_eq!(recovered.outcome, CronOutcome::Succeeded);
         assert_ne!(recovered.id, receipt.id);
-        let receipts = read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap();
+        let receipts = read_receipts(&root, &spec.wave, Some(&spec.graph)).unwrap();
         assert_eq!(receipts.iter().find(|r| r.id == receipt.id), Some(&receipt));
         assert_eq!(
             fs::read_to_string(&completed).unwrap(),
@@ -1822,7 +1825,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, OpsError::CommandFailed { .. }));
         assert_eq!(
-            read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap(),
+            read_receipts(&root, &spec.wave, Some(&spec.graph)).unwrap(),
             vec![receipt]
         );
     }
@@ -1837,7 +1840,7 @@ mod tests {
         let id = object.remove("machine_id").unwrap();
         object.insert("home_id".into(), id);
         let root = receipt_root(&spec.host.lf_home);
-        let dir = root.join(&spec.wave).join(&spec.flow);
+        let dir = root.join(&spec.wave).join(&spec.graph);
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join(format!("{}-{}.json", receipt.started_at, receipt.id)),
@@ -1845,7 +1848,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap(),
+            read_receipts(&root, &spec.wave, Some(&spec.graph)).unwrap(),
             vec![receipt.clone()]
         );
         let current = serde_json::to_value(receipt).unwrap();
@@ -1953,7 +1956,7 @@ mod tests {
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         let mut cron = spec(temp.path(), &executable);
         cron.wave.clear();
-        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
+        cron.graph = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
         cron.command = vec!["task".into(), "reconcile".into(), "--json".into()];
         cron.schedule = parse_schedule("every-minute").unwrap();
         fs::create_dir_all(&cron.working_directory).unwrap();
@@ -1973,7 +1976,7 @@ mod tests {
             "task\nreconcile\n--json\n"
         );
         assert_ne!(
-            cron.flow,
+            cron.graph,
             super::repository_cron_key(&cron.working_directory, &MachineId::new())
         );
     }
@@ -1985,7 +1988,7 @@ mod tests {
         let launchctl = FakeLaunchctl::default();
         let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
         cron.wave.clear();
-        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
+        cron.graph = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
         cron.command = vec!["task".into(), "reconcile".into(), "--json".into()];
         cron.schedule = parse_schedule("every-minute").unwrap();
         fs::create_dir_all(&cron.working_directory).unwrap();
@@ -1994,7 +1997,7 @@ mod tests {
             run_cron(
                 &agents,
                 "",
-                &cron.flow,
+                &cron.graph,
                 &cron.host.machine_id,
                 &cron.host.machine_id,
                 CronSource::Scheduled,
@@ -2004,7 +2007,7 @@ mod tests {
             run().unwrap();
         }
         let root = receipt_root(&cron.host.lf_home);
-        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        let receipts = list_cron_receipts(&root, "", Some(&cron.graph), 1).unwrap();
         assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 1);
         assert_eq!(receipts[0].outcome, CronOutcome::Succeeded);
 
@@ -2014,7 +2017,7 @@ mod tests {
         for _ in 0..14 {
             assert!(run().is_err());
         }
-        let receipts = list_cron_receipts(&root, "", Some(&cron.flow), 1).unwrap();
+        let receipts = list_cron_receipts(&root, "", Some(&cron.graph), 1).unwrap();
         assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 2);
         assert!(receipts
             .iter()
@@ -2064,10 +2067,10 @@ mod tests {
             "infra",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         // A pre-cutover plist has no retained segment yet.
-        let path = plist_path(&agents, &telemetry.wave, &telemetry.flow);
+        let path = plist_path(&agents, &telemetry.wave, &telemetry.graph);
         fs::write(&path, render_plist(&telemetry, 0).unwrap()).unwrap();
         telemetry.schedule = parse_schedule("0 0 8 * * *").unwrap();
         add_cron(&agents, &telemetry, &launchctl).unwrap();
@@ -2090,7 +2093,7 @@ mod tests {
             .unwrap()
             .iter()
             .all(|s| s.closed_at.is_some()));
-        remove_cron(&agents, &telemetry.wave, &telemetry.flow, &launchctl).unwrap();
+        remove_cron(&agents, &telemetry.wave, &telemetry.graph, &launchctl).unwrap();
         let moved = accounting::read(&telemetry.host.lf_home).unwrap();
         assert_eq!(moved.len(), 1);
         assert_eq!(moved[0].machine_id, telemetry.host.machine_id);
@@ -2101,7 +2104,7 @@ mod tests {
 
     #[test]
     fn released_job_conversion_preserves_identity_receipts_and_child_exclusion() {
-        for kind in [CronTargetKind::Flow, CronTargetKind::Skill] {
+        for kind in [CronTargetKind::Graph, CronTargetKind::Skill] {
             let temp = tempfile::tempdir().unwrap();
             let agents = temp.path().join("agents");
             fs::create_dir_all(&agents).unwrap();
@@ -2118,13 +2121,13 @@ mod tests {
             );
             fs::create_dir_all(&cron.working_directory).unwrap();
             let activated = Utc::now().timestamp() - 2 * 86400;
-            let path = plist_path(&agents, &cron.wave, &cron.flow);
+            let path = plist_path(&agents, &cron.wave, &cron.graph);
             // Released metadata has no command argv. Keep this fixture independent
             // of the new renderer, including the released Home key spellings.
             let released = format!(
                 r#"<plist version="1.0"><dict>
 <key>LoopflowWave</key><string>infrastructure</string>
-<key>LoopflowFlow</key><string>release-run</string>
+<key>LoopflowGraph</key><string>release-run</string>
 <key>LoopflowTargetKind</key><string>{}</string>
 <key>LoopflowSchedule</key><string>0 0 10 * * *</string>
 <key>LoopflowHomeId</key><string>{}</string>
@@ -2186,7 +2189,7 @@ mod tests {
         let wave = spec(temp.path(), Path::new("/usr/bin/true"));
         let mut first = wave.clone();
         first.wave.clear();
-        first.flow = "first".into();
+        first.graph = "first".into();
         first.command = vec![
             "--task".into(),
             "FIX-1".into(),
@@ -2194,10 +2197,10 @@ mod tests {
             "status".into(),
         ];
         let mut second = first.clone();
-        second.flow = "second".into();
+        second.graph = "second".into();
         second.command[1] = "FIX-2".into();
         let mut foreign = first.clone();
-        foreign.flow = "foreign".into();
+        foreign.graph = "foreign".into();
         foreign.working_directory = temp.path().join("foreign-repo");
         for cron in [&wave, &first, &second, &foreign] {
             add_cron(&agents, cron, &launchctl).unwrap();
@@ -2212,11 +2215,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.removed.len(), 1);
-        assert_eq!(result.removed[0].flow, "first");
+        assert_eq!(result.removed[0].graph, "first");
         let remaining = list_crons(&agents, &launchctl).unwrap();
         assert_eq!(remaining.len(), 3);
         for cron in [&wave, &second, &foreign] {
-            assert!(remaining.iter().any(|job| job.flow == cron.flow));
+            assert!(remaining.iter().any(|job| job.graph == cron.graph));
         }
     }
 
@@ -2231,7 +2234,7 @@ mod tests {
             "other",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         let error = sync_crons(
             &agents,
@@ -2253,7 +2256,7 @@ mod tests {
             "infra",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         let error = sync_crons(
             &agents,
@@ -2279,7 +2282,7 @@ mod tests {
             "infra",
             "telemetry-daily",
             "0 0 9 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         let first = sync_crons(
             &agents,
@@ -2310,8 +2313,8 @@ mod tests {
             &launchctl,
         )
         .unwrap();
-        assert_eq!(second.installed[0].flow, "release-run");
-        assert_eq!(second.removed[0].flow, "telemetry-daily");
+        assert_eq!(second.installed[0].graph, "release-run");
+        assert_eq!(second.removed[0].graph, "telemetry-daily");
     }
 
     #[test]
@@ -2332,7 +2335,7 @@ mod tests {
         let receipt = run_cron(
             &agents,
             &spec.wave,
-            &spec.flow,
+            &spec.graph,
             &spec.host.machine_id,
             &spec.host.machine_id,
             CronSource::Scheduled,
@@ -2356,7 +2359,7 @@ mod tests {
         let receipt = run_cron(
             &agents,
             &success.wave,
-            &success.flow,
+            &success.graph,
             &success.host.machine_id,
             &success.host.machine_id,
             CronSource::Manual,
@@ -2367,7 +2370,7 @@ mod tests {
         let prior_receipts = cron_receipt_ids(
             &receipt_root(&success.host.lf_home),
             &success.wave,
-            &success.flow,
+            &success.graph,
         )
         .unwrap();
 
@@ -2377,7 +2380,7 @@ mod tests {
         assert!(run_cron(
             &agents,
             &failure.wave,
-            &failure.flow,
+            &failure.graph,
             &failure.host.machine_id,
             &failure.host.machine_id,
             CronSource::Scheduled,
@@ -2387,7 +2390,7 @@ mod tests {
         let receipts = list_cron_receipts(
             &receipt_root(&failure.host.lf_home),
             &failure.wave,
-            Some(&failure.flow),
+            Some(&failure.graph),
             1,
         )
         .unwrap();
@@ -2404,7 +2407,7 @@ mod tests {
         let waited = wait_for_cron_receipt(
             &receipt_root(&failure.host.lf_home),
             &failure.wave,
-            &failure.flow,
+            &failure.graph,
             &prior_receipts,
             failed.started_at,
             Duration::from_secs(1),
@@ -2427,7 +2430,7 @@ mod tests {
         let agents = temp.path().join("agents");
         let launchctl = FakeLaunchctl::default();
         for (kind, name) in [
-            (CronTargetKind::Flow, "show"),
+            (CronTargetKind::Graph, "show"),
             (CronTargetKind::Skill, "list"),
         ] {
             let cron = named_spec(
@@ -2444,7 +2447,7 @@ mod tests {
             run_cron(
                 &agents,
                 &cron.wave,
-                &cron.flow,
+                &cron.graph,
                 &cron.host.machine_id,
                 &cron.host.machine_id,
                 CronSource::Scheduled,
@@ -2459,9 +2462,9 @@ mod tests {
                 Cli::try_parse_from(std::iter::once("lf").chain(args.iter().copied())).unwrap();
             match (kind, cli.command) {
                 (
-                    CronTargetKind::Flow,
-                    Some(Commands::Flow {
-                        cmd: FlowCommand::External(args),
+                    CronTargetKind::Graph,
+                    Some(Commands::Graph {
+                        cmd: GraphCommand::External(args),
                     }),
                 )
                 | (
@@ -2490,7 +2493,7 @@ mod tests {
         let error = run_cron(
             &agents,
             &cron.wave,
-            &cron.flow,
+            &cron.graph,
             &cron.host.machine_id,
             &placed_machine,
             CronSource::Scheduled,
@@ -2501,7 +2504,7 @@ mod tests {
         let receipts = list_cron_receipts(
             &receipt_root(&cron.host.lf_home),
             &cron.wave,
-            Some(&cron.flow),
+            Some(&cron.graph),
             1,
         )
         .unwrap();
@@ -2526,7 +2529,7 @@ mod tests {
         let receipt = record_cron_preflight_failure(
             &agents,
             &cron.wave,
-            &cron.flow,
+            &cron.graph,
             CronSource::Scheduled,
             "registry schema is incompatible; run `lf doctor`",
         )
@@ -2552,8 +2555,8 @@ mod tests {
             runner_started_at: None,
             machine_id: MachineId::new(),
             wave: "infra".to_string(),
-            flow: "telemetry".to_string(),
-            target_kind: CronTargetKind::Flow,
+            graph: "telemetry".to_string(),
+            target_kind: CronTargetKind::Graph,
             source: CronSource::Scheduled,
             schedule: "0 0 9 * * *".to_string(),
             repo: PathBuf::from("/repo"),
@@ -2611,21 +2614,21 @@ mod tests {
             "infrastructure",
             "release-run",
             "0 0 0 * * *",
-            CronTargetKind::Flow,
+            CronTargetKind::Graph,
         );
         spec.working_directory = temp.path().to_path_buf();
         let agents = temp.path().join("agents");
         fs::create_dir(&agents).unwrap();
         let now = Utc::now().timestamp();
         fs::write(
-            plist_path(&agents, &spec.wave, &spec.flow),
+            plist_path(&agents, &spec.wave, &spec.graph),
             render_plist(&spec, now - 3 * 86400).unwrap(),
         )
         .unwrap();
         let receipt = run_cron(
             &agents,
             &spec.wave,
-            &spec.flow,
+            &spec.graph,
             &spec.host.machine_id,
             &spec.host.machine_id,
             CronSource::Scheduled,
@@ -2654,7 +2657,7 @@ mod tests {
             let error = run_cron(
                 &agents,
                 &spec.wave,
-                &spec.flow,
+                &spec.graph,
                 &spec.host.machine_id,
                 &spec.host.machine_id,
                 CronSource::Scheduled,

@@ -233,7 +233,7 @@ def _exercise(lf: Path, root: Path, selection: dict, server: LinearServer) -> li
             "project_id": "project-1",
             "content": {
                 "metric_targets": [],
-                "flows": {"recommended": None},
+                "graphs": {"recommended": None},
                 "krs": [],
             },
             "predecessors": [],

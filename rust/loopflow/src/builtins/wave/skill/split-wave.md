@@ -4,8 +4,8 @@ produces: .lf/wave/<child>/ directories
 ---
 Decompose a wave into smaller, independent waves. Move future responsibility into the children; retain the parent's history and any active delivery until it settles.
 
-Writes to `.lf/wave/` belong to the selected Loopflow Flow's procedure. Outside
-that Flow, keep proposed Wave changes in scratch; Work association alone
+Writes to `.lf/wave/` belong to the selected Loopflow Graph's procedure. Outside
+that Graph, keep proposed Wave changes in scratch; Work association alone
 does not select memory maintenance.
 
 ## Orientation
@@ -83,7 +83,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      retaining issues and history; terminal Tasks stay historical. Missing
      evidence stays unresolved. Rotation does not transfer Tasks to child Waves.
    - Predecessor Projects become Completed; an authored Planned successor keeps
-     its content, otherwise only the predecessor's Flow is copied. New Waves
+     its content, otherwise only the predecessor's Graph is copied. New Waves
      without Projects receive an empty `feature` plan. Retry interruption with
      the same name. Keep the parent available while its active work finishes;
      do not delete its Projects or imply rotation retired the Wave itself.

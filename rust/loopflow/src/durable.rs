@@ -427,50 +427,50 @@ pub struct AbandonReceipt {
     pub abandoned_at: OffsetDateTime,
 }
 
-/// Query values for Flow discovery; none carries attachment authority.
+/// Query values for Graph discovery; none carries attachment authority.
 #[derive(Debug, Clone, Default)]
-pub struct FlowProcessFilter {
+pub struct GraphProcessFilter {
     pub repo: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub taskless: bool,
-    pub state: Option<crate::session::FlowProcessSummaryState>,
+    pub state: Option<crate::session::GraphProcessSummaryState>,
     pub search: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowProcessInventoryEntry {
+pub struct GraphProcessInventoryEntry {
     #[serde(flatten)]
-    pub summary: crate::session::FlowProcessSummary,
+    pub summary: crate::session::GraphProcessSummary,
     pub repo: Option<String>,
     pub ended_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowProcessPage {
-    pub entries: Vec<FlowProcessInventoryEntry>,
+pub struct GraphProcessPage {
+    pub entries: Vec<GraphProcessInventoryEntry>,
     pub next: Option<String>,
 }
 
-/// One Flow drawn from its Processes: the authored graph while its steps still fit
+/// One Graph drawn from its Processes: the authored graph while its steps still fit
 /// it, else the sequence the steps recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowProcessDetail {
-    pub entry: FlowProcessInventoryEntry,
-    pub graph: crate::flow::graph::FlowGraph,
+pub struct GraphProcessDetail {
+    pub entry: GraphProcessInventoryEntry,
+    pub compiled: crate::graph::compiled::CompiledGraph,
     pub current: Option<u32>,
     pub completed: Vec<u32>,
-    pub returns: Vec<crate::flow::graph::FlowReturn>,
+    pub returns: Vec<crate::graph::compiled::GraphReturn>,
     /// Per-edge counts at each active nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
     pub cwd: Option<std::path::PathBuf>,
-    /// Every step the Flow process launched, in order.
-    pub steps: Vec<FlowStepProcess>,
+    /// Every step the Graph process launched, in order.
+    pub steps: Vec<GraphStepProcess>,
 }
 
 /// One launched step and how its process ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowStepProcess {
+pub struct GraphStepProcess {
     pub lf_process_id: crate::id::LfProcessId,
     pub label: String,
     pub key: u32,
@@ -481,10 +481,10 @@ pub struct FlowStepProcess {
     pub exit_code: Option<i32>,
 }
 
-impl FlowStepProcess {
+impl GraphStepProcess {
     /// The step's label with the pass any returned loop is on: "implement · pass 2".
     pub fn position(&self) -> String {
-        match crate::flow::graph::loop_passes(&self.iterations) {
+        match crate::graph::compiled::loop_passes(&self.iterations) {
             Some(passes) => format!("{} · {passes}", self.label),
             None => self.label.clone(),
         }

@@ -101,15 +101,15 @@ cli:
     commands: |-
       $ lf -a codex : "fix the failing test"   # launch an agent with a prompt
       $ lf skill design "Add CSV export"       # a saved prompt: a Skill
-      $ lf flow pursue                          # Skills in sequence: a Flow
-      $ lf flow show pursue                    # print its steps
-      $ lf flow customize pursue               # copy it into your repo
-      $ lf -b -a claude:opus flow pursue        # headless, on a model you pick
+      $ lf graph pursue                         # Skills in sequence: a Graph
+      $ lf graph show pursue                   # print its steps
+      $ lf graph customize pursue              # copy it into your repo
+      $ lf -b -a claude:opus graph pursue       # headless, on a model you pick
       $ lf connect                             # this scope's ongoing conversation
       $ lf account                             # logins and remaining capacity
       $ lf history usage                               # tokens and cost per Session
       $ lf task create --wave exports --title "Add CSV export"
-      $ lf task run EXP-12                     # its own worktree, then its Flow
+      $ lf task run EXP-12                     # its own worktree, then its Graph
       $ lf connect --task EXP-12               # back to that Task's conversation
       $ lf history usage --task EXP-12                 # what that Task cost
       $ lf land                                # merge when checks pass
@@ -120,14 +120,14 @@ cli:
     - name: Skills
       text: A Skill is a prompt saved as a Markdown file, so you stop retyping it. `lf skill NAME`
         runs one.
-    - name: Flows
-      text: '`lf` runs Flows. A Flow is a (looping) sequence of Skills: a habit turned into a
+    - name: Graphs
+      text: '`lf` runs Graphs. A Graph is a (looping) sequence of Skills: a habit turned into a
         process you can run again.'
     - name: Built-ins
-      text: '`lf` provides lots of reasonable built-in Flows for software engineering, but you are
+      text: '`lf` provides lots of reasonable built-in Graphs for software engineering, but you are
         encouraged to build your own and share them with others. They are files in your repository.'
     - name: Interactive or headless
-      text: Run any Skill or Flow as a conversation or headless. Each step can use a different
+      text: Run any Skill or Graph as a conversation or headless. Each step can use a different
         agent or model.
     - name: Sessions
       text: '`lf` keeps every conversation it starts, whichever agent ran it, so you never lose one
@@ -146,8 +146,8 @@ cli:
       text: '`lf` encodes the stages a Task goes through to become a shipped and validated PR, and
         lets you customize, Wave by Wave, how and when you get involved.'
     links:
-    - label: Skills and Flows ↗
-      href: /docs/authoring#flows
+    - label: Skills and Graphs ↗
+      href: /docs/authoring#graphs
     - label: Tasks and Waves ↗
       href: /docs/waves
     - label: Worktrees and delivery ↗
@@ -160,9 +160,9 @@ cli:
         cmux and herdr.'
     - name: Use as much as you want
       text: Use what you like and skip what you don't. The launcher needs no Task and no Linear.
-        Flows run without Tasks, and a Task can run any Flow.
+        Graphs run without Tasks, and a Task can run any Graph.
     - name: Change whatever you want
-      text: Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.
+      text: Skills are Markdown and Graphs are YAML. Edit them or use the built-ins. MIT licensed.
     - name: Linear
       text: Your Tasks are Linear issues, so the plan your agents work from is the one your team
         already reads.

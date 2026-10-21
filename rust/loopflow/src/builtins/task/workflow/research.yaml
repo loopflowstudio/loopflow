@@ -2,6 +2,6 @@
 nodes:
   findings: { skill: research, description: you read the findings }
 edges:
-  - { from: start, to: findings, flow: research }
-  - { from: findings, to: findings, flow: research }
+  - { from: start, to: findings, graph: research }
+  - { from: findings, to: findings, graph: research }
   - { from: findings, to: end }

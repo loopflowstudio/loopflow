@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Launch agents, run Skills and Flows, manage Sessions, worktrees and PRs with Loopflow; use Task and Wave APIs when requested or already associated.
+description: Launch agents, run Skills and Graphs, manage Sessions, worktrees and PRs with Loopflow; use Task and Wave APIs when requested or already associated.
 ---
 
 # Use lf
@@ -10,10 +10,10 @@ lf --version
 lf help <command-or-skill>
 ```
 
-Install only when requested. Use the requested Skills, Flows, worktree and PR
+Install only when requested. Use the requested Skills, Graphs, worktree and PR
 operations, following the user's tools and repository conventions.
 Do the requested work in
-this checkout; preserve existing contributions and authored Flow boundaries.
+this checkout; preserve existing contributions and authored Graph boundaries.
 
 For work using Tasks, Waves or Projects, read `lf help skill work` in this conversation.
 That skill is the work API contract, also preloaded for work-associated launches.

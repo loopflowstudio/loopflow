@@ -103,7 +103,7 @@ async fn read_checkout(
     report: &mut TaskCheckoutExplanation,
 ) -> anyhow::Result<()> {
     let task = super::explain::read_local_task(store, &mut report.resolution).await?;
-    // Preparation has different rules from Flow launch: a missing checkout is
+    // Preparation has different rules from Graph launch: a missing checkout is
     // precisely what checkout restores, not a reason to refuse this command.
     let status = super::task_work_status(store, &task).await?;
     if let Err(error) = super::validate_preparation_status(&task, status) {

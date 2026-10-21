@@ -14,7 +14,7 @@ every other page's copy; `static/style.css` controls layout. The `cli` block is
 the page for engineers at `/cli`: the commands and two plain lists, with no Mac
 app. Backticks in its list copy set code. `navigation` at the top of the file
 is the one bar on the homepage and studio pages, including its Company menu.
-Flows navigation on docs pages goes to `/cli#flows`.
+Graphs navigation on docs pages goes to `/cli#graphs`.
 
 The `studio` block holds the company page at `/studio` and the `/etude`,
 `/fantasia` and `/about` pages. An effort

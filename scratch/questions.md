@@ -38,9 +38,25 @@
    listed. The refusal exists only because Jack asked for "public". The
    flexible alternative hands to that Machine's person and lets their pickup
    rule apply.)
-10. **Person derived from Machine records.** Assumption: there is no Person
-    ref. A Person is Machine records grouped by key. Each person's own Machines
-    publish their provider accounts and pickup flag.
+10. **Person record.** RESOLVED by Jack (2026-10-21, later): a Person record
+    in Git (`refs/loopflow/people/<email>`: key, name, provider accounts),
+    written by any of that person's Machines with lease + merge. No Machine
+    records.
+11. **LOO-555 publishes Machines.** Its uncommitted `implement` tree adds
+    `refs/loopflow/machines/<id>` (`ops/machine_record.rs`, for teammates'
+    cron visibility) and `task_ownership.machine_label`. Both contradict
+    "Machines are never published". Assumption: LOO-555 drops both before
+    landing; otherwise 878ecf deletes them in its first slice. Open for Jack:
+    where teammates' crons become visible, if anywhere (one option: on the
+    Person record, with no Machine named). LOO-555 had not received this
+    direction as of 2026-10-21.
+12. **Pickup default.** Assumption: on. Every Machine of yours lists
+    person-addressed Tasks until `lf machine pickup off`; the first open
+    claims. Alternative: opt-in, which strands handovers for a person who
+    never marks a Machine.
+13. **Machine ids in ownership entries.** Assumption: entries keep today's
+    opaque `machine_id` (your own Machines need it to agree which one holds
+    the Task); teammates' views never resolve or show it.
 
 ## Jack Heart's direction (2026-10-21, design review)
 

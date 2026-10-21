@@ -37,8 +37,8 @@ No provider can hold a Machine/default-Machine record portably.
 
 ## Consequences for the design
 
-- Machine routing needs Loopflow-owned records regardless of provider, so
-  Machine (and probably Person) records ride the Git ref even when Linear is
-  the planning provider.
+- A Loopflow-owned roster rides a Git ref regardless of provider. Per Jack's
+  later direction only Person records go there; Machine routing is a local
+  pickup setting, not a record.
 - Provider assignment is the free offline notification in all three.
 - Email is the cross-provider join key; Notion may not give it.

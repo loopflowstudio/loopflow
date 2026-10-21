@@ -442,33 +442,17 @@ fn load_yaml_file(path: &Path) -> Result<Option<serde_yaml_ng::Value>, LoadError
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|e| {
         LoadError::InvalidFlow(format!("YAML parse error in {}: {}", path.display(), e))
     })?;
-    fold_linear_team(&mut value);
-    Ok(Some(value))
-}
-
-/// Released lf reads the Linear Team from `linear.team`, so a repository
-/// keeps that block while either build may run in it. Read it as Linear
-/// planning's team; an explicit `planning.team` wins.
-fn fold_linear_team(value: &mut serde_yaml_ng::Value) {
-    let Some(mapping) = value.as_mapping_mut() else {
-        return;
-    };
-    let Some(linear) = mapping.remove("linear") else {
-        return;
-    };
-    let Some(team) = linear.get("team").cloned() else {
-        return;
-    };
-    if let Some(planning) = mapping.get_mut("planning").and_then(|p| p.as_mapping_mut()) {
-        if planning.get("provider").and_then(|p| p.as_str()) == Some("linear")
-            && !planning.contains_key("team")
-        {
-            planning.insert("team".into(), team);
-        }
+    if value.get("linear").is_some() {
+        return Err(LoadError::InvalidFlow(format!(
+            "{}: `linear.team` moved to `planning.team`; replace the `linear:` block \
+             with `planning: {{provider: linear, team: <team-id>}}`",
+            path.display()
+        )));
     }
+    Ok(Some(value))
 }
 
 /// Merge global and repo config. Repo wins for scalars, additive keys combine.
@@ -692,22 +676,16 @@ mod tests {
     }
 
     #[test]
-    fn repo_config_reads_the_released_linear_team() {
-        let team = "3871bed0-8c95-4077-ab72-728327d615b3";
+    fn repo_config_with_linear_block_names_the_move() {
         let temp = tempfile::tempdir().expect("create temp dir");
         std::fs::create_dir_all(temp.path().join(".lf")).expect("create .lf dir");
         std::fs::write(
             temp.path().join(".lf/config.yaml"),
-            format!("planning:\n  provider: linear\nlinear:\n  team: {team}\n"),
+            "planning:\n  provider: linear\nlinear:\n  team: team-loo\n",
         )
         .expect("write config");
-        let config = load_repo_config(temp.path()).unwrap().unwrap();
-        assert_eq!(
-            config.planning_transport(),
-            PlanningConfig::Linear {
-                team: Some(team.to_string())
-            }
-        );
+        let error = load_repo_config(temp.path()).unwrap_err().to_string();
+        assert!(error.contains("moved to `planning.team`"), "{error}");
     }
 
     #[test]

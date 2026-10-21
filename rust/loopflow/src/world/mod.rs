@@ -28,6 +28,7 @@ use crate::process::{LfProcess, ProcessKind};
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
+use crate::work::edit::{Disposition, WorkEdit, WorkValue};
 use crate::work::project::ProjectKR;
 use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
@@ -344,11 +345,11 @@ impl World {
         Ok(())
     }
 
-    /// Create an unstarted Task in `wave`.
-    pub fn task(&self, wave: &str, title: &str, report: &str) -> Result<Task> {
+    /// Create an unstarted Task in `wave`, or a standalone one without.
+    pub fn task(&self, wave: Option<&str>, title: &str, report: &str) -> Result<Task> {
         Ok(crate::ops::task::task_create(
             &self.repo,
-            Some(wave),
+            wave,
             Some(title.to_string()),
             Some(report.to_string()),
         )?)
@@ -373,13 +374,68 @@ impl World {
         Ok(())
     }
 
-    /// Complete a Task the way `lf task complete` does.
-    pub fn complete(&self, task: &Task, note: &str) -> Result<Task> {
-        Ok(crate::ops::task::task_complete(
-            &self.repo,
-            &task.identifier,
-            Some(note),
-        )?)
+    /// Complete a Task the way `lf task complete` does, then date the
+    /// completion `completed_days_ago` through the planning writer.
+    pub fn complete(&self, task: &Task, note: &str, completed_days_ago: f64) -> Result<Task> {
+        let task = crate::ops::task::task_complete(&self.repo, &task.identifier, Some(note))?;
+        let at = time::OffsetDateTime::from_unix_timestamp(self.days_ago(completed_days_ago))?
+            .format(&time::format_description::well_known::Rfc3339)?;
+        self.dispose(
+            &task,
+            Disposition {
+                planning_state: Some("completed".into()),
+                planning_completed: 1,
+                planning_completed_at: Some(at),
+            },
+        )?;
+        Ok(task)
+    }
+
+    /// Pause a Task the way `lf task pause` does.
+    pub fn pause(&self, task: &Task) -> Result<()> {
+        Ok(crate::ops::task::task_pause(&task.identifier, true)?)
+    }
+
+    /// Abandon a Task the way `lf task abandon` does, removing its checkout.
+    pub fn abandon(&self, task: &Task) -> Result<()> {
+        crate::ops::task::task_abandon(&self.repo, Some(&task.identifier), true)?;
+        Ok(())
+    }
+
+    /// Cancel a Task's planning the way an accepted Linear cancellation does,
+    /// leaving its local runtime alone.
+    pub fn cancel_upstream(&self, task: &Task) -> Result<()> {
+        self.dispose(
+            task,
+            Disposition {
+                planning_state: Some("canceled".into()),
+                planning_completed: 0,
+                planning_completed_at: None,
+            },
+        )
+    }
+
+    /// Delete a Task's checkout folder, leaving Git's worktree metadata, as a
+    /// person removing the directory would.
+    pub fn remove_checkout(&self, task: &Task) -> Result<()> {
+        let worktree = task
+            .worktree
+            .as_ref()
+            .ok_or_else(|| anyhow!("Task {} has no checkout", task.identifier))?;
+        std::fs::remove_dir_all(worktree)?;
+        Ok(())
+    }
+
+    fn dispose(&self, task: &Task, disposition: Disposition) -> Result<()> {
+        let store = self.store()?;
+        let mut conn = store.sqlite.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        crate::store::sqlite::planning_write::local(
+            &tx,
+            &WorkEdit::for_target(task.id.as_str(), &[WorkValue::Disposition(disposition)]),
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// Record a finished Flow run in `task`'s checkout (the repository when

@@ -1,6 +1,6 @@
 # LOO-551: Rename Flow to Graph
 
-Status: draft plan (kickoff, October 21, 2026). Product decisions accepted by
+Status: implemented; gate remains (October 21, 2026). Product decisions accepted by
 Jack Heart on October 21, 2026 live verbatim in `scratch/loo-551-decisions.md`
 and bind this plan.
 
@@ -106,7 +106,7 @@ or more backward edges" — the authoring heading stays "Loopflows").
    `target_kind: "flow"`. Its `--flow` flags name "Graph or Skill" targets, not
    Graphs. After this change an installed command that runs `lf flow` fails;
    `lf wave cron sync --wave <wave>` reinstalls from `.lf/config.yaml`. See
-   Decisions/assumption A2.
+   Decisions (cron renames too).
 6. **One external repository carries Flows:** `loopflowstudio/manabot`
    (`~/src/manabot`, mirrored as `~/src/fantasia`) has 7 files in `.lf/flows/`,
    4 using `flow:` steps. Cube, Etude, Kata and Hootro have none. Its branch
@@ -203,7 +203,7 @@ a second migration draft; "Flow" left in `lf help --all` or Desktop strings.
   (architecture, skill alignment), Swift `DTOFixtureTests` and
   `DesktopHeadlessTests`, website `tests/e2e/test_homepage.py` asserting the
   `#graphs` anchor exists in the rendered authoring doc.
-- Residual-noun check: `git grep -nE '\b[Ff]lows?\b' -- ':!RELEASE_NOTES.md'
+- Residual-noun check: `git grep -nP '\b[Ff]lows?\b' -- ':!RELEASE_NOTES.md'
   ':!release' ':!rust/loopflow/src/store/migrations/0*' ':!.lf/wave'` returns
   only musical/brand uses, the pinned manifest/cron spellings, and their
   comments.
@@ -222,7 +222,8 @@ goldens. Kept as history: Linear Project description `flow:` declarations
 Left:
 - Gate: full `cargo test` (incl. `cli_reference` after the v0.14.14 merge),
   Python, Swift `DTOFixtureTests`/`DesktopHeadlessTests`, website e2e `#graphs`
-  anchor, residual-noun check, copy-of-real-store `lf task workflow show`.
+  anchor, residual-noun check (134 lines to classify; use `-P`, since `-E`
+  lacks `\b` and returns 0), copy-of-real-store `lf task workflow show`.
 - manabot companion PR at landing.
 
 ## Land-to-release window (concept review, October 21, 2026)
@@ -260,3 +261,5 @@ Installed lf (0.14.12) reads this checkout as follows, verified with
 Kickoff: SQLite 3.51 rename/JSON probe on schema copy of live store — passed.
 Compress: clippy -D warnings, `cargo test --lib graph_inventory`, Swift `build-for-testing` (fixed merged-in `WorldReadTests` Flow queries) — passed.
 Implement: clippy -D warnings, upgrade test, `dto_fixtures`+`graph_discovery`, `lf graph show pursue` (8 steps), `lf flow list` exit 2 — passed. Gate owns the rest.
+Realign: residual-noun `git grep -nP` → 134 lines to classify at gate (plan said `-E`, which returned 0); no code repair.
+Concept review (post-implement): residual `-P` grep outside history/fixtures is musical, generic or pinned (manifest `serde(rename = "flow")`, Linear `flow:` declarations); cron, `.lf/graphs/`, config commands match the plan; no design change.

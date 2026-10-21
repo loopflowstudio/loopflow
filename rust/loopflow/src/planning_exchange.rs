@@ -138,6 +138,15 @@ impl PlanningSnapshot {
             .map(|(id, change)| (id.as_str(), change))
     }
 
+    /// Head IDs per edited field, computed in one pass over the journal.
+    pub(crate) fn heads_by_key(&self) -> BTreeMap<(&str, &str), Vec<&str>> {
+        let mut grouped: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (id, change) in self.heads() {
+            grouped.entry(change.edit.key()).or_default().push(id);
+        }
+        grouped
+    }
+
     /// Select current values while retaining every competing mutation.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
         winning_heads(self.heads())
@@ -267,5 +276,36 @@ mod canonical_tests {
                 .to_string()
                 .contains("predecessors")
         );
+    }
+
+    #[test]
+    fn heads_by_key_matches_heads_filtered_per_field() {
+        let a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let c = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let d = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        let task = "task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let other = "task_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let snapshot = PlanningSnapshot::from_bytes(
+            &serde_json::to_vec(&json!({"changes":{
+                a:{"edit":{"target":task,"change":{"field":"task_title","value":"One"}},"clock":1,"parents":[]},
+                b:{"edit":{"target":task,"change":{"field":"task_title","value":"Two"}},"clock":2,"parents":[a]},
+                c:{"edit":{"target":task,"change":{"field":"task_title","value":"Rival"}},"clock":2,"parents":[a]},
+                d:{"edit":{"target":other,"change":{"field":"task_title","value":"Other"}},"clock":1,"parents":[]}
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        let grouped = snapshot.heads_by_key();
+        assert_eq!(grouped[&(task, "task_title")], vec![b, c]);
+        assert_eq!(grouped[&(other, "task_title")], vec![d]);
+        for change in snapshot.changes.values() {
+            let filtered: Vec<_> = snapshot
+                .heads()
+                .filter(|(_, head)| head.edit.key() == change.edit.key())
+                .map(|(id, _)| id)
+                .collect();
+            assert_eq!(grouped[&change.edit.key()], filtered);
+        }
     }
 }

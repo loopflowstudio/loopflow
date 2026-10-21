@@ -71,7 +71,7 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     }
 }
 
-/// Read wave machine policy and surface malformed frontmatter to callers that
+/// Read Wave policy and surface malformed frontmatter to callers that
 /// must fail closed before starting external side effects.
 pub(crate) fn try_read_wave_config(
     repo: &Path,

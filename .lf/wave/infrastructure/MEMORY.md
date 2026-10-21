@@ -279,8 +279,8 @@ and layout replication across Desktop installations remain unresolved. The owner
 retains bounded vt100 text state, not a complete native terminal snapshot.
 
 Admission is not execution: Task filing and explicit Wave admission now commit
-uncaptured primary Sessions; ensure prepares placement, while explicit execution
-reserves input and Started. Nested CLI stand-ins preserve a pending request,
+uncaptured primary Sessions; explicit execution reserves input and claims the
+Task. Nested CLI stand-ins preserve a pending request,
 provider/Session identity and caller provenance after calling-provider/viewer death;
 this proves neither native readiness nor a warming policy.
 Finite Desktop requests must propagate cancellation through the actual worker,
@@ -309,7 +309,7 @@ Jack rejected stable cross-version APIs, negotiation and old-peer support. Exist
 version/identity commands suffice: retain versions when identity fails; report
 differences and the update command without a version gate. Named connections live
 on Machine rows. Removal clears label/repo and releases destination uniqueness;
-identity, route and placements survive so a replacement can be added at that
+identity and route survive so a replacement can be added at that
 destination without deleting history or touching remote work. Only explicitly
 added machines may receive foreground credentials.
 OpenSSH owns destination syntax. Exact-frontier fixtures seed released
@@ -473,8 +473,7 @@ Candidate, 0.14.5 and 0.14.6 PTY faults preserve exact drafts/history, proving n
 original-reset repair. Incident records lack its initiating error; installed
 recovery remains unproved.
 Live/unknown providers grant no duplicate launch or signaling.
-LOO-416 supersedes eager primary-input preparation: admission prepares placement
-without a capture; connect reserves the first input and launches.
+LOO-416: admission prepares no capture; connect reserves the first input and launches.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 
@@ -716,9 +715,7 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-11)
 
-Jack Heart approved PR #1491 for landing on October 11 after the complete
-fifteen-area reduction and +/- review, superseding review-only authority.
-Design/checks: `6fabcd0734:scratch/`; [mechanics](../../../docs/architecture/planning.md).
+PR #1491 landed October 11 with Jack Heart's approval. Design/checks: `6fabcd0734:scratch/`; [mechanics](../../../docs/architecture/planning.md).
 
 Jack selected Linear, shared or default user-keyed Git per repository. One typed
 writer owns local/imported Work; canonical Task/Project fields replace plan/PM
@@ -726,28 +723,24 @@ wrappers and duplicate readers. Linear privately owns acquisition, observations
 and acceptance. Saves attempt delivery before returning; failures buffer locally
 and warn. No fallback transport, publisher election or turn/Flow replay.
 Execution and delivery attempts stay local. Shared completion never moves a
-captured Workflow, signals a Process or authorizes checkout cleanup.
+Workflow, signals a Process or authorizes checkout cleanup.
 
 Receipts preserve attempts, later edits, nulls, ages, foreign/partial facts and IDs.
 Journal routes replace inventories, retaining causal losers and uncertainty.
 Released SQL stays immutable; no old-version Git decoder. Key pairing and automatic export of Git-imported,
 unmapped Work into Linear remain open; Linear's unconditional updates retain a
-remote-edit race. Jack moved minimum first-start admission to LOO-427 on October
-11; LOO-414 retains coordinator recovery and detached launch retries. Missing
-local placement proves no peer absence. Earlier stacking approval `19116a1b`
-did not settle first-start authority.
+remote-edit race. LOO-523 (2026-10-19) replaced first-start admission, placement
+and Started with an append-only (person, Machine) `task_ownership` log and a
+personal, Machine-local `lf wave machine`.
 
-Ordinary Tasks/comments replace FollowThrough and its ritual/CLI/DTO/UI/Flow.
-Private recovery retains filing IDs/uncertainty, committing Tasks before comments. One config
+Ordinary Tasks/comments replace FollowThrough. Private recovery retains filing
+IDs/uncertainty, committing Tasks before comments. One config
 cron list replaces WaveCronDef/GOAL declarations. Conversion retains labels,
 Machine, activation, dues, receipt classifications and child-held locks. Release
-remains Infrastructure-owned. Main #1523's terminal draft stays separate; conversion retains local liveness/placement.
+remains Infrastructure-owned. Main #1523's terminal draft stays separate.
 
-Prior hosted candidate checks and seven SSH source tests passed; the integrated
-head still needs CI. Git can return without a short-command warning for pending
-publication; status preserves uncertainty. Jack approved landing after disclosure.
-Real SSH, live Linear, installation and cron activation remain unproved. Exact
-candidate/run IDs and repairs:
+Status preserves pending-publication uncertainty. Real SSH, live Linear, installation and cron activation
+remain unproved. Candidate/run IDs and repairs:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`, Tasks across machines.
 
 ## Planning and launch preservation (curated 2026-10-13)

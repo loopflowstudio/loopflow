@@ -173,14 +173,14 @@ fn task_named<'a>(tasks: &'a [Value], name: &str) -> &'a Value {
 /// Backlog, open work and the Wave's conversation together.
 fn wave_backlog(built: &Built, sessions: &Value) {
     let tasks = built.wave_tasks("desktop");
-    let started = |item: &&Value| item["runtime"]["started"] == true;
-    let unstarted = tasks.iter().filter(|item| !started(item)).count();
+    let owned = |item: &&Value| item["runtime"]["owner"].is_object();
+    let unowned = tasks.iter().filter(|item| !owned(item)).count();
     let open = tasks
         .iter()
-        .filter(started)
+        .filter(owned)
         .filter(|item| item["task"]["completed"] == false)
         .count();
-    assert!(unstarted >= 7, "{unstarted} unstarted Tasks");
+    assert!(unowned >= 7, "{unowned} unowned Tasks");
     assert!(open >= 4, "{open} open Tasks");
     let merged = task_named(&tasks, "Show PR state on Task rows");
     assert_eq!(merged["pr"]["phase"], "merged");

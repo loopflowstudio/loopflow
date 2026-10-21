@@ -1,7 +1,33 @@
 //! Launch-owned authority for provider context callbacks.
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PROVIDER_CONTEXT_ENV: &str = "LF_PROVIDER_CONTEXT";
+/// The provider process's seen marker; see [`latest_marker`].
+pub(crate) const STEER_SEEN_ENV: &str = "LF_STEER_SEEN";
+
+/// Touched whenever a steer is saved. A tool-boundary hook skips lf entirely
+/// while its provider's seen marker is strictly newer, since no steer arrived
+/// after its last check. Prompt boundaries always check, which also catches
+/// Sessions newly associated with earlier steers.
+pub(crate) fn latest_marker(home: &Path) -> PathBuf {
+    home.join("steers").join("latest")
+}
+
+pub(crate) fn seen_marker(home: &Path, process: &crate::id::LfProcessId) -> PathBuf {
+    home.join("steers").join("seen").join(process.as_str())
+}
+
+pub(crate) fn touch(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path.parent().expect("marker has a parent"))?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?
+        .set_modified(std::time::SystemTime::now())
+}
 
 /// Survives attachment-only handoff; replacement creates another capability.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

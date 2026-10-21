@@ -16,7 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from native_titles import _Tui
+from tui import _Tui
 
 
 class _Handler(BaseHTTPRequestHandler):

@@ -133,8 +133,7 @@ struct WorkNavigator: View {
                         .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                         .help(preview.help).allowsHitTesting(false)
                     if let task = found?.task {
-                        TaskRowMetadata(task: task, status: status,
-                            localMachineId: model.observingMachineId, selected: selected,
+                        TaskRowMetadata(task: task, status: status, selected: selected,
                             slotHint: (model.navigation.showsSlotHints || hoveredTask == id)
                                 ? model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil } : nil,
                             sourceAge: preview.age)

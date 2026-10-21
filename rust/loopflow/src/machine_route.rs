@@ -1,7 +1,6 @@
 //! SSH destinations are OpenSSH inputs, including config aliases and URIs.
 use std::fs::{self, DirBuilder};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
-use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
@@ -62,19 +61,4 @@ pub(crate) fn bounded_ssh_args(dest: &str, forward_agent: bool) -> std::io::Resu
         "--".into(),
         dest.into(),
     ])
-}
-
-pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
-    repo.strip_prefix(&home)
-        .map_err(|_| {
-            format!(
-                "repo {} is outside {}; remote Machine routing needs a home-relative path",
-                repo.display(),
-                home.display()
-            )
-        })?
-        .to_str()
-        .map(str::to_string)
-        .ok_or_else(|| format!("repo path {} is not UTF-8", repo.display()))
 }

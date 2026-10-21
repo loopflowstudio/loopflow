@@ -41,9 +41,10 @@ Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
 Workflow definitions remain separately stored: provisioning and the draft migration
 import `.lf/workflows/`, and Wave workflow selection updates the stored definition.
-Imported Waves remain readable without execution placement: Wave list, status
-and roadmap emit `machine: null` and display “unplaced,” not a fabricated local
-Machine. Desktop consumes the same optional placement.
+Wave list, status and roadmap emit each Wave's `machine` from the reader's
+Machine-local Wave → Machine default (the Wave, then its parents), or
+`machine: null` when unset, never a fabricated local Machine.
+Desktop consumes the same optional value.
 
 Task deletion atomically records local removal and a stable pending field receipt.
 It preserves Workflow, Session, Process, PR and checkout state, including completed
@@ -187,7 +188,9 @@ retains its repository and destination in `planning_peer_routes`, independently 
 live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
 routing or rejected imports. Status derives the active destination from configuration;
 there is no stored selection or per-Work membership inventory. These routes are
-exchange evidence and grant no Machine placement or first-start authority.
+exchange evidence and grant no Task ownership. Ownership entries travel as marked
+Task comments in both modes; with Git planning, each local append sorts after every
+entry its Machine has seen.
 
 Task and Project Linear field receipts share `sqlite/planning_changes.rs`, with
 separate foreign keys. They retain stable mutation identity, provider baseline and
@@ -354,8 +357,8 @@ The repository operation validates all selected Waves, destinations, legacy
 conversions and Task evidence before reserving every pair and applying the first
 Wave. The Wave command consumes only its entry through the same operation.
 The shared binding identifies the predecessor. Names never select either endpoint.
-Started unfinished Tasks move with identity, checkout, PR and captured execution
-intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
+Unfinished Tasks with any ownership entry move with identity, checkout, PR and
+captured execution intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
 
 Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
 selected issue IDs; those records never select the current Project. Before the
@@ -683,7 +686,7 @@ steers. Idle steering starts no Flow. Local emission
 remains unconfirmed and does not prove the model followed a correction. Wave
 planning uses ordinary finite LfSessions.
 
-Work reservation sets Task Started once; an inspection Process does not. Constructors
+Work reservation claims an unowned Task in its ownership log; an inspection Process does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event
 attribution. Task delivery separately owns Git/PR mutations. Conversation identity
 and Flow membership never substitute for that authority.

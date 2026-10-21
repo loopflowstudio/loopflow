@@ -2112,25 +2112,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
     }
 }
 
-fn place_wave_on_remote(
-    store: &loopflow::store::sqlite::SqliteStore,
-    db: &rusqlite::Connection,
-    wave: &loopflow::id::WaveId,
-) -> loopflow::durable::Placement {
-    let machine = loopflow::durable::MachineId::new();
-    store
-        .add_machine(&machine, machine.as_str(), machine.as_str(), "/remote/repo")
-        .unwrap();
-    let repo = store.get_wave(wave).unwrap().unwrap();
-    let home = Path::new(db.path().unwrap()).parent().unwrap();
-    serde_json::from_value(lf(
-        Path::new(repo.repo()),
-        home,
-        &["wave", "place", wave.as_str(), machine.as_str(), "--json"],
-    ))
-    .unwrap()
-}
-
 #[test]
 fn rotation_saves_membership_and_pending_effects_offline() {
     use crate::test_linear_input::InventoryFixture;
@@ -2188,7 +2169,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             .unwrap();
         db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [active.id.as_str()]).unwrap();
         db.execute(
-            "UPDATE tasks SET started_at=17 WHERE id=?1",
+            "INSERT INTO task_ownership(id,task_id,kind,at,ordered_at,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',17,17000,1)",
             [active.id.as_str()],
         )
         .unwrap();
@@ -2251,7 +2232,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             })
         };
         let execution = retained_execution();
-        let placement = place_wave_on_remote(&store, &db, wave.id());
         let successor = loopflow::durable::ProjectId::new();
         let file = home.path().join("rotation.json");
         // Backlog may be newer than started work; rotation does not depend on display order.
@@ -2340,7 +2320,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert_eq!(moved.project_id, Some(successor.clone()));
         assert_eq!(
             db.query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
+                "SELECT max(at) FROM task_ownership WHERE task_id=?1",
                 [active.id.as_str()],
                 |r| r.get::<_, Option<i64>>(0)
             )
@@ -2527,12 +2507,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 loopflow::store::PlanningState::Available
             );
         }
-        assert_eq!(
-            store
-                .placement(&loopflow::durable::WorkRef::Wave(wave.id().clone()))
-                .unwrap(),
-            placement
-        );
         assert_eq!(retained_execution(), execution);
         assert!(repo.path().join(".lf/wave").exists());
     }
@@ -2555,7 +2529,6 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         let db = rusqlite::Connection::open(&path).unwrap();
         let mut projects = Vec::new();
         let mut observations = Vec::new();
-        let mut placements = Vec::new();
         for name in ["source", "destination", "competing"] {
             let wave = loopflow::work::wave::Wave::new(
                 loopflow::id::WaveId::new(),
@@ -2597,10 +2570,6 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 .unwrap();
                 observations.push(observed);
             }
-            placements.push((
-                wave.id().clone(),
-                place_wave_on_remote(&store, &db, wave.id()),
-            ));
             projects.push(project);
         }
         let task = store
@@ -2749,7 +2718,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         // Membership moves retain the original start, even without a checkout.
         db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [task.id.as_str()]).unwrap();
         db.execute(
-            "UPDATE tasks SET started_at=17 WHERE id=?1",
+            "INSERT INTO task_ownership(id,task_id,kind,at,ordered_at,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',17,17000,1)",
             [task.id.as_str()],
         )
         .unwrap();
@@ -2771,21 +2740,13 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         );
         assert_eq!(
             db.query_row(
-                "SELECT started_at FROM tasks WHERE id=?1",
+                "SELECT max(at) FROM task_ownership WHERE task_id=?1",
                 [task.id.as_str()],
                 |row| row.get::<_, i64>(0)
             )
             .unwrap(),
             17
         );
-        for (wave, placement) in placements {
-            assert_eq!(
-                store
-                    .placement(&loopflow::durable::WorkRef::Wave(wave))
-                    .unwrap(),
-                placement
-            );
-        }
         assert!(repo.path().join(".lf/wave").exists());
     }
 }

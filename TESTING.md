@@ -218,19 +218,6 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## External network isolation
 
-`tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake
-API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
-and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
-it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
-OSC titles and native manual rename. `--headless` checks new `claude -p` and
-`codex exec` conversations, saving naming readback beside stdout/stderr. Claude
-saves the name; Codex currently records the missing embedded naming endpoint.
-Old conversations and resume repair are out of scope. No installed
-accounts, host shims, or cmux windows participate.
-The probe uses native terminal-title defaults and checks the latest OSC title,
-so an earlier correct title cannot hide a later overwrite. The TUI probe does not
-cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
-
 `tests/e2e/opencode_terminal.py` probes installed OpenCode through the real lf
 interactive launch with a private home and local API. Prepare a disposable npm
 prefix with `@opencode-ai/plugin` matching `opencode --version`, then pass that
@@ -242,12 +229,6 @@ launch. `--expect-overlay` reproduces the old stderr corruption against the
 installed lf release. The
 `session_launch_contract::opencode_` fixtures also cover early failure, arbitrary
 stderr bytes, subprocess diagnostics and resume identity without a provider install.
-
-`uv run python scripts/test_task_installation.py --native-titles` builds a
-release-shaped candidate only inside Docker and exercises published promotion
-under a disposable OS account. It checks preview, existing settings and symlinks,
-failed hook installation, same-candidate retry and repeated installation. CI's
-installation job runs this proof; it never touches the host installation.
 
 ```bash
 uv sync
@@ -972,8 +953,8 @@ canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task consumers: durable work reservation retains Started after
-failure. Use CI's materialized migration graph for trigger
+include Task consumers: durable work reservation retains its ownership claim
+after failure. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Experimental Machines hold
 this build's exact schema: use a fresh Machine after changing it. Preserve
 populated historical fixtures for published migration coverage. A Task's draft is
@@ -1002,6 +983,9 @@ For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
+`docs/lf-reference.md` renders the compiled command tree below its preamble;
+after a command or help-text change, rewrite it with
+`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
@@ -1110,8 +1094,8 @@ acquisition with simulated Linear responses, including missing Projects, partial
 responses, absence, and provider failure. Neither is configured live-provider proof.
 
 The mechanical Flow proof uses that disposable account without an installation
-selection. A claim followed by admission failure/release leaves Started absent;
-the real worker records operation history and Started together. It retains the
+selection. A work reservation that fails before allocation leaves the Task unowned;
+the real worker records operation history and its ownership claim together. It retains the
 captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
@@ -1478,15 +1462,15 @@ can expose an empty file between creation and the first write.
 
 ### Project readiness fixtures
 
-Task fixtures must create their Wave and Project, select the Project in SQLite,
-and retain Machine placement before creating work. YAML binding imports belong to
+Task fixtures must create their Wave and Project and select the Project in SQLite
+before creating work. YAML binding imports belong to
 explicit activation tests; passive status reads do not import them. Keep readiness
 fields in inline Swift responses as well as shared DTO fixtures.
 
 Changes to Project selection or planning admission require the full materialized
 Rust suite and headless Swift tests, including Task consumers and status readers.
 Run the installation harness for migration changes; its released-source proof
-must retain Wave placement before projecting accepted Projects.
+must retain Wave identity before projecting accepted Projects.
 
 ### Shared identity fixtures
 

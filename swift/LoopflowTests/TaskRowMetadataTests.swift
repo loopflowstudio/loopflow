@@ -82,12 +82,12 @@ struct TaskRowMetadataTests {
             let status = SessionProgramStatus(sessions: records, unavailable: nil)
             #expect(status.label == nil)
             #expect(status.tone == nil)
-            let view = TaskRowMetadata(task: task, status: status, localMachineId: nil)
+            let view = TaskRowMetadata(task: task, status: status)
             #expect(throws: (any Error).self) {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-\(task.id)")
             }
         }
-        let unavailable = TaskRowMetadata(task: task, status: .unavailable("Offline"), localMachineId: nil)
+        let unavailable = TaskRowMetadata(task: task, status: .unavailable("Offline"))
         let icon = try unavailable.inspect().find(viewWithAccessibilityIdentifier: "work-program-status-unavailable-\(task.id)")
         #expect(try icon.accessibilityLabel().string().contains("Offline"))
     }
@@ -99,7 +99,7 @@ struct TaskRowMetadataTests {
                                        app: nil, title: nil, msg: "Build failed")
         let reported = SessionProgramStatus(sessions: [try session("failed", status: .init(seen: true, records: [error]))], unavailable: nil)
         #expect(reported.tone == .failure)
-        let selected = TaskRowMetadata(task: task, status: reported, localMachineId: nil).workSelection(true)
+        let selected = TaskRowMetadata(task: task, status: reported).workSelection(true)
         #expect(try selected.inspect().find(text: "Error").string() == "Error")
         let available = SessionProgramStatus(sessions: [try session("available", availability: .available)], unavailable: nil)
         #expect(available.tone == .available)
@@ -109,29 +109,24 @@ struct TaskRowMetadataTests {
         #expect(ProgramStatusState.done.workTone == .done)
     }
 
-    @Test("Only a known remote checkout gets a Machine name")
-    func machineOwnership() throws {
-        let task = try #require(roadmap().waves.first?.tasks.items[1])
-        let workspace = try #require(task.reference.workspace)
-        #expect(workspace.sidebarMachine(localMachineId: workspace.machineId) == nil)
-        #expect(workspace.sidebarMachine(localMachineId: "other-machine") == "build-server")
-        #expect(workspace.sidebarMachine(localMachineId: nil) == "Machine unknown")
-        let unknown = try JSONDecoder().decode(TaskWorktreeSnapshot.self, from: Data("""
-        {"machine_id":null,"machine_label":"must-not-guess","slug":"task","branch":null,
-         "base_commit":"base","worktree":"/task","local_exists":null}
+    @Test("Rows name the owner and Machine, or say the Task is unowned")
+    func ownerLine() throws {
+        let tasks = try roadmap().waves.flatMap(\.tasks.items)
+        let owned = try #require(tasks.first { $0.runtime?.owner != nil })
+        let view = TaskRowMetadata(task: owned, status: .unknown)
+        #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
+        let unowned = try #require(tasks.first { $0.runtime != nil && $0.runtime?.owner == nil })
+        #expect(try TaskRowMetadata(task: unowned, status: .unknown).inspect().find(text: "Unowned").string() == "Unowned")
+        let unknown = try JSONDecoder().decode(TaskOwner.self, from: Data("""
+        {"person":null,"machine":{"id":null,"label":null}}
         """.utf8))
-        #expect(unknown.sidebarMachine(localMachineId: "local") == "Machine unknown")
-        let unnamed = try JSONDecoder().decode(TaskWorktreeSnapshot.self, from: Data("""
-        {"machine_id":"remote","machine_label":null,"slug":"task","branch":null,
-         "base_commit":"base","worktree":"/task","local_exists":null}
-        """.utf8))
-        #expect(unnamed.sidebarMachine(localMachineId: "local") == "Remote · name unavailable")
+        #expect(unknown.summary == "Someone · Machine unknown")
     }
 
     @Test("Task identifiers remain visible without an external issue URL")
     func identifierWithoutLink() throws {
         let task = try #require(roadmap().waves.flatMap(\.tasks.items).first { $0.reference.issueUrl == nil })
-        let view = TaskRowMetadata(task: task, status: .unknown, localMachineId: nil)
+        let view = TaskRowMetadata(task: task, status: .unknown)
         #expect(try view.inspect().find(text: task.task.identifier).string() == task.task.identifier)
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-link-\(task.id)")

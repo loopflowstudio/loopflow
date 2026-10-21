@@ -33,11 +33,11 @@ mod sync;
 pub(crate) use sync::landed_at;
 pub mod task;
 pub mod task_actions;
-pub mod task_admission;
 pub mod task_execution;
 #[doc(hidden)]
 pub mod task_input;
 pub mod task_location;
+pub mod task_ownership;
 pub mod task_run;
 pub(crate) mod telemetry;
 pub mod trace;
@@ -71,7 +71,7 @@ pub use release::{
     ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome,
     ReleaseStatusResult,
 };
-pub(crate) use run::render_task_context;
+pub(crate) use run::{render_task_context, select_execution_work};
 #[doc(hidden)]
 pub use run::{
     resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,

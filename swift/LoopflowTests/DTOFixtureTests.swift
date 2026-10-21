@@ -603,7 +603,6 @@ struct DTOFixtureTests {
         #expect(detail.wave.machine?.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.machine?.route == "ssh://jack@mini-heart")
         #expect(detail.wave.machine?.label == "mini")
-        #expect(detail.wave.machine?.repo == "src/project")
 
         // The Machine runtime evidence carries the state and the one contextual action.
 

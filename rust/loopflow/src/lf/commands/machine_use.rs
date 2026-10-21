@@ -217,8 +217,9 @@ async fn move_primary_session(
         crate::ops::human_session::primary::ensure(store, repo, wave, false).await?;
     } else if let Some(session) = store.sqlite.complete_primary_session(primary)? {
         eprintln!(
-            "Session {} completed here; it continues on {target}",
-            session.id
+            "Session {} completed here; it continues on {}",
+            session.id,
+            describe(&store.sqlite, target)?
         );
     }
     Ok(())

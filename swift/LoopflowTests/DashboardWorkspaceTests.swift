@@ -1,5 +1,7 @@
 #if os(macOS)
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Loopflow
 @testable import LoopflowMac
@@ -98,6 +100,47 @@ struct DashboardWorkspaceTests {
         #expect(pages.map { $0.count } == [7, 2])
         #expect(pages.flatMap { $0 } == members)
         #expect(Self.golden.pages([]) == [[]])
+    }
+
+    /// The rendered grid, not just the geometry: slots stay inside the window,
+    /// never overlap, and keep golden proportions even beside a tile whose
+    /// content refuses to shrink.
+    @Test func renderedGoldenSlotsFitTheirBoundsUnfocusedAndFocused() async throws {
+        let members = (0..<7).map { WorkMemberRef(source: ["repo"], work: .init(repository: "repo", kind: .task, id: "t\($0)")) }
+        let bounds = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+        for focus in [nil, 0, 5] as [Int?] {
+            let frames = SlotFrames()
+            let grid = DashboardSlotGrid(members: members, focused: focus.map { members[$0].work }, layout: Self.golden) { member in
+                let index = members.firstIndex(of: member)!
+                ZStack {
+                    // Slot 1's content asks for nearly the whole window.
+                    if index == 1 { Color.clear.frame(minWidth: 1400) }
+                    Color.clear.onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { frames.value[index] = $0 }
+                }
+            }.transaction { $0.animation = nil }
+            let window = NSWindow(contentRect: bounds, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = NSHostingView(rootView: grid)
+            defer { window.contentView = nil }
+            window.layoutIfNeeded()
+            let deadline = ContinuousClock.now + .seconds(2)
+            while frames.value.count < 7, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            let expected = Self.golden.frames(in: bounds, focus: focus)
+            for index in 0..<7 where index != 1 {
+                let frame = try #require(frames.value[index])
+                #expect(bounds.contains(frame), "slot \(index) leaves the window: \(frame)")
+                let slot = try #require(expected[index]).insetBy(dx: 4, dy: 4)
+                #expect(abs(frame.minX - slot.minX) < 1 && abs(frame.width - slot.width) < 1 && abs(frame.height - slot.height) < 1,
+                        "slot \(index) focus \(String(describing: focus)): \(frame) vs \(slot)")
+                for other in 0..<7 where other != index && other != 1 {
+                    #expect(!frame.intersects(try #require(frames.value[other])), "slots \(index) and \(other) overlap")
+                }
+            }
+            // Content too wide for its slot starts at the slot's leading edge and is clipped
+            // on the trailing side, so a header's identifier stays visible.
+            let wide = try #require(frames.value[1]), slot = try #require(expected[1]).insetBy(dx: 4, dy: 4)
+            #expect(abs(wide.minX - slot.minX) < 1 && abs(wide.minY - slot.minY) < 1)
+            if focus == nil { #expect(abs((frames.value[0]!.width + 8) / bounds.width - 0.618) < 0.002) }
+        }
     }
 
     @Test func dashboardsReuseWorkAndKeepRepositoryNavigation() throws {
@@ -344,4 +387,8 @@ private extension WorkPaneLayout {
     }
 }
 
+@MainActor
+private final class SlotFrames {
+    var value: [Int: CGRect] = [:]
+}
 #endif

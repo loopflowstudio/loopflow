@@ -155,12 +155,12 @@ struct DashboardView: View {
         // Only a saved Dashboard has an arrangement to write.
         let arrangeable = plan.dashboardID != nil
         return VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: Spacing.sm) {
                 Button { zoom(member, plan: plan) } label: {
                     if let task = model.task(id: member.work.id)?.task { TaskHeading(task: task) }
                     else { Text(content?.title ?? member.work.id).lineLimit(1) }
                 }.buttonStyle(.plain)
-                Spacer()
+                Spacer(minLength: 0)
                 if let task = model.task(id: member.work.id) {
                     Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
                         label: { Image(systemName: "ellipsis") }
@@ -195,11 +195,21 @@ struct DashboardView: View {
                             workspaces.focus(entry.key)
                             entry.multiplexer.setFocusedPane(pane)
                         }, face: pane)
+                } else if let task = model.task(id: member.work.id)?.task {
+                    // A Task with a recorded conversation opens it; one with nothing to open offers Start.
+                    if model.taskSessions(task.id).isEmpty, !task.task.isTerminal {
+                        TaskStartOffer(model: model, task: task)
+                    } else {
+                        PaneEmptyState(title: "No conversation open", systemImage: "bubble.left",
+                                       description: "Open this Task’s recorded conversation.") {
+                            Button("Open conversation") { Task { await model.openTaskConversation(task.id) } }
+                                .accessibilityIdentifier("dashboard-open-conversation-\(task.id)")
+                        }
+                    }
                 } else {
-                    Label("No primary Session", systemImage: "bubble.left")
-                        .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    PaneEmptyState(title: "No primary Session", systemImage: "bubble.left") { EmptyView() }
                 }
-            } else { Text("Work unavailable").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") { EmptyView() } }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)

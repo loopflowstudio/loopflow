@@ -22,11 +22,8 @@ struct WorkspacePanesView: View {
             } else if let layout = store.visibleLayout {
                 panes(layout)
             } else {
-                ContentUnavailableView {
-                    Label("Panes collapsed", systemImage: "rectangle.compress.vertical")
-                } description: {
-                    Text("Your panes are retained. Show a pane to continue.")
-                } actions: {
+                PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
+                               description: "Your panes are retained. Show a pane to continue.") {
                     if workspace.key.kind == .task,
                        !store.layout.allPanes.contains(where: { $0.sessionId != nil }) {
                         Button("Open conversation") {
@@ -79,33 +76,95 @@ struct SessionSlotOffer<Description: View>: View {
     @ViewBuilder let description: Description
     @Environment(\.theme) private var theme
 
+    @Environment(\.compactPanes) private var compact
+
     var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-                .foregroundStyle(theme.palette.text)
-        } description: {
-            description.foregroundStyle(theme.palette.textSecondary)
-        } actions: {
-            if let action {
-                VStack(spacing: Spacing.sm) {
-                    Button(action: perform) { Label(action, systemImage: actionImage) }
-                        .buttonStyle(.bordered)
-                        .tint(theme.palette.text)
+        Group {
+            if compact {
+                PaneEmptyLine(title: title, systemImage: systemImage, detail: unavailable ?? note) { button }
+            } else {
+                ContentUnavailableView {
+                    Label(title, systemImage: systemImage)
                         .foregroundStyle(theme.palette.text)
-                        .disabled(unavailable != nil)
-                        .help(unavailable ?? help)
-                        .accessibilityLabel(accessibilityLabel ?? action)
-                        .accessibilityHint(accessibilityHint ?? "")
-                        .accessibilityIdentifier(actionIdentifier)
-                    if let note = unavailable ?? note {
-                        Text(note)
-                            .font(Typography.caption(9))
-                            .foregroundStyle(theme.palette.textSecondary)
+                } description: {
+                    description.foregroundStyle(theme.palette.textSecondary)
+                } actions: {
+                    VStack(spacing: Spacing.sm) {
+                        button
+                        if action != nil, let note = unavailable ?? note {
+                            Text(note)
+                                .font(Typography.caption(9))
+                                .foregroundStyle(theme.palette.textSecondary)
+                        }
                     }
                 }
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private var button: some View {
+        if let action {
+            Button(action: perform) { Label(action, systemImage: actionImage) }
+                .buttonStyle(.bordered)
+                .tint(theme.palette.text)
+                .foregroundStyle(theme.palette.text)
+                .disabled(unavailable != nil)
+                .help(unavailable ?? help)
+                .accessibilityLabel(accessibilityLabel ?? action)
+                .accessibilityHint(accessibilityHint ?? "")
+                .accessibilityIdentifier(actionIdentifier)
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Dashboard slots: a pane's empty state reads as one line sized to the slot.
+    @Entry var compactPanes = false
+}
+
+/// A pane with nothing running in it yet: what that means and its next action.
+/// Full panes explain themselves; a compact pane says the state in one line.
+struct PaneEmptyState<Actions: View>: View {
+    let title: String
+    let systemImage: String
+    var description: String?
+    @ViewBuilder let actions: Actions
+    @Environment(\.compactPanes) private var compact
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        if compact {
+            PaneEmptyLine(title: title, systemImage: systemImage, detail: description) { actions }
+        } else {
+            ContentUnavailableView {
+                Label(title, systemImage: systemImage).foregroundStyle(theme.palette.text)
+            } description: {
+                if let description { Text(description).foregroundStyle(theme.palette.textSecondary) }
+            } actions: { actions }
+        }
+    }
+}
+
+/// One line: the state, then its action; the explanation moves to help.
+private struct PaneEmptyLine<Actions: View>: View {
+    let title: String
+    let systemImage: String
+    let detail: String?
+    @ViewBuilder let actions: Actions
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Label(title, systemImage: systemImage)
+                .lineLimit(1).truncationMode(.tail)
+                .foregroundStyle(theme.palette.text)
+                .help(detail ?? title)
+            actions.controlSize(.small).fixedSize()
+        }
+        .font(Typography.body(12))
+        .padding(Spacing.sm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -648,26 +707,16 @@ struct SessionPaneView: View {
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
-            ContentUnavailableView {
-                Label("No Task conversation open", systemImage: "bubble.left")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text(workspace.conversationError == nil
+            PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
+                description: workspace.conversationError == nil
                     ? "Open this Task’s recorded conversation."
-                    : "The conversation could not open. Retry the opening above.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+                    : "The conversation could not open. Retry the opening above.") {
                 Button("Open conversation") { Task { await model.openTaskConversation(workspace.key.id) } }
                     .accessibilityIdentifier("task-open-conversation")
             }
         } else {
-            ContentUnavailableView {
-                Label("No session open", systemImage: "terminal")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text("Open the retained conversation when you’re ready.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "No session open", systemImage: "terminal",
+                           description: "Open the retained conversation when you’re ready.") {
                 Button("Open conversation") {
                     let wave = workspace.key.kind == .wave ? model.wave(id: workspace.key.id)?.wave.name : nil
                     Task { await model.openPrimaryConversation(in: workspace, wave: wave, store: sessions) }
@@ -698,13 +747,8 @@ struct SessionPaneView: View {
                 openButton(item)
             }.padding()
         case .failed(let message):
-            ContentUnavailableView {
-                Label("Session failed to open", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text(message)
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
+                           description: message) {
                 openButton(item)
             }
         case .pending where workspace.openingConversation:
@@ -712,13 +756,8 @@ struct SessionPaneView: View {
                 .foregroundStyle(theme.palette.text)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .pending, .live:
-            ContentUnavailableView {
-                Label("Not running here", systemImage: "terminal")
-                    .foregroundStyle(theme.palette.text)
-            } description: {
-                Text("This Session has no live terminal in this pane yet.")
-                    .foregroundStyle(theme.palette.textSecondary)
-            } actions: {
+            PaneEmptyState(title: "Not running here", systemImage: "terminal",
+                           description: "This Session has no live terminal in this pane yet.") {
                 openButton(item)
             }
         }

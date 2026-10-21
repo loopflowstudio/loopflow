@@ -163,6 +163,8 @@ struct DashboardSlotGrid<Tile: View>: View {
             ZStack(alignment: .topLeading) {
                 ForEach(0..<layout.count, id: \.self) { index in
                     let frame = (frames[index] ?? .zero).insetBy(dx: 4, dy: 4)
+                    // The layout owns each slot's frame; content never widens it
+                    // and anything that cannot shrink is clipped at the slot edge.
                     Group {
                         if index < slice.count {
                             tile(slice[index]).id(slice[index].work)
@@ -172,11 +174,14 @@ struct DashboardSlotGrid<Tile: View>: View {
                                 .accessibilityIdentifier("dashboard-empty-slot")
                         }
                     }
+                    .frame(width: max(0, frame.width), height: max(0, frame.height), alignment: .topLeading)
+                    .clipShape(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius))
                     .overlay { if let editing { slotControls(index, editing) } }
-                    .frame(width: max(0, frame.width), height: max(0, frame.height))
                     .offset(x: frame.minX, y: frame.minY)
                 }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+            .environment(\.compactPanes, true)
             .animation(FocusSizing.animation, value: focus)
             .animation(FocusSizing.animation, value: layout)
         }

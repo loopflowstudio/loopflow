@@ -236,8 +236,9 @@ struct TaskHeading: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(task.task.identifier).font(.system(.body, design: .monospaced)).fixedSize()
+            // The title truncates first; identifier and state keep their width.
             Text(task.task.name).lineLimit(1).truncationMode(.tail)
-                .frame(minWidth: 60, alignment: .leading).help(task.task.name)
+                .frame(minWidth: 0, alignment: .leading).help(task.task.name)
             Text(state).foregroundStyle(.secondary).fixedSize()
                 .accessibilityIdentifier("task-heading-state")
         }

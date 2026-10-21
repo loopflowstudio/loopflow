@@ -1,31 +1,33 @@
 # Desktop Dashboard demo notes
 
-October 18–19 attempts and findings in full: `f492be7f19:scratch/desktop-dashboard-demo.md`.
-Resolved there: the populated-clone failure (superseded by main's #1612 draft-copy
-builds), malformed `process_input` JSON (`79bf0d415b`), stale Sessions hiding activity
-and the raw unavailable-ID wall (one summary line since October 20), visit-derived
-Working Tasks (agreed-ux.md §4). Still open: LOO-426's Start offer needs demo
-confirmation; live `desktop state`/control target `com.loopflow.mac`, so a separately
-identified preview cannot show CLI↔native round-trip parity. Not yet exercised:
-jump-bar menus, Machine control, Start, Dashboard arrangement.
+Earlier attempts and resolved findings: `f492be7f19:scratch/desktop-dashboard-demo.md`
+(October 18–19) and `000d5f0970:scratch/desktop-dashboard-demo.md` (October 20 store-copy
+demo: titlebar text, Started labels, Dashboard trail — fixed; the trail fix and LOO-426 Start offer await demo).
+Still open: live `desktop state`/control target `com.loopflow.mac`, so a separately
+identified preview cannot show CLI↔native round-trip parity. Not yet exercised: jump-bar
+menus, Machine control, Dashboard arrangement. f492be7f19 (draft builds stop handing off
+to the installed lf) fixes a bug also on main; keep it in the PR notes.
 
-## Demo findings — October 20, 2026 (Loopflow Dev on the store copy, Jack Heart)
+## Golden-grid demo — October 20, 2026 (000d5f0970, store copy, Jack Heart)
 
-1. “if were using burgundy in title, bar text should be white no?” Trail and TaskHeading
-   drew dark text on the burgundy titlebar. Fixed: `palette.titlebarText`/
-   `titlebarSecondaryText` follow the titlebar scheme; TaskHeading uses the container's
-   secondary style, so tiles keep their palette.
-2. “why did i get an unstarted task if i clicked on it in main sidebar” / “it doesnt look
-   unstarted”. Cause: TaskHeading fell through to Linear's `planning_state`
-   (“unstarted”) once durable evidence said started. Fixed: the heading shows
-   Started/Unstarted from runtime `started`; Rust `task_began_in` (recorded work or a
-   published PR) is now the one definition for both the runtime and query evaluation.
-3. Trail “loopflow > hi / LOO-521” over Dashboard “hi” showing “No visible Work” in a
-   band. Cause, from code (not reproduced live): entering a Dashboard kept the previous
-   Task's `selectedSessionId`, and the breadcrumb derived a Task from it. Fixed: Dashboard
-   destinations clear it and head their own trail; a sidebar Task then shows the Task
-   (`workingTasksDashboardYieldsToSidebarTask`). Empty states fill the pane.
-   Demo should confirm.
+Worked: white titlebar text, Started/Paused labels, paging, focus growing a band.
 
-Also on this branch: f492be7f19 (draft builds stop handing off to the installed lf; the
-same bug is on main — keep it in the PR notes).
+1. Overflow (LOO-389/416 clipped), 3. LOO-539/520 overlap, 4. headers losing the
+   identifier: content that could not shrink was centered over its slot frame and spilled
+   both ways. Fixed: each slot is a hard top-leading frame clipped at its edge; TaskHeading
+   truncates the title first. Demo judges whether tile border plus pane border reads doubled.
+2. Full-window empty states. Fixed: tiles set `\.compactPanes`; `PaneEmptyState` and
+   `SessionSlotOffer` show one line, state plus action, explanation in help.
+5. `renderedGoldenSlotsFitTheirBoundsUnfocusedAndFocused`: grid hosted at 1600×1000,
+   unfocused/top/bottom focus, beside a tile demanding 1400pt; in bounds, no overlap,
+   slot 1 at 61.8%. Fails on the old centered frame.
+6. “No primary Session” with no action. Fixed: recorded Sessions → Open conversation
+   (navigates to the Task); nothing to open → Start offer.
+7. LOO-312 “Server connection could not be restored · Reconnect failed” is Codex 0.163.0's
+   TUI losing its `codex app-server` connection. Not the store copy: transport, `lf session
+   connect`, app-server and TUI were all started October 18 by installed lf `08d39395…` and
+   remain alive; Resume reattached that transport's screen. Real provider reattach gap,
+   LOO-416's lifecycle; lf reports the Session live because its processes are.
+
+Animation: focus and page turns share one 0.25 s spring. A representable takes its final
+frame at once, so a terminal regrids once per change; demo judges whether that flickers.

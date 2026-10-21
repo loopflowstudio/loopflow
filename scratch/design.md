@@ -180,15 +180,15 @@ Baseline `0f08742fc4` (v0.14.8 batch). Upgrade tests apply build drafts before o
 (`apply_build_drafts`); saved panes follow the Task's repository (LOO-505). Anonymous-query
 save-before-arrange remains an assumption (`questions.md`).
 
-Linear LOO-497 is retitled for Dashboards, but its acceptance body (still so on
-its October 19 05:41 revision) lists
-scripting parity and `open` beside, which Jack Heart's October 18 decisions moved
-to LOO-519 and removed; the body needs rewriting before review.
+Linear LOO-497's acceptance body (October 19 05:41 revision) still lists scripting
+parity and `open` beside, which Jack Heart moved to LOO-519 and removed on October 18;
+rewrite it before review.
 
 ## Remaining implementation, verification and transport
 
 - Demo checks (agreed-ux.md §5): golden geometry, focus growth, page turns, drag
-  reorder in sidebar and grid, slot editing, terminal behavior during animation.
+  reorder in sidebar and grid, slot editing, terminal behavior during animation, and the
+  October 20 golden-grid fixes (desktop-dashboard-demo.md).
 - Saved Dashboards now render through slots, so `ArrangementTree` axes/ratios no longer
   shape native geometry; they remain only as occurrence order. Collapsing the tree to an
   ordered occurrence list (Rust, CLI `arrange`, fixtures) awaits Jack's call (questions.md).
@@ -218,9 +218,10 @@ Gate owns affected suites and combined headless native/Linux acceptance
 → hide A → add a slot, focus B → enter A/draft → restart/restore A, Wave default unchanged.
 Unavailable Work must not appear deleted; failed saves stay visible.
 
-Check (October 20, order + slots): `cargo test --lib -- store::sqlite::selections work::selection lf::commands::desktop store::migrations` 162 passed, `--test integration dto_fixtures` 44 passed, clippy clean; `swift test --filter 'DashboardWorkspaceTests|WorkSelectionTests|WorkNavigationTests|WorkModelTests|TaskRowMetadataTests|ThemeWorkflowTests'` 98 passed. Native and broader suites stay gate-owned.
+Check (October 20): Rust `cargo test --lib -- store::sqlite::selections work::selection lf::commands::desktop store::migrations` 162 passed, `dto_fixtures` 44, clippy clean; Swift `swift test --filter 'DashboardWorkspaceTests|WorkspacePanesTests|SessionsPolishTests|TaskRowMetadataTests|WorkNavigationTests|WorkSelectionTests|…'` 78 passed after the golden-grid fixes. Native and broader suites stay gate-owned.
 
 ## History
 
 Earlier design: `8d4f2d8ea1:scratch/history/loo489-console-source-2026-10-17/loo497-before-continuation-design.md.txt`.
 Jack Heart rejected the prototype's invisible aliases (October 17); no production query-reference syntax is set.
+October 16 foundations review, settled: `000d5f0970:scratch/foundation-review.md`.

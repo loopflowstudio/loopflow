@@ -1,14 +1,10 @@
 # LOO-534: lifecycle world recipe
 
-Status: implemented, gated and published as [#1621](https://github.com/loopflowstudio/loopflow/pull/1621)
-(2026-10-20); main merged at 52ed99b138 (#1622's `wave-backlog`, `task-review`, `wave-lifecycle`
-recipes adapted to `task(Option<&str>)` and dated `complete`). Main merged again at f8d1b4f3cf
-(2026-10-21) for #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned. Main moved again
-to aa7038fcf9 (#1617, LOO-533 `density` recipe), merged with one shared `BuiltWorld` Swift
-fixture. Remaining: CI, review and merge; Task completion follows delivery.
-CI's matrix runs only once scratch is cleared (`scratch-clear` candidate), so it
-runs at submit; #1621's head 40b769765f has only `scratch-clear` passing, the rest skipped. Jack Heart requested this as an
-autonomous follow-up to lf-world (#1612) on 2026-10-20.
+Status: implemented and gated; published as [#1621](https://github.com/loopflowstudio/loopflow/pull/1621).
+Merged with origin/main at aa7038fcf9 (#1610 Owned/Unowned grouping, #1617 `density`
+recipe and `World::claim`). Remaining: CI (its matrix runs only after submit's
+scratch clear), review and merge; Task completion follows delivery. Jack Heart
+requested this as an autonomous follow-up to lf-world (#1612) on 2026-10-20.
 
 ## Problem
 
@@ -192,10 +188,8 @@ logic and transitional states (Jack Heart's 2026-10-20 direction).
 
 ## Delete — do not maintain
 
-- `WaveTaskInventory`'s inline `started` grouping, replaced by `WaveTaskGroups`.
-- `LifecycleWorld` (`LifecycleWorldTests.swift`) and `DensityWorld`
-  (`WorkDensityWorldTests.swift`), replaced by `BuiltWorld`. Density's
-  assertions and `lf session bind` path survive unchanged.
+Done: `WaveTaskInventory`'s inline grouping (now `WaveTaskGroups`) and the private
+`LifecycleWorld`/`DensityWorld` fixtures (now `BuiltWorld`). Nothing remains.
 
 ## Forbidden outcomes
 
@@ -205,82 +199,20 @@ logic and transitional states (Jack Heart's 2026-10-20 direction).
 - A second history filter for the inventory; it shares `isCurrent` with `TaskHistoryFilter`.
 - Two private Swift world fixtures, or a per-recipe fixture type.
 
-## Slices
+## Decisions carried from earlier slices
 
-### Main moved — done (2026-10-21)
-
-Jack Heart's #1610 (LOO-523) is an accepted product decision: Task ownership
-(person, Machine) replaced write-once `started_at`; `RoadmapTaskRuntime.started`
-is gone and `WaveTaskInventory` groups Owned / Unowned. `lf task checkout`
-(the world's `checkout`) now claims an unowned Task.
-
-1. Merge `origin/main`. Only `WorkSurfaceView.swift` conflicts (git merge-tree);
-   resolve to main's labels on top of `WaveTaskGroups`.
-2. `WaveTaskGroups`: `started`/`notStarted` → `owned`/`unowned` on
-   `runtime?.owner != nil`; callers in `WorkSurfaceView`, `LifecycleWorldTests`
-   (lines asserting `current.started`/`notStarted`) follow. No `started` field
-   or Started label survives.
-3. Settled: the world's `checkout` claim records an owner in a fresh world;
-   `World::new` needed no identity change.
-
-Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
-unset, `< /dev/null`) and `scripts/test_desktop.sh --filter
-'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
-
-### Main moved again — done (2026-10-21)
-
-Jack Heart's #1617 (LOO-533) landed a `density` recipe, `World::claim`, and
-`WorkDensityWorldTests` with a private `DensityWorld` fixture that duplicates
-this branch's private `LifecycleWorld` (same isolated HOME/.gitconfig, base env,
-`lf-world build <recipe>` → env JSON merge, `RegistryQuery` over the built `lf`).
-It also landed the identical `--bin lf-world` lines in `ci.yml` and
-`scripts/test.py`, so this branch's edits to those files drop out of the diff.
-
-1. Merge `origin/main`. `git merge-tree` conflicts only in `world/mod.rs` and
-   `world/recipes.rs`: keep both `claim` (main) and this branch's
-   `complete`/`pause`/`abandon`/`cancel_upstream`/`remove_checkout`; keep both
-   `density` and `lifecycle` entries. `density` calls `world.task(Some(wave), …)`.
-2. One Swift fixture: `BuiltWorld(recipe:)` in
-   `swift/LoopflowTests/BuiltWorld.swift` (internal) owns build, env and
-   `query`, honoring `LOOPFLOW_TEST_LF` / `LOOPFLOW_TEST_LF_WORLD` (main's
-   lookup) and draining stderr concurrently (main's runner). Both suites use it;
-   `LifecycleWorld` and `DensityWorld` are deleted. `model()` lives on
-   `BuiltWorld`; density uses it too.
-3. No assertion changes. Density's `claim` + Session rows and lifecycle's
-   `checkout` claim coexist; the world's `checkout` still claims.
-
-Focused check: `cargo test -p loopflow --test integration world_recipes` (LF_*
-unset, `< /dev/null`; expects 3 tests covering density and lifecycle) and
-`scripts/test_desktop.sh --filter 'LifecycleWorldTests|WorkDensityWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
-
-### Name "current" once — done (concept review, 2026-10-21)
-
-The accepted product word is *current* ("A Wave pairs its conversation with all
-current planned and started Tasks").
-
-`TaskPlanningSnapshot.isCurrent(_ condition:)` (`!isTerminal ||
-condition.unresolvedExecution`) sits beside `WaveTaskGroups`. `includes` opens
-with it and `WaveTaskGroups` filters on it directly: no filter instance, no `now`.
-Implement (2026-10-21): the predicate lives on the planning snapshot, not
-`RoadmapTask`, because `WaveDetailPane` filters `WaveTaskWork` rows through the
-same `includes`.
-
-Focused check: `scripts/test_desktop.sh --filter
-'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'`.
-
-Reviewed and kept: the Rust settled rung keys on runtime terminal state while
-Desktop's current keys on planning terminal state. They agree on every recipe
-row: completion and abandonment set both, and the upstream-canceled Task's
-unresolved execution keeps it current in Desktop and unsettled in Rust.
-`scratch/questions.md` entries are each settled by an accepted decision
-(LOO-489 Console retention, #1594's current-only inventory, "uncertain evidence
-never auto-closes work"); they remain open for Jack to revisit, not to block.
-
-### Original order
-
-One PR. Order: (1) world API + recipe + Rust integration test, which fails on the
-`waiting` assertion; (2) Rust `derive_task_condition` fix; (3) `WaveTaskGroups` +
-inventory + Swift suite + CI build lines.
+- #1610 (LOO-523): `WaveTaskGroups` groups Owned/Unowned on `runtime?.owner != nil`;
+  no `started` field or label survives. The world's `checkout` claims the Task.
+- #1617 (LOO-533): one internal `BuiltWorld(recipe:)` fixture serves both
+  `LifecycleWorldTests` and `WorkDensityWorldTests`, honoring
+  `LOOPFLOW_TEST_LF`/`LOOPFLOW_TEST_LF_WORLD` and draining stderr concurrently.
+- *Current* is named once: `TaskPlanningSnapshot.isCurrent(_:)` (`!isTerminal ||
+  condition.unresolvedExecution`). `TaskHistoryFilter.includes` opens with it and
+  `WaveTaskGroups` filters on it. It lives on the planning snapshot because
+  `WaveDetailPane` filters `WaveTaskWork` rows through the same `includes`.
+- Reviewed and kept: the Rust settled rung keys on runtime terminal state while
+  Desktop's current keys on planning terminal state. They agree on every recipe
+  row; the upstream-canceled Task's unresolved execution keeps it current in both.
 
 ## Done when
 
@@ -292,21 +224,6 @@ the built world, not hand-written rows.
 ## Checks
 
 Kickoff: portfolio world reproduced `88a613` done with `condition.state=waiting`.
-`cargo test -p loopflow --test integration world_recipes`: passed 2/2; fmt, clippy passed (publish).
-`scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests|WaveDetail'`: 50 passed (publish). Full Swift suite: gate/CI.
-Gate: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `world_recipes` 2/2, `commands::waves` 19/19, integration `wave` 15/15: passed.
-Gate: `scripts/test_desktop.sh -Xswiftc -gnone`: 615/616; `ProgramStatusTests` "later status event recovers an exited observer" missed its 5 s deadline by 2 ms under full-suite load, passed on rerun with `LifecycleWorldTests` (14/14). Untouched by this branch.
-Publish revision: inventory is current-only with no history control (#1594's assertion); completed ranges are proved on `TaskHistoryFilter` over world rows.
-Realign after main merge (2026-10-20): `cargo test -p loopflow --test integration world_recipes` 3/3 passed at 52ed99b138; Swift and full CI deferred to #1621's CI.
-Kickoff (2026-10-21): `git merge-tree HEAD origin/main` at f8d1b4f3cf — one conflict, `WorkSurfaceView.swift`; branch code still reads removed `runtime.started`.
-Main moved (2026-10-21): `world_recipes` 3/3; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
-Compress (2026-10-21): `WaveTaskGroups` drops its unused `now`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
-Realign (2026-10-21): origin/main unchanged since f8d1b4f3cf, merges clean; no stale `started` names; no checks rerun. Full CI: submit.
-Concept review (2026-10-21): next slice names `isCurrent`; prose only, no checks.
-Implement (2026-10-21): `isCurrent` named once; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
-Compress (2026-10-21): tests use `isCurrent` for settled rows and share `LifecycleWorld.model()`; `scripts/test_desktop.sh --filter 'LifecycleWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 42/42. fmt/clippy and full Swift: gate/CI.
-Realign (2026-10-21): `isCurrent` slice already landed; plan prose updated to match; origin/main unchanged; no checks rerun. fmt/clippy and full Swift: gate/CI.
-Concept review (2026-10-21): no design change, no open choice; "Done when" now names Project history as the range owner. Prose only, no checks.
-Gate (2026-10-21): clippy caught the settled-rung unit test still setting removed `started` after #1610's merge; now `owner: Some(owned())`. `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `commands::waves` 19/19, `world_recipes` 3/3, integration `wave` 16/16, `scripts/test_desktop.sh -Xswiftc -gnone` 617/617: passed. Full CI: submit.
-Kickoff (2026-10-21): origin/main at aa7038fcf9 (#1617); `git merge-tree` conflicts in `world/mod.rs`, `world/recipes.rs`; no checks run.
-Implement (2026-10-21): merged aa7038fcf9, `BuiltWorld` replaces both private fixtures; `world_recipes` 3/3, `scripts/test_desktop.sh --filter 'LifecycleWorldTests|WorkDensityWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 43/43. clippy and full Swift: gate/CI.
+Gate (2026-10-21, before #1617 merge): `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `commands::waves` 19/19, `world_recipes` 3/3, integration `wave` 16/16, `scripts/test_desktop.sh -Xswiftc -gnone` 617/617: passed.
+After #1617 merge: `world_recipes` 3/3, `scripts/test_desktop.sh --filter 'LifecycleWorldTests|WorkDensityWorldTests|TaskHistoryFilterTests|WorkNavigationTests'` 43/43. clippy and full Swift: gate/CI.
+Compress (2026-10-21): plan prose only; no checks rerun.

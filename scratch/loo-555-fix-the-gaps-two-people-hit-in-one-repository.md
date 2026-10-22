@@ -16,6 +16,24 @@ two-person docs and matching README/index introductions to reflect Git comment
 steers, branch reuse and personal crons. Gate owns remaining verification and
 delivery; no merge or Task completion is claimed here.
 
+Recovery checks: architecture, Python release automation (10), website (72),
+README/index consistency, migration validation, Rust formatting and Clippy
+passed. Full materialized Rust tests were stopped before execution by the gate's
+macOS security-pressure monitor (syspolicyd sustained >200% CPU); CI owns that
+unproven check. Headless Desktop built and ran 613 tests with one early sidebar
+assertion: planning status and selection membership arrive in separate frames.
+The existing wait now observes both; `scripts/test_desktop.sh --jobs 4
+-Xswiftc -gnone --filter WorkCLISubscriptionTests` passed all 3 tests, including
+both completion and abandonment. Swift boundary checks passed. No whole-suite
+rerun is warranted solely for this test synchronization change.
+
+A separate autonomous Flow `5d9d6d99-96eb-4d39-997d-c17b77864bfc` was observed
+live during recovery, with Claude PID 78253 and a running kickoff step. Its
+launch reason reports retrying with lf 0.14.14 after the Keychain failure.
+This conversation leaves that Flow running and launches no competing delivery.
+Prepared PR copy is in `scratch/pr-title.txt` and `scratch/pr-body.md`;
+retain the validation limits and former cron install commands when publishing.
+
 Status: implemented and committed (`5b725154` + `bf76c3df` on base
 `ed568b1f`, tree clean); next gate. Six kickoff passes on 2026-10-21 (878ecf
 steer reconciliation, Claude credential relaunch, an `lf checkout update`

@@ -160,12 +160,8 @@ the two real ways a person asks for clipboard text; one `exit_reason` formatter
 for a provider's last word; the Pi extension's lf path in its spec, not in the
 inherited env; relay decided by whether stdout is a terminal.
 
-Next implement direction:
-
-- **One name for the update command.** Version skew tells you `lf self install`
-  for this machine and `ssh … 'lf install'` for the remote. README and user
-  guidance use `lf install` (shortest resolving form). Make the local branch of
-  `report_version` say `lf install` too.
+Resolved (bd449bd264): version skew names `lf install` on both sides,
+matching the README's shortest resolving form.
 
 Counterexample kept, accepted: `lf -a claude | tee log` (stdin a terminal,
 stdout a pipe) no longer gets the relayed screen. Piping an interactive TUI is
@@ -179,7 +175,4 @@ forwarded logins, and OpenCode Zen forwarding stay open product calls in
 
 ## Check results
 
-- `cargo clippy --all-targets -- -D warnings` clean; `cargo test --lib -- platform::clipboard harness::codex lf::commands::run machine_credentials machine::tests harness::context harness::pi` passed (compress pass); realign ran no tests (npm latest versions re-checked); full suites → gate/CI.
-
-Check (2026-10-21): version skew names `lf install` on both sides; `cargo test -p loopflow --lib -- machine::tests` 2 passed, `cargo clippy --all-targets -- -D warnings` clean.
-Check (2026-10-21, compress): clipboard attempts reuse `os_process::exit_reason`; `cargo test -p loopflow --lib -- platform::clipboard` 2 passed, clippy clean.
+Check (2026-10-21, compress): `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- platform::clipboard machine::tests` passed; full suites → gate/CI.

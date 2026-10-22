@@ -228,6 +228,7 @@ Check results:
 - 2026-10-21 baseline: `cargo test --test integration agent_startup` → pass, 24,638 / 20,878 rows.
 - 2026-10-21 implement: `agent_startup` (budget `< 18_000`) → pass, 15,740 / 13,825 rows; `cached_schema_is_reread_after_ddl_from_another_connection` → pass, fails with the cookie dropped from the key; `loopflow` lib `store::` → 342 pass (run from the built test binary; cargo rebuilt on each invocation under load); `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` → clean.
 - 2026-10-21 compress: `user_tables` deleted, cookie folded into `SchemaCookie`; `store::migrations` lib tests → 127 pass; `cargo fmt --check` → clean; clippy and affected suites left to gate.
+- 2026-10-21 gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` → clean; `agent_startup` → pass, 15,738 / 13,824 rows (budget `< 18_000`); `loopflow` lib `store::` → see below.
 
 Concept review (2026-10-21, headless): no change. The change has no user-facing
 surface; one schema reader with a read cache matches the accepted "cache the

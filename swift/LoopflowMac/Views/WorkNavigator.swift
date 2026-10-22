@@ -8,7 +8,6 @@ struct WorkNavigator: View {
     let onOpenSession: (SessionRecord) -> Void
     var onNewTaskSession: ((String) -> Void)?
     @Environment(\.palette) private var palette
-    @State private var hoveredTask: String?
     @State private var actionTaskID: String?
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
@@ -133,6 +132,7 @@ struct WorkNavigator: View {
             model.select(focusedWork)
             return .handled
         }
+        .renderFlash()
         .onExitCommand { focusedWork = nil; focusMemory.restore() }
         .onDisappear { if focusedWork != nil { focusMemory.restore() } }
     }
@@ -144,7 +144,9 @@ struct WorkNavigator: View {
         let sessions = model.taskSessions(id)
         let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
         let title = found?.task.task.name ?? "Task unavailable · \(id)"
-        return VStack(alignment: .leading, spacing: 6) {
+        // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
+        // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
+        return RowHover { hover in VStack(alignment: .leading, spacing: 6) {
             Text(title).font(Typography.strong(13)).lineLimit(2).help(title)
                 .allowsHitTesting(false)
             TimelineView(.periodic(from: .now, by: 5)) { clock in
@@ -155,14 +157,15 @@ struct WorkNavigator: View {
                         .help(preview.help).allowsHitTesting(false)
                     if let task = found?.task {
                         TaskRowMetadata(task: task, status: status, selected: selected,
-                            slotHint: (model.navigation.showsSlotHints || hoveredTask == id)
-                                ? model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil } : nil,
+                            slotHint: model.workingTaskIDs.firstIndex(of: id).flatMap { $0 < 9 ? "⌘\($0 + 1)" : nil },
+                            showsSlotHint: model.navigation.showsSlotHints, hover: hover,
                             sourceAge: preview.age)
                     } else {
                         Text("Planning unavailable").font(Typography.code(10))
                             .foregroundStyle(palette.textSecondary).allowsHitTesting(false)
                     }
                 }
+                .renderFlash()
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -183,7 +186,8 @@ struct WorkNavigator: View {
                 .frame(width: 2).padding(.vertical, 12).padding(.leading, 4)
                 .allowsHitTesting(false)
         }
-        .onHover { hoveredTask = $0 ? id : nil }
+        .renderFlash()
+        }
         .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarWaveID == nil ? model.workingTaskWorkID(row: id) : nil))
         .contextMenu {
             actions(for: id)
@@ -458,6 +462,17 @@ private struct SidebarResponderCapture: NSViewRepresentable {
         weak var view: NSView?
         var monitor: Any?
         init(memory: SidebarResponderMemory) { self.memory = memory }
+    }
+}
+
+/// Owns one row's hover. Its body never reads the flag, so hovering does not
+/// re-run the row; leaves given the flag read it themselves.
+private struct RowHover<Content: View>: View {
+    @ViewBuilder let content: (HoverFlag) -> Content
+    @State private var hover = HoverFlag()
+
+    var body: some View {
+        content(hover).hoverSource(hover)
     }
 }
 

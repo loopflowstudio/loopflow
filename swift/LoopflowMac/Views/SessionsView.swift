@@ -77,13 +77,6 @@ struct ConsoleCommands: Commands {
     }
 }
 
-/// The pane whose strip the pointer is over: only that pane shows Close.
-@MainActor
-@Observable
-final class PaneHover {
-    var paneId: String?
-}
-
 extension ShellTab {
     var terminal: TerminalIdentity? {
         location.map { .shell(id, machineId: $0.machineId) }
@@ -249,7 +242,15 @@ final class SessionsWorkspace {
             "--checkout", identity.worktree]
     }
     let multiplexer = MultiplexerStore()
-    let hover = PaneHover()
+    /// One flag per pane strip, read only by that strip's Close control, so a
+    /// crossing never re-renders another pane. Lookup itself is unobserved.
+    @ObservationIgnored private var stripHovers: [String: HoverFlag] = [:]
+    func stripHover(_ paneId: String) -> HoverFlag {
+        if let flag = stripHovers[paneId] { return flag }
+        let flag = HoverFlag()
+        stripHovers[paneId] = flag
+        return flag
+    }
     private(set) var isRestoringIntent = false
     private var unavailableDrafts: [WorkFileDraft] = []
     var persistenceError: String?
@@ -738,33 +739,37 @@ final class SessionsStore {
         // Working-set pages are filtered. Absence establishes neither deletion
         // nor completion and must not discard prepared commands or native drafts.
 
+        // Reconcile a copy and publish once: element writes notify even when equal,
+        // and every pane reads this array.
+        var next = sessions
         for record in records {
             let observedState: SessionItem.State = localTerminal(for: record) != nil
                 ? .live : record.action(.moveHere) != nil ? .elsewhere : .pending
-            if let index = _index(record.id) {
+            if let index = next.firstIndex(where: { $0.id == record.id }) {
                 // Keep a prepared command until the retained native view consumes it.
-                if case .prepared = sessions[index].state {
+                if case .prepared = next[index].state {
                     var observed = record
-                    observed.openArgv = sessions[index].record.openArgv
-                    sessions[index].record = observed
+                    observed.openArgv = next[index].record.openArgv
+                    next[index].record = observed
                     continue
                 }
-                sessions[index].record = record
-                if record.provider == sessions[index].agentOverride {
-                    sessions[index].agentOverride = nil
+                next[index].record = record
+                if record.provider == next[index].agentOverride {
+                    next[index].agentOverride = nil
                 }
-                if case .opening = sessions[index].state { continue }
+                if case .opening = next[index].state { continue }
                 if observedState == .pending {
-                    switch sessions[index].state {
+                    switch next[index].state {
                     case .failed, .ended: continue
                     default: break
                     }
                 }
-                sessions[index].state = observedState
+                next[index].state = observedState
             } else {
-                sessions.append(SessionItem(record: record, state: observedState))
+                next.append(SessionItem(record: record, state: observedState))
             }
         }
+        if next != sessions { sessions = next }
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
@@ -1128,7 +1133,7 @@ struct SessionsContentView: View {
                     case .adjacent(let offset): model.cycleWorkingTask(offset)
                     case .search, .toggleSidebar: break
                     }
-                }, modifiersChanged: { navigation.showsSlotHints = $0 }) {
+                }, modifiersChanged: { if navigation.showsSlotHints != $0 { navigation.showsSlotHints = $0 } }) {
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
         }

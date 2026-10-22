@@ -336,12 +336,10 @@ struct SessionPaneView: View {
     let onFocus: (String, String?) -> Void
 
     private var store: MultiplexerStore { workspace.multiplexer }
-    private var hover: PaneHover { workspace.hover }
+    private var hover: HoverFlag { workspace.stripHover(pane.id) }
     @State private var bellRinging = false
     @State private var terminalTitle: String?
     @State private var copyConfirmation: String?
-
-    private var hovering: Bool { hover.paneId == pane.id }
 
     private var item: SessionItem? {
         guard case .session(let id, _, _) = pane.content else { return nil }
@@ -371,6 +369,7 @@ struct SessionPaneView: View {
                 .allowsHitTesting(false)
         }
         .shadow(color: theme.palette.shadow.opacity(isFocused ? 0.22 : 0.08), radius: isFocused ? 4 : 1, y: isFocused ? 2 : 1)
+        .renderFlash()
         .animation(DesignAnimation.standard(reduceMotion), value: isFocused)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
@@ -458,24 +457,25 @@ struct SessionPaneView: View {
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
-            if isFocused && hovering {
-                HStack(spacing: 2) {
-                    stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
-                        closePane()
+            if isFocused {
+                HoverRevealed(flag: hover) {
+                    HStack(spacing: 2) {
+                        stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
+                            closePane()
+                        }
                     }
+                    .accessibilityIdentifier("pane-actions")
                 }
-                .transition(.opacity)
-                .accessibilityIdentifier("pane-actions")
             }
         }
         .padding(.leading, 12)
         .padding(.trailing, 4)
         .frame(height: 28)
         .contentShape(Rectangle())
-        .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { inside in
-            if inside { hover.paneId = pane.id } else if hover.paneId == pane.id { hover.paneId = nil }
+        .background(PaneHoverRegion(identifier: "pane-hover-\(pane.id)") { [hover] inside in
+            if hover.isHovered != inside { hover.isHovered = inside }
         })
-        .animation(DesignAnimation.fast(reduceMotion), value: hovering)
+        .renderFlash()
         .onTapGesture { focusPane() }
         .contextMenu { paneActions }
         .accessibilityIdentifier("pane-strip-\(pane.id)")

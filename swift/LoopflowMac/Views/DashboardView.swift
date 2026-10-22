@@ -216,6 +216,7 @@ struct DashboardView: View {
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)
                 .strokeBorder(workspaces.selectedWork == member.work ? palette.borderActive : palette.border))
             .contentShape(Rectangle())
+            .renderFlash()
             .simultaneousGesture(TapGesture().onEnded { workspaces.focus(member.work) })
     }
 

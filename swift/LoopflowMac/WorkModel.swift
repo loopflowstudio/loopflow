@@ -128,11 +128,17 @@ final class WorkModel {
             return
         }
         let previous = selectionPlans.value ?? []
-        selectionPlans = .available(plans.map { plan in
+        let next = WorkReading.available(plans.map { plan in
             guard let id = plan.dashboardID, let old = previous.first(where: { $0.dashboardID == id }),
                   (old.savedRevision ?? 0) > (plan.savedRevision ?? 0) else { return plan }
             return old
         })
+        // A dictionary-subscript write notifies even when equal, and every frame
+        // carries a new observedAt that no view reads. The sidebar, Dashboards and
+        // title read these plans, so an unchanged frame must not republish them.
+        if case .available(let current) = selectionPlans, case .available(let fresh) = next,
+           current.count == fresh.count, zip(current, fresh).allSatisfy({ $0.matches($1) }) {
+        } else { selectionPlans = next }
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
@@ -1256,7 +1262,7 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
-        previewCopy = frame.copy
+        if previewCopy != frame.copy { previewCopy = frame.copy }
         // A preview copy is where the data lives, so it is the data identity.
         let dataDirectory = frame.copy ?? frame.home
         if case .heartbeat = frame.content {
@@ -2606,5 +2612,16 @@ enum TaskOrderDrag {
     static func token(_ workID: String) -> String { "task-order:" + workID }
     static func taskID(_ token: String) -> String? {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
+    }
+}
+
+extension WorkViewPlan {
+    /// Equal apart from when it was observed. Name each displayed field here.
+    func matches(_ other: WorkViewPlan) -> Bool {
+        name == other.name && pinned == other.pinned && dashboardID == other.dashboardID
+            && repository == other.repository && selection == other.selection
+            && savedRevision == other.savedRevision && resolution == other.resolution
+            && arrangement == other.arrangement && projection == other.projection
+            && slots == other.slots && contents == other.contents
     }
 }

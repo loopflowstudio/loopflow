@@ -121,7 +121,6 @@
                 "section": "waiting",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                   "due_date": "2026-10-09",
@@ -342,7 +341,6 @@
                 "section": "later",
                 "task": {
                   "assignee": null,
-                  "completed": true,
                   "completed_at": "2026-10-08T23:28:31.532538801Z",
                   "description": "",
                   "due_date": null,
@@ -605,7 +603,6 @@
       "section": "later",
       "task": {
         "assignee": null,
-        "completed": true,
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
@@ -1729,7 +1726,6 @@
                 "section": "waiting",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
                   "due_date": "2026-10-09",
@@ -1935,7 +1931,6 @@
                 "section": "later",
                 "task": {
                   "assignee": null,
-                  "completed": true,
                   "completed_at": "2026-10-08T23:28:31.532538801Z",
                   "description": "",
                   "due_date": null,
@@ -2183,7 +2178,6 @@
       "section": "later",
       "task": {
         "assignee": null,
-        "completed": true,
         "completed_at": "2026-10-08T23:28:31.532538801Z",
         "description": "",
         "due_date": null,
@@ -3229,7 +3223,6 @@
                 "section": "now",
                 "task": {
                   "assignee": null,
-                  "completed": false,
                   "completed_at": null,
                   "description": "",
                   "due_date": null,
@@ -3477,7 +3470,6 @@
       "section": "now",
       "task": {
         "assignee": null,
-        "completed": false,
         "completed_at": null,
         "description": "",
         "due_date": null,

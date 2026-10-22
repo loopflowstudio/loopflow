@@ -94,7 +94,6 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(resolved.due_date.as_deref(), Some("2026-10-15"));
             assert_eq!(resolved.assignee.as_deref(), Some("assignee-1"));
             assert_eq!(resolved.state.as_deref(), Some("unstarted"));
-            assert!(!resolved.completed);
             assert!(resolved.completed_at.is_none());
             assert_eq!(resolved.title, record.item.name);
             assert_eq!(resolved.description, record.item.description);

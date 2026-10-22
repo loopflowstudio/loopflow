@@ -122,7 +122,6 @@ pub struct TaskSummary {
     pub name: String,
     pub description: String,
     pub rank: u32,
-    pub completed: bool,
     pub state: Option<String>,
     pub completed_at: Option<String>,
     pub due_date: Option<String>,
@@ -1031,9 +1030,7 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
 /// A Task's section, from the same planning primitives the row already carries.
 fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
-        return if crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
-            .is_some()
-        {
+        return if crate::linear::terminal_reason(task.task.state.as_deref()).is_some() {
             RoadmapSection::Later
         } else {
             RoadmapSection::NotStarted
@@ -1042,8 +1039,7 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::Unstarted)
-        && crate::linear::terminal_reason(task.task.state.as_deref(), task.task.completed)
-            .is_some();
+        && crate::linear::terminal_reason(task.task.state.as_deref()).is_some();
     if runtime.status.is_terminal() || runtime.status == TaskState::Paused || withdrawn {
         return RoadmapSection::Later;
     }
@@ -1242,9 +1238,9 @@ async fn snapshot_tasks(
     }
     let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
     details.sort_by(|left, right| {
-        left.task
-            .completed
-            .cmp(&right.task.completed)
+        let done = |task: &TaskSummary| task.state.as_deref() == Some("completed");
+        done(&left.task)
+            .cmp(&done(&right.task))
             .then(left.task.rank.cmp(&right.task.rank))
             .then(left.task.identifier.cmp(&right.task.identifier))
     });
@@ -1447,11 +1443,8 @@ async fn snapshot_task_detail(
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
             // Shared completion withdraws an unstarted Task, never advances its Workflow.
-            plan_terminal_reason: crate::linear::terminal_reason(
-                task.state.as_deref(),
-                task.completed,
-            )
-            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
+            plan_terminal_reason: crate::linear::terminal_reason(task.state.as_deref())
+                .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -1817,7 +1810,6 @@ fn task_summary(
         name: task.title.clone(),
         description: task.description.clone(),
         rank: task.rank,
-        completed: task.completed,
         state: task.state.clone(),
         completed_at: task.completed_at.clone(),
         assignee: task.assignee.clone(),
@@ -1985,11 +1977,7 @@ fn print_status(status: &WaveDetailSnapshot) {
                     .runtime
                     .as_ref()
                     .map(|runtime| runtime.status.label())
-                    .unwrap_or(if task.task.completed {
-                        "completed"
-                    } else {
-                        "unstarted"
-                    });
+                    .unwrap_or(task.task.state.as_deref().unwrap_or("unstarted"));
                 println!(
                     "  {}  {:<10}  {:<12}  {}  {}",
                     task.task.identifier,
@@ -2667,8 +2655,7 @@ mod tests {
                 .unwrap();
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
-            assert_eq!(detail.task.completed, item.completed);
-            let terminal = crate::linear::terminal_reason(item.state.as_deref(), item.completed);
+            let terminal = crate::linear::terminal_reason(detail.task.state.as_deref());
             assert_eq!(
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()

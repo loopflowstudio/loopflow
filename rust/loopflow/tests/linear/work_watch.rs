@@ -1151,22 +1151,12 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                                         change.field == "state" && change.error.is_some()
                                     })
                                 {
-                                    assert_eq!(
-                                        task.task.completed,
-                                        expected == loopflow::durable::TaskState::Done
-                                    );
+                                    let done = expected == loopflow::durable::TaskState::Done;
                                     assert_eq!(
                                         task.task.state.as_deref(),
-                                        Some(if task.task.completed {
-                                            "completed"
-                                        } else {
-                                            "unstarted"
-                                        })
+                                        Some(if done { "completed" } else { "unstarted" })
                                     );
-                                    assert_eq!(
-                                        task.task.completed_at.is_some(),
-                                        task.task.completed
-                                    );
+                                    assert_eq!(task.task.completed_at.is_some(), done);
                                     return runtime;
                                 }
                             }

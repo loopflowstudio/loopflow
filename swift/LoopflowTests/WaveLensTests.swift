@@ -186,7 +186,7 @@ struct WaveLensTests {
 
     private func makeTask(state: String, reason: String) throws -> WaveTaskWork {
         let json = """
-        {"task":{"repository_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"state":"unstarted","completed_at":null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
+        {"task":{"repository_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
         "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move":{"owner":"task","reason":"\(reason)"},

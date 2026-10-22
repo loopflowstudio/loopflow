@@ -409,7 +409,7 @@ struct WorkNavigationTests {
         let projection = WorkProjection(roadmaps: try roadmap().waves, inventory: try roadmap().tasks.items, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
         let completed = try #require(projection.waves[0].tasks.first)
-        #expect(completed.task.task.completed)
+        #expect(completed.task.task.isSuccessful)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
         #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
         let missing = WorkProjection(roadmaps: [], inventory: [], sessions: records)

@@ -15,7 +15,6 @@
     "assignee": null,
     "due_date": null,
     "state": "unstarted",
-    "completed": false,
     "completed_at": null,
     "linear_id": "issue-gmail",
     "pm_snapshot_synced_at": 1790683200,

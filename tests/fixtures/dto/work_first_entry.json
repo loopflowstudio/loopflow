@@ -243,7 +243,6 @@
               "state": "available"
             },
             "assignee": null,
-            "completed": false,
             "completed_at": null,
             "description": "Exercise the persisted lifecycle.",
             "due_date": null,

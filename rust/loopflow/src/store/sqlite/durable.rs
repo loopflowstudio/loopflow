@@ -745,7 +745,6 @@ mod durable_store_tests {
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         };

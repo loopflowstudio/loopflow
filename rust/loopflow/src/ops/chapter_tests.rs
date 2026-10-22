@@ -45,25 +45,25 @@ fn unreviewed_backlog_remains_while_started_work_moves() {
         completed: false,
     };
     assert_eq!(
-        classify_task(Some("unstarted"), false, &evidence).0,
+        classify_task(Some("unstarted"), &evidence).0,
         TaskDisposition::Historical
     );
     assert_eq!(
-        classify_task(Some("started"), false, &evidence).0,
+        classify_task(Some("started"), &evidence).0,
         TaskDisposition::Move
     );
     assert_eq!(
-        classify_task(Some("completed"), true, &evidence).0,
+        classify_task(Some("completed"), &evidence).0,
         TaskDisposition::Historical
     );
     evidence.authored = None;
     assert_eq!(
-        classify_task(Some("backlog"), false, &evidence).0,
+        classify_task(Some("backlog"), &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(Some("backlog"), false, &evidence).0,
+        classify_task(Some("backlog"), &evidence).0,
         TaskDisposition::Move
     );
 }
@@ -78,28 +78,28 @@ fn unresolved_abandonment_requires_explicit_settlement() {
         completed: false,
     };
     assert_eq!(
-        classify_task(Some("unstarted"), false, &evidence).0,
+        classify_task(Some("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
     assert_eq!(
-        classify_task(Some("canceled"), false, &evidence).0,
+        classify_task(Some("canceled"), &evidence).0,
         TaskDisposition::Historical
     );
     evidence.begun = true;
     assert_eq!(
-        classify_task(Some("unstarted"), false, &evidence).0,
+        classify_task(Some("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.begun = false;
     evidence.authored = Some(true);
     assert_eq!(
-        classify_task(Some("unstarted"), false, &evidence).0,
+        classify_task(Some("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
     evidence.abandoned = false;
     evidence.completed = true;
     assert_eq!(
-        classify_task(Some("unstarted"), false, &evidence).0,
+        classify_task(Some("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
 }
@@ -353,7 +353,6 @@ async fn local_task(
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: Observation::default(),
     };

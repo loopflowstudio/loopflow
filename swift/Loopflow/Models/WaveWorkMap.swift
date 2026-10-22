@@ -110,13 +110,12 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let state: String?
     public let completedAt: String?
     public let dueDate: String?
-    public let completed: Bool
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
         case repositoryId = "repository_id", projectId = "project_id", waveId = "wave_id"
         case repo
-        case id, identifier, name, description, rank, completed, state, assignee, sync, acquisition
+        case id, identifier, name, description, rank, state, assignee, sync, acquisition
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
@@ -135,7 +134,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     }
 
     public var isTerminal: Bool { isSuccessful || state == "canceled" || state == "duplicate" }
-    public var isSuccessful: Bool { state == "completed" || (state == nil && completed) }
+    public var isSuccessful: Bool { state == "completed" }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {

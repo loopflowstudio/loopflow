@@ -495,8 +495,8 @@ pub struct Task {
     pub rank: u32,
     pub assignee: Option<String>,
     pub due_date: Option<String>,
+    /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
-    pub completed: bool,
     pub completed_at: Option<String>,
     /// Optional Linear binding, not a second owner of this record.
     pub linear_id: Option<LinearIssueId>,
@@ -764,7 +764,6 @@ mod tests {
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }

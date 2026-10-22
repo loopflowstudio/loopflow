@@ -1335,7 +1335,6 @@ mod tests {
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,
         }
@@ -1636,7 +1635,6 @@ mod tests {
             }
             let record = store.sqlite.task(&task.id).unwrap().unwrap();
             assert_eq!(record.state.as_deref(), Some("unstarted"));
-            assert!(!record.completed);
             assert_eq!(record.completed_at, None);
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);

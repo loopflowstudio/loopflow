@@ -332,7 +332,7 @@ struct DTOFixtureTests {
         let due = try #require(rows["due"])
         #expect(due.runtime == nil)
         #expect(due.task.dueDate == "2026-10-08")
-        #expect(!due.task.completed)
+        #expect(!due.task.isSuccessful)
     }
 
     @Test("Planning delivery retains uncertainty, errors and both conflict values")

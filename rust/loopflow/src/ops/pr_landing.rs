@@ -2056,7 +2056,6 @@ mod tests {
             assignee: None,
             due_date: None,
             state: None,
-            completed: false,
             completed_at: None,
             observation: Observation::NotRequired,
         };

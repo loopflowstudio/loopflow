@@ -106,7 +106,6 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         assignee: None,
         due_date: input.due_date.clone(),
         state: Some("unstarted".into()),
-        completed: false,
         completed_at: None,
         observation: crate::work::task::Observation::NotRequired,
     };
@@ -1127,12 +1126,12 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
-    let (state, completed): (Option<String>, bool) = conn.query_row(
-        "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+    let state: Option<String> = conn.query_row(
+        "SELECT COALESCE(planning_state,CASE WHEN planning_completed=1 THEN 'completed' END) FROM tasks WHERE id=?1",
         [task.id.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    if crate::linear::terminal_reason(state.as_deref(), completed).is_some()
+    if crate::linear::terminal_reason(state.as_deref()).is_some()
         && !super::durable::task_state_in(conn, &task.id)?.is_started()
     {
         return Err(StoreError::InvalidAuthority(
@@ -1255,7 +1254,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
                 Edit::TaskDueDate(task.due_date.clone()),
                 Edit::Disposition(crate::work::edit::Disposition {
                     planning_state: task.state.clone(),
-                    planning_completed: i64::from(task.completed),
+                    planning_completed: i64::from(task.state.as_deref() == Some("completed")),
                     planning_completed_at: task.completed_at.clone(),
                 }),
             ],
@@ -1393,7 +1392,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
     t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1831,8 +1830,8 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
-        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(23)?)
-            .map_err(|error| invalid_column(23, error))?,
+        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(22)?)
+            .map_err(|error| invalid_column(22, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
         branch: row.get(14)?,
@@ -1845,8 +1844,7 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
         assignee: row.get(18)?,
         due_date: row.get(19)?,
         state: row.get(20)?,
-        completed: row.get(21)?,
-        completed_at: row.get(22)?,
+        completed_at: row.get(21)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -2549,7 +2547,6 @@ mod local_planning_tests {
         assert_eq!(saved.rank, 7);
         assert_eq!(saved.assignee.as_deref(), Some("assignee-1"));
         assert_eq!(saved.state.as_deref(), Some("completed"));
-        assert!(saved.completed);
         assert_eq!(saved.completed_at.as_deref(), Some("2026-10-10T12:00:00Z"));
         assert_eq!(saved.due_date, task.due_date);
         assert_eq!(saved.worktree, task.worktree);
@@ -2580,7 +2577,6 @@ mod local_planning_tests {
             assert_eq!(imported.assignee, saved.assignee);
             assert_eq!(imported.due_date, saved.due_date);
             assert_eq!(imported.state, saved.state);
-            assert_eq!(imported.completed, saved.completed);
             assert_eq!(imported.completed_at, saved.completed_at);
             assert!(imported.worktree.is_none());
             assert!(peer.task_prs(&task.id).unwrap().is_empty());

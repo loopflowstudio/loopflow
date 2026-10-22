@@ -2024,7 +2024,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             assert_eq!(retained.description, "");
             assert_eq!(retained.rank, 0);
             assert_eq!(retained.assignee.as_deref(), Some("person-id"));
-            assert!(retained.completed);
+            assert_eq!(retained.state.as_deref(), Some("completed"));
             let changes = store.pending_task_changes(&second).unwrap();
             for field in ["task_title", "task_assignee"] {
                 assert!(changes.iter().any(|change| change.value.field() == field));

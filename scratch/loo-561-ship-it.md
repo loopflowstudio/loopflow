@@ -3,8 +3,9 @@
 Status (2026-10-22, implement pass): design accepted (Jack Heart, 2026-10-21/22). Built: graphs
 with `interactive:` stages, the landing engine fixes, `lf ship` with stand-ins, Shipping lifecycle
 with Stop, #1580 taken (Shipping is `state:shipping`), one landing engine with lazy recovery,
-completion on merge while shipping, blocked backoff, Ship it on the Task heading. Remaining: the
-rest of the state-model cleanup (item 3); commit the uncommitted `task_automation` fold. Drafts beside this Task's `ship_it.sql`: #1643's
+completion on merge while shipping, blocked backoff, Ship it on the Task heading, the
+`task_automation` fold (63f13b3805). Remaining: item 3's Linear In Review↔shipping mapping.
+Drafts beside this Task's `ship_it.sql`: #1643's
 `rename_flow_to_graph.sql`, main's `detached_owner_viewers.sql`, `saved_selections.sql`,
 `two_person_gaps.sql`.
 
@@ -99,21 +100,30 @@ Five hand restarts of `lf pr land --wait-and-fix` in one day. Each is handled on
   `task status/list`, `wave status/list/show`, `history`, `monitor`.
 - `lf ship` completes on merge (`ship_complete_if_merged`), backs off blocked stand-ins
   (`blocked_backoff`, 1→30 min, rechecking Pause/Stop).
-- `ops/task_automation.rs` and `store/sqlite/automation.rs` deleted (uncommitted at realign,
-  2026-10-22): execution blockers live in `ops/task_execution.rs`, repair admission
+- `ops/task_automation.rs` and `store/sqlite/automation.rs` deleted (63f13b3805): execution blockers live in `ops/task_execution.rs`, repair admission
   (`RepairAttempt`, `RepairReservation`) in `store/sqlite/ci_incidents.rs`, `repository_tasks`
   in `pr_landing.rs`; the stand-in decision in `lf/commands/ship.rs` reads as one match.
 
 ## Remaining
 
-3. **State-model cleanup.** Done: `AbandonIntent` and `abandon_requested_at` (Task and Project)
-   deleted; nothing set them, and the Task save nulled `abandon_reason` on every write. Left:
-   `tasks.planning_state`/`planning_completed(_at)` (Linear's mirrored state; read by
-   `linear/acceptance.rs` writeback and `ops/task.rs`; distinct from the `PlanningState` evidence
-   enum, which stays), duplicate DTO state fields, and folding `completion_request/error` into the
-   done transition plus writeback if nothing else reads it. Linear mapping:
-   Backlog/Todo↔unstarted, In Progress↔working, In Review↔shipping, Done↔done,
-   Canceled↔abandoned, through the one writer.
+3. **State-model cleanup.** Done: `AbandonIntent`/`abandon_requested_at` deleted; the duplicate
+   `completed` bool deleted from the `Task` and `TaskSummary` DTOs (Rust, Swift, fixtures) —
+   `state == "completed"` says it, and `terminal_reason`/`classify_task` take the state alone.
+   Kept, with reasons (2026-10-22):
+   - `tasks.planning_completed(_at)` is the lifecycle's done authority (`task_state_sql`), not a
+     mirror, and `planning_state`/`planning_completed` travel in the portable `Disposition`
+     WorkValue that released peers read and the edit log retains. Folding them is a shared-wire
+     change with its own Task, not a cleanup here.
+   - `completion_request/error` is read: `task_completion_pending`/`fail_task_completion` carry
+     "a failed completion request retries without replaying the route".
+   Left: In Review↔shipping. The one writer (`task_state_delivery::queue_in`) speaks Linear state
+   *types* (`unstarted|started|completed|canceled`); In Review is a named `started` state, so
+   shipping needs a per-team state lookup by name. Backlog/Todo↔unstarted, In Progress↔working,
+   Done↔done, Canceled↔abandoned already hold through that writer.
+
+Check (2026-10-22): clippy, fmt, `dto_fixtures` 42 ok; lib groups pr_landing/chapter/children/
+waves/task_execution ok; `ship`, `task_work`, `ops::linear` mixes each fail 1–2 planning/store
+tests that pass alone (shared-runner isolation, owner: gate).
 
 Settled this pass (2026-10-22):
 - Completion on merge is the ship process's job: before each route it reads the PR and completes
@@ -123,6 +133,38 @@ Settled this pass (2026-10-22):
   heading, hover-revealed; `ShipNoticeToast` Undo = Stop shipping. Not in `TaskWorkflowHeader`,
   sidebar rows, the sidebar/Dashboard/Sessions menus (`TaskActionItems`). Variant C (Workflow
   rail) is later and unsettled.
+
+7. **Post-merge `verify` (Jack Heart, 2026-10-22). ON HOLD — do not build yet.** Jack then
+   added: "its notable that right now verify often wants to be human, and its very task by task
+   if needed" and "im not exactly sure how to fit that into our model". Then, correcting the
+   operator's "human-only stage" reading: "no verify is not a stage only humans can do". So verify
+   is an ordinary `interactive:` stage after `deliver` (a person usually, a stand-in when
+   shipping), and whether a Task has anything to verify is per Task. Jack: "over time i hope to
+   make robots do it almost exclusively / but rigt now they often think they cant". So the
+   `verify` skill's main job is capability: teach the headless routes (branch/main `lf` with
+   `LF_HOME`, lf-world fake worlds, `loopflow-dev.py run-debug --world`, app builds and
+   view/interaction tests, headless Chrome screenshots, the installed binary after release) and
+   treat "can't verify" as a finding to fix, never a hand-back. The shape below is a
+   draft under discussion, not direction. Leave `deliver` and completion-on-merge as they are.
+   Draft: Jack: "verify sounds good. Verify should
+   either close the task OR start a new PR to fix whats found. i have explored both allowing new
+   PRs on a task OR just doing followup tasks. i think allowing multiple PRs on task may be messy
+   but may also adapt better to arbitrary stuff happening". Shape (operator reading, reversible):
+   - `deliver` becomes `gate → land --wait-and-fix → verify`. `verify` is a skill a stand-in runs
+     on main after the merge: the Task's acceptance against the merged result (headless demo of
+     the changed behavior; installed acceptance where the Task names it). Main's own CI on the
+     merge commit is not re-checked; the merge queue already tested the merged result.
+   - Pass: the route reaches `end`, the Task completes. Merge alone no longer completes a
+     shipping Task: the merge check in `lf ship` skips the pre-merge routes and runs what follows
+     `land`, so a hand-merged PR is still verified. A non-shipping Task keeps today's rule.
+   - Findings the Task promised: fix forward in the same Task. Its branch restarts from main, a
+     new PR becomes the current PR and the earlier one stays as delivery history (the existing
+     serial-PR rule in docs/architecture-reference.md "Task delivery algorithm"), then `deliver`
+     runs again. The Task stays `shipping` throughout, with reason "verifying" / "fixing after
+     merge". Findings outside the Task's outcome become a linked follow-up Task (existing
+     "distinct outcome" rule). No revert.
+   - Open: Jack is undecided between multi-PR and follow-up Tasks as the general answer; this
+     uses the serial same-Task path the model already supports. Revisit at demo.
 
 ## Done when
 

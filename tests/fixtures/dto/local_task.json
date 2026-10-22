@@ -71,7 +71,6 @@
     "section": "waiting",
     "task": {
       "assignee": null,
-      "completed": false,
       "completed_at": null,
       "description": "Keep the escaped quote",
       "due_date": null,

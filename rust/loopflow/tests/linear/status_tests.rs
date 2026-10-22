@@ -279,7 +279,6 @@ fn seed_stale_project_work(
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: Observation::NotRequired,
     };

@@ -433,7 +433,6 @@ fn register_task_fixture(
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };

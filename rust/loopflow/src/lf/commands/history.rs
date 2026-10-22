@@ -282,6 +282,13 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     }
 }
 
+/// What `lf history show` found: this Machine's own record, or a copy.
+#[derive(Debug)]
+enum Shown {
+    Local(Option<crate::process::LfProcess>),
+    Copied(crate::machine_records::CopiedHistory),
+}
+
 fn show(
     id: &str,
     json: bool,
@@ -291,7 +298,7 @@ fn show(
     context: bool,
     instructions: bool,
 ) -> anyhow::Result<()> {
-    let process = tokio::runtime::Runtime::new()?.block_on(async {
+    let shown = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let process = store.resolve_process(id).await?;
         let session = store.session(id).await?;
@@ -299,10 +306,13 @@ fn show(
             process.is_none() || session.is_none(),
             "Identity matches both a process and a Session; use an exact identity"
         );
-        anyhow::ensure!(
-            process.is_some() || session.is_some(),
-            "Process or Session {id} was not found"
-        );
+        if process.is_none() && session.is_none() {
+            // A Session copied from a given-back Machine, when nothing here is it.
+            let copied = store.sqlite.copied_history(id)?;
+            let copied =
+                copied.with_context(|| format!("Process or Session {id} was not found"))?;
+            return Ok(Shown::Copied(copied));
+        }
         if let Some(input) = input {
             anyhow::ensure!(session.is_some(), "--input requires a Session identity");
             let captured = store.sqlite.input_history(input)?;
@@ -311,8 +321,26 @@ fn show(
                 "Input does not belong to Session {id}"
             );
         }
-        Ok::<_, anyhow::Error>(process)
+        Ok::<_, anyhow::Error>(Shown::Local(process))
     })?;
+    let process = match shown {
+        Shown::Local(process) => process,
+        Shown::Copied(copied) => {
+            anyhow::ensure!(
+                !json && !final_answer && !context && !instructions && input.is_none(),
+                "Session {id} is a copy from {}; it reads as text, or as raw rows with --events",
+                copied.session.origin_name()
+            );
+            if events {
+                for event in &copied.events {
+                    println!("{}", serde_json::to_string(&event.row)?);
+                }
+            } else {
+                println!("{}", copied.render(&crate::store::lf_home_dir()));
+            }
+            return Ok(());
+        }
+    };
     match process {
         Some(process) => {
             anyhow::ensure!(

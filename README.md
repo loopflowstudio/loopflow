@@ -201,10 +201,11 @@ lf machine end code-1                                         # give a rented ma
 
 Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`). A
 rented machine's own guardian deletes it at its deadline or when its budget runs
-out. The end of a forwarded `lf task run`, and `lf ondemand list`, give back
-drained machines: first their Sessions and Processes are copied here (`lf
-session list` shows them "from code-1"), then the pod is deleted. A failed copy
-or unpushed work refuses every give-back but `--force`.
+out. The end of a forwarded `lf task run`, and the scheduled `lf task
+reconcile`, give back drained machines: first their Sessions and Processes are
+copied here (`lf session list` shows them "from code-1", `lf history show`
+opens one), then the pod is deleted. A failed copy or unpushed work refuses
+every give-back but `--force`. `lf ondemand list` never ends a machine.
 
 Task comments in Linear reach the Task's next useful boundary: before a Graph step,
 after an agent turn, when showing planning, and before a Linear write. Team checks

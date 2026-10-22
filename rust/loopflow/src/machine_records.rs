@@ -97,6 +97,90 @@ impl CopiedSession {
     }
 }
 
+/// A copied Session with what its origin recorded about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopiedHistory {
+    pub session: CopiedSession,
+    pub task_id: Option<String>,
+    /// A path on the origin, which may no longer exist anywhere.
+    pub cwd: Option<String>,
+    pub created_at: Option<i64>,
+    /// When this Machine last copied it.
+    pub copied_at: i64,
+    pub events: Vec<CopiedEvent>,
+}
+
+/// One session event as its origin wrote it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CopiedEvent {
+    pub kind: String,
+    pub observed_at: Option<i64>,
+    /// The capture a `captured` event names.
+    pub artifact_key: Option<String>,
+    pub row: serde_json::Value,
+}
+
+impl CopiedHistory {
+    /// Where an event's copied capture lives here, when it was copied.
+    fn capture_dir(&self, lf_home: &Path, event: &CopiedEvent) -> Option<PathBuf> {
+        let key = event.artifact_key.as_deref()?;
+        crate::session_record::record_dir(&copies_home(lf_home, &self.session.origin), key)
+            .filter(|dir| dir.is_dir())
+    }
+
+    /// The text `lf history show` prints for a copied Session.
+    pub fn render(&self, lf_home: &Path) -> String {
+        let session = &self.session;
+        let mut lines = vec![
+            format!(
+                "Session {} · from {} (copied {})",
+                session.id,
+                session.origin_name(),
+                when(Some(self.copied_at))
+            ),
+            format!("Title: {}", session.title),
+        ];
+        if let Some(task) = &self.task_id {
+            lines.push(format!("Task: {task}"));
+        }
+        lines.push(format!(
+            "Working directory on {}: {}",
+            session.origin_name(),
+            self.cwd.as_deref().unwrap_or("unknown")
+        ));
+        lines.push(format!("Created: {}", when(self.created_at)));
+        lines.push(match session.completed_at {
+            Some(at) => format!("Completed: {}", when(Some(at))),
+            None => "Completed: not recorded before the copy".to_string(),
+        });
+        lines.push(format!("Events: {}", self.events.len()));
+        for event in &self.events {
+            let capture = match (&event.artifact_key, self.capture_dir(lf_home, event)) {
+                (_, Some(dir)) => format!(" {}", dir.display()),
+                (Some(key), None) => format!(" {key} (capture not copied)"),
+                (None, None) => String::new(),
+            };
+            lines.push(format!(
+                "  {} {}{capture}",
+                when(event.observed_at),
+                event.kind
+            ));
+        }
+        lines.join("\n")
+    }
+}
+
+/// Local date and time, as people read history.
+fn when(at: Option<i64>) -> String {
+    at.and_then(|at| chrono::DateTime::from_timestamp(at, 0))
+        .map(|at| {
+            at.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 /// Write this Machine's records since `since` (unix seconds).
 ///
 /// # Errors

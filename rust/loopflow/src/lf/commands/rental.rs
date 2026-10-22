@@ -191,9 +191,10 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             );
         }
         OndemandCommand::List { json } => {
+            // A listing, even one a client polls, never ends a paid machine.
             let api = RunPod::from_env().ok();
             if let Some(api) = &api {
-                pass(sqlite, api)?;
+                refresh_all(sqlite, api)?;
             }
             let listings = sqlite
                 .ondemands()?
@@ -756,22 +757,40 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
     give_back(sqlite, &api, &rental, &machine, true, force)
 }
 
-/// One reconciliation of every live rental with its provider: adopt or forget
-/// unconfirmed creates, notice pods the guardian deleted, update costs, and
-/// give back Task rentals whose work has drained or whose soft deadline came.
-pub(crate) fn pass(sqlite: &SqliteStore, api: &RunPod) -> anyhow::Result<()> {
-    for rental in sqlite.rentals(None)? {
-        if !rental.state.is_live() {
-            continue;
-        }
-        if let Err(error) = reconcile(sqlite, api, &rental) {
+fn live_rentals(sqlite: &SqliteStore) -> anyhow::Result<Vec<Rental>> {
+    let mut rentals = sqlite.rentals(None)?;
+    rentals.retain(|rental| rental.state.is_live());
+    Ok(rentals)
+}
+
+/// Bring every live rental up to date with its provider, ending none.
+fn refresh_all(sqlite: &SqliteStore, api: &RunPod) -> anyhow::Result<()> {
+    for rental in live_rentals(sqlite)? {
+        if let Err(error) = refresh(sqlite, api, &rental) {
             eprintln!("{}: {error:#}", rental.provider_name);
         }
     }
     Ok(())
 }
 
+/// Refresh one rental, then give it back if it is a Task rental whose work
+/// has drained or whose soft deadline came.
 fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<()> {
+    let Some(rental) = refresh(sqlite, api, rental)? else {
+        return Ok(());
+    };
+    let Some(machine_id) = &rental.machine_id else {
+        return Ok(());
+    };
+    let Some(machine) = sqlite.machine_by_id(machine_id)? else {
+        return Ok(());
+    };
+    give_back(sqlite, api, &rental, &machine, false, false)
+}
+
+/// Adopt or lose an unconfirmed create, notice a pod already gone, and update
+/// cost. Returns the rental when its pod is still there.
+fn refresh(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Result<Option<Rental>> {
     let pod = match &rental.provider_id {
         // Requested or unconfirmed: only the name can find it.
         None => {
@@ -786,9 +805,9 @@ fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Res
                 }
                 Resolution::Lost => {
                     sqlite.set_rental_state(&rental.id, RentalState::Lost)?;
-                    return Ok(());
+                    return Ok(None);
                 }
-                Resolution::Wait => return Ok(()),
+                Resolution::Wait => return Ok(None),
             }
         }
         Some(id) => match api.pod(id)? {
@@ -796,25 +815,12 @@ fn reconcile(sqlite: &SqliteStore, api: &RunPod, rental: &Rental) -> anyhow::Res
             // Its guardian, or someone, already deleted it.
             _ => {
                 sqlite.set_rental_state(&rental.id, RentalState::Ended)?;
-                return Ok(());
+                return Ok(None);
             }
         },
     };
     sqlite.set_rental_cost(&rental.id, api.billed(&pod, now())?)?;
-    let Some(machine_id) = &rental.machine_id else {
-        return Ok(());
-    };
-    let Some(machine) = sqlite.machine_by_id(machine_id)? else {
-        return Ok(());
-    };
-    give_back(
-        sqlite,
-        api,
-        &sqlite.rental(&rental.id)?,
-        &machine,
-        false,
-        false,
-    )
+    Ok(Some(sqlite.rental(&rental.id)?))
 }
 
 fn give_back(
@@ -966,7 +972,7 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
 
 /// After a run forwarded to `machine` returns: if it is a live rental, give
 /// it back when its work has drained. Problems are reported, never raised;
-/// `lf ondemand list` runs the same pass again.
+/// `lf machine end` or the periodic Task check gives it back later.
 pub fn settle(machine: &MachineId) {
     let result = (|| -> anyhow::Result<()> {
         let runtime = tokio::runtime::Runtime::new()?;
@@ -979,12 +985,48 @@ pub fn settle(machine: &MachineId) {
             return Ok(());
         }
         let api = RunPod::from_env()
-            .context("`lf ondemand list` gives it back once RUNPOD_API_KEY is set")?;
+            .context("`lf machine end` gives it back once RUNPOD_API_KEY is set")?;
         reconcile(sqlite, &api, &rental)
     })();
     if let Err(error) = result {
         eprintln!("{machine}: {error:#}");
     }
+}
+
+/// The scheduled Task check's give-back pass. Without `RUNPOD_API_KEY` it
+/// reports only rentals already past their soft deadline, which then wait for
+/// `lf machine end` or their guardian.
+///
+/// # Errors
+/// When the store cannot be read, or a rental is due and the key is missing.
+pub fn check() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = open_store(&runtime)?;
+    let sqlite = &store.sqlite;
+    let live = live_rentals(sqlite)?;
+    if live.is_empty() {
+        return Ok(());
+    }
+    let Ok(api) = RunPod::from_env() else {
+        let due: Vec<&str> = live
+            .iter()
+            .filter(|rental| now() >= rental.soft_deadline())
+            .map(|rental| rental.provider_name.as_str())
+            .collect();
+        anyhow::ensure!(
+            due.is_empty(),
+            "{} past the soft deadline, and RUNPOD_API_KEY is not set here; \
+             `lf machine end` gives each back, or its guardian deletes it at the deadline",
+            due.join(", ")
+        );
+        return Ok(());
+    };
+    for rental in &live {
+        if let Err(error) = reconcile(sqlite, &api, rental) {
+            eprintln!("{}: {error:#}", rental.provider_name);
+        }
+    }
+    Ok(())
 }
 
 /// Live agent processes and repositories with work not on any remote.
@@ -1043,7 +1085,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{end_rental, read_holdings, Ended};
+    use super::{end_rental, read_holdings, refresh_all, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::runpod::RunPod;
@@ -1141,6 +1183,20 @@ mod tests {
         })
         .unwrap();
         assert!(matches!(ended, Ended::Uncopied(_)));
+        assert!(!deleted(&log));
+        assert_eq!(
+            store.rental(&rental.id).unwrap().state,
+            RentalState::Running
+        );
+    }
+
+    #[test]
+    fn listing_a_drained_rental_leaves_it_and_its_pod() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, api, log) = running(dir.path());
+        // Rented for a Task, holding none, with its pod still billing: drained.
+        assert!(!rental.by_hand);
+        refresh_all(&store, &api).unwrap();
         assert!(!deleted(&log));
         assert_eq!(
             store.rental(&rental.id).unwrap().state,

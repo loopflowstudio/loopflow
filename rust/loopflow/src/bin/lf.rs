@@ -942,6 +942,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     .errors
                     .push(format!("AgentProcess settlement: {error}")),
             }
+            // Rented machines whose work drained, or whose soft deadline came, go back.
+            if let Err(error) = loopflow::lf::commands::rental::check() {
+                result.errors.push(format!("Rentals: {error:#}"));
+            }
             if *json {
                 println!("{}", serde_json::to_string(&result)?);
             }

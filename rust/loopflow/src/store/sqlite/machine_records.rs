@@ -1,10 +1,12 @@
 //! Rows exported for another Machine and the copies this Machine keeps.
 //! Export reads every table inside one savepoint, so a copy is one snapshot.
 use rusqlite::types::ValueRef;
-use rusqlite::{params, Connection, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{MachineId, RepositoryId, TaskId};
-use crate::machine_records::{CopiedSession, CopyCounts, Record, RecordKind};
+use crate::machine_records::{
+    CopiedEvent, CopiedHistory, CopiedSession, CopyCounts, Record, RecordKind,
+};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
@@ -213,5 +215,71 @@ impl SqliteStore {
             },
         )?;
         Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// One copied Session and its events in their origin's order, when a
+    /// given-back Machine's copy holds it.
+    pub fn copied_history(&self, session: &str) -> StoreResult<Option<CopiedHistory>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let found = conn
+            .query_row(
+                "SELECT r.origin_machine_id, m.label, r.row, r.observed_at
+                 FROM machine_records r LEFT JOIN machines m ON m.id=r.origin_machine_id
+                 WHERE r.kind='session' AND r.key=?1
+                 ORDER BY r.observed_at DESC LIMIT 1",
+                [session],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((origin, origin_label, row, copied_at)) = found else {
+            return Ok(None);
+        };
+        let row: serde_json::Value = serde_json::from_str(&row)?;
+        let mut statement = conn.prepare(
+            "SELECT row FROM machine_records
+             WHERE origin_machine_id=?1 AND kind='session_event'
+               AND json_extract(row,'$.session_id')=?2
+             ORDER BY CAST(key AS INTEGER)",
+        )?;
+        let events = statement
+            .query_map(params![origin, session], |row| row.get::<_, String>(0))?
+            .map(|row| -> StoreResult<CopiedEvent> {
+                let row: serde_json::Value = serde_json::from_str(&row?)?;
+                let payload = row["payload"]
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok());
+                Ok(CopiedEvent {
+                    kind: row["kind"].as_str().unwrap_or_default().to_string(),
+                    observed_at: row["observed_at"].as_i64(),
+                    artifact_key: payload
+                        .as_ref()
+                        .and_then(|payload| payload["artifact_key"].as_str())
+                        .map(str::to_string),
+                    row,
+                })
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
+        let text = |name: &str| row[name].as_str().map(str::to_string);
+        Ok(Some(CopiedHistory {
+            session: CopiedSession {
+                origin: MachineId::from_raw(origin),
+                origin_label,
+                id: session.to_string(),
+                title: text("title").unwrap_or_default(),
+                completed_at: row["completed_at"].as_i64(),
+            },
+            task_id: text("task_id"),
+            cwd: text("cwd"),
+            created_at: row["created_at"].as_i64(),
+            copied_at,
+            events,
+        }))
     }
 }

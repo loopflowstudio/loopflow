@@ -90,3 +90,13 @@ written there is RunPod's disk until wiped, and stays valid. The brief directs
 whether give-back should sign out first where a provider supports it, or
 rented machines should get minted, short-lived GitHub credentials (the
 "hardware Jack does not own root on" trigger from the July forwarding decision).
+
+## Raised in the post-review implement pass (2026-10-21)
+
+### Q9. The scheduled check and RUNPOD_API_KEY
+
+The installed `lf task reconcile` schedule runs without Doppler, so its give-back
+pass usually has no key. Taken: it then does nothing until a rental passes its
+soft deadline, and from there reports an error each minute naming the rental
+(`lf machine end` or the guardian resolves it). Alternative: the Doppler
+reference of Q3, so the schedule can resolve the key itself.

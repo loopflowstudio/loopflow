@@ -191,6 +191,43 @@ fn copies_are_the_final_record_once_the_origin_is_gone() {
 }
 
 #[test]
+fn a_copied_session_opens_after_its_origin_is_gone() {
+    let laptop_home = tempfile::tempdir().unwrap();
+    let origin;
+    let here;
+    {
+        let worker_home = tempfile::tempdir().unwrap();
+        let pod = worker(worker_home.path());
+        origin = pod.local_machine().unwrap().id;
+        here = laptop(laptop_home.path(), &origin);
+        import(
+            &here,
+            laptop_home.path(),
+            &origin,
+            exported(&pod, worker_home.path()).as_slice(),
+        )
+        .unwrap();
+    }
+    here.remove_machine("code-1").unwrap();
+    assert!(here.copied_history("not-a-session").unwrap().is_none());
+
+    let history = here.copied_history(SESSION).unwrap().unwrap();
+    assert_eq!(history.task_id.as_deref(), Some(TASK));
+    assert_eq!(history.events.len(), 1);
+    assert_eq!(history.events[0].kind, "captured");
+    let shown = history.render(laptop_home.path());
+    assert!(
+        shown.contains(&format!("Session {SESSION} · from {origin}")),
+        "{shown}"
+    );
+    assert!(shown.contains("Title: Rent pods"), "{shown}");
+    let capture =
+        crate::session_record::record_dir(&copies_home(laptop_home.path(), &origin), ARTIFACT)
+            .unwrap();
+    assert!(shown.contains(&capture.display().to_string()), "{shown}");
+}
+
+#[test]
 fn an_export_from_another_machine_is_refused() {
     let (worker_home, laptop_home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let pod = worker(worker_home.path());

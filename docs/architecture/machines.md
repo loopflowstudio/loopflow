@@ -249,9 +249,11 @@ first, plus capture files. They land in `machine_records` keyed by origin and
 row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
 own tables, so no reconciler, attachment or Task judgment acts on a copy. An
 export from any Machine but the one expected is refused; a failed copy deletes
-nothing. `lf session list` and `lf task status` read copies "from <machine>"
-after the pod is gone. The end of a forwarded `lf task run` runs the give-back
-pass for its rented Machine.
+nothing. `lf session list` and `lf task status` name copies "from <machine>"
+after the pod is gone, and `lf history show <session>` opens one. The give-back
+pass runs at the end of a forwarded `lf task run` for its rented Machine and in
+the scheduled `lf task reconcile` for every rental; `lf ondemand list` only
+refreshes provider state and never ends a machine.
 
 ## Process topology
 

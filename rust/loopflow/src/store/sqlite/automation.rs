@@ -28,8 +28,6 @@ pub(crate) enum RepairAttempt {
     Finished {
         /// Unix seconds.
         ended_at: i64,
-        conclusion: Option<String>,
-        error: Option<String>,
     },
 }
 
@@ -46,16 +44,13 @@ impl SqliteStore {
                 "SELECT repair_conclusion IS NOT NULL
                      OR (responded_at IS NOT NULL AND repair_lf_process_id IS NULL)
                      OR (repair_finished_at IS NOT NULL AND repair_retries >= ?2),
-                     COALESCE(repair_finished_at, responded_at / 1000000000, updated_at / 1000000000),
-                     repair_conclusion, repair_error
+                     COALESCE(repair_finished_at, responded_at / 1000000000, updated_at / 1000000000)
                  FROM ci_incidents WHERE identity=?1",
                 params![identity, startup_retries],
                 |row| {
                     Ok(if row.get::<_, bool>(0)? {
                         RepairAttempt::Finished {
                             ended_at: row.get(1)?,
-                            conclusion: row.get(2)?,
-                            error: row.get(3)?,
                         }
                     } else {
                         RepairAttempt::Open

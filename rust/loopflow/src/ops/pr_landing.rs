@@ -824,7 +824,7 @@ fn next_attempt(
             .repair_attempt(&incident.identity, retries)
             .map_err(repair_error)?
         {
-            Some(RepairAttempt::Finished { ended_at, .. }) => ended = Some(ended_at),
+            Some(RepairAttempt::Finished { ended_at }) => ended = Some(ended_at),
             Some(RepairAttempt::Open) => return Ok(NextAttempt::Due(Box::new(incident))),
             None => {
                 let at = ended.map_or(0, |ended| ended + repair_backoff(attempt));
@@ -1939,6 +1939,23 @@ mod tests {
                 }
             })
         }
+
+        /// An acting check whose re-arms record the heads they asked for.
+        fn rearming(self: &Arc<Self>) -> (LandingIo, Arc<Mutex<Vec<String>>>) {
+            let rearmed = Arc::new(Mutex::new(Vec::new()));
+            let rearm: RearmPr = {
+                let rearmed = Arc::clone(&rearmed);
+                Arc::new(move |_: &PrLanding, head: &str| {
+                    rearmed.lock().unwrap().push(head.to_string());
+                    Ok(())
+                })
+            };
+            let io = LandingIo {
+                observe: self.observe(),
+                act: Some((self.repair(), rearm)),
+            };
+            (io, rearmed)
+        }
     }
 
     fn script(observations: Vec<LandingObservation>) -> Arc<Script> {
@@ -1985,9 +2002,10 @@ mod tests {
             .await
             .unwrap(),
         );
-        let task_id = match with_task {
-            true => Some(seed_task(&store, &worktree).await),
-            false => None,
+        let task_id = if with_task {
+            Some(seed_task(&store, &worktree).await)
+        } else {
+            None
         };
         let landing = PrLanding::new(
             NewPrLanding {
@@ -2061,18 +2079,6 @@ mod tests {
         store.seed_task(&task, &pr).await.unwrap().id
     }
 
-    fn rearm_counter() -> (Arc<Mutex<Vec<String>>>, RearmPr) {
-        let rearmed = Arc::new(Mutex::new(Vec::new()));
-        let rearm: RearmPr = {
-            let rearmed = Arc::clone(&rearmed);
-            Arc::new(move |_: &PrLanding, head: &str| {
-                rearmed.lock().unwrap().push(head.to_string());
-                Ok(())
-            })
-        };
-        (rearmed, rearm)
-    }
-
     fn failure(head: &str) -> LandingObservation {
         LandingObservation::Failing {
             head_sha: head.into(),
@@ -2132,11 +2138,7 @@ mod tests {
             head_sha: "head".into(),
             reason: Some("checks_timed_out".into()),
         }]);
-        let (rearmed, rearm) = rearm_counter();
-        let io = LandingIo {
-            observe: script.observe(),
-            act: Some((script.repair(), rearm)),
-        };
+        let (io, rearmed) = script.rearming();
         let watching = reconcile_pr_landing(store, landing, io).await.unwrap();
         assert_eq!(watching.state, PrLandingState::Watching);
         assert_eq!(*rearmed.lock().unwrap(), ["head"]);
@@ -2151,11 +2153,7 @@ mod tests {
             head_sha: "head".into(),
             reason: Some("manually_disabled".into()),
         }]);
-        let (rearmed, rearm) = rearm_counter();
-        let io = LandingIo {
-            observe: script.observe(),
-            act: Some((script.repair(), rearm)),
-        };
+        let (io, rearmed) = script.rearming();
         reconcile_pr_landing(store.clone(), landing, io)
             .await
             .unwrap();
@@ -2188,11 +2186,7 @@ mod tests {
             head_sha: "head".into(),
             reason: Some("checks_timed_out".into()),
         }]);
-        let (rearmed, rearm) = rearm_counter();
-        let io = LandingIo {
-            observe: script.observe(),
-            act: Some((script.repair(), rearm)),
-        };
+        let (io, rearmed) = script.rearming();
         let held = reconcile_pr_landing(store, landing, io).await;
         assert!(
             matches!(&held, Err(OpsError::DeliveryHeld(reason)) if reason.contains("lf task resume")),
@@ -2237,30 +2231,26 @@ mod tests {
             queue_failure(),
             queue_failure(),
         ]);
-        let rearmed = Arc::new(Mutex::new(0));
-        let io = LandingIo {
-            observe: script.observe(),
-            act: Some((script.repair(), {
-                let rearmed = Arc::clone(&rearmed);
-                Arc::new(move |_: &PrLanding, _: &str| {
-                    *rearmed.lock().unwrap() += 1;
-                    Ok(())
-                })
-            })),
-        };
+        let (io, rearmed) = script.rearming();
         let requeued = reconcile_pr_landing(store.clone(), landing, io.clone())
             .await
             .unwrap();
         assert_eq!(requeued.state, PrLandingState::Watching);
         assert_eq!(
-            (*rearmed.lock().unwrap(), *script.repairs.lock().unwrap()),
+            (
+                rearmed.lock().unwrap().len(),
+                *script.repairs.lock().unwrap()
+            ),
             (1, 0)
         );
         // The same failure again is a repair's, after its backoff.
         let backing_off = reconcile_pr_landing(store, requeued, io).await.unwrap();
         assert_eq!(backing_off.state, PrLandingState::Repairing);
         assert_eq!(
-            (*rearmed.lock().unwrap(), *script.repairs.lock().unwrap()),
+            (
+                rearmed.lock().unwrap().len(),
+                *script.repairs.lock().unwrap()
+            ),
             (1, 0)
         );
     }

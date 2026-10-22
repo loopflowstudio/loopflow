@@ -358,14 +358,30 @@ rows in `processes`/`agent_sessions`; `rentals` has no copy watermark (each
 copy re-exports from an hour before the rental's start and upserts);
 `lf session list --json` and the `TaskStatus` DTO omit copies by choice.
 
+Live probe, 2026-10-22 (Task conversation, disposable `LF_HOME`, ~$0.03 total):
+
+- Probe 1 (`probe`, cpu3c×2, $0.06/h, EU) rented but reported no SSH address
+  for 10 minutes: the adapter read `publicIp`/`portMappings`, which v2 does not
+  return. Its guardian deleted the pod within a minute of the 10-minute
+  deadline. Fixed in `1a40cf60e5`: `ssh.direct` (host, port), falling back to
+  `runtime.ports` for private 22/tcp; the proxy endpoint never counts.
+- Probe 2 (`probe-us`, cpu3c×2 in US-KS-2, 12-minute deadline, $0.05 cap):
+  `ssh.direct` appeared 35 s after create; the rent returned in 60 s with
+  `probe-us-1` added. On the pod: non-root `lf` user, git, gh, Node, Claude
+  Code 2.1.308 and published lf 0.14.14 on the login PATH, `/run/lf/ready`
+  set; guardian running as root since boot with "ends by 08:26:19Z or $0.012",
+  so `RUNPOD_POD_ID` and the pod key were injected. `lf --machine probe-us-1
+  machine id` returned the pod's Machine id. The pod was gone 15 s after the
+  deadline; `lf ondemand list` then read "ended 01:26" and `lf machine status`
+  "rental ended". Billing showed no records for a sub-hour pod, as expected.
+- Not exercised: `lf history export` over SSH (the pod ran published lf, which
+  lacks the command) and the Task path (`--rent`, connect, clone, hand-off).
+
 Remaining:
 
-1. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
-   quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
-   Unverified on a real pod: boot script (apt, sshd, nodesource, installer as
-   `lf`), `RUNPOD_POD_ID`
-   injection, the pod-scoped key deleting itself, and `lf history export` over
-   SSH (the pod needs a build with the command). The scheduled reconcile only
-   gives back when its environment carries `RUNPOD_API_KEY` (Q9).
+1. **Jack's demo (≤ $0.40)**: the Task path end to end, with Chrome approvals
+   for the pod's GitHub and Claude logins and this branch's Linux build on the
+   pod for `lf history export`. The scheduled reconcile only gives back when
+   its environment carries `RUNPOD_API_KEY` (Q9).
 
 Last check (implement 2026-10-22): `cargo clippy -p loopflow --all-targets -D warnings` and `cargo fmt --check` clean; `cargo test -p loopflow --lib -- rentals rental` 29 passed (incl. `an_ended_rental_hands_its_open_tasks_back_here`).

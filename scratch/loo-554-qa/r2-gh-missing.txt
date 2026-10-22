@@ -1,3 +1,0 @@
-lf versions differ: remote 0.14.14, local 0.14.14+34d866b5c. Update the remote with `ssh -- 'ssh://qa@38.80.152.147:39639' 'lf install'`
-Error: machine credential command failed on m (exit Some(1)): GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine connect` again
-$

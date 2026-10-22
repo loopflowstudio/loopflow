@@ -428,7 +428,7 @@ and this design: three names for one credential.
 
 Next implement: `lf account` prints `long-lived token until/expired <date>`;
 the JSON field becomes `long_lived_token_expires_at` (account_status.rs, the
-`auth_status.json` fixture and each language's fixture test,
+`auth_status.json` fixture (no Swift or Python mirror reads it),
 docs/subscriptions.md). No compatibility: the field is unreleased.
 
 ## Status and remaining work

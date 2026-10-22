@@ -80,7 +80,9 @@ one Chrome approval per login (GitHub, Claude). Autonomous Task runs are
 refusing; the person rents and connects first; (b) rent, open the approvals in
 Jack's Chrome, and wait as an Available attention state with the pod billing;
 (c) forward GitHub (forwardable per the 2026-10-07 machine decision) and sign in
-only Claude. Default kept: (a). Not blocking: the brief's demo is interactive.
+only Claude. Superseded 2026-10-22: Jack's Q10a tokens removed every approval, so
+`-b` now rents after a pre-rent check (see "Raised in concept review after
+long-lived tokens" below).
 
 ### Q8. Logins on a deleted pod
 

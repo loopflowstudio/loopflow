@@ -320,7 +320,8 @@ Built 2026-10-22:
   scope 403 to "unavailable".
 - **Several accounts** (Q11). Rental `prepare` (`connect_claude_accounts`)
   connects every Claude account holding a token and names each skipped one;
-  with none stored anywhere, it mints for each connected account. The pod's
+  with none stored anywhere, a foreground run mints for each connected
+  account and a `-b` run skips them all. The pod's
   account selection then falls through as on any Machine.
 
 Unit-tested: `oat`-only capture and install, encrypted storage, install
@@ -386,7 +387,7 @@ claim and the code-1 history (built; see Status). Q7–Q9 stand as recorded.
 ## Concept review (2026-10-22, after long-lived tokens, headless)
 
 Jack's Q10a (stored long-lived tokens) left no approval in `prepare`, so Q7's
-`-b` refusal lost its reason; built as described under the rental flow above.
+`-b` refusal lost its reason; replaced by the pre-rent check under "The pod" (built).
 Q8 sharpens and stays open in `questions.md`.
 
 ## Status and remaining work
@@ -408,6 +409,10 @@ history show <id>` opens a copied Session from `machine_records` and its
 copied captures. Built 2026-10-22: `SqliteStore::set_rental_state` hands the
 Machine's open Tasks back to this Machine in the same write whenever the rental
 stops being live, so every path to `ended` returns them, and the pass prints "LOO-570 back on <host>".
+Also built 2026-10-22: `--rent` under `-b` checks `gh` and a stored Claude
+token before renting (`require_unattended_logins`, unit-tested refusing
+without either and passing with both); GitHub forwarding no longer needs a
+foreground terminal.
 
 Deviations from the first draft of this design, recorded in
 `scratch/questions.md`: copies live in `machine_records` rather than stamped
@@ -477,4 +482,4 @@ Remaining:
    It also runs `lf -b task run X --rent code -a claude` once. The scheduled
    reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (compress 2026-10-22): `cargo test -p loopflow --lib machine_credentials` 16 passed; `cargo clippy --all-targets -- -D warnings` clean.
+Last check (compress 2026-10-22, reused by realign): `cargo test -p loopflow --lib machine_credentials` 16 passed; `cargo clippy --all-targets -- -D warnings` clean.

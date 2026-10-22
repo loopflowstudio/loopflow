@@ -2126,32 +2126,12 @@ async fn start_auth_command(
             )
         }
         None => {
-            let authorization_code_input = if input.takes_code() {
-                let stdin = child.stdin.take().ok_or_else(|| AuthError::CommandFailed {
-                    provider,
-                    message: "missing authorization code input pipe".to_string(),
-                })?;
-                Some(AuthorizationCodeInput::new(
-                    provider,
-                    CodeWriter::Pipe(stdin),
-                ))
-            } else {
-                None
-            };
-            let stdout = child
-                .stdout
+            let authorization_code_input = child
+                .stdin
                 .take()
-                .ok_or_else(|| AuthError::CommandFailed {
-                    provider,
-                    message: "missing stdout pipe".to_string(),
-                })?;
-            let stderr = child
-                .stderr
-                .take()
-                .ok_or_else(|| AuthError::CommandFailed {
-                    provider,
-                    message: "missing stderr pipe".to_string(),
-                })?;
+                .map(|stdin| AuthorizationCodeInput::new(provider, CodeWriter::Pipe(stdin)));
+            let stdout = child.stdout.take().expect("auth stdout is piped");
+            let stderr = child.stderr.take().expect("auth stderr is piped");
             let stdout_task = spawn_line_reader(stdout, line_tx.clone());
             let stderr_task = spawn_line_reader(stderr, line_tx);
             (

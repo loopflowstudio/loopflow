@@ -263,8 +263,8 @@ fn clone_migrates_only_its_snapshot_and_confines_children() {
 
 #[test]
 fn clone_runs_a_new_disposable_conversation_without_account_selection() {
-    let parent = tempfile::tempdir().unwrap();
-    let parent = parent.path().canonicalize().unwrap();
+    let parent = tempfile::tempdir().unwrap().keep(); eprintln!("KEPT {}", parent.display());
+    let parent = parent.canonicalize().unwrap();
     let source = parent.join("source");
     let clone = parent.join("clone");
     fs::create_dir(&source).unwrap();

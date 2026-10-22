@@ -11,9 +11,11 @@ The two-person docs and README/index introductions describe Git comment steers,
 branch reuse and personal crons. PR copy is in `scratch/pr-title.txt` and
 `scratch/pr-body.md`; keep its validation limits and former cron install lines.
 
-Main has since landed #1643 (`c0617ec0`, Flow → Graph rename across 348 files).
-This branch is not yet rebased onto it; the rebase step owns that, after checking
-no other agent is driving this worktree.
+Synced main through #1643 (`c0617ec0`, Flow → Graph rename): branch code, docs
+and tests now say Graph (`graph:` edges, `.lf/graphs/`, `CronSpec.graph`). Main's
+`rename_flow_to_graph` draft rewrites `wave_workflows` content before this
+branch's `two_person_gaps` draft drops the table (drafts apply alphabetically),
+so its Wave-YAML assertion was removed from the rename upgrade test.
 
 Status: implemented, merged with main through #1607 (`ce21904f`), committed;
 next gate. Seven kickoff passes on 2026-10-21 changed no plan; their narrative

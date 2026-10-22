@@ -85,7 +85,7 @@ pub fn published_from(
                 && cron.repo.canonicalize().ok().as_deref() == Some(repo.as_path())
         })
         .map(|cron| PublishedCron {
-            name: cron.flow.clone(),
+            name: cron.graph.clone(),
             wave: (!cron.wave.is_empty()).then(|| cron.wave.clone()),
             command: cron.command.clone(),
             schedule: cron.schedule.clone(),
@@ -263,7 +263,7 @@ mod tests {
             command: vec![
                 "--wave".into(),
                 "infra".into(),
-                "flow".into(),
+                "graph".into(),
                 "telemetry-daily".into(),
             ],
             schedule: "0 0 9 * * *".into(),

@@ -136,7 +136,7 @@ impl Pair {
         let env = self.env(person);
         let spec = CronSpec {
             wave: "infra".into(),
-            flow: name.into(),
+            graph: name.into(),
             command: command.iter().map(|arg| arg.to_string()).collect(),
             schedule: loopflow::ops::parse_schedule("daily").unwrap(),
             working_directory: self.repo(person),
@@ -184,14 +184,14 @@ fn success(output: &Output) -> String {
 fn two_people_share_one_repository() {
     use Person::{Lee, Maya};
     let pair = Pair::build();
-    // A takeover Workflow whose only Flow runs no agent.
+    // A takeover Workflow whose only Graph runs no agent.
     let maya = pair.repo(Maya);
-    std::fs::create_dir_all(maya.join(".lf/flows")).unwrap();
+    std::fs::create_dir_all(maya.join(".lf/graphs")).unwrap();
     std::fs::create_dir_all(maya.join(".lf/workflows")).unwrap();
-    std::fs::write(maya.join(".lf/flows/look.yaml"), "- cmd: task status\n").unwrap();
+    std::fs::write(maya.join(".lf/graphs/look.yaml"), "- cmd: task status\n").unwrap();
     std::fs::write(
         maya.join(".lf/workflows/takeover.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, flow: look}\n  - {from: review, to: end}\n",
+        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: look}\n  - {from: review, to: end}\n",
     )
     .unwrap();
     pair.git(&maya, &["add", ".lf"]);
@@ -260,7 +260,7 @@ fn two_people_share_one_repository() {
         "{claim}"
     );
     // 3. Maya publishes a cron. Lee sees it without installing anything.
-    pair.install_cron(Maya, "nightly", &["--wave", "infra", "flow", "look"]);
+    pair.install_cron(Maya, "nightly", &["--wave", "infra", "graph", "look"]);
     let published = || {
         pair.ok(Maya, &["cron", "publish", "nightly"]);
         let listing = pair.json(Lee, &["cron", "list", "--json"]);
@@ -338,7 +338,7 @@ fn two_people_share_one_repository() {
     assert_eq!(rejected.status.code(), Some(2));
     std::fs::write(
         maya.join(".lf/workflows/review.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, flow: implement}\n  - {from: review, to: end}\n",
+        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: implement}\n  - {from: review, to: end}\n",
     )
     .unwrap();
     pair.git(&maya, &["add", ".lf/workflows"]);

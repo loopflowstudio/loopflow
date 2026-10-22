@@ -415,6 +415,22 @@ when lf stored it, `--file` included) gates `claude_accounts_by_token` and
 (there is no `lf account list`) shows "rental token until/expired <date>" and
 JSON `rental_token_expires_at`. Renewal is `lf account token` again.
 
+## Concept review (2026-10-22, after token expiry, headless)
+
+Jack's steer (one long-lived token per account, `oat` only, laptop asserts
+identity, several accounts per machine) matches what is built. One name does
+not. `lf machine connect <m> claude <email>` installs the stored token on
+*every* Machine, owned or rented (Claude left `fresh_machine_login`), yet `lf
+account` says "rental token" and JSON says `rental_token_expires_at`. A person
+connecting `mini.local` from a pool reads that the token is for rentals. The
+same thing is "long-lived token" in the command's message, the store column
+and this design: three names for one credential.
+
+Next implement: `lf account` prints `long-lived token until/expired <date>`;
+the JSON field becomes `long_lived_token_expires_at` (account_status.rs, the
+`auth_status.json` fixture and each language's fixture test,
+docs/subscriptions.md). No compatibility: the field is unreleased.
+
 ## Status and remaining work
 
 Built 2026-10-21 (implement, compress, copy-up implement, compress, post-review implement): the draft

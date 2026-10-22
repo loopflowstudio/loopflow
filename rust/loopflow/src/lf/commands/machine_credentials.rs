@@ -119,14 +119,7 @@ pub(super) async fn connect(
             }
         }
         Provider::GitHub => {
-            // gh resolves its own selected token. It is never exported to a child.
-            let output = Command::new("gh")
-                .args(["auth", "token", "--hostname", "github.com"])
-                .output()?;
-            if !output.status.success() {
-                bail!("GitHub is not connected on this laptop");
-            }
-            let token = SecretString::new(String::from_utf8(output.stdout)?.trim().to_string());
+            let token = gh_token()?;
             let login = github_login(token.expose_secret()).await?;
             if email.is_some_and(|expected| !expected.eq_ignore_ascii_case(&login)) {
                 bail!("GitHub login does not match the requested account");
@@ -239,25 +232,12 @@ pub(super) async fn connect(
 /// run skips each with a note.
 pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> Result<()> {
     let store = open_account_store().await?;
-    let accounts = store
-        .list_provider_accounts(Some(Provider::Claude.as_str()))
-        .await?;
-    let (mut minted, mut unminted) = (Vec::new(), Vec::new());
-    for account in &accounts {
-        let token = store
-            .long_lived_token(Provider::Claude.as_str(), &account.account_id)
-            .await?;
-        if token.is_some() {
-            minted.push(account);
-        } else {
-            unminted.push(account);
-        }
-    }
+    let (minted, mut unminted) = claude_accounts_by_token(&store).await?;
     let chosen = if minted.is_empty() && foreground(batch) {
         unminted.retain(|account| account.credential_state == CredentialState::Connected);
         unminted
     } else {
-        for account in unminted {
+        for account in &unminted {
             let login = account_login(account);
             eprintln!(
                 "Skipping Claude {login}: no long-lived token (`lf account token claude {login}`)"
@@ -268,7 +248,7 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
     if chosen.is_empty() {
         bail!("no Claude account to install; `lf account connect claude <email>`, then `lf account token claude <email>`");
     }
-    for account in chosen {
+    for account in &chosen {
         connect(
             machine,
             Provider::Claude,
@@ -284,27 +264,46 @@ pub(super) async fn connect_claude_accounts(machine: &Machine, batch: bool) -> R
 /// A background rental pays only when no login needs a person: `gh` holds a
 /// token here and a Claude account holds a long-lived one.
 pub(super) async fn require_unattended_logins(store: &SharedStore) -> Result<()> {
-    let gh = Command::new("gh")
-        .args(["auth", "token", "--hostname", "github.com"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    if !gh.is_ok_and(|status| status.success()) {
-        bail!("GitHub is not connected on this laptop; `gh auth login` first");
+    gh_token()?;
+    if claude_accounts_by_token(store).await?.0.is_empty() {
+        bail!("no Claude account holds a long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal");
     }
+    Ok(())
+}
+
+/// Claude accounts split into those holding a long-lived token and those without.
+async fn claude_accounts_by_token(
+    store: &SharedStore,
+) -> Result<(Vec<ProviderAccount>, Vec<ProviderAccount>)> {
+    let (mut minted, mut unminted) = (Vec::new(), Vec::new());
     for account in store
         .list_provider_accounts(Some(Provider::Claude.as_str()))
         .await?
     {
-        if store
+        let token = store
             .long_lived_token(Provider::Claude.as_str(), &account.account_id)
-            .await?
-            .is_some()
-        {
-            return Ok(());
+            .await?;
+        if token.is_some() {
+            minted.push(account);
+        } else {
+            unminted.push(account);
         }
     }
-    bail!("no Claude account holds a long-lived token, and a background run cannot approve one; `lf account token claude <email>` mints it in a foreground terminal")
+    Ok((minted, unminted))
+}
+
+/// gh resolves its own selected token. It is never exported to a child.
+fn gh_token() -> Result<SecretString> {
+    let output = Command::new("gh")
+        .args(["auth", "token", "--hostname", "github.com"])
+        .stderr(Stdio::null())
+        .output();
+    match output {
+        Ok(output) if output.status.success() => Ok(SecretString::new(
+            String::from_utf8(output.stdout)?.trim().to_string(),
+        )),
+        _ => bail!("GitHub is not connected on this laptop; `gh auth login` first"),
+    }
 }
 
 fn connecting(machine: &Machine, provider: Provider, login: &str) {

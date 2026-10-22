@@ -385,25 +385,9 @@ claim and the code-1 history (built; see Status). Q7–Q9 stand as recorded.
 
 ## Concept review (2026-10-22, after long-lived tokens, headless)
 
-Jack's credential decision (Q10a, the steer "no approval every time I rent")
-removes the premise of Q7's default. `--rent` refused under `-b` because a
-fresh pod needed a Chrome approval per login. Now GitHub forwards the
-laptop's `gh` token and Claude installs stored tokens, so no step of
-`prepare` needs a person once tokens exist. Built 2026-10-22:
-
-- Drop `require_foreground` from GitHub's branch of `machine connect`
-  (`machine_credentials.rs`): it guards an approval that does not exist.
-- Replace the blanket `-b` refusal in `--rent` with a check before renting:
-  `gh` is connected and at least one Claude account holds a long-lived
-  token; otherwise refuse naming `lf account token claude <email>`, so a
-  background run still never pays for a machine it cannot use. `prepare`
-  passes the run's `batch` through, so an account without a token is skipped
-  with its note rather than minted.
-- An autonomous `lf -b task run X --rent code -a claude` is a demo case.
-
-Q8 sharpens and stays open (below in `questions.md`): a rented pod now holds
-year-long subscription tokens, and give-back deletes the pod without revoking
-them.
+Jack's Q10a (stored long-lived tokens) left no approval in `prepare`, so Q7's
+`-b` refusal lost its reason; built as described under the rental flow above.
+Q8 sharpens and stays open in `questions.md`.
 
 ## Status and remaining work
 
@@ -493,4 +477,4 @@ Remaining:
    It also runs `lf -b task run X --rent code -a claude` once. The scheduled
    reconcile only gives back when its environment carries `RUNPOD_API_KEY` (Q9).
 
-Last check (implement 2026-10-22): `cargo test -p loopflow --lib -- background_rental_needs github_installs claude_long_lived` 3 passed; `cargo clippy --all-targets -- -D warnings` clean.
+Last check (compress 2026-10-22): `cargo test -p loopflow --lib machine_credentials` 16 passed; `cargo clippy --all-targets -- -D warnings` clean.

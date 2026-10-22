@@ -135,7 +135,7 @@ Etude's `api.py`/`http.py`/`machines.py` reduced, against `https://api.runpod.io
 | `GET catalog/cpus?include=AVAILABILITY&product=POD&vcpuCount=N` | Etude's `_cpu_quote`: smallest power of two ≥ vcpus, grown until `size × ramGbPerVcpu ≥ memory_gb`, price `securePerVcpu × size`, cheapest in-stock flavor; a `gpu` template uses `catalog/gpus` |
 | `POST pods` with `cpu: {id, vcpuCount}` or `gpu: {...}` (never both), `disk`, `ports: ["22/tcp"]`, `env`, start command | create, sent once, never retried; result must carry our name, a positive price and a live status |
 | `GET pods` (no server filters; match `name` client-side) | recover an uncertain create |
-| `GET pods/{id}` | status, `publicIp`, port mapping for 22, actual price |
+| `GET pods/{id}` | status, `ssh.direct` (host, published port for 22; `runtime.ports` carries the same), actual `cost` |
 | `DELETE pods/{id}` after re-reading name + createdAt | give back exactly this pod |
 | `GET billing/pods?podId=…&bucketSize=hour` | contiguous whole billed hours (`totalAmount`) |
 
@@ -205,8 +205,8 @@ Before this lands, the demo pod runs this branch's Linux build (Docker
 `linux/amd64`, `scp`, `mv` over `.new`) instead of step 3's installer, as LOO-554
 did. After landing the installer is enough.
 
-Laptop side, after `booting`: poll `GET pods/{id}` until `publicIp` and the port
-mapping for 22 exist, wait for SSH, then the ordinary path: `lf machine add
+Laptop side, after `booting`: poll `GET pods/{id}` until `ssh.direct` names a
+host and published port for 22 (the proxy endpoint is PTY-only and never counts), wait for SSH, then the ordinary path: `lf machine add
 lf@IP:PORT --label code-1` (probe + identity), clone the repository's origin and
 `lf repo identity --bind <repo_id>` over `lf --machine code-1`, then `lf machine
 connect code-1 github` and `… claude` (Jack approves each in Chrome; `-b`
@@ -363,7 +363,7 @@ Remaining:
 1. **Live probe (~$0.10) and demo**, with the demo step: both spend money. The
    quote path was verified live (cpu3c×8 at $0.24/h; stock image pinned).
    Unverified on a real pod: boot script (apt, sshd, nodesource, installer as
-   `lf`), RunPod's `portMappings`/`publicIp` field names, `RUNPOD_POD_ID`
+   `lf`), `RUNPOD_POD_ID`
    injection, the pod-scoped key deleting itself, and `lf history export` over
    SSH (the pod needs a build with the command). The scheduled reconcile only
    gives back when its environment carries `RUNPOD_API_KEY` (Q9).

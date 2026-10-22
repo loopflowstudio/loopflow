@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use serde_json::{json, Value};
 
-use super::{CreatePod, RunPod};
+use super::{read_pod, CreatePod, RunPod};
 use crate::rental::{Hardware, Template, Usd};
 
 fn at(text: &str) -> time::OffsetDateTime {
@@ -32,9 +32,33 @@ fn pod(name: &str) -> Value {
         "cost": 0.24,
         "createdAt": "2026-10-21T20:10:00Z",
         "status": "RUNNING",
-        "publicIp": "203.0.113.7",
-        "portMappings": {"22": 40022},
+        "ssh": {
+            "direct": {"host": "203.0.113.7", "port": 40022, "username": "root",
+                       "command": "ssh root@203.0.113.7 -p 40022"},
+            "proxy": {"host": "ssh.runpod.io", "port": 22, "username": "pod1-abc",
+                      "command": "ssh pod1-abc@ssh.runpod.io"}
+        },
+        "runtime": {"uptime": 12, "ports": [
+            {"ip": "203.0.113.7", "private": 22, "public": 40022, "type": "tcp"}
+        ]},
     })
+}
+
+#[test]
+fn a_pod_without_a_published_port_has_no_address_yet() {
+    // Before the port is published, v2 answers with the proxy endpoint only;
+    // the proxy is PTY-only and never counts as an address.
+    let mut raw = pod("lf-rent_1");
+    raw["ssh"].as_object_mut().unwrap().remove("direct");
+    raw["runtime"] = json!({"uptime": 0, "ports": []});
+    assert_eq!(read_pod(&raw).unwrap().ssh, None);
+    // Without `ssh.direct`, the runtime port table still names the mapping.
+    let mut raw = pod("lf-rent_1");
+    raw["ssh"].as_object_mut().unwrap().remove("direct");
+    assert_eq!(
+        read_pod(&raw).unwrap().ssh,
+        Some(("203.0.113.7".into(), 40022))
+    );
 }
 
 fn template() -> Template {

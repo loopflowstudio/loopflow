@@ -397,19 +397,39 @@ fn hour_floor(at: OffsetDateTime) -> OffsetDateTime {
     at.replace_time(time::Time::from_hms(at.hour(), 0, 0).expect("valid hour"))
 }
 
+fn port(value: &Value) -> Option<u16> {
+    value.as_u64().and_then(|port| u16::try_from(port).ok())
+}
+
 fn read_pod(raw: &Value) -> Result<Pod> {
     let fields = || -> Option<Pod> {
         let id = raw["id"].as_str()?.to_string();
         check_id(&id).ok()?;
-        let ssh = raw["publicIp"]
+        // v2 reports the published 22/tcp port under `ssh.direct` once the pod
+        // has a public address; `runtime.ports` carries the same mapping. The
+        // proxy endpoint is PTY-only and cannot carry `lf --machine`.
+        let direct = &raw["ssh"]["direct"];
+        let ssh = direct["host"]
             .as_str()
-            .filter(|ip| !ip.is_empty())
-            .zip(
-                raw["portMappings"]["22"]
-                    .as_u64()
-                    .and_then(|port| u16::try_from(port).ok()),
-            )
-            .map(|(ip, port)| (ip.to_string(), port));
+            .filter(|host| !host.is_empty())
+            .zip(port(&direct["port"]))
+            .map(|(host, port)| (host.to_string(), port))
+            .or_else(|| {
+                raw["runtime"]["ports"]
+                    .as_array()?
+                    .iter()
+                    .find_map(|mapping| {
+                        (mapping["private"] == 22 && mapping["type"] == "tcp")
+                            .then(|| {
+                                mapping["ip"]
+                                    .as_str()
+                                    .filter(|ip| !ip.is_empty())
+                                    .zip(port(&mapping["public"]))
+                                    .map(|(ip, port)| (ip.to_string(), port))
+                            })
+                            .flatten()
+                    })
+            });
         Some(Pod {
             id,
             name: raw["name"].as_str()?.to_string(),

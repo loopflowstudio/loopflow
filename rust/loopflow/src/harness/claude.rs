@@ -754,7 +754,7 @@ mod tests {
         }
         assert_ne!(recorded[0].0, recorded[1].0);
         for (pid, _) in recorded {
-            assert!(!crate::journal::OsProcess::group_is_alive(pid).unwrap());
+            assert!(crate::journal::OsProcess::group(pid).unwrap().is_empty());
         }
     }
 

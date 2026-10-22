@@ -1050,7 +1050,7 @@ fn _mark_lf_created(path: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), 
 
 /// The canonical root of the worktree containing `cwd`, when lf created it.
 pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
-    let output = git_stdout_inheriting(
+    let output = git_stdout(
         cwd,
         &[
             "rev-parse",
@@ -1058,13 +1058,14 @@ pub(crate) fn lf_created_worktree(cwd: &Path) -> Option<PathBuf> {
             "--git-path",
             LF_CREATED_MARKER,
         ],
-        &|_| {},
     )
     .ok()?;
     let mut lines = output.lines();
-    let root = PathBuf::from(lines.next()?);
-    cwd.join(lines.next()?).is_file().then_some(())?;
-    root.canonicalize().ok()
+    let root = lines.next()?;
+    if !cwd.join(lines.next()?).is_file() {
+        return None;
+    }
+    Path::new(root).canonicalize().ok()
 }
 
 /// Read a file's contents at a given revision.

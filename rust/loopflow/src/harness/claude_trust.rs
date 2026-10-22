@@ -49,9 +49,10 @@ fn _config_path(command: &Command) -> Option<PathBuf> {
     let home = launch_env(command, "HOME")
         .filter(|home| !home.is_empty())
         .map(PathBuf::from);
-    let claude_dir = config_dir
-        .clone()
-        .or_else(|| Some(home.clone()?.join(".claude")))?;
+    let claude_dir = match &config_dir {
+        Some(dir) => dir.clone(),
+        None => home.as_ref()?.join(".claude"),
+    };
     let legacy = claude_dir.join(".config.json");
     if fs::metadata(&legacy).is_ok_and(|meta| meta.len() > 0) {
         return Some(legacy);
@@ -63,12 +64,12 @@ fn _accept(config: &Path, worktree: &Path) -> Result<()> {
     let key = worktree
         .to_str()
         .ok_or_else(|| anyhow!("worktree path is not UTF-8"))?;
-    if _trusted(&_read(config)?, key)? {
+    if _trusted(&_read(config)?, key) {
         return Ok(());
     }
     let _lock = ConfigLock::acquire(config)?;
     let mut root = _read(config)?;
-    if _trusted(&root, key)? {
+    if _trusted(&root, key) {
         return Ok(());
     }
     let projects = root
@@ -96,18 +97,12 @@ fn _read(config: &Path) -> Result<Map<String, Value>> {
     }
 }
 
-fn _trusted(root: &Map<String, Value>, key: &str) -> Result<bool> {
-    let Some(projects) = root.get("projects") else {
-        return Ok(false);
-    };
-    let projects = projects
-        .as_object()
-        .ok_or_else(|| anyhow!("`projects` is not an object"))?;
-    Ok(projects
-        .get(key)
+fn _trusted(root: &Map<String, Value>, key: &str) -> bool {
+    root.get("projects")
+        .and_then(|projects| projects.get(key))
         .and_then(|project| project.get(TRUST_FIELD))
         .and_then(Value::as_bool)
-        .unwrap_or(false))
+        .unwrap_or(false)
 }
 
 fn _write(config: &Path, root: &Value) -> Result<()> {
@@ -138,14 +133,14 @@ impl ConfigLock {
             match fs::create_dir(&lock) {
                 Ok(()) => return Ok(Self(lock)),
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                    if _stale(&lock) {
-                        let _ = fs::remove_dir(&lock);
-                        continue;
-                    }
                     if Instant::now() >= deadline {
                         return Err(anyhow!("{} is held", lock.display()));
                     }
-                    std::thread::sleep(Duration::from_millis(50));
+                    if _stale(&lock) {
+                        let _ = fs::remove_dir(&lock);
+                    } else {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                 }
                 Err(error) => return Err(error.into()),
             }
@@ -255,7 +250,7 @@ mod tests {
             json!({"numStartups": 3, "projects": {"/elsewhere": {"allowedTools": ["x"]}}});
         fs::write(fixture.config(), sibling.to_string()).unwrap();
 
-        fixture.launch(&worktree.join("."), None);
+        fixture.launch(&worktree, None);
 
         let key = worktree.canonicalize().unwrap().display().to_string();
         let mut expected = sibling;

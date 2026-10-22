@@ -408,6 +408,8 @@ impl PlanningSync {
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
                         }), if !linear => {},
+                        // Linear repositories share people through `lf refresh`.
+                        _ = sync_people(&store, &repo), if !linear => {},
                     }
                 };
                 #[cfg(test)]
@@ -438,6 +440,16 @@ async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
             tracing::debug!(%error, operation, "planning synchronization pending");
         }
         tokio::time::sleep(delay).await;
+    }
+}
+
+/// People change rarely; sharing who you are never holds up planning.
+async fn sync_people(store: &Store, repo: &str) {
+    loop {
+        if let Err(error) = super::people::sync(&store.sqlite, Path::new(repo)).await {
+            tracing::warn!(%error, "people were not synchronized");
+        }
+        tokio::time::sleep(Duration::from_secs(300)).await;
     }
 }
 

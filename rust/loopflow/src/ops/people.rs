@@ -97,3 +97,61 @@ fn has_origin(repo: &Path) -> bool {
 fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use crate::ops::planning_sync::PlanningSync;
+    use crate::store::StorageConfig;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn git_planning_sync_lists_you_without_refresh() {
+        let root = tempfile::tempdir().unwrap();
+        let origin = root.path().join("origin.git");
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&origin).unwrap();
+        std::fs::create_dir(&repo).unwrap();
+        git(&origin, &["init", "-q", "--bare"]);
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "Dustin@Example.com"]);
+        git(
+            &repo,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let config = StorageConfig::sqlite(root.path().join("loopflow.db"));
+        let store = Arc::new(
+            runtime
+                .block_on(crate::store::open_ephemeral_store(&config))
+                .unwrap(),
+        );
+        let sync =
+            PlanningSync::start_watch(store.clone(), repo.to_string_lossy().into_owned()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while store.sqlite.people().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "people never synchronized");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(sync);
+
+        let people = super::list(&store.sqlite, &repo).unwrap();
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].key, "dustin@example.com");
+        assert!(people[0].is_you);
+    }
+}

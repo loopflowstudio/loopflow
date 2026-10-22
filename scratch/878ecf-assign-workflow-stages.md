@@ -508,9 +508,10 @@ and 2), then rebase onto LOO-555 for the handover protocol.
   caches everyone's before it refreshes Linear; a failure warns and planning
   continues. Publish and fetch run in one blocking hop. `lf person list
   [--json]` reads the cache. `LinearClient::viewer` replaced `viewer_id`.
-- Remaining in slice 2:
-  - Git-only planning has no `lf refresh` path yet (refresh is Linear-only),
-    so the people fetch should also ride Git planning sync at a low cadence.
+- Slice 2 is complete. Git-only repositories share people through the Git
+  planning connection (`PlanningSync`, every 5 minutes, first attempt at
+  start); Linear repositories through `lf refresh`. Check: `cargo test -p
+  loopflow --lib people` passed; clippy and fmt clean.
 - Next: rebase onto LOO-555, then slice 3. LOO-555 had not landed on
   `origin/main` as of 2026-10-21 (main = this branch's base). On rebase, take
   LOO-555's `config::participant_email` but keep its result keyed through

@@ -79,3 +79,9 @@ Round two: pod `oou1q5x1h8tccw` 2026-10-22T02:22Z → deleted 02:44Z (HTTP 204,
 then 404 "pod not found"); 22 min at $0.06/h ≈ $0.02. Total ≈ $0.12.
 The Codex and OpenCode grants minted for that pod went with it; neither
 provider was asked to revoke them.
+
+## Gate (2026-10-22, HEAD 622067d448, even with origin/main)
+
+- `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` | PASS
+- `cargo test -p loopflow --lib` (machine_credentials, clipboard, prompt, codex, context, account, machine, os_process, transport) | PASS 239, 2 ignored
+- `--test golden_prompt`, `--test integration` reference_matches_the_compiled_cli + documented_commands | PASS; remaining matrix deferred to CI

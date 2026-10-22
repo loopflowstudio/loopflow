@@ -62,3 +62,9 @@
 - **Version skew from a Docker build (noted).** A branch build without git
   metadata reports `0.14.14` against the laptop's `0.14.14+<sha>`, and every
   machine command prints the skew line. Only affects ad-hoc builds.
+- **Wave memory left unchanged (realign, 2026-10-22).** The refresh Flow's
+  realign does not call for curating `.lf/wave/product/MEMORY.md`, which sits at
+  15.8k of its 16k-token budget. Lessons worth promoting there when a Flow owns
+  that edit: OpenCode 2 keeps credentials in its own store (`opencode auth
+  export`/`import`, package `@opencode/cli`), and Codex refuses a
+  group-writable socket directory under Ubuntu's default umask.

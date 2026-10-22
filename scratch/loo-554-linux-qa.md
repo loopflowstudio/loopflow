@@ -13,14 +13,12 @@ Round three (2026-10-22) is landing only: the earlier Flow stopped after
 implement when its steps could not launch (missing managed Claude credential),
 so nothing was published. No new defects are open. PR #1635 merged into main
 as 173bb90880, so the launch-output results below now describe this branch on
-main, not a combined tree. Main's eight newer commits (through ed568b1ff5,
-#1638) touch `os_process.rs`, `transport.rs`, `lf/mod.rs` and
-`docs/lf-reference.md` in regions this branch did not edit; those merge
-cleanly. One conflict: both sides rewrote the AGENTS.md sentence on
-generating `docs/lf-reference.md`, and main's wording (the
-`reference_matches_the_compiled_cli` test) wins. After the merge, if that
-integration test fails, regenerate the reference with its `UPDATE_CLI_REFERENCE=1`
-form rather than editing the doc by hand. Gate builds the merged tree.
+main, not a combined tree. Sync merged main at ed568b1ff5 (#1638) as
+e1bfa5c7e1. The one conflict, the AGENTS.md sentence on generating
+`docs/lf-reference.md`, resolved to main's test name
+(`reference_matches_the_compiled_cli`) with this branch's "inherited `LF_*`
+unset, `< /dev/null`" guidance kept. That test passes on the merged tree, so
+the reference needs no regeneration; the branch's own tests pass there too.
 
 ## Problem
 
@@ -403,3 +401,4 @@ Check (2026-10-22, implement round two): `cargo test -p loopflow --lib -- machin
 Check (2026-10-22, kickoff round three): `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component` 16 pass on HEAD 79c04625; `cargo fmt --check` clean; dry-run merge with origin/main (173bb90880 and seven later commits) → 0 conflicts; full matrix → gate/CI.
 Check (2026-10-21, implement round three): no code change since 79c04625 (prose commits only), so the kickoff result stands; `git merge-tree HEAD origin/main` (ed568b1ff5) → one conflict, AGENTS.md reference sentence, resolution above; build and suites → sync/gate.
 Check (2026-10-22, compress round three): OpenCode device login reuses `wait_for_browser_confirmation`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard account::tests::browser_confirmation …` 20 pass; full matrix → gate/CI.
+Check (2026-10-22, realign round three): merged tree e1bfa5c7e1; `cargo fmt --check` clean; `cargo test -p loopflow --test integration reference_matches_the_compiled_cli` pass; `cargo test -p loopflow --lib -- machine_credentials platform::clipboard machine::tests::release_numbers_order_by_component harness::context::tests::pi_extension` 17 pass; full matrix → gate/CI.

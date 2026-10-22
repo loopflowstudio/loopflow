@@ -1008,7 +1008,13 @@ impl CodexHarness {
             }
         }
         let directory = if connection.is_none() {
-            Some(tempfile::tempdir()?)
+            // Codex refuses a socket parent other users could write to. A
+            // umask of 002 (Ubuntu's default) would otherwise make it 0775.
+            Some(
+                tempfile::Builder::new()
+                    .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+                    .tempdir()?,
+            )
         } else {
             None
         };
